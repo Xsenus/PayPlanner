@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Calendar,
@@ -7,6 +7,8 @@ import {
   GripVertical,
   Plus,
   Pencil,
+  Printer,
+  ReceiptText,
   Search,
   SlidersHorizontal,
   Trash2,
@@ -25,10 +27,13 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import type {
+  BankStatementImportCreatedOperation,
   MoneyOperation,
   MoneyOperationAccountingType,
   MoneyOperationDirection,
   MoneyOperationSource,
+  CashOrder,
+  CashOrderType,
 } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
@@ -39,6 +44,12 @@ const SOURCE_LABELS: Record<MoneyTab, string> = {
   Cash: 'Касса',
   Card: 'Карты',
   Total: 'Итого',
+};
+
+const SOURCE_MODAL_LABELS: Record<MoneyOperationSource, string> = {
+  Bank: 'банку',
+  Cash: 'кассе',
+  Card: 'картам',
 };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -58,6 +69,7 @@ const MONEY_OPERATION_COLUMNS = [
   { key: 'purpose', label: 'Назначение', defaultVisible: true, defaultWidth: 240 },
   { key: 'paidAccountName', label: 'Опл. счета', defaultVisible: false, defaultWidth: 160 },
   { key: 'categoryName', label: 'Статья', defaultVisible: true, defaultWidth: 160 },
+  { key: 'cashOrder', label: 'Кассовый ордер', defaultVisible: true, defaultWidth: 190 },
 ] as const;
 
 type MoneyOperationColumnKey = (typeof MONEY_OPERATION_COLUMNS)[number]['key'];
@@ -147,6 +159,216 @@ function formatDate(value: string) {
   return value;
 }
 
+function CashOrdersPanel({
+  from,
+  to,
+  search,
+  refreshKey,
+  onPrint,
+}: {
+  from: string;
+  to: string;
+  search: string;
+  refreshKey: number;
+  onPrint: (cashOrderId: number) => void;
+}) {
+  const [orders, setOrders] = useState<CashOrder[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [typeFilter, setTypeFilter] = useState<CashOrderType | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Posted' | 'Cancelled'>('all');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pageSize = 10;
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    apiService
+      .getCashOrdersPaged({
+        from,
+        to,
+        type: typeFilter === 'all' ? undefined : typeFilter,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        search,
+        page,
+        pageSize,
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setOrders(data.items);
+        setTotal(data.total);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setOrders([]);
+        setTotal(0);
+        setError(extractDisplayErrorMessage(err, 'Не удалось загрузить кассовые ордера.'));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [from, page, refreshKey, search, statusFilter, to, typeFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [from, search, statusFilter, to, typeFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  return (
+    <div className="mt-6 rounded-xl border border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">Кассовые ордера</h2>
+          <p className="text-sm text-slate-500">ПКО и РКО по выбранному периоду кассы</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {([
+            { key: 'all', label: 'Все' },
+            { key: 'Incoming', label: 'ПКО' },
+            { key: 'Outgoing', label: 'РКО' },
+          ] as const).map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setTypeFilter(item.key)}
+              className={[
+                'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
+                typeFilter === item.key
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50',
+              ].join(' ')}>
+              {item.label}
+            </button>
+          ))}
+          <span className="mx-1 h-6 w-px bg-slate-200" aria-hidden="true" />
+          {([
+            { key: 'all', label: 'Все статусы' },
+            { key: 'Posted', label: 'Проведён' },
+            { key: 'Cancelled', label: 'Отменён' },
+          ] as const).map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setStatusFilter(item.key)}
+              className={[
+                'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
+                statusFilter === item.key
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50',
+              ].join(' ')}>
+              {item.label}
+            </button>
+          ))}
+          <div className="ml-2 text-sm text-slate-500">Всего: {total}</div>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] table-fixed text-sm">
+          <colgroup>
+            <col style={{ width: 140 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 150 }} />
+            <col style={{ width: 220 }} />
+            <col style={{ width: 260 }} />
+            <col style={{ width: 90 }} />
+          </colgroup>
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">Номер</th>
+              <th className="px-3 py-2 text-left font-medium">Дата</th>
+              <th className="px-3 py-2 text-left font-medium">Тип</th>
+              <th className="px-3 py-2 text-left font-medium">Сумма</th>
+              <th className="px-3 py-2 text-left font-medium">Плательщик</th>
+              <th className="px-3 py-2 text-left font-medium">Основание</th>
+              <th className="px-3 py-2 text-left font-medium">Действия</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {loading ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                  Загрузка кассовых ордеров...
+                </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-red-500">
+                  {error}
+                </td>
+              </tr>
+            ) : orders.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                  За выбранный период кассовых ордеров нет.
+                </td>
+              </tr>
+            ) : (
+              orders.map((order) => (
+                <tr key={order.id} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 font-medium text-slate-900">{order.number}</td>
+                  <td className="px-3 py-2">{formatDate(order.date)}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={[
+                        'inline-flex rounded-full px-2 py-1 text-xs font-medium',
+                        order.type === 'Incoming'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-rose-50 text-rose-700',
+                      ].join(' ')}>
+                      {order.type === 'Incoming' ? 'ПКО' : 'РКО'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 font-medium">{formatMoney(order.amount)} ₽</td>
+                  <td className="px-3 py-2 text-slate-700">{order.payerName ?? order.clientName ?? '—'}</td>
+                  <td className="px-3 py-2">
+                    <div className="line-clamp-2 text-slate-700" title={order.basis ?? undefined}>
+                      {order.basis ?? '—'}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => onPrint(order.id)}
+                      className="rounded-md border border-emerald-200 p-2 text-emerald-700 hover:bg-emerald-50"
+                      aria-label="Печать кассового ордера"
+                      title="Печать кассового ордера">
+                      <Printer className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <TablePagination
+        page={page}
+        totalPages={totalPages}
+        totalItems={total}
+        pageSize={pageSize}
+        pageSizeOptions={[pageSize]}
+        onPageChange={setPage}
+        onPageSizeChange={() => undefined}
+        recordsLabel="Найдено ордеров"
+        pageSizeLabel="Строк на странице"
+        previousLabel="Назад"
+        nextLabel="Вперед"
+      />
+    </div>
+  );
+}
+
 function MoneyOperationModal({
   source,
   initialData,
@@ -193,8 +415,8 @@ function MoneyOperationModal({
   };
 
   const title = initialData
-    ? `Редактировать операцию по ${SOURCE_LABELS[source].toLowerCase()}`
-    : `Добавить операцию по ${SOURCE_LABELS[source].toLowerCase()}`;
+    ? `Редактировать операцию по ${SOURCE_MODAL_LABELS[source]}`
+    : `Добавить операцию по ${SOURCE_MODAL_LABELS[source]}`;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
@@ -409,6 +631,16 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
   const [totalTab, setTotalTab] = useState<'total' | 'cashflow'>('total');
   const [confirmDelete, setConfirmDelete] = useState<MoneyOperation | null>(null);
   const [page, setPage] = useState(1);
+  const [cashOrdersRefreshKey, setCashOrdersRefreshKey] = useState(0);
+  const [bankStatementImporting, setBankStatementImporting] = useState(false);
+  const [bankStatementImportResult, setBankStatementImportResult] = useState<{
+    rowsRead: number;
+    created: number;
+    skipped: number;
+    errors: string[];
+    operations: BankStatementImportCreatedOperation[];
+  } | null>(null);
+  const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState(`${currentYear}-01-01`);
@@ -483,6 +715,8 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
 
     const rows = ([
       { key: 'Bank', label: 'Банк' },
+      { key: 'Cash', label: 'Касса' },
+      { key: 'Card', label: 'Карты' },
     ] as const).map((row) => {
       const data = bySource.get(row.key) ?? {
         startBalance: 0,
@@ -511,6 +745,77 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
 
     return { rows, total };
   }, [summary.bySource]);
+
+  const handlePrintCashOrder = async (cashOrderId: number) => {
+    try {
+      const html = await apiService.getCashOrderPrintHtml(cashOrderId);
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось открыть печатную форму кассового ордера.');
+      toast.error(message, 'Касса');
+    }
+  };
+
+  const handleCreateCashOrder = async (item: MoneyOperation) => {
+    if (!item.relatedPaymentId && item.id <= 0) return;
+
+    try {
+      const order = item.relatedPaymentId
+        ? await apiService.createCashOrderFromPayment(item.relatedPaymentId)
+        : await apiService.createCashOrderFromMoneyOperation(item.id);
+      toast.success(`Создан кассовый ордер ${order.number}.`, 'Касса');
+      await reload();
+      setCashOrdersRefreshKey((value) => value + 1);
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось создать кассовый ордер.');
+      toast.error(message, 'Касса');
+    }
+  };
+
+  const handleBankStatementFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setBankStatementImporting(true);
+    setBankStatementImportResult(null);
+    try {
+      const result = await apiService.importBankStatement(file);
+      setBankStatementImportResult({
+        rowsRead: result.rowsRead,
+        created: result.created,
+        skipped: result.skipped,
+        errors: result.errors ?? [],
+        operations: result.operations ?? [],
+      });
+      toast.success(`Создано операций: ${result.created}. Пропущено: ${result.skipped}.`, 'Выписка банка');
+      await reload();
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось загрузить банковскую выписку.');
+      toast.error(message, 'Выписка банка');
+    } finally {
+      setBankStatementImporting(false);
+    }
+  };
+
+  const handleOpenImportedOperation = async (operationId: number) => {
+    const operation = items.find((item) => item.id === operationId);
+    if (operation) {
+      handleEdit(operation);
+      return;
+    }
+
+    try {
+      const loadedOperation = await apiService.getMoneyOperation(operationId);
+      handleEdit(loadedOperation);
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось открыть импортированную операцию.');
+      toast.error(message, 'Выписка банка');
+    }
+  };
 
   const renderCell = (item: MoneyOperation, columnKey: MoneyOperationColumnKey) => {
     switch (columnKey) {
@@ -572,6 +877,29 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
         return item.paidAccountName ?? '—';
       case 'categoryName':
         return item.categoryName ?? '—';
+      case 'cashOrder':
+        if (item.cashOrderNumber) {
+          return (
+            <button
+              type="button"
+              onClick={() => item.cashOrderId && handlePrintCashOrder(item.cashOrderId)}
+              className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+              title="Открыть печатную форму кассового ордера">
+              <ReceiptText className="h-3.5 w-3.5" />
+              {item.cashOrderNumber}
+            </button>
+          );
+        }
+
+        if (item.canCreateCashOrder) {
+          return (
+            <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+              ПКО не оформлен
+            </span>
+          );
+        }
+
+        return '—';
       default:
         return '—';
     }
@@ -636,27 +964,6 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     setEditingOperation(item);
     setModalOpen(true);
   };
-
-
-  useEffect(() => {
-    if (items.length === 0) return;
-    let raw: string | null = null;
-    try {
-      raw = localStorage.getItem('pp.openMoneyOperationId');
-    } catch {
-      raw = null;
-    }
-    if (!raw) return;
-    const targetId = Number(raw);
-    if (Number.isNaN(targetId)) {
-      try { localStorage.removeItem('pp.openMoneyOperationId'); } catch { /** */ }
-      return;
-    }
-    const target = items.find((item) => item.id === targetId);
-    if (!target) return;
-    handleEdit(target);
-    try { localStorage.removeItem('pp.openMoneyOperationId'); } catch { /** */ }
-  }, [items]);
 
   const handleDelete = (item: MoneyOperation) => {
     if (item.isReadonly || item.id <= 0) return;
@@ -762,14 +1069,88 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
           <p className="text-sm text-slate-500">Операции по деньгам ({SOURCE_LABELS[source]})</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            className="flex items-center gap-2 rounded-lg border border-blue-500 px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
-            type="button">
-            <UploadCloud className="h-4 w-4" />
-            Загрузить выписку
-          </button>
+          {source === 'Bank' && (
+            <>
+              <input
+                ref={bankStatementInputRef}
+                type="file"
+                accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+                className="hidden"
+                onChange={handleBankStatementFileSelected}
+              />
+              <button
+                className="flex items-center gap-2 rounded-lg border border-blue-500 px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                type="button"
+                disabled={bankStatementImporting}
+                onClick={() => bankStatementInputRef.current?.click()}>
+                <UploadCloud className="h-4 w-4" />
+                {bankStatementImporting ? 'Загружаем...' : 'Загрузить выписку'}
+              </button>
+              <div className="text-xs text-slate-500">CSV, TSV, TXT, выгрузка 1С</div>
+            </>
+          )}
         </div>
       </div>
+
+      {source === 'Bank' && bankStatementImportResult && (
+        <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <div className="font-medium">
+            Импорт выписки: прочитано {bankStatementImportResult.rowsRead}, создано {bankStatementImportResult.created}, пропущено {bankStatementImportResult.skipped}
+          </div>
+          {bankStatementImportResult.errors.length > 0 && (
+            <div className="mt-2 max-h-24 overflow-y-auto text-xs text-blue-800">
+              {bankStatementImportResult.errors.slice(0, 5).map((error) => (
+                <div key={error}>{error}</div>
+              ))}
+              {bankStatementImportResult.errors.length > 5 && (
+                <div>Ещё ошибок: {bankStatementImportResult.errors.length - 5}</div>
+              )}
+            </div>
+          )}
+          {bankStatementImportResult.operations.length > 0 && (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-blue-100 bg-white/70">
+              <table className="w-full min-w-[640px] text-xs">
+                <thead className="text-blue-700">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Дата</th>
+                    <th className="px-3 py-2 text-left font-medium">Тип</th>
+                    <th className="px-3 py-2 text-left font-medium">Сумма</th>
+                    <th className="px-3 py-2 text-left font-medium">Контрагент</th>
+                    <th className="px-3 py-2 text-left font-medium">Документ</th>
+                    <th className="px-3 py-2 text-right font-medium">Действия</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-blue-100 text-blue-950">
+                  {bankStatementImportResult.operations.slice(0, 5).map((operation) => (
+                    <tr key={`${operation.id}-${operation.date}-${operation.amount}`}>
+                      <td className="px-3 py-2">{formatDate(operation.date)}</td>
+                      <td className="px-3 py-2">
+                        {operation.direction === 'Income' ? 'Приход' : 'Расход'}
+                      </td>
+                      <td className="px-3 py-2">{formatMoney(operation.amount)} ₽</td>
+                      <td className="px-3 py-2">{operation.counterpartyName || '—'}</td>
+                      <td className="px-3 py-2">{operation.paymentOrderNumber || '—'}</td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          className="rounded-md border border-blue-200 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                          onClick={() => void handleOpenImportedOperation(operation.id)}>
+                          Открыть
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {bankStatementImportResult.operations.length > 5 && (
+                <div className="border-t border-blue-100 px-3 py-2 text-xs text-blue-700">
+                  Ещё создано операций: {bankStatementImportResult.operations.length - 5}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_260px]">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1056,6 +1437,24 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
                         {item.isReadonly && (
                           <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">Из графика</span>
                         )}
+                        {item.canCreateCashOrder && (
+                          <button
+                            onClick={() => handleCreateCashOrder(item)}
+                            className="rounded-md border border-amber-200 p-2 text-amber-700 hover:bg-amber-50"
+                            aria-label="Создать ПКО"
+                            title="Создать приходный кассовый ордер">
+                            <ReceiptText className="h-4 w-4" />
+                          </button>
+                        )}
+                        {item.cashOrderId && (
+                          <button
+                            onClick={() => handlePrintCashOrder(item.cashOrderId!)}
+                            className="rounded-md border border-emerald-200 p-2 text-emerald-700 hover:bg-emerald-50"
+                            aria-label="Печать кассового ордера"
+                            title="Печать кассового ордера">
+                            <Printer className="h-4 w-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleEdit(item)}
                           disabled={Boolean(item.isReadonly) || item.id <= 0}
@@ -1093,6 +1492,16 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
         previousLabel="Назад"
         nextLabel="Вперед"
       />
+
+      {source === 'Cash' && (
+        <CashOrdersPanel
+          from={from}
+          to={to}
+          search={debouncedSearch}
+          refreshKey={cashOrdersRefreshKey}
+          onPrint={handlePrintCashOrder}
+        />
+      )}
 
       <MoneyOperationModal
         source={apiSource ?? 'Bank'}

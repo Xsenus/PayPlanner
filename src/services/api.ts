@@ -2154,6 +2154,10 @@ export class ApiService {
     return this.request<PagedResult<MoneyOperation> & { summary: MoneyOperationsSummary }>(`/money-operations/paged${q}`);
   }
 
+  async getMoneyOperation(id: number) {
+    return this.request<MoneyOperation>(`/money-operations/${id}`);
+  }
+
   async createMoneyOperation(payload: MoneyOperation) {
     return this.request<MoneyOperation>('/money-operations', {
       method: 'POST',
@@ -2170,6 +2174,48 @@ export class ApiService {
 
   async deleteMoneyOperation(id: number) {
     return this.request<void>(`/money-operations/${id}`, { method: 'DELETE' });
+  }
+
+  async importBankStatement(file: File) {
+    const payload = new FormData();
+    payload.append('file', file);
+    return this.request<BankStatementImportResult>('/money-operations/bank-statement/import', {
+      method: 'POST',
+      body: payload,
+    });
+  }
+
+  async createCashOrderFromPayment(paymentId: number) {
+    return this.request<CashOrder>(`/cash-orders/from-payment/${paymentId}`, { method: 'POST' });
+  }
+
+  async createCashOrderFromMoneyOperation(operationId: number) {
+    return this.request<CashOrder>(`/cash-orders/from-money-operation/${operationId}`, { method: 'POST' });
+  }
+
+  async getCashOrdersPaged(params?: {
+    from?: string;
+    to?: string;
+    type?: 'Incoming' | 'Outgoing';
+    status?: 'Draft' | 'Posted' | 'Cancelled';
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 25,
+    });
+    return this.request<PagedResult<CashOrder>>(`/cash-orders/paged${q}`);
+  }
+
+  async getCashOrderPrintHtml(id: number) {
+    return this.request<string>(`/cash-orders/${id}/print`);
+  }
+
+  getCashOrderPrintUrl(id: number) {
+    return `${API_BASE_URL}/cash-orders/${id}/print`;
   }
 
   async getUserActivityLogs(params?: {
@@ -2283,6 +2329,8 @@ import type {
   SummaryStats,
   PeriodKey,
   SummaryStatus,
+  BankStatementImportResult,
+  CashOrder,
   MoneyOperation,
   MoneyOperationAccountingType,
   MoneyOperationDirection,

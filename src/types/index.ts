@@ -483,6 +483,8 @@ export type PaymentKind = 'Income' | 'Expense';
 export type MoneyOperationDirection = 'Income' | 'Expense' | 'Transfer';
 export type MoneyOperationSource = 'Bank' | 'Cash' | 'Card';
 export type MoneyOperationAccountingType = 'Fact' | 'Plan';
+export type CashOrderStatus = 'Draft' | 'Posted' | 'Cancelled';
+export type CashOrderType = 'Incoming' | 'Outgoing';
 
 export interface MoneyOperation {
   id: number;
@@ -510,6 +512,31 @@ export interface MoneyOperation {
   updatedAt?: string | null;
   isReadonly?: boolean;
   relatedPaymentId?: number | null;
+  cashOrderId?: number | null;
+  cashOrderNumber?: string | null;
+  cashOrderStatus?: CashOrderStatus | null;
+  canCreateCashOrder?: boolean;
+}
+
+export interface CashOrder {
+  id: number;
+  number: string;
+  type: CashOrderType;
+  status: CashOrderStatus;
+  date: string;
+  amount: number;
+  currency?: string | null;
+  clientId?: number | null;
+  clientName?: string | null;
+  paymentId?: number | null;
+  moneyOperationId?: number | null;
+  invoiceId?: number | null;
+  account?: string | null;
+  payerName?: string | null;
+  basis?: string | null;
+  comment?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
 }
 
 export interface MoneyOperationSourceSummary {
@@ -528,6 +555,23 @@ export interface MoneyOperationsSummary {
   incomeCount: number;
   expenseCount: number;
   bySource: MoneyOperationSourceSummary[];
+}
+
+export interface BankStatementImportCreatedOperation {
+  id: number;
+  date: string;
+  direction: MoneyOperationDirection;
+  amount: number;
+  counterpartyName?: string | null;
+  paymentOrderNumber?: string | null;
+}
+
+export interface BankStatementImportResult {
+  rowsRead: number;
+  created: number;
+  skipped: number;
+  errors: string[];
+  operations: BankStatementImportCreatedOperation[];
 }
 
 export interface PaymentsListSummary {
