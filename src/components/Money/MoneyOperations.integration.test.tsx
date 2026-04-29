@@ -8,28 +8,48 @@ import type { MoneyOperation, MoneyOperationsSummary } from '../../types';
 const {
   createCashOrderFromPaymentMock,
   createCashOrderFromMoneyOperationMock,
+  cancelCashOrderMock,
+  copyCashOrderMock,
   createMoneyOperationMock,
   deleteMoneyOperationMock,
+  downloadCashOrderPdfMock,
+  getCashBookMock,
+  getCashBookPrintHtmlMock,
+  getCashOrderRegisterMock,
+  getCashOrderRegisterPrintHtmlMock,
   getCashOrderPrintHtmlMock,
-  getCashOrdersPagedMock,
+  getCashOrderMock,
+  getMoneyOperationAccountsMock,
+  getMoneyOperationAccountSummariesMock,
   getMoneyOperationMock,
   getMoneyOperationsPagedMock,
   importBankStatementMock,
   toastErrorMock,
   toastSuccessMock,
+  updateCashOrderMock,
   updateMoneyOperationMock,
 } = vi.hoisted(() => ({
   createCashOrderFromPaymentMock: vi.fn(),
   createCashOrderFromMoneyOperationMock: vi.fn(),
+  cancelCashOrderMock: vi.fn(),
+  copyCashOrderMock: vi.fn(),
   createMoneyOperationMock: vi.fn(),
   deleteMoneyOperationMock: vi.fn(),
+  downloadCashOrderPdfMock: vi.fn(),
+  getCashBookMock: vi.fn(),
+  getCashBookPrintHtmlMock: vi.fn(),
+  getCashOrderRegisterMock: vi.fn(),
+  getCashOrderRegisterPrintHtmlMock: vi.fn(),
   getCashOrderPrintHtmlMock: vi.fn(),
-  getCashOrdersPagedMock: vi.fn(),
+  getCashOrderMock: vi.fn(),
+  getMoneyOperationAccountsMock: vi.fn(),
+  getMoneyOperationAccountSummariesMock: vi.fn(),
   getMoneyOperationMock: vi.fn(),
   getMoneyOperationsPagedMock: vi.fn(),
   importBankStatementMock: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
+  updateCashOrderMock: vi.fn(),
   updateMoneyOperationMock: vi.fn(),
 }));
 
@@ -72,13 +92,23 @@ vi.mock('../../services/api', () => ({
   apiService: {
     createCashOrderFromPayment: createCashOrderFromPaymentMock,
     createCashOrderFromMoneyOperation: createCashOrderFromMoneyOperationMock,
+    cancelCashOrder: cancelCashOrderMock,
+    copyCashOrder: copyCashOrderMock,
     createMoneyOperation: createMoneyOperationMock,
     deleteMoneyOperation: deleteMoneyOperationMock,
+    downloadCashOrderPdf: downloadCashOrderPdfMock,
+    getCashBook: getCashBookMock,
+    getCashBookPrintHtml: getCashBookPrintHtmlMock,
+    getCashOrderRegister: getCashOrderRegisterMock,
+    getCashOrderRegisterPrintHtml: getCashOrderRegisterPrintHtmlMock,
     getCashOrderPrintHtml: getCashOrderPrintHtmlMock,
-    getCashOrdersPaged: getCashOrdersPagedMock,
+    getCashOrder: getCashOrderMock,
+    getMoneyOperationAccounts: getMoneyOperationAccountsMock,
+    getMoneyOperationAccountSummaries: getMoneyOperationAccountSummariesMock,
     getMoneyOperation: getMoneyOperationMock,
     getMoneyOperationsPaged: getMoneyOperationsPagedMock,
     importBankStatement: importBankStatementMock,
+    updateCashOrder: updateCashOrderMock,
     updateMoneyOperation: updateMoneyOperationMock,
   },
 }));
@@ -170,19 +200,85 @@ describe('MoneyOperations integration', () => {
 
     createCashOrderFromPaymentMock.mockReset();
     createCashOrderFromMoneyOperationMock.mockReset();
+    cancelCashOrderMock.mockReset();
+    copyCashOrderMock.mockReset();
     createMoneyOperationMock.mockReset();
     deleteMoneyOperationMock.mockReset();
+    downloadCashOrderPdfMock.mockReset();
+    getCashBookMock.mockReset();
+    getCashBookPrintHtmlMock.mockReset();
     getCashOrderPrintHtmlMock.mockReset();
-    getCashOrdersPagedMock.mockReset();
+    getCashOrderMock.mockReset();
+    getCashOrderRegisterMock.mockReset();
+    getCashOrderRegisterPrintHtmlMock.mockReset();
+    getMoneyOperationAccountsMock.mockReset();
+    getMoneyOperationAccountSummariesMock.mockReset();
     getMoneyOperationMock.mockReset();
     getMoneyOperationsPagedMock.mockReset();
     importBankStatementMock.mockReset();
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
+    updateCashOrderMock.mockReset();
     updateMoneyOperationMock.mockReset();
+    if (!URL.createObjectURL) {
+      Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(), configurable: true });
+    }
+    if (!URL.revokeObjectURL) {
+      Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
+    }
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:cash-order');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    vi.spyOn(window, 'open').mockImplementation(() => null);
 
-    getMoneyOperationsPagedMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' }) => {
-      const filtered = params?.source ? operations.filter((item) => item.source === params.source) : operations;
+    getMoneyOperationAccountsMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' }) =>
+      Array.from(
+        new Set(
+          operations
+            .filter((item) => !params?.source || item.source === params.source)
+            .map((item) => item.accountName)
+            .filter(Boolean) as string[],
+        ),
+      ),
+    );
+    getMoneyOperationAccountSummariesMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' }) => {
+      const accountNames = Array.from(
+        new Set(
+          operations
+            .filter((item) => !params?.source || item.source === params.source)
+            .map((item) => item.accountName)
+            .filter(Boolean) as string[],
+        ),
+      );
+
+      return accountNames.map((accountName) => {
+        const accountItems = operations.filter(
+          (item) => item.accountName === accountName && (!params?.source || item.source === params.source),
+        );
+        const incomeItems = accountItems.filter((item) => item.direction === 'Income');
+        const expenseItems = accountItems.filter((item) => item.direction === 'Expense');
+        const income = incomeItems.reduce((sum, item) => sum + item.amount, 0);
+        const expense = expenseItems.reduce((sum, item) => sum + item.amount, 0);
+
+        return {
+          accountName,
+          source: params?.source ?? accountItems[0]?.source ?? 'Bank',
+          startBalance: 0,
+          income,
+          expense,
+          endBalance: income - expense,
+          incomeCount: incomeItems.length,
+          expenseCount: expenseItems.length,
+        };
+      });
+    });
+
+    getMoneyOperationsPagedMock.mockImplementation(
+      async (params?: { source?: 'Bank' | 'Cash' | 'Card'; accountName?: string }) => {
+      const filtered = operations.filter(
+        (item) =>
+          (!params?.source || item.source === params.source) &&
+          (!params?.accountName || item.accountName === params.accountName),
+      );
       return {
         items: filtered,
         total: filtered.length,
@@ -192,12 +288,72 @@ describe('MoneyOperations integration', () => {
       };
     });
 
-    getCashOrdersPagedMock.mockResolvedValue({
+    getCashOrderRegisterMock.mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
       pageSize: 10,
+      incomingCount: 0,
+      outgoingCount: 0,
+      postedCount: 0,
+      cancelledCount: 0,
+      incomingAmount: 0,
+      outgoingAmount: 0,
     });
+    getCashBookMock.mockResolvedValue({
+      from: '2026-04-01',
+      to: '2026-04-30',
+      openingBalance: 0,
+      income: 25000,
+      expense: 0,
+      closingBalance: 25000,
+      incomingCount: 1,
+      outgoingCount: 0,
+      days: [
+        {
+          date: '2026-04-29',
+          openingBalance: 0,
+          income: 25000,
+          expense: 0,
+          closingBalance: 25000,
+          incomingCount: 1,
+          outgoingCount: 0,
+        },
+      ],
+    });
+    getCashBookPrintHtmlMock.mockResolvedValue('<html><body>Кассовая книга</body></html>');
+    getCashOrderRegisterPrintHtmlMock.mockResolvedValue('<html><body>Журнал регистрации</body></html>');
+    getCashOrderMock.mockImplementation(async (id: number) => ({
+      id,
+      number: 'ПКО-2026-0003',
+      type: 'Incoming',
+      status: 'Posted',
+      date: '2026-04-29',
+      amount: 25000,
+      currency: 'RUB',
+      clientId: 74,
+      clientName: 'Ахмедова Айтан Рафик Кызы',
+      paymentId: 33,
+      moneyOperationId: null,
+      invoiceId: 33,
+      account: 'Основная касса',
+      payerName: 'Ахмедова Айтан Рафик Кызы',
+      basis: 'Оплата от клиента. счет №33',
+      comment: null,
+      createdAt: '2026-04-29T10:00:00Z',
+      updatedAt: null,
+    }));
+    updateCashOrderMock.mockImplementation(async (_id: number, payload: unknown) => payload);
+    cancelCashOrderMock.mockImplementation(async (_id: number) => ({
+      ...(await getCashOrderMock(_id)),
+      status: 'Cancelled',
+    }));
+    copyCashOrderMock.mockImplementation(async (_id: number) => ({
+      ...(await getCashOrderMock(_id)),
+      id: 10,
+      number: 'ПКО-2026-0004',
+    }));
+    downloadCashOrderPdfMock.mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' }));
 
     getMoneyOperationMock.mockImplementation(async (id: number) => operations.find((item) => item.id === id));
 
@@ -278,8 +434,12 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByLabelText(/^Дата$/)).toHaveProperty('value', '2026-04-21');
     await user.click(screen.getByLabelText('Расход'));
 
-    await user.clear(screen.getByLabelText('Банковский счёт'));
-    await user.type(screen.getByLabelText('Банковский счёт'), 'Расчётный счёт');
+    const bankAccountInput = screen
+      .getAllByLabelText('Банковский счёт')
+      .find((element): element is HTMLInputElement => element instanceof HTMLInputElement);
+    expect(bankAccountInput).toBeTruthy();
+    await user.clear(bankAccountInput!);
+    await user.type(bankAccountInput!, 'Расчётный счёт');
     await user.clear(screen.getByLabelText('Поставщик'));
     await user.type(screen.getByLabelText('Поставщик'), 'Новый поставщик');
     await user.clear(screen.getByLabelText(/^Назначение$/));
@@ -301,6 +461,30 @@ describe('MoneyOperations integration', () => {
     expect(toastSuccessMock).toHaveBeenCalledWith('Операция создана.', 'Деньги');
     await screen.findByText('Новый поставщик');
   }, 15000);
+
+  it('filters money operations by selected account', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({ id: 1, accountName: 'Основной счёт', counterpartyName: 'Поставщик А' }),
+      createOperation({ id: 2, accountName: 'Резервный счёт', counterpartyName: 'Поставщик Б' }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Поставщик А');
+    expect(screen.getByText('Поставщик Б')).toBeTruthy();
+
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), 'Резервный счёт');
+
+    await waitFor(() =>
+      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ accountName: 'Резервный счёт' }),
+      ),
+    );
+    expect(await screen.findByText('Поставщик Б')).toBeTruthy();
+    expect(document.body.textContent).toContain('Расход: 1 500,00 ₽');
+    expect(screen.queryByText('Поставщик А')).toBeNull();
+  });
 
   it('normalizes API dates in the edit form and updates the operation', async () => {
     const user = userEvent.setup();
@@ -383,7 +567,7 @@ describe('MoneyOperations integration', () => {
 
     await waitFor(() => expect(createCashOrderFromPaymentMock).toHaveBeenCalledWith(77));
     expect(toastSuccessMock).toHaveBeenCalledWith('Создан кассовый ордер ПКО-2026-0001.', 'Касса');
-    await waitFor(() => expect(getCashOrdersPagedMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getCashOrderRegisterMock).toHaveBeenCalledTimes(2));
   }, 15000);
 
   it('creates a cash order for a manual cash operation', async () => {
@@ -409,12 +593,13 @@ describe('MoneyOperations integration', () => {
 
     await waitFor(() => expect(createCashOrderFromMoneyOperationMock).toHaveBeenCalledWith(11));
     expect(toastSuccessMock).toHaveBeenCalledWith('Создан кассовый ордер ПКО-2026-0002.', 'Касса');
-    await waitFor(() => expect(getCashOrdersPagedMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getCashOrderRegisterMock).toHaveBeenCalledTimes(2));
   }, 15000);
 
   it('loads and renders the cash orders journal in the cash section', async () => {
+    const user = userEvent.setup();
     operations = [];
-    getCashOrdersPagedMock.mockResolvedValueOnce({
+    getCashOrderRegisterMock.mockResolvedValueOnce({
       items: [
         {
           id: 9,
@@ -440,19 +625,100 @@ describe('MoneyOperations integration', () => {
       total: 1,
       page: 1,
       pageSize: 10,
+      incomingCount: 1,
+      outgoingCount: 0,
+      postedCount: 1,
+      cancelledCount: 0,
+      incomingAmount: 25000,
+      outgoingAmount: 0,
     });
 
     render(<MoneyOperations source="Cash" />);
 
     await screen.findByText('Кассовые ордера');
     await screen.findByText('ПКО-2026-0003');
+    await screen.findByText('ПКО: 1, РКО: 0');
     await screen.findByText('Оплата от клиента. счет №33');
-    expect(getCashOrdersPagedMock).toHaveBeenCalledWith(
+    expect(getCashOrderRegisterMock).toHaveBeenCalledWith(
       expect.objectContaining({
         page: 1,
         pageSize: 10,
       }),
     );
+
+    await user.click(screen.getByRole('button', { name: 'Кассовая книга' }));
+    await waitFor(() => expect(getCashBookPrintHtmlMock).toHaveBeenCalledWith({ from: '2026-01-01', to: '2026-12-31' }));
+
+    await user.click(screen.getByRole('button', { name: 'Журнал' }));
+    await waitFor(() =>
+      expect(getCashOrderRegisterPrintHtmlMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: '2026-01-01',
+          to: '2026-12-31',
+        }),
+      ),
+    );
+  }, 15000);
+
+  it('opens and manages a cash order card from the cash journal', async () => {
+    const user = userEvent.setup();
+    operations = [];
+    getCashOrderRegisterMock.mockResolvedValue({
+      items: [
+        {
+          id: 9,
+          number: 'ПКО-2026-0003',
+          type: 'Incoming',
+          status: 'Posted',
+          date: '2026-04-29',
+          amount: 25000,
+          currency: 'RUB',
+          clientId: 74,
+          clientName: 'Ахмедова Айтан Рафик Кызы',
+          paymentId: 33,
+          moneyOperationId: null,
+          invoiceId: 33,
+          account: 'Основная касса',
+          payerName: 'Ахмедова Айтан Рафик Кызы',
+          basis: 'Оплата от клиента. счет №33',
+          comment: null,
+          createdAt: '2026-04-29T10:00:00Z',
+          updatedAt: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+      incomingCount: 1,
+      outgoingCount: 0,
+      postedCount: 1,
+      cancelledCount: 0,
+      incomingAmount: 25000,
+      outgoingAmount: 0,
+    });
+
+    render(<MoneyOperations source="Cash" />);
+
+    await screen.findByText('Кассовые ордера');
+    await user.click(screen.getByRole('button', { name: 'ПКО-2026-0003' }));
+
+    await waitFor(() => expect(getCashOrderMock).toHaveBeenCalledWith(9));
+    await screen.findByText('Приходный кассовый ордер ПКО-2026-0003');
+
+    const amountInput = screen.getByDisplayValue('25000');
+    await user.clear(amountInput);
+    await user.type(amountInput, '30000');
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(updateCashOrderMock).toHaveBeenCalledWith(9, expect.objectContaining({ amount: 30000 })));
+
+    await user.click(screen.getByRole('button', { name: 'PDF' }));
+    await waitFor(() => expect(downloadCashOrderPdfMock).toHaveBeenCalledWith(9));
+
+    await user.click(screen.getByRole('button', { name: 'Копировать' }));
+    await waitFor(() => expect(copyCashOrderMock).toHaveBeenCalledWith(9));
+
+    await user.click(screen.getByRole('button', { name: 'Отменить' }));
+    await waitFor(() => expect(cancelCashOrderMock).toHaveBeenCalledWith(10));
   }, 15000);
 
   it('filters the cash orders journal by outgoing orders', async () => {
@@ -465,7 +731,7 @@ describe('MoneyOperations integration', () => {
     await user.click(screen.getByRole('button', { name: 'РКО' }));
 
     await waitFor(() =>
-      expect(getCashOrdersPagedMock).toHaveBeenLastCalledWith(
+      expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(
         expect.objectContaining({
           type: 'Outgoing',
           page: 1,
@@ -485,7 +751,7 @@ describe('MoneyOperations integration', () => {
     await user.click(screen.getByRole('button', { name: 'Отменён' }));
 
     await waitFor(() =>
-      expect(getCashOrdersPagedMock).toHaveBeenLastCalledWith(
+      expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(
         expect.objectContaining({
           status: 'Cancelled',
           page: 1,

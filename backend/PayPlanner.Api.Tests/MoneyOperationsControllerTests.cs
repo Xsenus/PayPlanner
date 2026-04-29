@@ -7,6 +7,7 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.Invoices;
 using System.Text;
 using Xunit;
 
@@ -272,6 +273,85 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task MoneyJournal_FiltersByAccountAndCalculatesOpeningBalance()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "Стартовый остаток",
+                Amount = 10_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 3, 31),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "Клиент",
+                Amount = 5_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 10),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Резервный банк",
+                CounterpartyName = "Поставщик",
+                Amount = 1_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 11),
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var accountsAction = await controller.GetAccounts(MoneyOperationSource.Bank);
+        var accountsOk = Assert.IsType<OkObjectResult>(accountsAction.Result);
+        var accounts = Assert.IsAssignableFrom<IReadOnlyList<string>>(accountsOk.Value);
+        Assert.Contains("Основной банк", accounts);
+        Assert.Contains("Резервный банк", accounts);
+
+        var accountSummariesAction = await controller.GetAccountSummaries(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: MoneyOperationSource.Bank);
+        var accountSummariesOk = Assert.IsType<OkObjectResult>(accountSummariesAction.Result);
+        var accountSummaries = Assert.IsAssignableFrom<IReadOnlyList<MoneyOperationAccountSummaryDto>>(accountSummariesOk.Value);
+        var mainAccountSummary = Assert.Single(accountSummaries, item => item.AccountName == "Основной банк");
+        Assert.Equal(10_000m, mainAccountSummary.StartBalance);
+        Assert.Equal(5_000m, mainAccountSummary.Income);
+        Assert.Equal(15_000m, mainAccountSummary.EndBalance);
+
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            accountName: "Основной банк",
+            search: null);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+        var item = Assert.Single(page.Items);
+        Assert.Equal("Основной банк", item.AccountName);
+        Assert.Equal(10_000m, page.Summary.StartBalance);
+        Assert.Equal(5_000m, page.Summary.Income);
+        Assert.Equal(15_000m, page.Summary.EndBalance);
+    }
+
+    [Fact]
     public async Task ManualCashOperation_CreatesAndSyncsCashOrder()
     {
         await using var db = await CreateContextAsync();
@@ -416,6 +496,331 @@ public class MoneyOperationsControllerTests
         var order = Assert.Single(page.Items);
         Assert.Equal("ПКО-2026-0002", order.Number);
         Assert.Equal(CashOrderStatus.Cancelled, order.Status);
+    }
+
+    [Fact]
+    public async Task CashOrder_UpdateCancelAndCopy_Workflow()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "ПКО-2026-0001",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 4, 29),
+            Amount = 25_000m,
+            Currency = "RUB",
+            PayerName = "Ахмедова Айтан Рафик Кызы",
+            Basis = "Оплата по счёту №33",
+            Account = "Основная касса",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var source = await db.CashOrders.SingleAsync();
+        var updateAction = await controller.Update(source.Id, new CashOrder
+        {
+            Type = CashOrderType.Incoming,
+            Date = new DateTime(2026, 4, 30),
+            Amount = 30_000m,
+            Currency = "RUB",
+            PayerName = "Ахмедова Айтан Рафик Кызы",
+            Basis = "Оплата и доплата",
+            Account = "Касса",
+            Comment = "Проверено",
+        }, CancellationToken.None);
+
+        var updateOk = Assert.IsType<OkObjectResult>(updateAction);
+        var updated = Assert.IsType<CashOrderDto>(updateOk.Value);
+        Assert.Equal(30_000m, updated.Amount);
+        Assert.Equal(new DateTime(2026, 4, 30), updated.Date);
+        Assert.Equal("Проверено", updated.Comment);
+
+        var copyAction = await controller.Copy(source.Id, CancellationToken.None);
+        var copyCreated = Assert.IsType<CreatedResult>(copyAction);
+        var copied = Assert.IsType<CashOrderDto>(copyCreated.Value);
+        Assert.NotEqual(source.Id, copied.Id);
+        Assert.StartsWith("ПКО-", copied.Number);
+        Assert.Equal(30_000m, copied.Amount);
+        Assert.Null(copied.PaymentId);
+        Assert.Null(copied.MoneyOperationId);
+
+        var cancelAction = await controller.Cancel(source.Id, CancellationToken.None);
+        var cancelOk = Assert.IsType<OkObjectResult>(cancelAction);
+        var cancelled = Assert.IsType<CashOrderDto>(cancelOk.Value);
+        Assert.Equal(CashOrderStatus.Cancelled, cancelled.Status);
+
+        var cancelledUpdateAction = await controller.Update(source.Id, new CashOrder
+        {
+            Type = CashOrderType.Incoming,
+            Date = new DateTime(2026, 5, 1),
+            Amount = 1_000m,
+        }, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(cancelledUpdateAction);
+    }
+
+    [Fact]
+    public async Task CashOrder_DownloadPdf_ReturnsPdfFile()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "ПКО-2026-0001",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 4, 29),
+            Amount = 25_000m,
+            Currency = "RUB",
+            PayerName = "Ахмедова Айтан Рафик Кызы",
+            Basis = "Оплата по счёту №33",
+            Account = "Основная касса",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db, new FakeInvoiceDocumentPdfService("%PDF-cash%"u8.ToArray()));
+        var order = await db.CashOrders.SingleAsync();
+
+        var action = await controller.DownloadPdf(order.Id, CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(action);
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.Equal("%PDF-cash%"u8.ToArray(), file.FileContents);
+        Assert.Equal("cash-order-ПКО-2026-0001.pdf", file.FileDownloadName);
+    }
+
+    [Fact]
+    public async Task CashOrder_Print_ReturnsAccountableFormWithAmountInWords()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "ПКО-2026-0001",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 4, 29),
+            Amount = 25_001.25m,
+            Currency = "RUB",
+            PayerName = "Ахмедова Айтан Рафик Кызы",
+            Basis = "Оплата по счёту №33",
+            Account = "Основная касса",
+            Comment = "Без приложения",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var order = await db.CashOrders.SingleAsync();
+
+        var action = await controller.Print(order.Id, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(action);
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("Приходный кассовый ордер", content.Content);
+        Assert.Contains("Квитанция к приходный кассовый ордер", content.Content);
+        Assert.Contains("Двадцать пять тысяч один рубль 25 копеек", content.Content);
+        Assert.Contains("Принято от", content.Content);
+        Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
+    }
+
+    [Fact]
+    public async Task CashOrder_CashBook_ReturnsPeriodBalancesByDay()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = "ПКО-2026-0001",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 1),
+                Amount = 10_000m,
+                Currency = "RUB",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "ПКО-2026-0002",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 29),
+                Amount = 25_000m,
+                Currency = "RUB",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "РКО-2026-0001",
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 30),
+                Amount = 3_000m,
+                Currency = "RUB",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "ПКО-2026-0003",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Cancelled,
+                Date = new DateTime(2026, 4, 29),
+                Amount = 99_000m,
+                Currency = "RUB",
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var action = await controller.GetCashBook(new DateTime(2026, 4, 29), new DateTime(2026, 4, 30), CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var book = Assert.IsType<CashBookResponseDto>(ok.Value);
+        Assert.Equal(10_000m, book.OpeningBalance);
+        Assert.Equal(25_000m, book.Income);
+        Assert.Equal(3_000m, book.Expense);
+        Assert.Equal(32_000m, book.ClosingBalance);
+        Assert.Equal(1, book.IncomingCount);
+        Assert.Equal(1, book.OutgoingCount);
+        Assert.Collection(
+            book.Days,
+            day =>
+            {
+                Assert.Equal(new DateTime(2026, 4, 29), day.Date);
+                Assert.Equal(10_000m, day.OpeningBalance);
+                Assert.Equal(35_000m, day.ClosingBalance);
+            },
+            day =>
+            {
+                Assert.Equal(new DateTime(2026, 4, 30), day.Date);
+                Assert.Equal(35_000m, day.OpeningBalance);
+                Assert.Equal(32_000m, day.ClosingBalance);
+            });
+    }
+
+    [Fact]
+    public async Task CashOrder_Register_ReturnsPagedRowsAndSummary()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = "ПКО-2026-0001",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 29),
+                Amount = 25_000m,
+                Currency = "RUB",
+                PayerName = "Ахмедова Айтан Рафик Кызы",
+                Basis = "Оплата по счёту №33",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "РКО-2026-0001",
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 30),
+                Amount = 3_000m,
+                Currency = "RUB",
+                PayerName = "Касса",
+                Basis = "Выдача из кассы",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "ПКО-2026-0002",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Cancelled,
+                Date = new DateTime(2026, 4, 30),
+                Amount = 1_000m,
+                Currency = "RUB",
+                PayerName = "Ахмедова Айтан Рафик Кызы",
+                Basis = "Ошибочный документ",
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var action = await controller.GetRegister(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            type: null,
+            status: null,
+            search: "Ахмедова",
+            page: 1,
+            pageSize: 10,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var register = Assert.IsType<CashOrderRegisterResponseDto>(ok.Value);
+        Assert.Equal(2, register.Total);
+        Assert.Equal(2, register.IncomingCount);
+        Assert.Equal(0, register.OutgoingCount);
+        Assert.Equal(1, register.PostedCount);
+        Assert.Equal(1, register.CancelledCount);
+        Assert.Equal(25_000m, register.IncomingAmount);
+        Assert.Equal(0m, register.OutgoingAmount);
+        Assert.Equal(["ПКО-2026-0002", "ПКО-2026-0001"], register.Items.Select(item => item.Number).ToArray());
+    }
+
+    [Fact]
+    public async Task CashOrder_PrintCashBook_ReturnsHtml()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "ПКО-2026-0001",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 4, 29),
+            Amount = 25_000m,
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var action = await controller.PrintCashBook(new DateTime(2026, 4, 29), new DateTime(2026, 4, 29), CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(action);
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("Кассовая книга", content.Content);
+        Assert.Contains("25", content.Content);
+    }
+
+    [Fact]
+    public async Task CashOrder_PrintRegister_ReturnsHtml()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "ПКО-2026-0001",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 4, 29),
+            Amount = 25_000m,
+            Currency = "RUB",
+            PayerName = "Ахмедова Айтан Рафик Кызы",
+            Basis = "Оплата по счёту №33",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var action = await controller.PrintRegister(
+            from: new DateTime(2026, 4, 29),
+            to: new DateTime(2026, 4, 29),
+            type: null,
+            status: null,
+            search: null,
+            ct: CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(action);
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("Журнал регистрации кассовых документов", content.Content);
+        Assert.Contains("ПКО-2026-0001", content.Content);
+        Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
     }
 
     [Fact]
@@ -628,5 +1033,22 @@ public class MoneyOperationsControllerTests
             Headers = new HeaderDictionary(),
             ContentType = "text/csv",
         };
+    }
+
+    private sealed class FakeInvoiceDocumentPdfService : IInvoiceDocumentPdfService
+    {
+        private readonly byte[] _bytes;
+
+        public FakeInvoiceDocumentPdfService(byte[] bytes)
+        {
+            _bytes = bytes;
+        }
+
+        public Task<byte[]> RenderAsync(string html, CancellationToken ct = default)
+        {
+            Assert.Contains("ПКО-2026-0001", html);
+            Assert.Contains("Ахмедова Айтан Рафик Кызы", html);
+            return Task.FromResult(_bytes);
+        }
     }
 }
