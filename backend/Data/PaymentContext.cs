@@ -67,7 +67,8 @@ public class PaymentContext : DbContext
         typeof(LegalEntity),
         typeof(MoneyOperation),
         typeof(Payment),
-        typeof(PowerOfAttorney)
+        typeof(PowerOfAttorney),
+        typeof(CashOrder)
     };
 
     private static readonly HashSet<Type> MetadataOnlyAuditedEntityTypes = new()
@@ -128,6 +129,7 @@ public class PaymentContext : DbContext
     }
 
     public DbSet<MoneyOperation> MoneyOperations => Set<MoneyOperation>();
+    public DbSet<CashOrder> CashOrders => Set<CashOrder>();
 
     /// <summary>
     /// Выполняет конфигурацию сущностей, связей и индексов.
@@ -725,6 +727,51 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Source).HasDatabaseName("IX_MoneyOperations_Source");
             entity.HasIndex(e => e.Direction).HasDatabaseName("IX_MoneyOperations_Direction");
             entity.HasIndex(e => new { e.Source, e.Date }).HasDatabaseName("IX_MoneyOperations_Source_Date");
+        });
+
+        modelBuilder.Entity<CashOrder>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Number).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Type).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Currency).HasMaxLength(12);
+            entity.Property(e => e.Account).HasMaxLength(120);
+            entity.Property(e => e.PayerName).HasMaxLength(200);
+            entity.Property(e => e.Basis).HasMaxLength(1000);
+            entity.Property(e => e.Comment).HasMaxLength(1000);
+            entity.Property(e => e.Date).HasColumnType("date");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Client)
+                  .WithMany()
+                  .HasForeignKey(e => e.ClientId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.Payment)
+                  .WithMany(p => p.CashOrders)
+                  .HasForeignKey(e => e.PaymentId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.MoneyOperation)
+                  .WithMany(operation => operation.CashOrders)
+                  .HasForeignKey(e => e.MoneyOperationId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.Invoice)
+                  .WithMany()
+                  .HasForeignKey(e => e.InvoiceId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.Number).IsUnique().HasDatabaseName("IX_CashOrders_Number");
+            entity.HasIndex(e => e.Date).HasDatabaseName("IX_CashOrders_Date");
+            entity.HasIndex(e => e.Type).HasDatabaseName("IX_CashOrders_Type");
+            entity.HasIndex(e => e.Status).HasDatabaseName("IX_CashOrders_Status");
+            entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_CashOrders_ClientId");
+            entity.HasIndex(e => e.PaymentId).HasDatabaseName("IX_CashOrders_PaymentId");
+            entity.HasIndex(e => e.MoneyOperationId).HasDatabaseName("IX_CashOrders_MoneyOperationId");
+            entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_CashOrders_InvoiceId");
         });
 
         // ------------------ ClientPassport ------------------
@@ -1361,6 +1408,7 @@ public class PaymentContext : DbContext
             ConfigureAudit<MoneyOperation>(modelBuilder);
             ConfigureAudit<Payment>(modelBuilder);
             ConfigureAudit<PowerOfAttorney>(modelBuilder);
+            ConfigureAudit<CashOrder>(modelBuilder);
             ConfigureAudit<Role>(modelBuilder, enableSoftDelete: false);
             ConfigureAudit<User>(modelBuilder, enableSoftDelete: false);
         }
@@ -1716,6 +1764,7 @@ public class PaymentContext : DbContext
         if (clrType == typeof(ClientPassport)) return "client-passport";
         if (clrType == typeof(PowerOfAttorney)) return "power-of-attorney";
         if (clrType == typeof(MoneyOperation)) return "money-operation";
+        if (clrType == typeof(CashOrder)) return "cash-order";
 
         return null;
     }

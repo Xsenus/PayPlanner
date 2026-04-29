@@ -25,4 +25,5 @@ public class MoneyOperation
     public string? PaidAccountName { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
+    public ICollection<CashOrder> CashOrders { get; set; } = new List<CashOrder>();
 }

@@ -29,6 +29,10 @@ public sealed class MoneyOperationListItemDto
     public DateTime? UpdatedAt { get; init; }
     public bool IsReadonly { get; init; }
     public int? RelatedPaymentId { get; init; }
+    public int? CashOrderId { get; init; }
+    public string? CashOrderNumber { get; init; }
+    public CashOrderStatus? CashOrderStatus { get; init; }
+    public bool CanCreateCashOrder { get; init; }
 }
 
 public sealed class MoneyOperationSourceSummaryDto

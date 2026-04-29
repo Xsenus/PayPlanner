@@ -57,6 +57,8 @@ namespace PayPlanner.Api.Models
 
         public ICollection<InvoiceLineItem> InvoiceLineItems { get; set; } = new List<InvoiceLineItem>();
 
+        public ICollection<CashOrder> CashOrders { get; set; } = new List<CashOrder>();
+
         /// <summary>
         /// Внешний ключ на дело клиента, к которому относится платеж.
         /// </summary>

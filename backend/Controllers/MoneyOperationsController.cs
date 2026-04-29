@@ -5,6 +5,8 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using System.Globalization;
+using System.Text;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -13,8 +15,13 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class MoneyOperationsController : ControllerBase
 {
+    private const long MaxStatementFileSizeBytes = 10L * 1024L * 1024L;
     private const string CashSourceToken = "\u043A\u0430\u0441";
+    private const string CashSourceTitleToken = "\u041A\u0430\u0441";
+    private const string CashSourceAlternativeToken = "\u043D\u0430\u043B\u0438\u0447";
+    private const string CashSourceAlternativeTitleToken = "\u041D\u0430\u043B\u0438\u0447";
     private const string CardSourceToken = "\u043A\u0430\u0440\u0442";
+    private const string CardSourceTitleToken = "\u041A\u0430\u0440\u0442";
 
     private readonly PaymentContext _db;
     private readonly ILogger<MoneyOperationsController> _logger;
@@ -192,12 +199,35 @@ public class MoneyOperationsController : ControllerBase
                 UpdatedAt = operation.UpdatedAt,
                 IsReadonly = false,
                 RelatedPaymentId = null,
+                CashOrderId = _db.CashOrders
+                    .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
+                    .OrderByDescending(order => order.Id)
+                    .Select(order => (int?)order.Id)
+                    .FirstOrDefault(),
+                CashOrderNumber = _db.CashOrders
+                    .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
+                    .OrderByDescending(order => order.Id)
+                    .Select(order => order.Number)
+                    .FirstOrDefault(),
+                CashOrderStatus = _db.CashOrders
+                    .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
+                    .OrderByDescending(order => order.Id)
+                    .Select(order => (CashOrderStatus?)order.Status)
+                    .FirstOrDefault(),
+                CanCreateCashOrder =
+                    operation.Source == MoneyOperationSource.Cash &&
+                    operation.AccountingType == MoneyOperationAccountingType.Fact &&
+                    operation.Amount > 0m &&
+                    (operation.Direction == MoneyOperationDirection.Income ||
+                     operation.Direction == MoneyOperationDirection.Expense) &&
+                    !_db.CashOrders.Any(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled),
             });
 
         var paymentOperations = ApplyPaymentFilters(
                 _db.Payments.AsNoTracking(),
                 from,
                 to,
+                source,
                 direction,
                 accountingType,
                 search)
@@ -207,11 +237,15 @@ public class MoneyOperationsController : ControllerBase
                 Source =
                     payment.PaymentSource != null &&
                     payment.PaymentSource.Name != null &&
-                    payment.PaymentSource.Name.ToLower().Contains(CashSourceToken)
+                    (payment.PaymentSource.Name.Contains(CashSourceToken) ||
+                     payment.PaymentSource.Name.Contains(CashSourceTitleToken) ||
+                     payment.PaymentSource.Name.Contains(CashSourceAlternativeToken) ||
+                     payment.PaymentSource.Name.Contains(CashSourceAlternativeTitleToken))
                         ? MoneyOperationSource.Cash
                         : payment.PaymentSource != null &&
                           payment.PaymentSource.Name != null &&
-                          payment.PaymentSource.Name.ToLower().Contains(CardSourceToken)
+                          (payment.PaymentSource.Name.Contains(CardSourceToken) ||
+                           payment.PaymentSource.Name.Contains(CardSourceTitleToken))
                             ? MoneyOperationSource.Card
                             : MoneyOperationSource.Bank,
                 Direction = payment.Type == PaymentType.Income
@@ -246,14 +280,32 @@ public class MoneyOperationsController : ControllerBase
                 UpdatedAt = null,
                 IsReadonly = true,
                 RelatedPaymentId = payment.Id,
+                CashOrderId = _db.CashOrders
+                    .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
+                    .OrderByDescending(order => order.Id)
+                    .Select(order => (int?)order.Id)
+                    .FirstOrDefault(),
+                CashOrderNumber = _db.CashOrders
+                    .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
+                    .OrderByDescending(order => order.Id)
+                    .Select(order => order.Number)
+                    .FirstOrDefault(),
+                CashOrderStatus = _db.CashOrders
+                    .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
+                    .OrderByDescending(order => order.Id)
+                    .Select(order => (CashOrderStatus?)order.Status)
+                    .FirstOrDefault(),
+                CanCreateCashOrder =
+                    payment.PaymentSource != null &&
+                    payment.PaymentSource.Name != null &&
+                    (payment.PaymentSource.Name.Contains(CashSourceToken) ||
+                     payment.PaymentSource.Name.Contains(CashSourceTitleToken) ||
+                     payment.PaymentSource.Name.Contains(CashSourceAlternativeToken) ||
+                     payment.PaymentSource.Name.Contains(CashSourceAlternativeTitleToken)) &&
+                    !_db.CashOrders.Any(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled),
             });
 
         var combinedQuery = customOperations.Concat(paymentOperations);
-
-        if (source.HasValue)
-        {
-            combinedQuery = combinedQuery.Where(item => item.Source == source.Value);
-        }
 
         return combinedQuery;
     }
@@ -296,11 +348,16 @@ public class MoneyOperationsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var term = search.Trim().ToLower();
+            var term = search.Trim();
+            var titleTerm = ToTitleSearchTerm(term);
             query = query.Where(operation =>
-                (operation.CounterpartyName ?? string.Empty).ToLower().Contains(term) ||
-                (operation.Purpose ?? string.Empty).ToLower().Contains(term) ||
-                (operation.CategoryName ?? string.Empty).ToLower().Contains(term));
+                (operation.CounterpartyName ?? string.Empty).Contains(term) ||
+                (operation.Purpose ?? string.Empty).Contains(term) ||
+                (operation.CategoryName ?? string.Empty).Contains(term) ||
+                (titleTerm != term &&
+                    ((operation.CounterpartyName ?? string.Empty).Contains(titleTerm) ||
+                     (operation.Purpose ?? string.Empty).Contains(titleTerm) ||
+                     (operation.CategoryName ?? string.Empty).Contains(titleTerm))));
         }
 
         return query;
@@ -310,6 +367,7 @@ public class MoneyOperationsController : ControllerBase
         IQueryable<Payment> query,
         DateTime? from,
         DateTime? to,
+        MoneyOperationSource? source,
         MoneyOperationDirection? direction,
         MoneyOperationAccountingType? accountingType,
         string? search)
@@ -319,13 +377,42 @@ public class MoneyOperationsController : ControllerBase
         if (from.HasValue)
         {
             var fromDate = from.Value.Date;
-            query = query.Where(payment => payment.Date >= fromDate);
+            query = query.Where(payment => (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) >= fromDate);
         }
 
         if (to.HasValue)
         {
             var toDate = to.Value.Date;
-            query = query.Where(payment => payment.Date <= toDate);
+            query = query.Where(payment => (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) <= toDate);
+        }
+
+        if (source.HasValue)
+        {
+            query = source.Value switch
+            {
+                MoneyOperationSource.Cash => query.Where(payment =>
+                    payment.PaymentSource != null &&
+                    payment.PaymentSource.Name != null &&
+                    (payment.PaymentSource.Name.Contains(CashSourceToken) ||
+                     payment.PaymentSource.Name.Contains(CashSourceTitleToken) ||
+                     payment.PaymentSource.Name.Contains(CashSourceAlternativeToken) ||
+                     payment.PaymentSource.Name.Contains(CashSourceAlternativeTitleToken))),
+                MoneyOperationSource.Card => query.Where(payment =>
+                    payment.PaymentSource != null &&
+                    payment.PaymentSource.Name != null &&
+                    (payment.PaymentSource.Name.Contains(CardSourceToken) ||
+                     payment.PaymentSource.Name.Contains(CardSourceTitleToken))),
+                MoneyOperationSource.Bank => query.Where(payment =>
+                    payment.PaymentSource == null ||
+                    payment.PaymentSource.Name == null ||
+                    (!payment.PaymentSource.Name.Contains(CashSourceToken) &&
+                     !payment.PaymentSource.Name.Contains(CashSourceTitleToken) &&
+                     !payment.PaymentSource.Name.Contains(CashSourceAlternativeToken) &&
+                     !payment.PaymentSource.Name.Contains(CashSourceAlternativeTitleToken) &&
+                     !payment.PaymentSource.Name.Contains(CardSourceToken) &&
+                     !payment.PaymentSource.Name.Contains(CardSourceTitleToken))),
+                _ => query.Where(_ => false),
+            };
         }
 
         if (direction.HasValue)
@@ -355,11 +442,16 @@ public class MoneyOperationsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var term = search.Trim().ToLower();
+            var term = search.Trim();
+            var titleTerm = ToTitleSearchTerm(term);
             query = query.Where(payment =>
-                (payment.CounterpartyName ?? string.Empty).ToLower().Contains(term) ||
-                (payment.Description ?? string.Empty).ToLower().Contains(term) ||
-                (payment.Account ?? string.Empty).ToLower().Contains(term));
+                (payment.CounterpartyName ?? string.Empty).Contains(term) ||
+                (payment.Description ?? string.Empty).Contains(term) ||
+                (payment.Account ?? string.Empty).Contains(term) ||
+                (titleTerm != term &&
+                    ((payment.CounterpartyName ?? string.Empty).Contains(titleTerm) ||
+                     (payment.Description ?? string.Empty).Contains(titleTerm) ||
+                     (payment.Account ?? string.Empty).Contains(titleTerm))));
         }
 
         return query;
@@ -395,7 +487,119 @@ public class MoneyOperationsController : ControllerBase
 
         _db.MoneyOperations.Add(model);
         await _db.SaveChangesAsync();
+        await SyncCashOrderAsync(model);
         return Created($"/api/money-operations/{model.Id}", model);
+    }
+
+    [HttpPost("bank-statement/import")]
+    [RequestSizeLimit(MaxStatementFileSizeBytes)]
+    public async Task<ActionResult<BankStatementImportResultDto>> ImportBankStatement([FromForm] IFormFile? file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest("Файл выписки не выбран.");
+        }
+
+        if (file.Length > MaxStatementFileSizeBytes)
+        {
+            return BadRequest("Файл выписки слишком большой.");
+        }
+
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (extension is not ".csv" and not ".txt" and not ".tsv")
+        {
+            return BadRequest("Поддерживаются файлы CSV, TSV и TXT.");
+        }
+
+        await using var stream = file.OpenReadStream();
+        using var memory = new MemoryStream();
+        await stream.CopyToAsync(memory, ct);
+        var text = DecodeStatementBytes(memory.ToArray());
+        if (LooksLikeClientBankExchange(text))
+        {
+            var clientBankResult = ParseClientBankExchange(text);
+            return Ok(await ImportBankStatementItemsAsync(clientBankResult.Items, clientBankResult.Result, ct));
+        }
+
+        var rows = ParseDelimitedRows(text);
+        var result = new BankStatementImportResultDto();
+
+        if (rows.Count == 0)
+        {
+            return Ok(result);
+        }
+
+        var header = rows[0];
+        var map = BuildStatementHeaderMap(header);
+        if (map.Date < 0 || (map.Amount < 0 && (map.Income < 0 || map.Expense < 0)))
+        {
+            return BadRequest("Не найдены обязательные колонки выписки: дата и сумма либо приход/расход.");
+        }
+
+        var importItems = new List<BankStatementImportItem>();
+
+        for (var index = 1; index < rows.Count; index++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var row = rows[index];
+            if (row.All(string.IsNullOrWhiteSpace))
+            {
+                continue;
+            }
+
+            result.RowsRead++;
+            var rowNumber = index + 1;
+
+            if (!TryGetCell(row, map.Date, out var dateValue) || !TryParseStatementDate(dateValue, out var date))
+            {
+                result.Skipped++;
+                result.Errors.Add($"Строка {rowNumber}: не удалось прочитать дату.");
+                continue;
+            }
+
+            var direction = MoneyOperationDirection.Income;
+            decimal amount;
+            if (map.Amount >= 0 && TryGetCell(row, map.Amount, out var amountValue) && TryParseStatementAmount(amountValue, out var signedAmount))
+            {
+                direction = signedAmount < 0 ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income;
+                amount = Math.Abs(signedAmount);
+            }
+            else
+            {
+                var income = map.Income >= 0 && TryGetCell(row, map.Income, out var incomeValue) && TryParseStatementAmount(incomeValue, out var parsedIncome)
+                    ? parsedIncome
+                    : 0m;
+                var expense = map.Expense >= 0 && TryGetCell(row, map.Expense, out var expenseValue) && TryParseStatementAmount(expenseValue, out var parsedExpense)
+                    ? parsedExpense
+                    : 0m;
+
+                if (income == 0m && expense == 0m)
+                {
+                    result.Skipped++;
+                    result.Errors.Add($"Строка {rowNumber}: не удалось прочитать сумму.");
+                    continue;
+                }
+
+                direction = income != 0m ? MoneyOperationDirection.Income : MoneyOperationDirection.Expense;
+                amount = Math.Abs(income != 0m ? income : expense);
+            }
+
+            if (amount <= 0m)
+            {
+                result.Skipped++;
+                result.Errors.Add($"Строка {rowNumber}: нулевая сумма пропущена.");
+                continue;
+            }
+
+            var documentNumber = NormalizeStatementText(GetOptionalCell(row, map.DocumentNumber));
+            var counterparty = NormalizeStatementText(GetOptionalCell(row, map.Counterparty));
+            var purpose = NormalizeStatementText(GetOptionalCell(row, map.Purpose));
+            var account = NormalizeStatementText(GetOptionalCell(row, map.Account)) ?? "Расчетный счет";
+
+            importItems.Add(new BankStatementImportItem(date.Date, direction, amount, account, counterparty, purpose, documentNumber));
+        }
+
+        return Ok(await ImportBankStatementItemsAsync(importItems, result, ct));
     }
 
     [HttpPut("{id:int}")]
@@ -434,7 +638,7 @@ public class MoneyOperationsController : ControllerBase
         entity.PaidAccountName = string.IsNullOrWhiteSpace(model.PaidAccountName) ? null : model.PaidAccountName.Trim();
         entity.UpdatedAt = DateTime.UtcNow;
 
-        await _db.SaveChangesAsync();
+        await SyncCashOrderAsync(entity);
         return Ok(entity);
     }
 
@@ -447,8 +651,563 @@ public class MoneyOperationsController : ControllerBase
             return NotFound();
         }
 
+        var linkedOrders = await _db.CashOrders
+            .Where(order => order.MoneyOperationId == entity.Id && order.Status != CashOrderStatus.Cancelled)
+            .ToListAsync();
+        foreach (var order in linkedOrders)
+        {
+            order.Status = CashOrderStatus.Cancelled;
+            order.UpdatedAt = DateTime.UtcNow;
+        }
+
         _db.MoneyOperations.Remove(entity);
         await _db.SaveChangesAsync();
         return NoContent();
     }
+
+    private async Task SyncCashOrderAsync(MoneyOperation operation)
+    {
+        var existing = await _db.CashOrders
+            .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
+            .OrderByDescending(order => order.Id)
+            .FirstOrDefaultAsync();
+
+        if (!ShouldHaveCashOrder(operation))
+        {
+            if (existing is not null)
+            {
+                existing.Status = CashOrderStatus.Cancelled;
+                existing.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+            }
+
+            return;
+        }
+
+        var type = operation.Direction == MoneyOperationDirection.Expense
+            ? CashOrderType.Outgoing
+            : CashOrderType.Incoming;
+
+        if (existing is not null && existing.Type != type)
+        {
+            existing.Status = CashOrderStatus.Cancelled;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing = null;
+        }
+
+        if (existing is null)
+        {
+            _db.CashOrders.Add(new CashOrder
+            {
+                Number = await GenerateCashOrderNumberAsync(type, operation.Date),
+                Type = type,
+                Status = CashOrderStatus.Posted,
+                Date = operation.Date.Date,
+                Amount = operation.Amount,
+                Currency = string.IsNullOrWhiteSpace(operation.Currency) ? "RUB" : operation.Currency,
+                MoneyOperationId = operation.Id,
+                Account = operation.AccountName,
+                PayerName = operation.CounterpartyName,
+                Basis = BuildCashOrderBasis(operation),
+                Comment = operation.CategoryName,
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
+        else
+        {
+            existing.Date = operation.Date.Date;
+            existing.Amount = operation.Amount;
+            existing.Currency = string.IsNullOrWhiteSpace(operation.Currency) ? "RUB" : operation.Currency;
+            existing.Account = operation.AccountName;
+            existing.PayerName = operation.CounterpartyName;
+            existing.Basis = BuildCashOrderBasis(operation);
+            existing.Comment = operation.CategoryName;
+            existing.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
+    }
+
+    private static bool ShouldHaveCashOrder(MoneyOperation operation)
+        => operation.Source == MoneyOperationSource.Cash &&
+           operation.AccountingType == MoneyOperationAccountingType.Fact &&
+           operation.Amount > 0m &&
+           (operation.Direction == MoneyOperationDirection.Income ||
+            operation.Direction == MoneyOperationDirection.Expense);
+
+    private static string ToTitleSearchTerm(string value)
+        => string.IsNullOrWhiteSpace(value)
+            ? value
+            : string.Join(' ', value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Select(part => part.Length == 1
+                    ? part.ToUpperInvariant()
+                    : char.ToUpperInvariant(part[0]) + part[1..]));
+
+    private async Task<string> GenerateCashOrderNumberAsync(CashOrderType type, DateTime date)
+    {
+        var prefix = type == CashOrderType.Incoming ? "ПКО" : "РКО";
+        var yearPrefix = $"{prefix}-{date:yyyy}-";
+        var count = await _db.CashOrders.CountAsync(order => order.Number.StartsWith(yearPrefix));
+        return $"{yearPrefix}{count + 1:0000}";
+    }
+
+    private static string BuildCashOrderBasis(MoneyOperation operation)
+    {
+        var source = operation.Direction == MoneyOperationDirection.Expense
+            ? "Выдача из кассы"
+            : "Прием наличных в кассу";
+        return string.Join(". ", new[] { source, operation.Purpose, operation.PaidInvoiceNumber }.Where(item => !string.IsNullOrWhiteSpace(item)));
+    }
+
+    private static bool IsBankPaymentSource(string? sourceName)
+        => string.IsNullOrWhiteSpace(sourceName) ||
+           (!sourceName.Contains(CashSourceToken) &&
+            !sourceName.Contains(CashSourceTitleToken) &&
+            !sourceName.Contains(CashSourceAlternativeToken) &&
+            !sourceName.Contains(CashSourceAlternativeTitleToken) &&
+            !sourceName.Contains(CardSourceToken) &&
+            !sourceName.Contains(CardSourceTitleToken));
+
+    private async Task<BankStatementImportResultDto> ImportBankStatementItemsAsync(
+        IReadOnlyCollection<BankStatementImportItem> items,
+        BankStatementImportResultDto result,
+        CancellationToken ct)
+    {
+        if (items.Count == 0)
+        {
+            return result;
+        }
+
+        var minDate = items.Min(item => item.Date);
+        var maxDate = items.Max(item => item.Date);
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        var importKeys = new HashSet<string>(StringComparer.Ordinal);
+        var pendingOperations = new List<MoneyOperation>();
+        var existingOperations = await _db.MoneyOperations
+            .AsNoTracking()
+            .Where(operation =>
+                operation.Source == MoneyOperationSource.Bank &&
+                operation.AccountingType == MoneyOperationAccountingType.Fact &&
+                operation.Date >= minDate &&
+                operation.Date <= maxDate)
+            .ToListAsync(ct);
+        var completedPayments = await _db.Payments
+            .AsNoTracking()
+            .Include(payment => payment.PaymentSource)
+            .Where(payment =>
+                payment.Status == PaymentStatus.Completed &&
+                (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) >= minDate &&
+                (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) <= maxDate)
+            .ToListAsync(ct);
+
+        foreach (var item in items)
+        {
+            ct.ThrowIfCancellationRequested();
+            var importKey = BuildBankStatementImportKey(
+                item.Date,
+                item.Direction,
+                item.Amount,
+                item.DocumentNumber,
+                item.CounterpartyName);
+
+            if (!importKeys.Add(importKey))
+            {
+                result.Skipped++;
+                continue;
+            }
+
+            var alreadyExists = existingOperations.Any(operation =>
+                operation.Direction == item.Direction &&
+                operation.Date == item.Date &&
+                operation.Amount == item.Amount &&
+                (operation.PaymentOrderNumber ?? string.Empty) == (item.DocumentNumber ?? string.Empty) &&
+                (operation.CounterpartyName ?? string.Empty) == (item.CounterpartyName ?? string.Empty));
+
+            if (alreadyExists)
+            {
+                result.Skipped++;
+                continue;
+            }
+
+            var paymentType = item.Direction == MoneyOperationDirection.Income
+                ? PaymentType.Income
+                : PaymentType.Expense;
+            var matchingPaymentExists = completedPayments.Any(payment =>
+                payment.Type == paymentType &&
+                (payment.PaidAmount > 0m ? payment.PaidAmount : payment.Amount) == item.Amount &&
+                (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date == item.Date &&
+                string.Equals(payment.PaymentOrderNumber ?? string.Empty, item.DocumentNumber ?? string.Empty, StringComparison.Ordinal) &&
+                string.Equals(payment.CounterpartyName ?? string.Empty, item.CounterpartyName ?? string.Empty, StringComparison.Ordinal) &&
+                IsBankPaymentSource(payment.PaymentSource?.Name));
+
+            if (matchingPaymentExists)
+            {
+                result.Skipped++;
+                continue;
+            }
+
+            var operation = new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = item.Direction,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = item.AccountName,
+                CounterpartyName = item.CounterpartyName,
+                CategoryName = item.Direction == MoneyOperationDirection.Income ? "Поступление по выписке" : "Списание по выписке",
+                Amount = item.Amount,
+                Currency = "RUB",
+                PaymentOrderNumber = item.DocumentNumber,
+                Date = item.Date,
+                RecognitionDate = item.Date,
+                Purpose = item.Purpose,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            _db.MoneyOperations.Add(operation);
+            pendingOperations.Add(operation);
+
+            result.Created++;
+            result.Operations.Add(new BankStatementImportCreatedOperationDto
+            {
+                Date = operation.Date,
+                Direction = operation.Direction,
+                Amount = operation.Amount,
+                CounterpartyName = operation.CounterpartyName,
+                PaymentOrderNumber = operation.PaymentOrderNumber,
+            });
+        }
+
+        if (pendingOperations.Count > 0)
+        {
+            await _db.SaveChangesAsync(ct);
+            for (var index = 0; index < pendingOperations.Count; index++)
+            {
+                result.Operations[index].Id = pendingOperations[index].Id;
+            }
+        }
+
+        await transaction.CommitAsync(ct);
+        return result;
+    }
+
+    private static bool LooksLikeClientBankExchange(string text)
+        => text.Contains("1CClientBankExchange", StringComparison.OrdinalIgnoreCase) ||
+           text.Contains("СекцияДокумент=", StringComparison.OrdinalIgnoreCase);
+
+    private static (List<BankStatementImportItem> Items, BankStatementImportResultDto Result) ParseClientBankExchange(string text)
+    {
+        var items = new List<BankStatementImportItem>();
+        var result = new BankStatementImportResultDto();
+        var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        var statementAccount = string.Empty;
+        Dictionary<string, string>? document = null;
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            if (line.StartsWith("СекцияДокумент=", StringComparison.OrdinalIgnoreCase))
+            {
+                document = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                continue;
+            }
+
+            if (line.Equals("КонецДокумента", StringComparison.OrdinalIgnoreCase))
+            {
+                if (document is not null)
+                {
+                    AddClientBankExchangeDocument(document, statementAccount, items, result);
+                    document = null;
+                }
+
+                continue;
+            }
+
+            var separatorIndex = line.IndexOf('=');
+            if (separatorIndex <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..separatorIndex].Trim();
+            var value = line[(separatorIndex + 1)..].Trim();
+            if (document is not null)
+            {
+                document[key] = value;
+            }
+            else if (key.Equals("РасчСчет", StringComparison.OrdinalIgnoreCase))
+            {
+                statementAccount = NormalizeBankAccount(value);
+            }
+        }
+
+        if (document is not null)
+        {
+            AddClientBankExchangeDocument(document, statementAccount, items, result);
+        }
+
+        return (items, result);
+    }
+
+    private static void AddClientBankExchangeDocument(
+        IReadOnlyDictionary<string, string> document,
+        string statementAccount,
+        ICollection<BankStatementImportItem> items,
+        BankStatementImportResultDto result)
+    {
+        result.RowsRead++;
+        var documentNumber = NormalizeStatementText(GetDictionaryValue(document, "Номер"));
+
+        if (!TryParseStatementDate(GetDictionaryValue(document, "Дата") ?? string.Empty, out var date))
+        {
+            result.Skipped++;
+            result.Errors.Add($"Документ {documentNumber ?? result.RowsRead.ToString(CultureInfo.InvariantCulture)}: не удалось прочитать дату.");
+            return;
+        }
+
+        if (!TryParseStatementAmount(GetDictionaryValue(document, "Сумма") ?? string.Empty, out var amount) || amount == 0m)
+        {
+            result.Skipped++;
+            result.Errors.Add($"Документ {documentNumber ?? result.RowsRead.ToString(CultureInfo.InvariantCulture)}: не удалось прочитать сумму.");
+            return;
+        }
+
+        var payerAccount = NormalizeBankAccount(GetDictionaryValue(document, "ПлательщикСчет"));
+        var recipientAccount = NormalizeBankAccount(GetDictionaryValue(document, "ПолучательСчет"));
+        var isExpense = !string.IsNullOrWhiteSpace(statementAccount) &&
+                        string.Equals(statementAccount, payerAccount, StringComparison.Ordinal);
+        var isIncome = !string.IsNullOrWhiteSpace(statementAccount) &&
+                       string.Equals(statementAccount, recipientAccount, StringComparison.Ordinal);
+        var direction = isExpense && !isIncome ? MoneyOperationDirection.Expense : MoneyOperationDirection.Income;
+        var counterparty = NormalizeStatementText(direction == MoneyOperationDirection.Expense
+            ? GetDictionaryValue(document, "Получатель")
+            : GetDictionaryValue(document, "Плательщик"));
+        var purpose = NormalizeStatementText(GetDictionaryValue(document, "НазначениеПлатежа"));
+        var account = statementAccount;
+        if (string.IsNullOrWhiteSpace(account))
+        {
+            account = direction == MoneyOperationDirection.Expense ? payerAccount : recipientAccount;
+        }
+
+        items.Add(new BankStatementImportItem(
+            date.Date,
+            direction,
+            Math.Abs(amount),
+            string.IsNullOrWhiteSpace(account) ? "Расчетный счет" : account,
+            counterparty,
+            purpose,
+            documentNumber));
+    }
+
+    private static string? GetDictionaryValue(IReadOnlyDictionary<string, string> values, string key)
+        => values.TryGetValue(key, out var value) ? value : null;
+
+    private static string NormalizeBankAccount(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().Replace(" ", string.Empty);
+
+    private static string DecodeStatementBytes(byte[] bytes)
+    {
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+        {
+            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+        }
+
+        var utf8 = new UTF8Encoding(false, true);
+        try
+        {
+            return utf8.GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding(1251).GetString(bytes);
+        }
+    }
+
+    private static List<List<string>> ParseDelimitedRows(string text)
+    {
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        var firstLine = normalized.Split('\n', 2)[0];
+        var delimiter = firstLine.Count(ch => ch == ';') >= firstLine.Count(ch => ch == '\t') ? ';' : '\t';
+        if (firstLine.Count(ch => ch == ',') > firstLine.Count(ch => ch == delimiter))
+        {
+            delimiter = ',';
+        }
+
+        var rows = new List<List<string>>();
+        var row = new List<string>();
+        var cell = new StringBuilder();
+        var inQuotes = false;
+
+        for (var index = 0; index < normalized.Length; index++)
+        {
+            var ch = normalized[index];
+            if (ch == '"')
+            {
+                if (inQuotes && index + 1 < normalized.Length && normalized[index + 1] == '"')
+                {
+                    cell.Append('"');
+                    index++;
+                }
+                else
+                {
+                    inQuotes = !inQuotes;
+                }
+
+                continue;
+            }
+
+            if (!inQuotes && ch == delimiter)
+            {
+                row.Add(cell.ToString().Trim());
+                cell.Clear();
+                continue;
+            }
+
+            if (!inQuotes && ch == '\n')
+            {
+                row.Add(cell.ToString().Trim());
+                cell.Clear();
+                rows.Add(row);
+                row = new List<string>();
+                continue;
+            }
+
+            cell.Append(ch);
+        }
+
+        row.Add(cell.ToString().Trim());
+        if (row.Any(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            rows.Add(row);
+        }
+
+        return rows;
+    }
+
+    private static StatementHeaderMap BuildStatementHeaderMap(IReadOnlyList<string> header)
+    {
+        var map = new StatementHeaderMap();
+        for (var index = 0; index < header.Count; index++)
+        {
+            var name = NormalizeHeaderName(header[index]);
+            if (map.Date < 0 && (name.Contains("дата") || name.Contains("date")))
+            {
+                map.Date = index;
+            }
+            else if (map.DocumentNumber < 0 && (name.Contains("номер") || name.Contains("документ") || name.Contains("поручение")))
+            {
+                map.DocumentNumber = index;
+            }
+            else if (map.Counterparty < 0 && (name.Contains("контрагент") || name.Contains("плательщик") || name.Contains("получатель") || name.Contains("payer")))
+            {
+                map.Counterparty = index;
+            }
+            else if (map.Purpose < 0 && (name.Contains("назначение") || name.Contains("комментар") || name.Contains("purpose")))
+            {
+                map.Purpose = index;
+            }
+            else if (map.Account < 0 && (name.Contains("счет") || name.Contains("счёт") || name.Contains("account")))
+            {
+                map.Account = index;
+            }
+            else if (map.Income < 0 && (name.Contains("приход") || name.Contains("поступ") || name.Contains("кредит") || name.Contains("credit")))
+            {
+                map.Income = index;
+            }
+            else if (map.Expense < 0 && (name.Contains("расход") || name.Contains("спис") || name.Contains("дебет") || name.Contains("debit")))
+            {
+                map.Expense = index;
+            }
+            else if (map.Amount < 0 && (name.Contains("сумма") || name.Contains("amount")))
+            {
+                map.Amount = index;
+            }
+        }
+
+        return map;
+    }
+
+    private static string NormalizeHeaderName(string value)
+        => value.Trim().ToLowerInvariant().Replace(" ", string.Empty).Replace("_", string.Empty);
+
+    private static bool TryGetCell(IReadOnlyList<string> row, int index, out string value)
+    {
+        if (index >= 0 && index < row.Count)
+        {
+            value = row[index].Trim();
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
+        value = string.Empty;
+        return false;
+    }
+
+    private static string? GetOptionalCell(IReadOnlyList<string> row, int index)
+        => TryGetCell(row, index, out var value) ? value : null;
+
+    private static string? NormalizeStatementText(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string BuildBankStatementImportKey(
+        DateTime date,
+        MoneyOperationDirection direction,
+        decimal amount,
+        string? documentNumber,
+        string? counterparty)
+        => string.Join("|", date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), direction, amount.ToString("0.00", CultureInfo.InvariantCulture), documentNumber ?? string.Empty, counterparty ?? string.Empty);
+
+    private static bool TryParseStatementDate(string value, out DateTime date)
+    {
+        var formats = new[] { "dd.MM.yyyy", "d.M.yyyy", "yyyy-MM-dd", "dd/MM/yyyy", "d/M/yyyy" };
+        return DateTime.TryParseExact(value.Trim(), formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out date) ||
+               DateTime.TryParse(value.Trim(), CultureInfo.GetCultureInfo("ru-RU"), DateTimeStyles.None, out date);
+    }
+
+    private static bool TryParseStatementAmount(string value, out decimal amount)
+    {
+        var normalized = value
+            .Trim()
+            .Replace("\u00A0", string.Empty)
+            .Replace(" ", string.Empty)
+            .Replace("₽", string.Empty)
+            .Replace("руб.", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("руб", string.Empty, StringComparison.OrdinalIgnoreCase);
+
+        if (normalized.Contains(',') && normalized.Contains('.'))
+        {
+            normalized = normalized.Replace(".", string.Empty).Replace(',', '.');
+        }
+        else
+        {
+            normalized = normalized.Replace(',', '.');
+        }
+
+        return decimal.TryParse(normalized, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out amount);
+    }
+
+    private sealed class StatementHeaderMap
+    {
+        public int Date { get; set; } = -1;
+        public int Amount { get; set; } = -1;
+        public int Income { get; set; } = -1;
+        public int Expense { get; set; } = -1;
+        public int Counterparty { get; set; } = -1;
+        public int Purpose { get; set; } = -1;
+        public int DocumentNumber { get; set; } = -1;
+        public int Account { get; set; } = -1;
+    }
+
+    private sealed record BankStatementImportItem(
+        DateTime Date,
+        MoneyOperationDirection Direction,
+        decimal Amount,
+        string AccountName,
+        string? CounterpartyName,
+        string? Purpose,
+        string? DocumentNumber);
 }

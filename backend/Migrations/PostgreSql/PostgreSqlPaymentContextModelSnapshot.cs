@@ -452,6 +452,141 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("BaseCurrencies");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.CashOrder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Account")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Basis")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Currency")
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("InvoiceId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("MoneyOperationId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PayerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int?>("PaymentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId")
+                        .HasDatabaseName("IX_CashOrders_ClientId");
+
+                    b.HasIndex("Date")
+                        .HasDatabaseName("IX_CashOrders_Date");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_CashOrder_DeletedAt_Audit");
+
+                    b.HasIndex("InvoiceId")
+                        .HasDatabaseName("IX_CashOrders_InvoiceId");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_CashOrder_IsDeleted");
+
+                    b.HasIndex("MoneyOperationId")
+                        .HasDatabaseName("IX_CashOrders_MoneyOperationId");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasDatabaseName("IX_CashOrders_Number");
+
+                    b.HasIndex("PaymentId")
+                        .HasDatabaseName("IX_CashOrders_PaymentId");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_CashOrders_Status");
+
+                    b.HasIndex("Type")
+                        .HasDatabaseName("IX_CashOrders_Type");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_CashOrder_UpdatedAt_Audit");
+
+                    b.ToTable("CashOrders");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Client", b =>
                 {
                     b.Property<int>("Id")
@@ -3928,6 +4063,37 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("LegalEntity");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.CashOrder", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.Invoice", "Invoice")
+                        .WithMany()
+                        .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.MoneyOperation", "MoneyOperation")
+                        .WithMany("CashOrders")
+                        .HasForeignKey("MoneyOperationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.Payment", "Payment")
+                        .WithMany("CashOrders")
+                        .HasForeignKey("PaymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Client");
+
+                    b.Navigation("Invoice");
+
+                    b.Navigation("MoneyOperation");
+
+                    b.Navigation("Payment");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Client", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientStatusEntity", "ClientStatus")
@@ -4444,9 +4610,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("UserCompanyAccesses");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.MoneyOperation", b =>
+                {
+                    b.Navigation("CashOrders");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
                 {
                     b.Navigation("Acts");
+
+                    b.Navigation("CashOrders");
 
                     b.Navigation("InvoiceClientCases");
 
