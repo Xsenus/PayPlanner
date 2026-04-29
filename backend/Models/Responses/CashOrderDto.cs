@@ -16,8 +16,12 @@ public sealed class CashOrderDto
     public int? InvoiceId { get; init; }
     public string? Account { get; init; }
     public string? PayerName { get; init; }
+    public string? ReceiverName { get; init; }
     public string? Basis { get; init; }
+    public string? Appendix { get; init; }
     public string? Comment { get; init; }
+    public DateTime? CancelledAt { get; init; }
+    public string? CancelledReason { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime? UpdatedAt { get; init; }
 }

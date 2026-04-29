@@ -348,15 +348,21 @@ describe('MoneyOperations integration', () => {
       invoiceId: 33,
       account: 'Основная касса',
       payerName: 'Ахмедова Айтан Рафик Кызы',
+      receiverName: 'Основная касса',
       basis: 'Оплата от клиента. счет №33',
+      appendix: 'Счёт №33',
       comment: null,
+      cancelledAt: null,
+      cancelledReason: null,
       createdAt: '2026-04-29T10:00:00Z',
       updatedAt: null,
     }));
     updateCashOrderMock.mockImplementation(async (_id: number, payload: unknown) => payload);
-    cancelCashOrderMock.mockImplementation(async (_id: number) => ({
+    cancelCashOrderMock.mockImplementation(async (_id: number, reason?: string) => ({
       ...(await getCashOrderMock(_id)),
       status: 'Cancelled',
+      cancelledAt: '2026-04-29T11:00:00Z',
+      cancelledReason: reason ?? null,
     }));
     copyCashOrderMock.mockImplementation(async (_id: number) => ({
       ...(await getCashOrderMock(_id)),
@@ -394,8 +400,12 @@ describe('MoneyOperations integration', () => {
       invoiceId: null,
       account: '33',
       payerName: 'Ахмедова Айтан Рафик Кызы',
+      receiverName: 'Основная касса',
       basis: 'Оплата от клиента. счет №33',
+      appendix: null,
       comment: null,
+      cancelledAt: null,
+      cancelledReason: null,
       createdAt: '2026-04-20T08:00:00Z',
       updatedAt: null,
     }));
@@ -414,8 +424,12 @@ describe('MoneyOperations integration', () => {
       invoiceId: null,
       account: 'Касса',
       payerName: 'Ручной клиент',
+      receiverName: 'Касса',
       basis: 'Прием наличных в кассу',
+      appendix: null,
       comment: null,
+      cancelledAt: null,
+      cancelledReason: null,
       createdAt: '2026-04-20T08:00:00Z',
       updatedAt: null,
     }));
@@ -830,8 +844,12 @@ describe('MoneyOperations integration', () => {
           invoiceId: 33,
           account: 'Основная касса',
           payerName: 'Ахмедова Айтан Рафик Кызы',
+          receiverName: 'Основная касса',
           basis: 'Оплата от клиента. счет №33',
+          appendix: 'Счёт №33',
           comment: null,
+          cancelledAt: null,
+          cancelledReason: null,
           createdAt: '2026-04-29T10:00:00Z',
           updatedAt: null,
         },
@@ -854,12 +872,23 @@ describe('MoneyOperations integration', () => {
 
     await waitFor(() => expect(getCashOrderMock).toHaveBeenCalledWith(9));
     await screen.findByText('Приходный кассовый ордер ПКО-2026-0003');
+    await screen.findByText('Связанный счёт');
+    await waitFor(() => expect(screen.getAllByText('#33').length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByDisplayValue('Основная касса').length).toBeGreaterThan(0));
 
     const amountInput = screen.getByDisplayValue('25000');
     await user.clear(amountInput);
     await user.type(amountInput, '30000');
+    const appendixInput = screen.getByDisplayValue('Счёт №33');
+    await user.clear(appendixInput);
+    await user.type(appendixInput, 'Квитанция к счёту №33');
     await user.click(screen.getByRole('button', { name: 'Сохранить' }));
-    await waitFor(() => expect(updateCashOrderMock).toHaveBeenCalledWith(9, expect.objectContaining({ amount: 30000 })));
+    await waitFor(() =>
+      expect(updateCashOrderMock).toHaveBeenCalledWith(
+        9,
+        expect.objectContaining({ amount: 30000, appendix: 'Квитанция к счёту №33' }),
+      ),
+    );
 
     await user.click(screen.getByRole('button', { name: 'PDF' }));
     await waitFor(() => expect(downloadCashOrderPdfMock).toHaveBeenCalledWith(9));
@@ -868,7 +897,11 @@ describe('MoneyOperations integration', () => {
     await waitFor(() => expect(copyCashOrderMock).toHaveBeenCalledWith(9));
 
     await user.click(screen.getByRole('button', { name: 'Отменить' }));
-    await waitFor(() => expect(cancelCashOrderMock).toHaveBeenCalledWith(10));
+    await user.type(screen.getByPlaceholderText('Причина отмены'), 'Дубликат');
+    await user.click(screen.getByRole('button', { name: 'Подтвердить отмену' }));
+    await waitFor(() => expect(cancelCashOrderMock).toHaveBeenCalledWith(10, 'Дубликат'));
+    await screen.findByText('Документ отменён');
+    await screen.findByText(/Причина: Дубликат/);
   }, 15000);
 
   it('filters the cash orders journal by outgoing orders', async () => {

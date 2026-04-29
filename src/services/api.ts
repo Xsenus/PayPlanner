@@ -2275,8 +2275,11 @@ export class ApiService {
     });
   }
 
-  async cancelCashOrder(id: number) {
-    return this.request<CashOrder>(`/cash-orders/${id}/cancel`, { method: 'POST' });
+  async cancelCashOrder(id: number, reason?: string) {
+    return this.request<CashOrder>(`/cash-orders/${id}/cancel`, {
+      method: 'POST',
+      body: reason ? JSON.stringify({ reason }) : undefined,
+    });
   }
 
   async copyCashOrder(id: number) {

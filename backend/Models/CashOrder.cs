@@ -19,8 +19,12 @@ public class CashOrder
     public Invoice? Invoice { get; set; }
     public string? Account { get; set; }
     public string? PayerName { get; set; }
+    public string? ReceiverName { get; set; }
     public string? Basis { get; set; }
+    public string? Appendix { get; set; }
     public string? Comment { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public string? CancelledReason { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
 }

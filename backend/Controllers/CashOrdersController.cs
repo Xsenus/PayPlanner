@@ -245,6 +245,7 @@ public class CashOrdersController : ControllerBase
             InvoiceId = payment.InvoiceId,
             Account = payment.Account,
             PayerName = payment.CounterpartyName ?? payment.Client?.Name,
+            ReceiverName = payment.Type == PaymentType.Expense ? payment.CounterpartyName ?? payment.Client?.Name : null,
             Basis = BuildBasis(payment),
             CreatedAt = DateTime.UtcNow,
         };
@@ -290,6 +291,7 @@ public class CashOrdersController : ControllerBase
             MoneyOperationId = operation.Id,
             Account = operation.AccountName,
             PayerName = operation.CounterpartyName,
+            ReceiverName = operation.Direction == MoneyOperationDirection.Expense ? operation.CounterpartyName : null,
             Basis = BuildBasis(operation),
             Comment = operation.CategoryName,
             CreatedAt = DateTime.UtcNow,
@@ -315,8 +317,12 @@ public class CashOrdersController : ControllerBase
         model.Currency = string.IsNullOrWhiteSpace(model.Currency) ? "RUB" : model.Currency.Trim();
         model.Account = Normalize(model.Account);
         model.PayerName = Normalize(model.PayerName);
+        model.ReceiverName = Normalize(model.ReceiverName);
         model.Basis = Normalize(model.Basis);
+        model.Appendix = Normalize(model.Appendix);
         model.Comment = Normalize(model.Comment);
+        model.CancelledAt = model.Status == CashOrderStatus.Cancelled ? model.CancelledAt ?? DateTime.UtcNow : null;
+        model.CancelledReason = model.Status == CashOrderStatus.Cancelled ? Normalize(model.CancelledReason) : null;
         model.CreatedAt = DateTime.UtcNow;
 
         _db.CashOrders.Add(model);
@@ -354,7 +360,9 @@ public class CashOrdersController : ControllerBase
         order.InvoiceId = model.InvoiceId;
         order.Account = Normalize(model.Account);
         order.PayerName = Normalize(model.PayerName);
+        order.ReceiverName = Normalize(model.ReceiverName);
         order.Basis = Normalize(model.Basis);
+        order.Appendix = Normalize(model.Appendix);
         order.Comment = Normalize(model.Comment);
         order.UpdatedAt = DateTime.UtcNow;
 
@@ -364,7 +372,7 @@ public class CashOrdersController : ControllerBase
     }
 
     [HttpPost("{id:int}/cancel")]
-    public async Task<IActionResult> Cancel(int id, CancellationToken ct)
+    public async Task<IActionResult> Cancel(int id, [FromBody] CashOrderCancelRequest? request, CancellationToken ct)
     {
         var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
@@ -375,6 +383,8 @@ public class CashOrdersController : ControllerBase
         if (order.Status != CashOrderStatus.Cancelled)
         {
             order.Status = CashOrderStatus.Cancelled;
+            order.CancelledAt = DateTime.UtcNow;
+            order.CancelledReason = Normalize(request?.Reason);
             order.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync(ct);
         }
@@ -405,7 +415,9 @@ public class CashOrdersController : ControllerBase
             InvoiceId = source.InvoiceId,
             Account = source.Account,
             PayerName = source.PayerName,
+            ReceiverName = source.ReceiverName,
             Basis = source.Basis,
+            Appendix = source.Appendix,
             Comment = source.Comment,
             CreatedAt = DateTime.UtcNow,
         };
@@ -573,12 +585,16 @@ public class CashOrdersController : ControllerBase
             query = query.Where(order =>
                 order.Number.Contains(term) ||
                 (order.PayerName ?? string.Empty).Contains(term) ||
+                (order.ReceiverName ?? string.Empty).Contains(term) ||
                 (order.Basis ?? string.Empty).Contains(term) ||
+                (order.Appendix ?? string.Empty).Contains(term) ||
                 (order.Account ?? string.Empty).Contains(term) ||
                 (titleTerm != term &&
                     (order.Number.Contains(titleTerm) ||
                      (order.PayerName ?? string.Empty).Contains(titleTerm) ||
+                     (order.ReceiverName ?? string.Empty).Contains(titleTerm) ||
                      (order.Basis ?? string.Empty).Contains(titleTerm) ||
+                     (order.Appendix ?? string.Empty).Contains(titleTerm) ||
                      (order.Account ?? string.Empty).Contains(titleTerm))));
         }
 
@@ -655,8 +671,12 @@ public class CashOrdersController : ControllerBase
             InvoiceId = order.InvoiceId,
             Account = order.Account,
             PayerName = order.PayerName,
+            ReceiverName = order.ReceiverName,
             Basis = order.Basis,
+            Appendix = order.Appendix,
             Comment = order.Comment,
+            CancelledAt = order.CancelledAt,
+            CancelledReason = order.CancelledReason,
             CreatedAt = order.CreatedAt,
             UpdatedAt = order.UpdatedAt,
         };
@@ -670,9 +690,14 @@ public class CashOrdersController : ControllerBase
         var amount = order.Amount.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
         var amountWords = Html(AmountToWordsRu(order.Amount));
         var payer = System.Net.WebUtility.HtmlEncode(order.PayerName ?? order.Client?.Name ?? "-");
+        var receiver = System.Net.WebUtility.HtmlEncode(order.ReceiverName ?? "-");
         var basis = System.Net.WebUtility.HtmlEncode(order.Basis ?? "-");
+        var appendix = System.Net.WebUtility.HtmlEncode(order.Appendix ?? "-");
         var account = System.Net.WebUtility.HtmlEncode(order.Account ?? "-");
         var comment = System.Net.WebUtility.HtmlEncode(order.Comment ?? "-");
+        var cancelNotice = order.Status == CashOrderStatus.Cancelled
+            ? $"""<div class="cancelled">Документ отменён{(order.CancelledAt.HasValue ? $" {order.CancelledAt:dd.MM.yyyy HH:mm}" : string.Empty)}{(string.IsNullOrWhiteSpace(order.CancelledReason) ? string.Empty : $": {System.Net.WebUtility.HtmlEncode(order.CancelledReason)}")}</div>"""
+            : string.Empty;
         return $$"""
 <!doctype html>
 <html lang="ru">
@@ -697,6 +722,7 @@ public class CashOrdersController : ControllerBase
     .amount-box { display: grid; grid-template-columns: 170px 1fr 180px; gap: 12px; margin-top: 18px; align-items: end; }
     .amount { border: 1px solid #111827; padding: 8px 10px; text-align: right; font-size: 18px; font-weight: 700; }
     .notice { margin-top: 18px; border: 1px solid #cbd5e1; padding: 10px 12px; color: #334155; font-size: 13px; }
+    .cancelled { margin-top: 18px; border: 1px solid #fecdd3; background: #fff1f2; color: #be123c; padding: 10px 12px; font-weight: 700; }
     .receipt { margin-top: 28px; border-top: 2px dashed #cbd5e1; padding-top: 20px; }
     .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin-top: 42px; }
     .signature { border-top: 1px solid #111827; padding-top: 7px; color: #334155; font-size: 13px; text-align: center; }
@@ -714,10 +740,13 @@ public class CashOrdersController : ControllerBase
 
     <h1>{{title}} <span class="number">№ {{System.Net.WebUtility.HtmlEncode(order.Number)}}</span></h1>
 
+    {{cancelNotice}}
     <div class="field"><div class="label">{{personLabel}}</div><div class="line">{{payer}}</div></div>
+    <div class="field"><div class="label">Получатель</div><div class="line">{{receiver}}</div></div>
     <div class="field"><div class="label">Основание</div><div class="line">{{basis}}</div></div>
-    <div class="field"><div class="label">Приложение</div><div class="line">{{comment}}</div></div>
+    <div class="field"><div class="label">Приложение</div><div class="line">{{appendix}}</div></div>
     <div class="field"><div class="label">Счет / касса</div><div class="line">{{account}}</div></div>
+    <div class="field"><div class="label">Комментарий</div><div class="line">{{comment}}</div></div>
     <div class="amount-box">
       <div class="label">Сумма</div>
       <div class="line">{{amountWords}}</div>
@@ -733,6 +762,7 @@ public class CashOrdersController : ControllerBase
     <section class="receipt">
       <h2>Квитанция к {{title.ToLowerInvariant()}} № {{System.Net.WebUtility.HtmlEncode(order.Number)}}</h2>
       <div class="field"><div class="label">{{personLabel}}</div><div class="line">{{payer}}</div></div>
+      <div class="field"><div class="label">Получатель</div><div class="line">{{receiver}}</div></div>
       <div class="field"><div class="label">Основание</div><div class="line">{{basis}}</div></div>
       <div class="amount-box">
         <div class="label">Сумма</div>
@@ -1050,4 +1080,9 @@ public class CashOrdersController : ControllerBase
 
     private static string Html(string value)
         => System.Net.WebUtility.HtmlEncode(value);
+}
+
+public sealed class CashOrderCancelRequest
+{
+    public string? Reason { get; init; }
 }

@@ -915,7 +915,9 @@ public class MoneyOperationsControllerTests
             Amount = 25_000m,
             Currency = "RUB",
             PayerName = "Ахмедова Айтан Рафик Кызы",
+            ReceiverName = "Касса",
             Basis = "Оплата по счёту №33",
+            Appendix = "Квитанция",
             Account = "Основная касса",
             CreatedAt = DateTime.UtcNow,
         });
@@ -930,8 +932,10 @@ public class MoneyOperationsControllerTests
             Amount = 30_000m,
             Currency = "RUB",
             PayerName = "Ахмедова Айтан Рафик Кызы",
+            ReceiverName = "Основная касса",
             Basis = "Оплата и доплата",
             Account = "Касса",
+            Appendix = "Скан заявления",
             Comment = "Проверено",
         }, CancellationToken.None);
 
@@ -939,6 +943,8 @@ public class MoneyOperationsControllerTests
         var updated = Assert.IsType<CashOrderDto>(updateOk.Value);
         Assert.Equal(30_000m, updated.Amount);
         Assert.Equal(new DateTime(2026, 4, 30), updated.Date);
+        Assert.Equal("Основная касса", updated.ReceiverName);
+        Assert.Equal("Скан заявления", updated.Appendix);
         Assert.Equal("Проверено", updated.Comment);
 
         var copyAction = await controller.Copy(source.Id, CancellationToken.None);
@@ -947,13 +953,19 @@ public class MoneyOperationsControllerTests
         Assert.NotEqual(source.Id, copied.Id);
         Assert.StartsWith("ПКО-", copied.Number);
         Assert.Equal(30_000m, copied.Amount);
+        Assert.Equal("Основная касса", copied.ReceiverName);
+        Assert.Equal("Скан заявления", copied.Appendix);
         Assert.Null(copied.PaymentId);
         Assert.Null(copied.MoneyOperationId);
+        Assert.Null(copied.CancelledAt);
+        Assert.Null(copied.CancelledReason);
 
-        var cancelAction = await controller.Cancel(source.Id, CancellationToken.None);
+        var cancelAction = await controller.Cancel(source.Id, new CashOrderCancelRequest { Reason = "Ошибочный документ" }, CancellationToken.None);
         var cancelOk = Assert.IsType<OkObjectResult>(cancelAction);
         var cancelled = Assert.IsType<CashOrderDto>(cancelOk.Value);
         Assert.Equal(CashOrderStatus.Cancelled, cancelled.Status);
+        Assert.NotNull(cancelled.CancelledAt);
+        Assert.Equal("Ошибочный документ", cancelled.CancelledReason);
 
         var cancelledUpdateAction = await controller.Update(source.Id, new CashOrder
         {
@@ -1007,9 +1019,11 @@ public class MoneyOperationsControllerTests
             Amount = 25_001.25m,
             Currency = "RUB",
             PayerName = "Ахмедова Айтан Рафик Кызы",
+            ReceiverName = "Основная касса",
             Basis = "Оплата по счёту №33",
             Account = "Основная касса",
-            Comment = "Без приложения",
+            Appendix = "Договор и счёт",
+            Comment = "Без замечаний",
             CreatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
@@ -1026,6 +1040,9 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Двадцать пять тысяч один рубль 25 копеек", content.Content);
         Assert.Contains("Принято от", content.Content);
         Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
+        Assert.Contains("Основная касса", content.Content);
+        Assert.Contains("Договор и счёт", content.Content);
+        Assert.Contains("Без замечаний", content.Content);
     }
 
     [Fact]

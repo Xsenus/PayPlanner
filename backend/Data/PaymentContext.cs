@@ -739,8 +739,11 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Currency).HasMaxLength(12);
             entity.Property(e => e.Account).HasMaxLength(120);
             entity.Property(e => e.PayerName).HasMaxLength(200);
+            entity.Property(e => e.ReceiverName).HasMaxLength(200);
             entity.Property(e => e.Basis).HasMaxLength(1000);
+            entity.Property(e => e.Appendix).HasMaxLength(1000);
             entity.Property(e => e.Comment).HasMaxLength(1000);
+            entity.Property(e => e.CancelledReason).HasMaxLength(500);
             entity.Property(e => e.Date).HasColumnType("date");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 

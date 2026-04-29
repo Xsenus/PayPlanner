@@ -533,8 +533,12 @@ export interface CashOrder {
   invoiceId?: number | null;
   account?: string | null;
   payerName?: string | null;
+  receiverName?: string | null;
   basis?: string | null;
+  appendix?: string | null;
   comment?: string | null;
+  cancelledAt?: string | null;
+  cancelledReason?: string | null;
   createdAt: string;
   updatedAt?: string | null;
 }

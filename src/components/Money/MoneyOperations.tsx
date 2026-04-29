@@ -208,8 +208,11 @@ function mapCashOrderToForm(order: CashOrder): CashOrder {
     currency: order.currency || 'RUB',
     account: order.account || '',
     payerName: order.payerName || '',
+    receiverName: order.receiverName || '',
     basis: order.basis || '',
+    appendix: order.appendix || '',
     comment: order.comment || '',
+    cancelledReason: order.cancelledReason || '',
   };
 }
 
@@ -229,18 +232,22 @@ function CashOrderModal({
   isSaving: boolean;
   onClose: () => void;
   onSave: (payload: CashOrder) => Promise<void>;
-  onCancelOrder: (order: CashOrder) => Promise<void>;
+  onCancelOrder: (order: CashOrder, reason?: string) => Promise<void>;
   onCopy: (order: CashOrder) => Promise<void>;
   onDownloadPdf: (id: number) => Promise<void>;
   onPrint: (id: number) => void;
 }) {
   const [form, setForm] = useState<CashOrder | null>(order ? mapCashOrderToForm(order) : null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
 
   useEffect(() => {
     if (open && order) {
       setForm(mapCashOrderToForm(order));
       setError(null);
+      setConfirmingCancel(false);
+      setCancelReason(order.cancelledReason ?? '');
     }
   }, [open, order]);
 
@@ -248,6 +255,10 @@ function CashOrderModal({
 
   const isCancelled = form.status === 'Cancelled';
   const title = `${form.type === 'Incoming' ? 'Приходный кассовый ордер' : 'Расходный кассовый ордер'} ${form.number}`;
+  const clientLabel = form.clientName ?? '—';
+  const paymentLabel = form.paymentId ? `#${form.paymentId}` : '—';
+  const invoiceLabel = form.invoiceId ? `#${form.invoiceId}` : '—';
+  const operationLabel = form.moneyOperationId ? `#${form.moneyOperationId}` : '—';
 
   const setField = <K extends keyof CashOrder>(key: K, value: CashOrder[K]) => {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -352,11 +363,20 @@ function CashOrderModal({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
-              Плательщик / получатель
+              Плательщик
               <input
                 value={form.payerName ?? ''}
                 disabled={isCancelled}
                 onChange={(event) => setField('payerName', event.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Получатель
+              <input
+                value={form.receiverName ?? ''}
+                disabled={isCancelled}
+                onChange={(event) => setField('receiverName', event.target.value)}
                 className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
               />
             </label>
@@ -374,6 +394,16 @@ function CashOrderModal({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Приложение
+              <textarea
+                value={form.appendix ?? ''}
+                disabled={isCancelled}
+                onChange={(event) => setField('appendix', event.target.value)}
+                rows={4}
+                className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
               Комментарий
               <textarea
                 value={form.comment ?? ''}
@@ -385,24 +415,54 @@ function CashOrderModal({
             </label>
           </div>
 
-          <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 md:grid-cols-3">
+          {isCancelled && (
+            <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+              <div className="font-semibold">Документ отменён</div>
+              <div className="mt-1">
+                {form.cancelledAt ? `Дата отмены: ${formatDate(form.cancelledAt)}.` : null}
+                {form.cancelledReason ? ` Причина: ${form.cancelledReason}` : ' Причина не указана.'}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 md:grid-cols-4">
             <div>
               <div className="text-xs uppercase text-slate-400">Клиент</div>
-              <div className="mt-1 font-medium text-slate-800">{form.clientName ?? '—'}</div>
+              <div className="mt-1 font-medium text-slate-800">{clientLabel}</div>
             </div>
             <div>
               <div className="text-xs uppercase text-slate-400">Связанный платёж</div>
-              <div className="mt-1 font-medium text-slate-800">{form.paymentId ? `#${form.paymentId}` : '—'}</div>
+              <div className="mt-1 font-medium text-slate-800">{paymentLabel}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-slate-400">Связанный счёт</div>
+              <div className="mt-1 font-medium text-slate-800">{invoiceLabel}</div>
             </div>
             <div>
               <div className="text-xs uppercase text-slate-400">Операция денег</div>
-              <div className="mt-1 font-medium text-slate-800">{form.moneyOperationId ? `#${form.moneyOperationId}` : '—'}</div>
+              <div className="mt-1 font-medium text-slate-800">{operationLabel}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-slate-400">Создан</div>
+              <div className="mt-1 font-medium text-slate-800">{formatDate(form.createdAt)}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-slate-400">Обновлён</div>
+              <div className="mt-1 font-medium text-slate-800">{form.updatedAt ? formatDate(form.updatedAt) : '—'}</div>
             </div>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
           <div className="flex flex-wrap items-center gap-2">
+            {confirmingCancel && (
+              <input
+                value={cancelReason}
+                onChange={(event) => setCancelReason(event.target.value)}
+                placeholder="Причина отмены"
+                className="min-w-64 rounded-lg border border-rose-200 px-3 py-2 text-sm text-slate-700"
+              />
+            )}
             <button
               type="button"
               onClick={() => onPrint(form.id)}
@@ -428,12 +488,27 @@ function CashOrderModal({
             </button>
             <button
               type="button"
-              onClick={() => void onCancelOrder(form)}
+              onClick={() => {
+                if (!confirmingCancel) {
+                  setConfirmingCancel(true);
+                  return;
+                }
+
+                void onCancelOrder(form, cancelReason.trim() || undefined);
+              }}
               disabled={isCancelled || isSaving}
               className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50">
               <Ban className="h-4 w-4" />
-              Отменить
+              {confirmingCancel ? 'Подтвердить отмену' : 'Отменить'}
             </button>
+            {confirmingCancel && (
+              <button
+                type="button"
+                onClick={() => setConfirmingCancel(false)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                Назад
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -1311,10 +1386,10 @@ export function MoneyOperations({ source }: { source: MoneyTab }) {
     }
   };
 
-  const handleCancelCashOrder = async (order: CashOrder) => {
+  const handleCancelCashOrder = async (order: CashOrder, reason?: string) => {
     setCashOrderSaving(true);
     try {
-      const cancelled = await apiService.cancelCashOrder(order.id);
+      const cancelled = await apiService.cancelCashOrder(order.id, reason);
       setSelectedCashOrder(cancelled);
       setCashOrdersRefreshKey((value) => value + 1);
       await reload();
