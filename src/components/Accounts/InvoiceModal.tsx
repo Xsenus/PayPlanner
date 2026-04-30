@@ -14,6 +14,7 @@ import type {
   InvoiceInput,
   InstallmentPlanInput,
   InvoiceLineItem,
+  MoneyOperation,
   Payment,
   PaymentKind,
   PaymentStatus,
@@ -396,6 +397,45 @@ function formatDate(value?: string | null): string {
   return `${d}.${m}.${y}`;
 }
 
+function moneyOperationSourceLabel(source?: MoneyOperation['source'] | null): string {
+  switch (source) {
+    case 'Cash':
+      return 'Касса';
+    case 'Card':
+      return 'Карты';
+    case 'EMoney':
+      return 'E-money';
+    case 'Bank':
+    default:
+      return 'Банк';
+  }
+}
+
+function moneyOperationDirectionLabel(direction?: MoneyOperation['direction'] | null): string {
+  switch (direction) {
+    case 'Expense':
+      return 'Расход';
+    case 'Transfer':
+      return 'Перевод';
+    case 'Income':
+    default:
+      return 'Приход';
+  }
+}
+
+function moneyOperationMatchStatusLabel(status?: MoneyOperation['matchStatus']): string | null {
+  switch (status) {
+    case 'Matched':
+      return 'Сверено';
+    case 'ClarificationRequired':
+      return 'Уточнить';
+    case 'Ignored':
+      return 'Не сверять';
+    default:
+      return null;
+  }
+}
+
 function resolveRelatedPaymentDate(payment: Payment): string {
   return payment.paidDate ?? payment.lastPaymentDate ?? payment.plannedDate ?? payment.date ?? '';
 }
@@ -759,6 +799,9 @@ export function InvoiceModal({
     [relatedPayments],
   );
   const [displayPayments, setDisplayPayments] = useState<Payment[]>(visibleRelatedPayments);
+  const [linkedMoneyOperations, setLinkedMoneyOperations] = useState<MoneyOperation[]>([]);
+  const [linkedMoneyOperationsLoading, setLinkedMoneyOperationsLoading] = useState(false);
+  const [linkedMoneyOperationsError, setLinkedMoneyOperationsError] = useState<string | null>(null);
   const [installmentPlan, setInstallmentPlan] = useState<InstallmentPlanInput | null>(() => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(visibleRelatedPayments)));
   const [installmentModalOpen, setInstallmentModalOpen] = useState(false);
   const [installmentPlanTouched, setInstallmentPlanTouched] = useState(false);
@@ -1438,6 +1481,41 @@ export function InvoiceModal({
   useEffect(() => {
     setDisplayPayments(visibleRelatedPayments);
   }, [visibleRelatedPayments]);
+
+  useEffect(() => {
+    const linkedInvoiceId = invoice?.invoiceEntityId ?? invoice?.id ?? null;
+    if (!open || mode !== 'edit' || !linkedInvoiceId) {
+      setLinkedMoneyOperations([]);
+      setLinkedMoneyOperationsError(null);
+      setLinkedMoneyOperationsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLinkedMoneyOperationsLoading(true);
+    setLinkedMoneyOperationsError(null);
+
+    apiService
+      .getMoneyOperationsPaged({ linkedInvoiceId, page: 1, pageSize: 20 })
+      .then((response) => {
+        if (cancelled) return;
+        setLinkedMoneyOperations(response.items ?? []);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setLinkedMoneyOperations([]);
+        setLinkedMoneyOperationsError(extractDisplayErrorMessage(error, 'Не удалось загрузить движения денег по счёту.'));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLinkedMoneyOperationsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [invoice?.id, invoice?.invoiceEntityId, mode, open]);
 
   useEffect(() => {
     if (form.type !== 'Income' && installmentPlan) {
@@ -3781,6 +3859,91 @@ export function InvoiceModal({
                             )}
                           </div>
                         )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                <header className="mb-3 flex flex-col gap-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Движения денег
+                  </span>
+                  <p className="text-sm text-slate-500">
+                    Банк, касса, карты и e-money, связанные с этим счётом.
+                  </p>
+                </header>
+
+                {mode !== 'edit' || !(invoice?.invoiceEntityId ?? invoice?.id) ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                    Сначала сохраните счёт, после этого здесь появятся связанные движения денег.
+                  </div>
+                ) : linkedMoneyOperationsLoading ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {t('loading') ?? 'Загрузка...'}
+                  </div>
+                ) : linkedMoneyOperationsError ? (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-5 text-sm text-rose-700">
+                    {linkedMoneyOperationsError}
+                  </div>
+                ) : linkedMoneyOperations.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                    Связанные движения денег пока не найдены.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {linkedMoneyOperations.map((operation) => {
+                      const amount = formatCurrencySmart(operation.amount ?? 0).full;
+                      const statusLabel = moneyOperationMatchStatusLabel(operation.matchStatus);
+                      const sourceLabel = moneyOperationSourceLabel(operation.source);
+                      const directionLabel = moneyOperationDirectionLabel(operation.direction);
+                      const purpose = operation.purpose?.trim()
+                        || operation.counterpartyName?.trim()
+                        || operation.paidInvoiceNumber?.trim()
+                        || 'Без назначения';
+
+                      return (
+                        <div
+                          key={`${operation.isReadonly ? 'payment' : 'operation'}-${operation.id}`}
+                          className="rounded-xl border border-slate-200 px-4 py-3"
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-semibold text-slate-900">{amount}</span>
+                                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                  operation.direction === 'Expense'
+                                    ? 'bg-rose-50 text-rose-700'
+                                    : operation.direction === 'Transfer'
+                                      ? 'bg-violet-50 text-violet-700'
+                                      : 'bg-emerald-50 text-emerald-700'
+                                }`}>
+                                  {directionLabel}
+                                </span>
+                                <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                                  {sourceLabel}
+                                </span>
+                                {statusLabel ? (
+                                  <span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                                    {statusLabel}
+                                  </span>
+                                ) : null}
+                                {operation.isReadonly ? (
+                                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                                    Платёж
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 line-clamp-2 text-sm text-slate-600">{purpose}</div>
+                            </div>
+                            <div className="shrink-0 text-left text-xs text-slate-500 sm:text-right">
+                              <div>{formatDate(operation.date) || 'Без даты'}</div>
+                              {operation.accountName?.trim() ? <div>{operation.accountName.trim()}</div> : null}
+                            </div>
+                          </div>
                         </div>
                       );
                     })}

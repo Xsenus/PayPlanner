@@ -2135,6 +2135,7 @@ export class ApiService {
     direction?: MoneyOperationDirection;
     accountingType?: MoneyOperationAccountingType;
     accountName?: string;
+    linkedInvoiceId?: number;
     search?: string;
   }) {
     const q = buildQuery(params ?? {});
@@ -2148,6 +2149,7 @@ export class ApiService {
     direction?: MoneyOperationDirection;
     accountingType?: MoneyOperationAccountingType;
     accountName?: string;
+    linkedInvoiceId?: number;
     search?: string;
     page?: number;
     pageSize?: number;
@@ -2174,6 +2176,10 @@ export class ApiService {
     return this.request<MoneyOperation>(`/money-operations/${id}`);
   }
 
+  async getMoneyOperationInvoiceCandidates(id: number) {
+    return this.request<MoneyOperationInvoiceCandidate[]>(`/money-operations/${id}/invoice-candidates`);
+  }
+
   async createMoneyOperation(payload: MoneyOperation) {
     return this.request<MoneyOperation>('/money-operations', {
       method: 'POST',
@@ -2188,6 +2194,17 @@ export class ApiService {
     });
   }
 
+  async ignoreMoneyOperation(id: number) {
+    return this.request<MoneyOperation>(`/money-operations/${id}/ignore`, { method: 'POST' });
+  }
+
+  async linkMoneyOperationInvoice(id: number, payload: { invoiceId: number; comment?: string | null }) {
+    return this.request<MoneyOperation>(`/money-operations/${id}/link-invoice`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async deleteMoneyOperation(id: number) {
     return this.request<void>(`/money-operations/${id}`, { method: 'DELETE' });
   }
@@ -2198,6 +2215,21 @@ export class ApiService {
     return this.request<BankStatementImportResult>('/money-operations/bank-statement/import', {
       method: 'POST',
       body: payload,
+    });
+  }
+
+  async getBankStatementImports(params?: { page?: number; pageSize?: number }) {
+    const q = buildQuery(params ?? {});
+    return this.request<PagedResult<BankStatementImportBatch>>(`/money-operations/bank-statement/imports${q}`);
+  }
+
+  async getBankStatementImport(id: number) {
+    return this.request<BankStatementImportBatchDetail>(`/money-operations/bank-statement/imports/${id}`);
+  }
+
+  async rollbackBankStatementImport(id: number) {
+    return this.request<BankStatementImportRollbackResult>(`/money-operations/bank-statement/imports/${id}/rollback`, {
+      method: 'POST',
     });
   }
 
@@ -2424,11 +2456,15 @@ import type {
   CashBookSummary,
   CashOrder,
   CashOrderRegister,
+  BankStatementImportBatch,
+  BankStatementImportBatchDetail,
+  BankStatementImportRollbackResult,
   MoneyOperation,
   MoneyOperationAccountingType,
   MoneyOperationDirection,
   MoneyOperationSource,
   MoneyOperationAccountSummary,
+  MoneyOperationInvoiceCandidate,
   MoneyOperationsSummary,
   PaymentsListSummary,
   ClientBalanceSummary,

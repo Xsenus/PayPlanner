@@ -18,12 +18,16 @@ const {
   getCashOrderRegisterMock,
   getCashOrderRegisterPrintHtmlMock,
   getCashOrderPrintHtmlMock,
+  getBankStatementImportMock,
+  getBankStatementImportsMock,
   getCashOrderMock,
   getMoneyOperationAccountsMock,
   getMoneyOperationAccountSummariesMock,
+  getMoneyOperationInvoiceCandidatesMock,
   getMoneyOperationMock,
   getMoneyOperationsPagedMock,
   importBankStatementMock,
+  rollbackBankStatementImportMock,
   toastErrorMock,
   toastSuccessMock,
   updateCashOrderMock,
@@ -41,12 +45,16 @@ const {
   getCashOrderRegisterMock: vi.fn(),
   getCashOrderRegisterPrintHtmlMock: vi.fn(),
   getCashOrderPrintHtmlMock: vi.fn(),
+  getBankStatementImportMock: vi.fn(),
+  getBankStatementImportsMock: vi.fn(),
   getCashOrderMock: vi.fn(),
   getMoneyOperationAccountsMock: vi.fn(),
   getMoneyOperationAccountSummariesMock: vi.fn(),
+  getMoneyOperationInvoiceCandidatesMock: vi.fn(),
   getMoneyOperationMock: vi.fn(),
   getMoneyOperationsPagedMock: vi.fn(),
   importBankStatementMock: vi.fn(),
+  rollbackBankStatementImportMock: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
   updateCashOrderMock: vi.fn(),
@@ -102,12 +110,16 @@ vi.mock('../../services/api', () => ({
     getCashOrderRegister: getCashOrderRegisterMock,
     getCashOrderRegisterPrintHtml: getCashOrderRegisterPrintHtmlMock,
     getCashOrderPrintHtml: getCashOrderPrintHtmlMock,
+    getBankStatementImport: getBankStatementImportMock,
+    getBankStatementImports: getBankStatementImportsMock,
     getCashOrder: getCashOrderMock,
     getMoneyOperationAccounts: getMoneyOperationAccountsMock,
     getMoneyOperationAccountSummaries: getMoneyOperationAccountSummariesMock,
+    getMoneyOperationInvoiceCandidates: getMoneyOperationInvoiceCandidatesMock,
     getMoneyOperation: getMoneyOperationMock,
     getMoneyOperationsPaged: getMoneyOperationsPagedMock,
     importBankStatement: importBankStatementMock,
+    rollbackBankStatementImport: rollbackBankStatementImportMock,
     updateCashOrder: updateCashOrderMock,
     updateMoneyOperation: updateMoneyOperationMock,
   },
@@ -182,6 +194,12 @@ function createOperation(overrides: Partial<MoneyOperation> = {}): MoneyOperatio
     salesPointName: overrides.salesPointName ?? 'Офис',
     paymentPriority: overrides.paymentPriority ?? null,
     paidAccountName: overrides.paidAccountName ?? 'Счёт 51',
+    linkedInvoiceId: overrides.linkedInvoiceId ?? null,
+    linkedInvoiceNumber: overrides.linkedInvoiceNumber ?? null,
+    linkedInvoiceDate: overrides.linkedInvoiceDate ?? null,
+    matchStatus: overrides.matchStatus ?? 'None',
+    matchedAt: overrides.matchedAt ?? null,
+    matchComment: overrides.matchComment ?? null,
     createdAt: overrides.createdAt ?? '2026-04-20T08:00:00Z',
     updatedAt: overrides.updatedAt ?? null,
     isReadonly: overrides.isReadonly ?? false,
@@ -214,11 +232,15 @@ describe('MoneyOperations integration', () => {
     getCashOrderMock.mockReset();
     getCashOrderRegisterMock.mockReset();
     getCashOrderRegisterPrintHtmlMock.mockReset();
+    getBankStatementImportMock.mockReset();
+    getBankStatementImportsMock.mockReset();
     getMoneyOperationAccountsMock.mockReset();
     getMoneyOperationAccountSummariesMock.mockReset();
+    getMoneyOperationInvoiceCandidatesMock.mockReset();
     getMoneyOperationMock.mockReset();
     getMoneyOperationsPagedMock.mockReset();
     importBankStatementMock.mockReset();
+    rollbackBankStatementImportMock.mockReset();
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
     updateCashOrderMock.mockReset();
@@ -274,6 +296,7 @@ describe('MoneyOperations integration', () => {
         };
       });
     });
+    getMoneyOperationInvoiceCandidatesMock.mockResolvedValue([]);
 
     getMoneyOperationsPagedMock.mockImplementation(
       async (params?: {
@@ -333,6 +356,52 @@ describe('MoneyOperations integration', () => {
     });
     getCashBookPrintHtmlMock.mockResolvedValue('<html><body>Кассовая книга</body></html>');
     getCashOrderRegisterPrintHtmlMock.mockResolvedValue('<html><body>Журнал регистрации</body></html>');
+    getBankStatementImportsMock.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 5,
+    });
+    getBankStatementImportMock.mockImplementation(async (id: number) => ({
+      id,
+      fileName: 'statement.csv',
+      status: 'Applied',
+      rowsRead: 1,
+      createdRows: 1,
+      skippedRows: 0,
+      errorRows: 0,
+      rollbackRows: 0,
+      fileHash: 'hash',
+      fileSize: 128,
+      errorSummary: null,
+      createdAt: '2026-04-29T10:00:00Z',
+      rolledBackAt: null,
+      rows: [
+        {
+          id: 1,
+          rowNumber: 2,
+          status: 'Created',
+          message: null,
+          moneyOperationId: 44,
+          date: '2026-04-29',
+          direction: 'Income',
+          amount: 25000,
+          accountName: 'Основной счет',
+          counterpartyName: 'Ахмедова Айтан Рафик Кызы',
+          purpose: 'Оплата по счету №33',
+          paymentOrderNumber: '101',
+          createdAt: '2026-04-29T10:00:00Z',
+          rolledBackAt: null,
+        },
+      ],
+    }));
+    rollbackBankStatementImportMock.mockResolvedValue({
+      batchId: 1,
+      status: 'RolledBack',
+      deletedOperations: 1,
+      skippedRows: 0,
+      messages: [],
+    });
     getCashOrderMock.mockImplementation(async (id: number) => ({
       id,
       number: 'ПКО-2026-0003',
@@ -374,6 +443,7 @@ describe('MoneyOperations integration', () => {
     getMoneyOperationMock.mockImplementation(async (id: number) => operations.find((item) => item.id === id));
 
     importBankStatementMock.mockResolvedValue({
+      batchId: null,
       rowsRead: 0,
       created: 0,
       skipped: 0,
@@ -435,7 +505,13 @@ describe('MoneyOperations integration', () => {
     }));
 
     updateMoneyOperationMock.mockImplementation(async (id: number, payload: MoneyOperation) => {
-      const updated = { ...payload, id, updatedAt: '2026-04-21T09:00:00Z' };
+      const updated = {
+        ...payload,
+        id,
+        linkedInvoiceNumber: payload.linkedInvoiceId ? String(payload.linkedInvoiceId) : null,
+        matchStatus: payload.linkedInvoiceId ? 'Matched' : payload.matchStatus,
+        updatedAt: '2026-04-21T09:00:00Z',
+      } as MoneyOperation;
       operations = operations.map((item) => (item.id === id ? updated : item));
       return updated;
     });
@@ -554,6 +630,58 @@ describe('MoneyOperations integration', () => {
     expect(document.body.textContent).toContain('3 000,00');
     expect(document.body.textContent).toContain('5 000,00');
     expect(document.body.textContent).toContain('23 000,00 ₽');
+  });
+
+  it('shows a paged cashflow journal on the total money tab', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({
+        id: 1,
+        source: 'Bank',
+        direction: 'Income',
+        amount: 25000,
+        accountName: 'Основной банк',
+        counterpartyName: 'Клиент по банку',
+        purpose: 'Оплата счета 33',
+      }),
+      createOperation({
+        id: 2,
+        source: 'Cash',
+        direction: 'Expense',
+        amount: 5000,
+        accountName: 'Касса',
+        counterpartyName: 'Поставщик наличными',
+        purpose: 'Расход из кассы',
+      }),
+    ];
+
+    render(<MoneyOperations source="Total" />);
+
+    await screen.findByText('Общий баланс');
+    await user.click(screen.getByRole('button', { name: 'ОДДС' }));
+
+    expect(await screen.findByText('Журнал движений')).toBeTruthy();
+    expect(screen.getByText('Клиент по банку')).toBeTruthy();
+    expect(screen.getByText('Поставщик наличными')).toBeTruthy();
+    expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ source: undefined, page: 1, pageSize: 25 }),
+    );
+
+    await user.selectOptions(screen.getAllByRole('combobox')[0], 'Cash');
+
+    await waitFor(() =>
+      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ source: 'Cash' }),
+      ),
+    );
+
+    await user.selectOptions(screen.getAllByRole('combobox')[1], 'Income');
+
+    await waitFor(() =>
+      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ source: 'Cash', direction: 'Income' }),
+      ),
+    );
   });
 
   it('renders the e-money journal with wallet labels', async () => {
@@ -688,6 +816,206 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Обновлённое назначение');
   }, 15000);
 
+  it('links a bank operation to an invoice from the edit form', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({
+        id: 7,
+        source: 'Bank',
+        direction: 'Income',
+        counterpartyName: 'Клиент по выписке',
+        matchStatus: 'ClarificationRequired',
+        linkedInvoiceId: null,
+        linkedInvoiceNumber: null,
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Клиент по выписке');
+
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await user.clear(screen.getByLabelText('ID счёта'));
+    await user.type(screen.getByLabelText('ID счёта'), '33');
+    await user.type(screen.getByLabelText('Комментарий сверки'), 'Оплата по выписке');
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(updateMoneyOperationMock).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({
+        linkedInvoiceId: 33,
+        matchStatus: 'Matched',
+        matchComment: 'Оплата по выписке',
+      }),
+    );
+  }, 15000);
+
+  it('selects a suggested invoice candidate for bank operation matching', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({
+        id: 8,
+        source: 'Bank',
+        direction: 'Income',
+        amount: 25000,
+        counterpartyName: 'Ахмедова Айтан Рафик Кызы',
+        purpose: 'Оплата по счету №33',
+        matchStatus: 'ClarificationRequired',
+        linkedInvoiceId: null,
+        linkedInvoiceNumber: null,
+      }),
+    ];
+    getMoneyOperationInvoiceCandidatesMock.mockResolvedValueOnce([
+      {
+        invoiceId: 33,
+        paymentId: 330,
+        invoiceNumber: '33',
+        invoiceDate: '2026-04-20T00:00:00',
+        amount: 25000,
+        paidAmount: 0,
+        outstandingAmount: 25000,
+        status: 'Pending',
+        clientId: 74,
+        clientName: 'Ахмедова Айтан Рафик Кызы',
+        counterpartyName: 'Ахмедова Айтан Рафик Кызы',
+        matchReason: 'номер счёта найден в назначении',
+        score: 180,
+      },
+    ]);
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Ахмедова Айтан Рафик Кызы');
+
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await screen.findByText('Подходящие счета');
+    await screen.findByText('Счёт 33 от 20.04.2026');
+    await user.click(screen.getByRole('button', { name: /Счёт 33/ }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(updateMoneyOperationMock).toHaveBeenCalledWith(
+      8,
+      expect.objectContaining({
+        linkedInvoiceId: 33,
+        paidInvoiceNumber: '33',
+        matchStatus: 'Matched',
+      }),
+    );
+  }, 15000);
+
+  it('allows linking an e-money income operation to an invoice', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({
+        id: 18,
+        source: 'EMoney',
+        direction: 'Income',
+        amount: 7500,
+        counterpartyName: 'Ахмедова Айтан Рафик Кызы',
+        purpose: 'ЮMoney, оплата по счету №44',
+        matchStatus: 'ClarificationRequired',
+        linkedInvoiceId: null,
+        linkedInvoiceNumber: null,
+      }),
+    ];
+    getMoneyOperationInvoiceCandidatesMock.mockResolvedValueOnce([
+      {
+        invoiceId: 44,
+        paymentId: 440,
+        invoiceNumber: '44',
+        invoiceDate: '2026-04-20T00:00:00',
+        amount: 7500,
+        paidAmount: 0,
+        outstandingAmount: 7500,
+        status: 'Pending',
+        clientId: 74,
+        clientName: 'Ахмедова Айтан Рафик Кызы',
+        counterpartyName: 'Ахмедова Айтан Рафик Кызы',
+        matchReason: 'номер счёта найден в назначении',
+        score: 180,
+      },
+    ]);
+
+    render(<MoneyOperations source="EMoney" />);
+
+    await screen.findByText('Ахмедова Айтан Рафик Кызы');
+
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await screen.findByText('Подходящие счета');
+    await screen.findByText('Счёт 44 от 20.04.2026');
+    await user.click(screen.getByRole('button', { name: /Счёт 44/ }));
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(updateMoneyOperationMock).toHaveBeenCalledWith(
+      18,
+      expect.objectContaining({
+        source: 'EMoney',
+        linkedInvoiceId: 44,
+        paidInvoiceNumber: '44',
+        matchStatus: 'Matched',
+      }),
+    );
+  }, 15000);
+
+  it('marks a bank operation as ignored from the edit form', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({
+        id: 9,
+        source: 'Bank',
+        direction: 'Income',
+        counterpartyName: 'Неизвестный отправитель',
+        matchStatus: 'ClarificationRequired',
+        linkedInvoiceId: null,
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Неизвестный отправитель');
+    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await user.selectOptions(screen.getByLabelText('Статус'), 'Ignored');
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(updateMoneyOperationMock).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({
+        linkedInvoiceId: null,
+        matchStatus: 'Ignored',
+      }),
+    );
+  }, 15000);
+
+  it('opens a linked invoice from the cashflow journal', async () => {
+    const user = userEvent.setup();
+    const onOpenInvoice = vi.fn();
+    operations = [
+      createOperation({
+        id: 10,
+        source: 'Bank',
+        direction: 'Income',
+        counterpartyName: 'Клиент со счётом',
+        linkedInvoiceId: 33,
+        linkedInvoiceNumber: '33',
+        paidAccountName: '33',
+        matchStatus: 'Matched',
+      }),
+    ];
+
+    render(<MoneyOperations source="Total" onOpenInvoice={onOpenInvoice} />);
+
+    await screen.findByText('Общий баланс');
+    await user.click(screen.getByRole('button', { name: 'ОДДС' }));
+    await screen.findByText('Клиент со счётом');
+    await user.click(screen.getByRole('button', { name: 'Счёт 33' }));
+
+    expect(onOpenInvoice).toHaveBeenCalledWith(33, 'Income');
+  });
+
   it('deletes a custom money operation after confirmation', async () => {
     const user = userEvent.setup();
 
@@ -707,6 +1035,23 @@ describe('MoneyOperations integration', () => {
       expect(screen.queryByText('Поставщик А')).toBeNull();
     });
   }, 15000);
+
+  it('does not allow deleting an operation already applied to an invoice', async () => {
+    operations = [
+      createOperation({
+        direction: 'Income',
+        counterpartyName: 'Клиент со счётом',
+        linkedInvoiceId: 33,
+        linkedInvoiceNumber: '33',
+        matchStatus: 'Matched',
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Клиент со счётом');
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Удалить' }).disabled).toBe(true);
+  });
 
   it('creates a cash order for a readonly cash payment', async () => {
     const user = userEvent.setup();
@@ -947,6 +1292,7 @@ describe('MoneyOperations integration', () => {
   it('imports a bank statement file and reloads bank operations', async () => {
     operations = [];
     importBankStatementMock.mockResolvedValueOnce({
+      batchId: 1,
       rowsRead: 2,
       created: 2,
       skipped: 0,
@@ -987,5 +1333,47 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Редактировать операцию по банку');
     expect(toastSuccessMock).toHaveBeenCalledWith('Создано операций: 2. Пропущено: 0.', 'Выписка банка');
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(2));
+  }, 15000);
+
+  it('shows bank import journal details and rolls back an import batch', async () => {
+    const user = userEvent.setup();
+    operations = [];
+    getBankStatementImportsMock.mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          fileName: 'statement.csv',
+          status: 'Applied',
+          rowsRead: 1,
+          createdRows: 1,
+          skippedRows: 0,
+          errorRows: 0,
+          rollbackRows: 0,
+          createdAt: '2026-04-29T10:00:00Z',
+          rolledBackAt: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 5,
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Журнал импортов выписки');
+    await screen.findByText('statement.csv');
+
+    await user.click(screen.getByRole('button', { name: 'Открыть' }));
+
+    await waitFor(() => expect(getBankStatementImportMock).toHaveBeenCalledWith(1));
+    await screen.findByText('Импорт банковской выписки');
+    await screen.findByText('Ахмедова Айтан Рафик Кызы');
+    await screen.findByText('Оплата по счету №33');
+
+    await user.click(screen.getAllByRole('button', { name: 'Откатить' })[1]);
+
+    await waitFor(() => expect(rollbackBankStatementImportMock).toHaveBeenCalledWith(1));
+    expect(toastSuccessMock).toHaveBeenCalledWith('Откат импорта: удалено операций 1, пропущено строк 0.', 'Выписка банка');
   }, 15000);
 });

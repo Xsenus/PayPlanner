@@ -483,6 +483,7 @@ export type PaymentKind = 'Income' | 'Expense';
 export type MoneyOperationDirection = 'Income' | 'Expense' | 'Transfer';
 export type MoneyOperationSource = 'Bank' | 'Cash' | 'Card' | 'EMoney';
 export type MoneyOperationAccountingType = 'Fact' | 'Plan';
+export type MoneyOperationMatchStatus = 'None' | 'ClarificationRequired' | 'Matched' | 'Ignored';
 export type CashOrderStatus = 'Draft' | 'Posted' | 'Cancelled';
 export type CashOrderType = 'Incoming' | 'Outgoing';
 
@@ -508,6 +509,12 @@ export interface MoneyOperation {
   salesPointName?: string | null;
   paymentPriority?: number | null;
   paidAccountName?: string | null;
+  linkedInvoiceId?: number | null;
+  linkedInvoiceNumber?: string | null;
+  linkedInvoiceDate?: string | null;
+  matchStatus?: MoneyOperationMatchStatus;
+  matchedAt?: string | null;
+  matchComment?: string | null;
   createdAt: string;
   updatedAt?: string | null;
   isReadonly?: boolean;
@@ -597,6 +604,22 @@ export interface MoneyOperationAccountSummary {
   expenseCount: number;
 }
 
+export interface MoneyOperationInvoiceCandidate {
+  invoiceId: number;
+  paymentId: number;
+  invoiceNumber: string;
+  invoiceDate?: string | null;
+  amount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  status: PaymentStatus;
+  clientId?: number | null;
+  clientName?: string | null;
+  counterpartyName?: string | null;
+  matchReason?: string | null;
+  score: number;
+}
+
 export interface MoneyOperationsSummary {
   startBalance: number;
   income: number;
@@ -614,14 +637,61 @@ export interface BankStatementImportCreatedOperation {
   amount: number;
   counterpartyName?: string | null;
   paymentOrderNumber?: string | null;
+  matchStatus?: MoneyOperationMatchStatus;
 }
 
 export interface BankStatementImportResult {
+  batchId?: number | null;
   rowsRead: number;
   created: number;
   skipped: number;
   errors: string[];
   operations: BankStatementImportCreatedOperation[];
+}
+
+export interface BankStatementImportBatch {
+  id: number;
+  fileName: string;
+  status: string;
+  rowsRead: number;
+  createdRows: number;
+  skippedRows: number;
+  errorRows: number;
+  rollbackRows: number;
+  createdAt: string;
+  rolledBackAt?: string | null;
+}
+
+export interface BankStatementImportRow {
+  id: number;
+  rowNumber: number;
+  status: string;
+  message?: string | null;
+  moneyOperationId?: number | null;
+  date: string;
+  direction: MoneyOperationDirection;
+  amount: number;
+  accountName?: string | null;
+  counterpartyName?: string | null;
+  purpose?: string | null;
+  paymentOrderNumber?: string | null;
+  createdAt: string;
+  rolledBackAt?: string | null;
+}
+
+export interface BankStatementImportBatchDetail extends BankStatementImportBatch {
+  fileHash: string;
+  fileSize: number;
+  errorSummary?: string | null;
+  rows: BankStatementImportRow[];
+}
+
+export interface BankStatementImportRollbackResult {
+  batchId: number;
+  status: string;
+  deletedOperations: number;
+  skippedRows: number;
+  messages: string[];
 }
 
 export interface PaymentsListSummary {

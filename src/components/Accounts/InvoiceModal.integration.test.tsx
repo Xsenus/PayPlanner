@@ -10,6 +10,7 @@ import type {
   ContractInput,
   InstallmentPlanInput,
   Invoice,
+  MoneyOperation,
   Payment,
   ServiceCategoryDictionaryItem,
   ServiceDictionaryItem,
@@ -111,6 +112,7 @@ vi.mock('../../services/api', () => ({
     getActs: vi.fn().mockResolvedValue({ items: [] }),
     getNextInvoiceNumber: vi.fn().mockResolvedValue('24'),
     getPayment: vi.fn(),
+    getMoneyOperationsPaged: vi.fn().mockResolvedValue({ items: [], totalCount: 0, summary: {} }),
     createContract: vi.fn(),
     createCase: vi.fn(),
     createAct: vi.fn(),
@@ -267,6 +269,8 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.createAct).mockReset();
     vi.mocked(apiService.getContract).mockReset();
     vi.mocked(apiService.getPayment).mockReset();
+    vi.mocked(apiService.getMoneyOperationsPaged).mockReset();
+    vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue({ items: [], totalCount: 0, summary: {} });
     vi.mocked(apiService.updateInvoice).mockClear();
   });
 
@@ -477,6 +481,70 @@ describe('InvoiceModal integration', () => {
     await screen.findByText('Первая оплата по счету №25');
     expect(screen.getByText('Доплата по счету №25')).toBeTruthy();
     expect(screen.getAllByText(/₽/).length).toBeGreaterThan(1);
+  });
+
+  it('loads and renders linked money operations for the invoice', async () => {
+    const invoice = {
+      id: 540,
+      invoiceEntityId: 33,
+      number: '33',
+      date: '2026-04-29',
+      dueDate: '2026-04-30',
+      amount: 25000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 25000 }],
+    } as unknown as Invoice;
+
+    const linkedOperation = {
+      id: 9001,
+      source: 'Bank',
+      direction: 'Income',
+      accountingType: 'Fact',
+      accountName: 'ОСНОВНОЙ Банк',
+      counterpartyName: 'Ахмедова Айтан Рафик Кызы',
+      amount: 25000,
+      currency: 'RUB',
+      date: '2026-04-29',
+      isAdvancePayment: false,
+      purpose: 'Оплата по счёту №33',
+      linkedInvoiceId: 33,
+      linkedInvoiceNumber: '33',
+      matchStatus: 'Matched',
+      createdAt: '2026-04-29T10:00:00Z',
+    } as MoneyOperation;
+
+    vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValueOnce({
+      items: [linkedOperation],
+      totalCount: 1,
+      summary: {},
+    });
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    await screen.findByText('Движения денег');
+
+    await waitFor(() => {
+      expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledWith({ linkedInvoiceId: 33, page: 1, pageSize: 20 });
+    });
+
+    expect(await screen.findByText('Оплата по счёту №33')).toBeTruthy();
+    expect(screen.getByText('Банк')).toBeTruthy();
+    expect(screen.getByText('Сверено')).toBeTruthy();
+    expect(screen.getByText('ОСНОВНОЙ Банк')).toBeTruthy();
   });
 
   it('restores installment summary and badges from related installment payments', async () => {

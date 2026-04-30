@@ -1008,27 +1008,27 @@ function AppContent() {
 
       case 'moneyBank':
         return permissions.payments.canView
-          ? <MoneyOperations source="Bank" />
+          ? <MoneyOperations source="Bank" onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)} />
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'moneyCash':
         return permissions.payments.canView
-          ? <MoneyOperations source="Cash" />
+          ? <MoneyOperations source="Cash" onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)} />
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'moneyCards':
         return permissions.payments.canView
-          ? <MoneyOperations source="Card" />
+          ? <MoneyOperations source="Card" onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)} />
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'moneyEMoney':
         return permissions.payments.canView
-          ? <MoneyOperations source="EMoney" />
+          ? <MoneyOperations source="EMoney" onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)} />
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'moneyTotal':
         return permissions.payments.canView
-          ? <MoneyOperations source="Total" />
+          ? <MoneyOperations source="Total" onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)} />
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'contracts':
