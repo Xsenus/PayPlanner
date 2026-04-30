@@ -580,6 +580,31 @@ describe('MoneyOperations integration', () => {
     });
   });
 
+  it('shows balance reconciliation for the journal and selected account', async () => {
+    operations = [
+      createOperation({
+        id: 1,
+        direction: 'Income',
+        amount: 1000,
+        accountName: 'Основной счет',
+        counterpartyName: 'Клиент',
+      }),
+      createOperation({
+        id: 2,
+        direction: 'Expense',
+        amount: 250,
+        accountName: 'Основной счет',
+        counterpartyName: 'Поставщик',
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    const badges = await screen.findAllByText('Сверка сходится');
+    expect(badges.length).toBeGreaterThan(0);
+    expect(screen.getByText('Сверка остатков')).toBeTruthy();
+  });
+
   it('uses the local current date when creating a bank operation and saves it', async () => {
     const user = userEvent.setup();
 

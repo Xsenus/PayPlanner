@@ -301,6 +301,33 @@ function isAppliedToInvoice(item: MoneyOperation) {
   return Boolean(item.linkedInvoiceId && item.matchStatus === 'Matched');
 }
 
+type BalanceCheckSource = Pick<MoneyOperationsSummary | MoneyOperationAccountSummary, 'startBalance' | 'income' | 'expense' | 'endBalance'>;
+
+function getBalanceCheck(source: BalanceCheckSource) {
+  const expectedEndBalance = Math.round((source.startBalance + source.income - source.expense) * 100) / 100;
+  const difference = Math.round((source.endBalance - expectedEndBalance) * 100) / 100;
+
+  return {
+    expectedEndBalance,
+    difference,
+    isBalanced: Math.abs(difference) < 0.01,
+  };
+}
+
+function renderBalanceCheckBadge(source: BalanceCheckSource) {
+  const check = getBalanceCheck(source);
+
+  return (
+    <div
+      className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ${
+        check.isBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+      }`}
+      title={`Расчетный остаток: ${formatMoney(check.expectedEndBalance)} ₽`}>
+      <span>{check.isBalanced ? 'Сверка сходится' : `Расхождение: ${formatMoney(check.difference)} ₽`}</span>
+    </div>
+  );
+}
+
 function getOperationOriginBadge(item: MoneyOperation) {
   if (item.isReadonly) {
     return {
@@ -2922,6 +2949,13 @@ export function MoneyOperations({
         </div>
 
         <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+            <div>
+              <div className="text-sm font-medium text-slate-800">Сверка остатков</div>
+              <div className="mt-1 text-xs text-slate-500">Начало + приход - расход = конец</div>
+            </div>
+            {renderBalanceCheckBadge(summary)}
+          </div>
           <button
             onClick={handleCurrentYear}
             className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
@@ -3004,8 +3038,11 @@ export function MoneyOperations({
                     </label>
                     {selectedAccountSummary && (
                       <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-600">
-                        <div className="font-medium text-slate-800">
-                          Остаток: {formatMoney(selectedAccountSummary.endBalance)} ₽
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-medium text-slate-800">
+                            Остаток: {formatMoney(selectedAccountSummary.endBalance)} ₽
+                          </div>
+                          {renderBalanceCheckBadge(selectedAccountSummary)}
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-2">
                           <span className="text-emerald-600">Приход: {formatMoney(selectedAccountSummary.income)} ₽</span>
