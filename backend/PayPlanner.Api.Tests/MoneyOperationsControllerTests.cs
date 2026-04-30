@@ -7,6 +7,7 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
 using System.Reflection;
 using System.Text;
@@ -91,6 +92,43 @@ public class MoneyOperationsControllerTests
         var deleteAction = await controller.Delete(createdOperation.Id);
         Assert.IsType<NoContentResult>(deleteAction);
         Assert.False(await db.MoneyOperations.AnyAsync());
+    }
+
+    [Fact]
+    public async Task DeleteMoneyOperation_ReturnsBadRequest_WhenOperationAlreadyAppliedToInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 25_000m,
+            Date = new DateTime(2026, 4, 29),
+            LinkedInvoiceId = invoice.Id,
+            PaidInvoiceNumber = "33",
+            PaidAccountName = "33",
+            MatchStatus = MoneyOperationMatchStatus.Matched,
+            MatchedAt = DateTime.UtcNow,
+            MatchComment = "Сверено",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Delete(operation.Id);
+
+        Assert.IsType<BadRequestObjectResult>(action);
+        Assert.True(await db.MoneyOperations.AnyAsync(item => item.Id == operation.Id));
     }
 
     [Fact]
@@ -400,6 +438,102 @@ public class MoneyOperationsControllerTests
         Assert.Equal(3_000m, eMoney.Income);
         Assert.Equal(3_000m, eMoney.EndBalance);
         Assert.Equal(2_000m, page.Summary.EndBalance);
+    }
+
+    [Fact]
+    public async Task MoneyJournal_TotalSummaryCalculatesOpeningBalanceBySourceAndIgnoresPlan()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "Стартовый остаток",
+                Amount = 10_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 3, 31),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Cash,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Главная касса",
+                CounterpartyName = "Расход до периода",
+                Amount = 2_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 3, 30),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "Клиент",
+                Amount = 5_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 10),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Cash,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Главная касса",
+                CounterpartyName = "Наличный клиент",
+                Amount = 3_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 11),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Plan,
+                AccountName = "Основной банк",
+                CounterpartyName = "План не должен попасть в факт",
+                Amount = 99_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 12),
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: null,
+            direction: null,
+            accountingType: null,
+            accountName: null,
+            search: null);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+
+        Assert.Equal(8_000m, page.Summary.StartBalance);
+        Assert.Equal(8_000m, page.Summary.Income);
+        Assert.Equal(16_000m, page.Summary.EndBalance);
+        Assert.Equal(2, page.Summary.IncomeCount);
+
+        var bank = Assert.Single(page.Summary.BySource, item => item.Source == MoneyOperationSource.Bank);
+        Assert.Equal(10_000m, bank.StartBalance);
+        Assert.Equal(5_000m, bank.Income);
+        Assert.Equal(15_000m, bank.EndBalance);
+
+        var cash = Assert.Single(page.Summary.BySource, item => item.Source == MoneyOperationSource.Cash);
+        Assert.Equal(-2_000m, cash.StartBalance);
+        Assert.Equal(3_000m, cash.Income);
+        Assert.Equal(1_000m, cash.EndBalance);
     }
 
     [Fact]
@@ -1263,6 +1397,7 @@ public class MoneyOperationsControllerTests
         Assert.Equal(3, result.RowsRead);
         Assert.Equal(2, result.Created);
         Assert.Equal(1, result.Skipped);
+        Assert.NotNull(result.BatchId);
 
         var operations = await db.MoneyOperations.OrderBy(item => item.Date).ToListAsync();
         Assert.Collection(
@@ -1282,6 +1417,19 @@ public class MoneyOperationsControllerTests
                 Assert.Equal("Поставщик", expense.CounterpartyName);
             });
 
+        var batch = await db.BankStatementImportBatches
+            .Include(item => item.Rows)
+            .SingleAsync(item => item.Id == result.BatchId);
+        Assert.Equal("statement.csv", batch.FileName);
+        Assert.Equal(BankStatementImportBatchStatus.Applied, batch.Status);
+        Assert.Equal(3, batch.RowsRead);
+        Assert.Equal(2, batch.CreatedRows);
+        Assert.Equal(1, batch.SkippedRows);
+        Assert.Equal(3, batch.Rows.Count);
+        Assert.Equal(2, batch.Rows.Count(item => item.Status == BankStatementImportRowStatus.Created));
+        Assert.Equal(1, batch.Rows.Count(item => item.Status == BankStatementImportRowStatus.Skipped));
+        Assert.All(operations, operation => Assert.Equal(batch.Id, operation.BankStatementImportBatchId));
+
         var duplicateAction = await controller.ImportBankStatement(
             CreateFormFile(
                 "Дата;Сумма;Контрагент;Назначение;Номер\n" +
@@ -1292,6 +1440,875 @@ public class MoneyOperationsControllerTests
         var duplicateResult = Assert.IsType<BankStatementImportResultDto>(duplicateOk.Value);
         Assert.Equal(0, duplicateResult.Created);
         Assert.Equal(1, duplicateResult.Skipped);
+    }
+
+    [Fact]
+    public async Task RollbackBankStatementImport_RemovesCreatedOperationsAndMarksRows()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db);
+        var importAction = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Оплата по счету №33;101\n",
+                "statement.csv"),
+            CancellationToken.None);
+        var importOk = Assert.IsType<OkObjectResult>(importAction.Result);
+        var importResult = Assert.IsType<BankStatementImportResultDto>(importOk.Value);
+        Assert.NotNull(importResult.BatchId);
+
+        var rollbackAction = await controller.RollbackBankStatementImport(importResult.BatchId.Value, CancellationToken.None);
+
+        var rollbackOk = Assert.IsType<OkObjectResult>(rollbackAction.Result);
+        var rollbackResult = Assert.IsType<BankStatementImportRollbackResultDto>(rollbackOk.Value);
+        Assert.Equal(BankStatementImportBatchStatus.RolledBack, rollbackResult.Status);
+        Assert.Equal(1, rollbackResult.DeletedOperations);
+        Assert.Equal(0, rollbackResult.SkippedRows);
+        Assert.Empty(await db.MoneyOperations.ToListAsync());
+
+        var batch = await db.BankStatementImportBatches.Include(item => item.Rows).SingleAsync();
+        Assert.Equal(BankStatementImportBatchStatus.RolledBack, batch.Status);
+        Assert.Equal(1, batch.RollbackRows);
+        var row = Assert.Single(batch.Rows);
+        Assert.Equal(BankStatementImportRowStatus.RolledBack, row.Status);
+        Assert.NotNull(row.RolledBackAt);
+    }
+
+    [Fact]
+    public async Task RollbackBankStatementImport_SkipsMatchedOperations()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db);
+        var importAction = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Оплата по счету №33;101\n",
+                "statement.csv"),
+            CancellationToken.None);
+        var importOk = Assert.IsType<OkObjectResult>(importAction.Result);
+        var importResult = Assert.IsType<BankStatementImportResultDto>(importOk.Value);
+        var operation = await db.MoneyOperations.SingleAsync();
+        operation.MatchStatus = MoneyOperationMatchStatus.Matched;
+        await db.SaveChangesAsync();
+
+        var rollbackAction = await controller.RollbackBankStatementImport(importResult.BatchId!.Value, CancellationToken.None);
+
+        var rollbackOk = Assert.IsType<OkObjectResult>(rollbackAction.Result);
+        var rollbackResult = Assert.IsType<BankStatementImportRollbackResultDto>(rollbackOk.Value);
+        Assert.Equal(BankStatementImportBatchStatus.RollbackBlocked, rollbackResult.Status);
+        Assert.Equal(0, rollbackResult.DeletedOperations);
+        Assert.Equal(1, rollbackResult.SkippedRows);
+        Assert.Single(await db.MoneyOperations.ToListAsync());
+
+        var row = await db.BankStatementImportRows.SingleAsync();
+        Assert.Equal(BankStatementImportRowStatus.RollbackSkipped, row.Status);
+        Assert.Contains("сверена", row.Message);
+    }
+
+    [Fact]
+    public async Task ImportBankStatement_AutoMatchesSingleInvoiceByNumberInPurpose()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 29),
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 4, 29),
+            CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Оплата по счету №33;101\n",
+                "statement.csv"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        var operationDto = Assert.Single(result.Operations);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, operationDto.MatchStatus);
+
+        var operation = await db.MoneyOperations.SingleAsync();
+        Assert.Equal(invoice.Id, operation.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, operation.MatchStatus);
+        Assert.Equal("33", operation.PaidInvoiceNumber);
+        Assert.Contains("Автоматически сверено", operation.MatchComment);
+
+        var payment = await db.Payments.SingleAsync();
+        Assert.Equal(PaymentStatus.Completed, payment.Status);
+        Assert.Equal(25_000m, payment.PaidAmount);
+        Assert.True(payment.IsPaid);
+        Assert.Contains("Деньги", payment.SystemNotes);
+
+        var row = await db.BankStatementImportRows.SingleAsync();
+        Assert.Equal(BankStatementImportRowStatus.Created, row.Status);
+        Assert.Contains("Автоматически сверено", row.Message);
+    }
+
+    [Fact]
+    public async Task ImportBankStatement_AutoMatchesSingleInvoiceByExactAmountAndClient()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client
+        {
+            Name = "Ахмедова Айтан Рафик Кызы",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var invoice = new Invoice
+        {
+            Number = "77",
+            Date = new DateTime(2026, 4, 29),
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Client = client,
+            Account = "77",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 4, 29),
+            CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Поступление от клиента;101\n",
+                "statement.csv"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        var operationDto = Assert.Single(result.Operations);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, operationDto.MatchStatus);
+
+        var operation = await db.MoneyOperations.SingleAsync();
+        Assert.Equal(invoice.Id, operation.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, operation.MatchStatus);
+        Assert.Equal("77", operation.PaidInvoiceNumber);
+        Assert.Contains("по сумме", operation.MatchComment);
+    }
+
+    [Fact]
+    public async Task ImportBankStatement_DoesNotAutoMatchAmbiguousAmountAndClient()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client
+        {
+            Name = "Ахмедова Айтан Рафик Кызы",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Payments.AddRange(
+            new Payment
+            {
+                Invoice = new Invoice { Number = "77", Date = new DateTime(2026, 4, 1), CreatedAt = DateTime.UtcNow },
+                Client = client,
+                Account = "77",
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Amount = 25_000m,
+                PaidAmount = 0m,
+                Date = new DateTime(2026, 4, 1),
+                CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                Invoice = new Invoice { Number = "78", Date = new DateTime(2026, 4, 2), CreatedAt = DateTime.UtcNow },
+                Client = client,
+                Account = "78",
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Amount = 25_000m,
+                PaidAmount = 0m,
+                Date = new DateTime(2026, 4, 2),
+                CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Поступление от клиента;101\n",
+                "statement.csv"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        var operationDto = Assert.Single(result.Operations);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operationDto.MatchStatus);
+
+        var operation = await db.MoneyOperations.SingleAsync();
+        Assert.Null(operation.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operation.MatchStatus);
+    }
+
+    [Fact]
+    public async Task ImportBankStatement_LeavesAmbiguousInvoiceNumberForClarification()
+    {
+        await using var db = await CreateContextAsync();
+        db.Payments.AddRange(
+            new Payment
+            {
+                Invoice = new Invoice { Number = "33", Date = new DateTime(2026, 4, 1), CreatedAt = DateTime.UtcNow },
+                Account = "33",
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Amount = 25_000m,
+                PaidAmount = 0m,
+                Date = new DateTime(2026, 4, 1),
+                CounterpartyName = "Первый клиент",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                Invoice = new Invoice { Number = "33", Date = new DateTime(2026, 4, 2), CreatedAt = DateTime.UtcNow },
+                Account = "33",
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Amount = 25_000m,
+                PaidAmount = 0m,
+                Date = new DateTime(2026, 4, 2),
+                CounterpartyName = "Второй клиент",
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Оплата по счету №33;101\n",
+                "statement.csv"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        var operationDto = Assert.Single(result.Operations);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operationDto.MatchStatus);
+
+        var operation = await db.MoneyOperations.SingleAsync();
+        Assert.Null(operation.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operation.MatchStatus);
+    }
+
+    [Fact]
+    public async Task GetInvoiceCandidates_ReturnsScoredCandidatesForBankOperation()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client
+        {
+            Name = "Ахмедова Айтан Рафик Кызы",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 25_000m,
+            Date = new DateTime(2026, 4, 29),
+            CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+            Purpose = "Оплата по счету №33",
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Client = client,
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 4, 20),
+            CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.GetInvoiceCandidates(operation.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var candidate = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<MoneyOperationInvoiceCandidateDto>>(ok.Value));
+        Assert.Equal(invoice.Id, candidate.InvoiceId);
+        Assert.Equal("33", candidate.InvoiceNumber);
+        Assert.Equal(25_000m, candidate.OutstandingAmount);
+        Assert.True(candidate.Score >= 160);
+        Assert.Contains("номер счёта", candidate.MatchReason);
+    }
+
+    [Fact]
+    public async Task GetInvoiceCandidates_ReturnsCandidatesForEMoneyIncomeOperation()
+    {
+        await using var db = await CreateContextAsync();
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.EMoney,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 7_500m,
+            Date = new DateTime(2026, 4, 29),
+            CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+            Purpose = "ЮMoney, оплата по счету №44",
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.Add(new Payment
+        {
+            Invoice = new Invoice { Number = "44", Date = new DateTime(2026, 4, 20), CreatedAt = DateTime.UtcNow },
+            Account = "44",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 7_500m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 4, 20),
+            CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.GetInvoiceCandidates(operation.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var candidate = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<MoneyOperationInvoiceCandidateDto>>(ok.Value));
+        Assert.Equal("44", candidate.InvoiceNumber);
+        Assert.Equal(7_500m, candidate.OutstandingAmount);
+    }
+
+    [Fact]
+    public async Task GetInvoiceCandidates_ExcludesFullyPaidInvoices()
+    {
+        await using var db = await CreateContextAsync();
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 25_000m,
+            Date = new DateTime(2026, 4, 29),
+            Purpose = "Оплата по счету №33",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.Add(new Payment
+        {
+            Invoice = new Invoice { Number = "33", Date = new DateTime(2026, 4, 20), CreatedAt = DateTime.UtcNow },
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 25_000m,
+            PaidAmount = 25_000m,
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.GetInvoiceCandidates(operation.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<MoneyOperationInvoiceCandidateDto>>(ok.Value));
+    }
+
+    [Fact]
+    public async Task IgnoreMoneyOperation_ClearsInvoiceLinkAndMarksAsIgnored()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 25_000m,
+            Date = new DateTime(2026, 4, 29),
+            LinkedInvoiceId = invoice.Id,
+            PaidInvoiceNumber = "33",
+            PaidAccountName = "33",
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            MatchedAt = null,
+            MatchComment = "Связано ошибочно",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Ignore(operation.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var result = Assert.IsType<MoneyOperation>(ok.Value);
+        Assert.Equal(MoneyOperationMatchStatus.Ignored, result.MatchStatus);
+        Assert.Null(result.LinkedInvoiceId);
+        Assert.Null(result.PaidInvoiceNumber);
+        Assert.Null(result.PaidAccountName);
+        Assert.Null(result.MatchedAt);
+        Assert.NotNull(result.UpdatedAt);
+        Assert.Equal(MoneyOperationMatchStatus.Ignored, (await db.MoneyOperations.SingleAsync()).MatchStatus);
+    }
+
+    [Fact]
+    public async Task IgnoreMoneyOperation_ReturnsBadRequest_WhenOperationAlreadyAppliedToInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 25_000m,
+            Date = new DateTime(2026, 4, 29),
+            LinkedInvoiceId = invoice.Id,
+            PaidInvoiceNumber = "33",
+            PaidAccountName = "33",
+            MatchStatus = MoneyOperationMatchStatus.Matched,
+            MatchedAt = DateTime.UtcNow,
+            MatchComment = "Сверено",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Ignore(operation.Id, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(action);
+        var saved = await db.MoneyOperations.SingleAsync();
+        Assert.Equal(invoice.Id, saved.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, saved.MatchStatus);
+    }
+
+    [Fact]
+    public async Task LinkInvoice_RejectsOperationAmountGreaterThanInvoiceOutstandingAmount()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 25_000m,
+            Date = new DateTime(2026, 4, 29),
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            PaidAmount = 10_000m,
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.LinkInvoice(
+            operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = invoice.Id },
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action);
+        Assert.Contains("Остаток", Assert.IsType<string>(badRequest.Value));
+        var unchanged = await db.MoneyOperations.SingleAsync();
+        Assert.Null(unchanged.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, unchanged.MatchStatus);
+    }
+
+    [Fact]
+    public async Task LinkInvoice_WithOverpayment_ClosesInvoiceAndCreditsClientBalance()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client
+        {
+            Name = "Ахмедова Айтан Рафик Кызы",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 17_000m,
+            Date = new DateTime(2026, 4, 29),
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Client = client,
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            PaidAmount = 10_000m,
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.LinkInvoice(
+            operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = invoice.Id },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var result = Assert.IsType<MoneyOperation>(ok.Value);
+        Assert.Equal(invoice.Id, result.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, result.MatchStatus);
+
+        var payment = await db.Payments.SingleAsync();
+        Assert.Equal(PaymentStatus.Completed, payment.Status);
+        Assert.Equal(25_000m, payment.PaidAmount);
+        Assert.True(payment.IsPaid);
+
+        var balanceTransaction = await db.ClientBalanceTransactions.SingleAsync();
+        Assert.Equal(client.Id, balanceTransaction.ClientId);
+        Assert.Equal(invoice.Id, balanceTransaction.InvoiceId);
+        Assert.Equal(payment.Id, balanceTransaction.PaymentId);
+        Assert.Equal(2_000m, balanceTransaction.Amount);
+        Assert.Equal(ClientBalanceTransactionType.Overpayment, balanceTransaction.Type);
+        Assert.Equal(ClientBalanceDirection.Credit, balanceTransaction.Direction);
+        Assert.Equal($"money-operation-overpayment:{operation.Id}", balanceTransaction.ExternalKey);
+    }
+
+    [Fact]
+    public async Task ApplyClientBalanceCreditAfterMoneyOperationOverpayment_DoesNotCreateNewMoneyOperation()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client
+        {
+            Name = "Ахмедова Айтан Рафик Кызы",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var firstInvoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var secondInvoice = new Invoice
+        {
+            Number = "34",
+            Date = new DateTime(2026, 4, 21),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var firstPayment = new Payment
+        {
+            Client = client,
+            Invoice = firstInvoice,
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 15_000m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var secondPayment = new Payment
+        {
+            Client = client,
+            Invoice = secondInvoice,
+            Account = "34",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 10_000m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 4, 21),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 17_000m,
+            Date = new DateTime(2026, 4, 29),
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.AddRange(firstPayment, secondPayment);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var linkAction = await controller.LinkInvoice(
+            operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = firstInvoice.Id },
+            CancellationToken.None);
+        Assert.IsType<OkObjectResult>(linkAction);
+
+        var applyResult = await ClientBalanceService.ApplyCreditAsync(
+            db,
+            client.Id,
+            secondPayment.Id,
+            1_500m,
+            new DateTime(2026, 4, 30, 10, 0, 0, DateTimeKind.Utc),
+            httpContext: null,
+            CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        Assert.True(applyResult.Success);
+        Assert.Equal(1_500m, applyResult.AppliedAmount);
+        Assert.Equal(1, await db.MoneyOperations.CountAsync());
+        Assert.Equal(500m, await ClientBalanceService.GetBalanceAsync(db, client.Id));
+
+        var refreshedSecondPayment = await db.Payments.SingleAsync(item => item.Id == secondPayment.Id);
+        Assert.Equal(1_500m, refreshedSecondPayment.PaidAmount);
+        Assert.Equal(PaymentStatus.Overdue, refreshedSecondPayment.Status);
+        Assert.Contains("Зачтено с баланса клиента", refreshedSecondPayment.SystemNotes);
+
+        var balanceTransactions = await db.ClientBalanceTransactions
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Equal(2, balanceTransactions.Count);
+        Assert.Equal(ClientBalanceTransactionType.Overpayment, balanceTransactions[0].Type);
+        Assert.Equal(ClientBalanceDirection.Credit, balanceTransactions[0].Direction);
+        Assert.Equal(ClientBalanceTransactionType.CreditApplied, balanceTransactions[1].Type);
+        Assert.Equal(ClientBalanceDirection.Debit, balanceTransactions[1].Direction);
+    }
+
+    [Fact]
+    public async Task LinkInvoice_MarksBankOperationAsMatched_WhenAmountFitsOutstanding()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 15_000m,
+            Date = new DateTime(2026, 4, 29),
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            PaidAmount = 10_000m,
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.LinkInvoice(
+            operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest
+            {
+                InvoiceId = invoice.Id,
+                Comment = "Проверено оператором",
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var result = Assert.IsType<MoneyOperation>(ok.Value);
+        Assert.Equal(invoice.Id, result.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, result.MatchStatus);
+        Assert.Equal("Проверено оператором", result.MatchComment);
+
+        var payment = await db.Payments.SingleAsync();
+        Assert.Equal(PaymentStatus.Completed, payment.Status);
+        Assert.Equal(25_000m, payment.PaidAmount);
+        Assert.True(payment.IsPaid);
+        Assert.Contains("Деньги", payment.SystemNotes);
+    }
+
+    [Fact]
+    public async Task LinkInvoice_AppliesPartialMoneyOperationToInvoicePayment()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 5_000m,
+            Date = new DateTime(2026, 4, 29),
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            PaidAmount = 10_000m,
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.LinkInvoice(
+            operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = invoice.Id },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        Assert.IsType<MoneyOperation>(ok.Value);
+
+        var payment = await db.Payments.SingleAsync();
+        Assert.Equal(PaymentStatus.Processing, payment.Status);
+        Assert.Equal(15_000m, payment.PaidAmount);
+        Assert.False(payment.IsPaid);
+        Assert.Equal(new DateTime(2026, 4, 29), payment.LastPaymentDate);
+    }
+
+    [Fact]
+    public async Task LinkInvoice_MarksEMoneyOperationAsMatched_WhenAmountFitsOutstanding()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "44",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.EMoney,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 7_500m,
+            Date = new DateTime(2026, 4, 29),
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Account = "44",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 7_500m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.LinkInvoice(
+            operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = invoice.Id },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var result = Assert.IsType<MoneyOperation>(ok.Value);
+        Assert.Equal(invoice.Id, result.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, result.MatchStatus);
+        Assert.Equal("44", result.PaidInvoiceNumber);
+        Assert.Contains("Денежная операция", result.MatchComment);
     }
 
     [Fact]
@@ -1419,6 +2436,178 @@ public class MoneyOperationsControllerTests
         Assert.Equal(0, result.Created);
         Assert.Equal(1, result.Skipped);
         Assert.Empty(await db.MoneyOperations.ToListAsync());
+    }
+
+    [Fact]
+    public async Task UpdateMoneyOperation_WithLinkedInvoice_MarksOperationAsMatched()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 29),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = "Основной счёт",
+            CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+            Amount = 25_000m,
+            Currency = "RUB",
+            Date = new DateTime(2026, 4, 29),
+            RecognitionDate = new DateTime(2026, 4, 29),
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Invoices.Add(invoice);
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var updateAction = await controller.Update(operation.Id, new MoneyOperation
+        {
+            Source = operation.Source,
+            Direction = operation.Direction,
+            AccountingType = operation.AccountingType,
+            AccountName = operation.AccountName,
+            CounterpartyName = operation.CounterpartyName,
+            Amount = operation.Amount,
+            Currency = operation.Currency,
+            Date = operation.Date,
+            RecognitionDate = operation.RecognitionDate,
+            LinkedInvoiceId = invoice.Id,
+            MatchComment = "Оплата по выписке",
+        });
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction);
+        var updated = Assert.IsType<MoneyOperation>(ok.Value);
+        Assert.Equal(invoice.Id, updated.LinkedInvoiceId);
+        Assert.Equal("33", updated.PaidInvoiceNumber);
+        Assert.Equal("33", updated.PaidAccountName);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, updated.MatchStatus);
+        Assert.NotNull(updated.MatchedAt);
+
+        var page = await GetMoneyPageAsync(controller, MoneyOperationSource.Bank);
+        var item = Assert.Single(page.Items);
+        Assert.Equal(invoice.Id, item.LinkedInvoiceId);
+        Assert.Equal("33", item.LinkedInvoiceNumber);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, item.MatchStatus);
+        Assert.Equal("Оплата по выписке", item.MatchComment);
+    }
+
+    [Fact]
+    public async Task GetPaged_WithLinkedInvoiceId_ReturnsOnlyInvoiceMoneyOperations()
+    {
+        await using var db = await CreateContextAsync();
+        var targetInvoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 29),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var otherInvoice = new Invoice
+        {
+            Number = "34",
+            Date = new DateTime(2026, 4, 30),
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        db.Invoices.AddRange(targetInvoice, otherInvoice);
+        await db.SaveChangesAsync();
+
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Amount = 25_000m,
+                Date = new DateTime(2026, 4, 29),
+                Purpose = "Оплата по счёту №33",
+                LinkedInvoiceId = targetInvoice.Id,
+                MatchStatus = MoneyOperationMatchStatus.Matched,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Amount = 10_000m,
+                Date = new DateTime(2026, 4, 30),
+                Purpose = "Оплата по счёту №34",
+                LinkedInvoiceId = otherInvoice.Id,
+                MatchStatus = MoneyOperationMatchStatus.Matched,
+                CreatedAt = DateTime.UtcNow,
+            });
+
+        db.Payments.Add(new Payment
+        {
+            InvoiceId = targetInvoice.Id,
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 5_000m,
+            PaidAmount = 5_000m,
+            Date = new DateTime(2026, 4, 29),
+            PaidDate = new DateTime(2026, 4, 29),
+            Description = "Наличный платёж по счёту №33",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: null,
+            direction: null,
+            accountingType: null,
+            accountName: null,
+            linkedInvoiceId: targetInvoice.Id,
+            search: null,
+            page: 1,
+            pageSize: 25);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+
+        Assert.Equal(2, page.Total);
+        Assert.All(page.Items, item => Assert.Equal(targetInvoice.Id, item.LinkedInvoiceId));
+        Assert.Contains(page.Items, item => item.IsReadonly && item.RelatedPaymentId.HasValue);
+        Assert.Contains(page.Items, item => !item.IsReadonly && item.Purpose == "Оплата по счёту №33");
+        Assert.DoesNotContain(page.Items, item => item.LinkedInvoiceId == otherInvoice.Id);
+    }
+
+    [Fact]
+    public async Task ImportBankStatement_CreatesOperationsAsClarificationRequired()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Оплата по счёту №33;301\n",
+                "statement.csv"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        var operationDto = Assert.Single(result.Operations);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operationDto.MatchStatus);
+
+        var operation = await db.MoneyOperations.SingleAsync();
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operation.MatchStatus);
+
+        var page = await GetMoneyPageAsync(controller, MoneyOperationSource.Bank);
+        var item = Assert.Single(page.Items);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, item.MatchStatus);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

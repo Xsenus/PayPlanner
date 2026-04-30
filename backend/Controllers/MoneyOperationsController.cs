@@ -6,7 +6,9 @@ using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -40,6 +42,7 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] MoneyOperationDirection? direction,
         [FromQuery] MoneyOperationAccountingType? accountingType,
         [FromQuery] string? accountName = null,
+        [FromQuery] int? linkedInvoiceId = null,
         [FromQuery] string? search = null,
         CancellationToken ct = default)
     {
@@ -47,8 +50,9 @@ public class MoneyOperationsController : ControllerBase
             async cancellationToken =>
             {
                 var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, accountName, search)
-                .OrderByDescending(item => item.Date)
-                .ThenByDescending(item => item.Id)
+                    .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
+                    .OrderByDescending(item => item.Date)
+                    .ThenByDescending(item => item.Id)
                     .ToListAsync(cancellationToken);
 
                 return rows.Select(MapMoneyOperationRow).ToList();
@@ -67,6 +71,7 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] MoneyOperationDirection? direction,
         [FromQuery] MoneyOperationAccountingType? accountingType,
         [FromQuery] string? accountName = null,
+        [FromQuery] int? linkedInvoiceId = null,
         [FromQuery] string? search = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
@@ -77,7 +82,8 @@ public class MoneyOperationsController : ControllerBase
 
         var response = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
-            var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, accountName, search);
+            var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, accountName, search)
+                .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value);
             var total = await query.CountAsync(cancellationToken);
             var itemRows = await query
                 .OrderByDescending(item => item.Date)
@@ -387,6 +393,18 @@ public class MoneyOperationsController : ControllerBase
                 SalesPointName = operation.SalesPointName,
                 PaymentPriority = operation.PaymentPriority,
                 PaidAccountName = operation.PaidAccountName,
+                LinkedInvoiceId = operation.LinkedInvoiceId,
+                LinkedInvoiceNumber = operation.LinkedInvoice != null ? operation.LinkedInvoice.Number : null,
+                LinkedInvoiceDate = operation.LinkedInvoice != null ? operation.LinkedInvoice.Date : null,
+                MatchStatus = operation.MatchStatus == MoneyOperationMatchStatus.Matched
+                    ? nameof(MoneyOperationMatchStatus.Matched)
+                    : operation.MatchStatus == MoneyOperationMatchStatus.ClarificationRequired
+                        ? nameof(MoneyOperationMatchStatus.ClarificationRequired)
+                        : operation.MatchStatus == MoneyOperationMatchStatus.Ignored
+                            ? nameof(MoneyOperationMatchStatus.Ignored)
+                            : nameof(MoneyOperationMatchStatus.None),
+                MatchedAt = operation.MatchedAt,
+                MatchComment = operation.MatchComment,
                 CreatedAt = operation.CreatedAt,
                 UpdatedAt = operation.UpdatedAt,
                 IsReadonly = false,
@@ -473,6 +491,14 @@ public class MoneyOperationsController : ControllerBase
                 SalesPointName = null,
                 PaymentPriority = null,
                 PaidAccountName = payment.Account,
+                LinkedInvoiceId = payment.InvoiceId,
+                LinkedInvoiceNumber = payment.Invoice != null ? payment.Invoice.Number : payment.Account,
+                LinkedInvoiceDate = payment.Invoice != null ? payment.Invoice.Date : payment.AccountDate,
+                MatchStatus = payment.InvoiceId.HasValue
+                    ? nameof(MoneyOperationMatchStatus.Matched)
+                    : nameof(MoneyOperationMatchStatus.None),
+                MatchedAt = payment.LastPaymentDate ?? payment.PaidDate,
+                MatchComment = null,
                 CreatedAt = payment.CreatedAt,
                 UpdatedAt = null,
                 IsReadonly = true,
@@ -679,6 +705,166 @@ public class MoneyOperationsController : ControllerBase
         return item is null ? NotFound() : Ok(item);
     }
 
+    [HttpGet("{id:int}/invoice-candidates")]
+    public async Task<ActionResult<IReadOnlyList<MoneyOperationInvoiceCandidateDto>>> GetInvoiceCandidates(
+        int id,
+        CancellationToken ct)
+    {
+        var operation = await _db.MoneyOperations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (operation is null)
+        {
+            return NotFound();
+        }
+
+        if (operation.Direction != MoneyOperationDirection.Income)
+        {
+            return Ok(Array.Empty<MoneyOperationInvoiceCandidateDto>());
+        }
+
+        var purposeTokens = ExtractInvoiceNumberTokens(operation.Purpose)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var operationAmount = Math.Round(operation.Amount, 2, MidpointRounding.AwayFromZero);
+        var operationCounterparty = operation.CounterpartyName?.Trim();
+
+        var invoicePayments = await _db.Payments
+            .AsNoTracking()
+            .Include(payment => payment.Invoice)
+            .Include(payment => payment.Client)
+            .Where(payment =>
+                payment.DocumentKind == DocumentKind.Invoice &&
+                payment.Type == PaymentType.Income &&
+                payment.Status != PaymentStatus.Cancelled &&
+                payment.InvoiceId.HasValue)
+            .ToListAsync(ct);
+
+        var candidates = invoicePayments
+            .Select(payment =>
+            {
+                var invoiceNumber = payment.Invoice?.Number ?? payment.Account ?? payment.LegacyAccountNumber ?? string.Empty;
+                var numberTokens = BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber);
+                var outstandingAmount = CalculateOutstandingAmount(payment.Amount, payment.PaidAmount, payment.Status);
+                var score = 0;
+                var reasons = new List<string>();
+
+                if (purposeTokens.Count > 0 && numberTokens.Any(purposeTokens.Contains))
+                {
+                    score += 100;
+                    reasons.Add("номер счёта найден в назначении");
+                }
+
+                if (outstandingAmount > 0m && operationAmount <= outstandingAmount + 0.009m)
+                {
+                    score += 20;
+                    reasons.Add("сумма помещается в остаток счёта");
+                }
+
+                if (Math.Abs(outstandingAmount - operationAmount) <= 0.009m)
+                {
+                    score += 40;
+                    reasons.Add("сумма совпадает с остатком счёта");
+                }
+
+                var candidateName = payment.Client?.Name ?? payment.CounterpartyName;
+                if (NamesLookRelated(operationCounterparty, candidateName))
+                {
+                    score += 20;
+                    reasons.Add("похожий контрагент");
+                }
+
+                return new MoneyOperationInvoiceCandidateDto
+                {
+                    InvoiceId = payment.InvoiceId!.Value,
+                    PaymentId = payment.Id,
+                    InvoiceNumber = invoiceNumber,
+                    InvoiceDate = payment.Invoice?.Date ?? payment.AccountDate,
+                    Amount = payment.Amount,
+                    PaidAmount = payment.PaidAmount,
+                    OutstandingAmount = outstandingAmount,
+                    Status = payment.Status,
+                    ClientId = payment.ClientId,
+                    ClientName = payment.Client?.Name,
+                    CounterpartyName = payment.CounterpartyName,
+                    MatchReason = reasons.Count == 0 ? null : string.Join(", ", reasons),
+                    Score = score,
+                };
+            })
+            .Where(candidate => candidate.OutstandingAmount > 0m && candidate.Score > 0)
+            .OrderByDescending(candidate => candidate.Score)
+            .ThenByDescending(candidate => candidate.InvoiceDate)
+            .ThenByDescending(candidate => candidate.InvoiceId)
+            .Take(10)
+            .ToList();
+
+        return Ok(candidates);
+    }
+
+    [HttpPost("{id:int}/ignore")]
+    public async Task<IActionResult> Ignore(int id, CancellationToken ct)
+    {
+        var operation = await _db.MoneyOperations.FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (operation is null)
+        {
+            return NotFound();
+        }
+
+        if (IsAppliedToInvoice(operation))
+        {
+            return BadRequest("Связанную со счётом денежную операцию нельзя пометить как игнорируемую без операции сторно.");
+        }
+
+        operation.LinkedInvoiceId = null;
+        operation.PaidInvoiceNumber = null;
+        operation.PaidAccountName = null;
+        operation.MatchStatus = MoneyOperationMatchStatus.Ignored;
+        operation.MatchedAt = null;
+        operation.MatchComment = "Операция выписки помечена как не требующая сверки.";
+        operation.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+        return Ok(operation);
+    }
+
+    [HttpPost("{id:int}/link-invoice")]
+    public async Task<IActionResult> LinkInvoice(
+        int id,
+        [FromBody] LinkMoneyOperationInvoiceRequest request,
+        CancellationToken ct)
+    {
+        if (request.InvoiceId <= 0)
+        {
+            return BadRequest("Не выбран счёт для сверки.");
+        }
+
+        var operation = await _db.MoneyOperations.FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (operation is null)
+        {
+            return NotFound();
+        }
+
+        var validation = await ValidateInvoiceLinkAsync(operation, request.InvoiceId, ct);
+        if (validation.Error is not null)
+        {
+            return BadRequest(validation.Error);
+        }
+
+        var invoice = validation.Invoice!;
+        operation.LinkedInvoiceId = invoice.Id;
+        operation.PaidInvoiceNumber = invoice.Number;
+        operation.PaidAccountName = invoice.Number;
+        operation.MatchStatus = MoneyOperationMatchStatus.Matched;
+        operation.MatchedAt = DateTime.UtcNow;
+        operation.MatchComment = string.IsNullOrWhiteSpace(request.Comment)
+            ? $"Денежная операция сверена со счётом {invoice.Number}."
+            : request.Comment.Trim();
+        operation.UpdatedAt = DateTime.UtcNow;
+
+        await ApplyMoneyOperationToInvoicePaymentAsync(operation, invoice.Id, ct);
+        await _db.SaveChangesAsync(ct);
+        return Ok(operation);
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] MoneyOperation model)
     {
@@ -698,10 +884,35 @@ public class MoneyOperationsController : ControllerBase
         model.DirectionName = string.IsNullOrWhiteSpace(model.DirectionName) ? null : model.DirectionName.Trim();
         model.SalesPointName = string.IsNullOrWhiteSpace(model.SalesPointName) ? null : model.SalesPointName.Trim();
         model.PaidAccountName = string.IsNullOrWhiteSpace(model.PaidAccountName) ? null : model.PaidAccountName.Trim();
+        model.MatchComment = string.IsNullOrWhiteSpace(model.MatchComment) ? null : model.MatchComment.Trim();
+        if (model.LinkedInvoiceId.HasValue)
+        {
+            var validation = await ValidateInvoiceLinkAsync(model, model.LinkedInvoiceId.Value);
+            var invoice = validation.Invoice;
+            if (validation.Error is not null)
+            {
+                return BadRequest(validation.Error);
+            }
+
+            model.PaidInvoiceNumber = invoice!.Number;
+            model.PaidAccountName = invoice.Number;
+            model.MatchStatus = MoneyOperationMatchStatus.Matched;
+            model.MatchedAt = DateTime.UtcNow;
+        }
+        else if (model.MatchStatus == MoneyOperationMatchStatus.Matched)
+        {
+            model.MatchStatus = MoneyOperationMatchStatus.None;
+            model.MatchedAt = null;
+        }
         model.CreatedAt = DateTime.UtcNow;
 
         _db.MoneyOperations.Add(model);
         await _db.SaveChangesAsync();
+        if (model.LinkedInvoiceId.HasValue && model.MatchStatus == MoneyOperationMatchStatus.Matched)
+        {
+            await ApplyMoneyOperationToInvoicePaymentAsync(model, model.LinkedInvoiceId.Value);
+            await _db.SaveChangesAsync();
+        }
         await SyncCashOrderAsync(model);
         return Created($"/api/money-operations/{model.Id}", model);
     }
@@ -730,11 +941,19 @@ public class MoneyOperationsController : ControllerBase
         await using var stream = file.OpenReadStream();
         using var memory = new MemoryStream();
         await stream.CopyToAsync(memory, ct);
-        var text = DecodeStatementBytes(memory.ToArray());
+        var statementBytes = memory.ToArray();
+        var fileHash = Convert.ToHexString(SHA256.HashData(statementBytes)).ToLowerInvariant();
+        var text = DecodeStatementBytes(statementBytes);
         if (LooksLikeClientBankExchange(text))
         {
             var clientBankResult = ParseClientBankExchange(text);
-            return Ok(await ImportBankStatementItemsAsync(clientBankResult.Items, clientBankResult.Result, ct));
+            return Ok(await ImportBankStatementItemsAsync(
+                clientBankResult.Items,
+                clientBankResult.Result,
+                file.FileName,
+                statementBytes.Length,
+                fileHash,
+                ct));
         }
 
         var rows = ParseDelimitedRows(text);
@@ -812,10 +1031,196 @@ public class MoneyOperationsController : ControllerBase
             var purpose = NormalizeStatementText(GetOptionalCell(row, map.Purpose));
             var account = NormalizeStatementText(GetOptionalCell(row, map.Account)) ?? "Расчетный счет";
 
-            importItems.Add(new BankStatementImportItem(date.Date, direction, amount, account, counterparty, purpose, documentNumber));
+            importItems.Add(new BankStatementImportItem(rowNumber, date.Date, direction, amount, account, counterparty, purpose, documentNumber));
         }
 
-        return Ok(await ImportBankStatementItemsAsync(importItems, result, ct));
+        return Ok(await ImportBankStatementItemsAsync(importItems, result, file.FileName, statementBytes.Length, fileHash, ct));
+    }
+
+    [HttpGet("bank-statement/imports")]
+    public async Task<ActionResult<PagedResponse<BankStatementImportBatchListItemDto>>> GetBankStatementImports(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
+        CancellationToken ct = default)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 5, 100);
+
+        var query = _db.BankStatementImportBatches.AsNoTracking().OrderByDescending(batch => batch.CreatedAt);
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(batch => new BankStatementImportBatchListItemDto
+            {
+                Id = batch.Id,
+                FileName = batch.FileName,
+                Status = batch.Status,
+                RowsRead = batch.RowsRead,
+                CreatedRows = batch.CreatedRows,
+                SkippedRows = batch.SkippedRows,
+                ErrorRows = batch.ErrorRows,
+                RollbackRows = batch.RollbackRows,
+                CreatedAt = batch.CreatedAt,
+                RolledBackAt = batch.RolledBackAt,
+            })
+            .ToListAsync(ct);
+
+        return Ok(new PagedResponse<BankStatementImportBatchListItemDto>
+        {
+            Items = items,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+        });
+    }
+
+    [HttpGet("bank-statement/imports/{batchId:int}")]
+    public async Task<ActionResult<BankStatementImportBatchDetailDto>> GetBankStatementImport(int batchId, CancellationToken ct)
+    {
+        var batch = await _db.BankStatementImportBatches
+            .AsNoTracking()
+            .Where(item => item.Id == batchId)
+            .Select(item => new BankStatementImportBatchDetailDto
+            {
+                Id = item.Id,
+                FileName = item.FileName,
+                FileHash = item.FileHash,
+                FileSize = item.FileSize,
+                Status = item.Status,
+                RowsRead = item.RowsRead,
+                CreatedRows = item.CreatedRows,
+                SkippedRows = item.SkippedRows,
+                ErrorRows = item.ErrorRows,
+                RollbackRows = item.RollbackRows,
+                ErrorSummary = item.ErrorSummary,
+                CreatedAt = item.CreatedAt,
+                RolledBackAt = item.RolledBackAt,
+                Rows = item.Rows
+                    .OrderBy(row => row.RowNumber)
+                    .Select(row => new BankStatementImportRowDto
+                    {
+                        Id = row.Id,
+                        RowNumber = row.RowNumber,
+                        Status = row.Status,
+                        Message = row.Message,
+                        MoneyOperationId = row.MoneyOperationId,
+                        Date = row.Date,
+                        Direction = row.Direction,
+                        Amount = row.Amount,
+                        AccountName = row.AccountName,
+                        CounterpartyName = row.CounterpartyName,
+                        Purpose = row.Purpose,
+                        PaymentOrderNumber = row.PaymentOrderNumber,
+                        CreatedAt = row.CreatedAt,
+                        RolledBackAt = row.RolledBackAt,
+                    })
+                    .ToList(),
+            })
+            .FirstOrDefaultAsync(ct);
+
+        return batch is null ? NotFound() : Ok(batch);
+    }
+
+    [HttpPost("bank-statement/imports/{batchId:int}/rollback")]
+    public async Task<ActionResult<BankStatementImportRollbackResultDto>> RollbackBankStatementImport(int batchId, CancellationToken ct)
+    {
+        var batch = await _db.BankStatementImportBatches
+            .Include(item => item.Rows)
+            .FirstOrDefaultAsync(item => item.Id == batchId, ct);
+        if (batch is null)
+        {
+            return NotFound();
+        }
+
+        if (batch.Status == BankStatementImportBatchStatus.RolledBack)
+        {
+            return Ok(new BankStatementImportRollbackResultDto
+            {
+                BatchId = batch.Id,
+                Status = batch.Status,
+                DeletedOperations = 0,
+                SkippedRows = 0,
+                Messages = ["Импорт уже был откачен."],
+            });
+        }
+
+        var operationIds = batch.Rows
+            .Where(row => row.MoneyOperationId.HasValue && row.Status == BankStatementImportRowStatus.Created)
+            .Select(row => row.MoneyOperationId!.Value)
+            .ToArray();
+        var operations = await _db.MoneyOperations
+            .Include(operation => operation.CashOrders)
+            .Where(operation => operationIds.Contains(operation.Id))
+            .ToListAsync(ct);
+
+        var messages = new List<string>();
+        var deleted = 0;
+        var skipped = 0;
+
+        foreach (var row in batch.Rows.Where(row => row.Status == BankStatementImportRowStatus.Created))
+        {
+            if (!row.MoneyOperationId.HasValue)
+            {
+                row.Status = BankStatementImportRowStatus.RollbackSkipped;
+                row.Message = "Операция уже отсутствует.";
+                row.RolledBackAt = DateTime.UtcNow;
+                skipped++;
+                continue;
+            }
+
+            var operation = operations.FirstOrDefault(item => item.Id == row.MoneyOperationId.Value);
+            if (operation is null)
+            {
+                row.Status = BankStatementImportRowStatus.RollbackSkipped;
+                row.Message = "Операция уже отсутствует.";
+                row.RolledBackAt = DateTime.UtcNow;
+                skipped++;
+                continue;
+            }
+
+            if (operation.LinkedInvoiceId.HasValue || operation.MatchStatus == MoneyOperationMatchStatus.Matched)
+            {
+                row.Status = BankStatementImportRowStatus.RollbackSkipped;
+                row.Message = "Операция уже сверена со счётом, автоматический откат пропущен.";
+                row.RolledBackAt = DateTime.UtcNow;
+                messages.Add($"Строка {row.RowNumber}: операция сверена со счётом.");
+                skipped++;
+                continue;
+            }
+
+            if (operation.CashOrders.Any(order => order.Status != CashOrderStatus.Cancelled))
+            {
+                row.Status = BankStatementImportRowStatus.RollbackSkipped;
+                row.Message = "По операции есть кассовый ордер, автоматический откат пропущен.";
+                row.RolledBackAt = DateTime.UtcNow;
+                messages.Add($"Строка {row.RowNumber}: есть кассовый ордер.");
+                skipped++;
+                continue;
+            }
+
+            _db.MoneyOperations.Remove(operation);
+            row.Status = BankStatementImportRowStatus.RolledBack;
+            row.RolledBackAt = DateTime.UtcNow;
+            deleted++;
+        }
+
+        batch.RollbackRows = deleted;
+        batch.RolledBackAt = DateTime.UtcNow;
+        batch.Status = skipped == 0
+            ? BankStatementImportBatchStatus.RolledBack
+            : BankStatementImportBatchStatus.RollbackBlocked;
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new BankStatementImportRollbackResultDto
+        {
+            BatchId = batch.Id,
+            Status = batch.Status,
+            DeletedOperations = deleted,
+            SkippedRows = skipped,
+            Messages = messages,
+        });
     }
 
     [HttpPut("{id:int}")]
@@ -830,6 +1235,22 @@ public class MoneyOperationsController : ControllerBase
         if (model.Amount < 0)
         {
             return BadRequest("Amount must be non-negative.");
+        }
+
+        var originalLinkedInvoiceId = entity.LinkedInvoiceId;
+        var originalMatchStatus = entity.MatchStatus;
+        var originalAmount = entity.Amount;
+        if (originalLinkedInvoiceId.HasValue)
+        {
+            if (model.LinkedInvoiceId != originalLinkedInvoiceId)
+            {
+                return BadRequest("Сверенную денежную операцию нельзя отвязать или перенести на другой счёт через редактирование.");
+            }
+
+            if (Math.Abs(originalAmount - model.Amount) > 0.009m)
+            {
+                return BadRequest("Сумму сверенной денежной операции нельзя изменить через редактирование.");
+            }
         }
 
         entity.Source = model.Source;
@@ -852,8 +1273,45 @@ public class MoneyOperationsController : ControllerBase
         entity.SalesPointName = string.IsNullOrWhiteSpace(model.SalesPointName) ? null : model.SalesPointName.Trim();
         entity.PaymentPriority = model.PaymentPriority;
         entity.PaidAccountName = string.IsNullOrWhiteSpace(model.PaidAccountName) ? null : model.PaidAccountName.Trim();
+        entity.MatchComment = string.IsNullOrWhiteSpace(model.MatchComment) ? null : model.MatchComment.Trim();
+        if (model.LinkedInvoiceId.HasValue)
+        {
+            var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(item => item.Id == model.LinkedInvoiceId.Value);
+            if (invoice is null)
+            {
+                return BadRequest("Счёт для сверки банковской операции не найден.");
+            }
+
+            var validation = await ValidateInvoiceLinkAsync(entity, invoice.Id);
+            if (validation.Error is not null)
+            {
+                return BadRequest(validation.Error);
+            }
+
+            entity.LinkedInvoiceId = invoice.Id;
+            entity.PaidInvoiceNumber = invoice.Number;
+            entity.PaidAccountName = invoice.Number;
+            entity.MatchStatus = MoneyOperationMatchStatus.Matched;
+            entity.MatchedAt = entity.MatchedAt ?? DateTime.UtcNow;
+            if (!originalLinkedInvoiceId.HasValue || originalMatchStatus != MoneyOperationMatchStatus.Matched)
+            {
+                await ApplyMoneyOperationToInvoicePaymentAsync(entity, invoice.Id);
+            }
+        }
+        else
+        {
+            entity.LinkedInvoiceId = null;
+            entity.MatchedAt = null;
+            entity.MatchStatus = model.MatchStatus switch
+            {
+                MoneyOperationMatchStatus.ClarificationRequired => MoneyOperationMatchStatus.ClarificationRequired,
+                MoneyOperationMatchStatus.Ignored => MoneyOperationMatchStatus.Ignored,
+                _ => MoneyOperationMatchStatus.None,
+            };
+        }
         entity.UpdatedAt = DateTime.UtcNow;
 
+        await _db.SaveChangesAsync();
         await SyncCashOrderAsync(entity);
         return Ok(entity);
     }
@@ -865,6 +1323,11 @@ public class MoneyOperationsController : ControllerBase
         if (entity is null)
         {
             return NotFound();
+        }
+
+        if (IsAppliedToInvoice(entity))
+        {
+            return BadRequest("Связанную со счётом денежную операцию нельзя удалить без операции сторно.");
         }
 
         var linkedOrders = await _db.CashOrders
@@ -880,6 +1343,9 @@ public class MoneyOperationsController : ControllerBase
         await _db.SaveChangesAsync();
         return NoContent();
     }
+
+    private static bool IsAppliedToInvoice(MoneyOperation operation)
+        => operation.LinkedInvoiceId.HasValue && operation.MatchStatus == MoneyOperationMatchStatus.Matched;
 
     private async Task SyncCashOrderAsync(MoneyOperation operation)
     {
@@ -983,6 +1449,14 @@ public class MoneyOperationsController : ControllerBase
             SalesPointName = row.SalesPointName,
             PaymentPriority = row.PaymentPriority,
             PaidAccountName = row.PaidAccountName,
+            LinkedInvoiceId = row.LinkedInvoiceId,
+            LinkedInvoiceNumber = row.LinkedInvoiceNumber,
+            LinkedInvoiceDate = row.LinkedInvoiceDate,
+            MatchStatus = string.IsNullOrWhiteSpace(row.MatchStatus)
+                ? MoneyOperationMatchStatus.None
+                : ParseEnum<MoneyOperationMatchStatus>(row.MatchStatus),
+            MatchedAt = row.MatchedAt,
+            MatchComment = row.MatchComment,
             CreatedAt = row.CreatedAt,
             UpdatedAt = row.UpdatedAt,
             IsReadonly = row.IsReadonly,
@@ -1050,6 +1524,9 @@ public class MoneyOperationsController : ControllerBase
     private async Task<BankStatementImportResultDto> ImportBankStatementItemsAsync(
         IReadOnlyCollection<BankStatementImportItem> items,
         BankStatementImportResultDto result,
+        string fileName,
+        long fileSize,
+        string fileHash,
         CancellationToken ct)
     {
         if (items.Count == 0)
@@ -1060,7 +1537,20 @@ public class MoneyOperationsController : ControllerBase
         var minDate = items.Min(item => item.Date);
         var maxDate = items.Max(item => item.Date);
         await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        var batch = new BankStatementImportBatch
+        {
+            FileName = Path.GetFileName(fileName),
+            FileHash = fileHash,
+            FileSize = fileSize,
+            RowsRead = result.RowsRead,
+            ErrorRows = result.Errors.Count,
+            ErrorSummary = result.Errors.Count == 0 ? null : string.Join(Environment.NewLine, result.Errors.Take(50)),
+            CreatedAt = DateTime.UtcNow,
+        };
+        _db.BankStatementImportBatches.Add(batch);
+
         var importKeys = new HashSet<string>(StringComparer.Ordinal);
+        var pendingRows = new List<BankStatementImportRow>();
         var pendingOperations = new List<MoneyOperation>();
         var existingOperations = await _db.MoneyOperations
             .AsNoTracking()
@@ -1078,6 +1568,40 @@ public class MoneyOperationsController : ControllerBase
                 (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) >= minDate &&
                 (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) <= maxDate)
             .ToListAsync(ct);
+        var invoiceNumbersFromStatement = items
+            .SelectMany(item => ExtractInvoiceNumberTokens(item.Purpose))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var invoiceCandidates = (await _db.Payments
+                .AsNoTracking()
+                .Include(payment => payment.Invoice)
+                .Include(payment => payment.Client)
+                .Where(payment =>
+                    payment.DocumentKind == DocumentKind.Invoice &&
+                    payment.Type == PaymentType.Income &&
+                    payment.Status != PaymentStatus.Cancelled &&
+                    payment.InvoiceId.HasValue)
+                .ToListAsync(ct))
+                .Select(payment => new BankStatementInvoiceCandidate(
+                    payment.Id,
+                    payment.InvoiceId!.Value,
+                    payment.Invoice?.Number ?? payment.Account ?? string.Empty,
+                    payment.Account,
+                    payment.Amount,
+                    payment.PaidAmount,
+                    payment.Status,
+                    payment.ClientId,
+                    payment.Client != null ? payment.Client.Name : null,
+                    payment.CounterpartyName,
+                    BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber)))
+                .Where(candidate =>
+                    invoiceNumbersFromStatement.Count == 0 ||
+                    candidate.NumberTokens.Any(invoiceNumbersFromStatement.Contains) ||
+                    items.Any(item =>
+                        item.Direction == MoneyOperationDirection.Income &&
+                        Math.Abs(candidate.OutstandingAmount - item.Amount) <= 0.009m &&
+                        NamesLookRelated(item.CounterpartyName, candidate.ClientName ?? candidate.CounterpartyName)))
+                .ToList();
 
         foreach (var item in items)
         {
@@ -1092,6 +1616,7 @@ public class MoneyOperationsController : ControllerBase
             if (!importKeys.Add(importKey))
             {
                 result.Skipped++;
+                pendingRows.Add(CreateImportRow(batch, item, importKey, BankStatementImportRowStatus.Skipped, "Повтор строки внутри файла."));
                 continue;
             }
 
@@ -1105,6 +1630,7 @@ public class MoneyOperationsController : ControllerBase
             if (alreadyExists)
             {
                 result.Skipped++;
+                pendingRows.Add(CreateImportRow(batch, item, importKey, BankStatementImportRowStatus.Skipped, "Такая банковская операция уже есть в журнале."));
                 continue;
             }
 
@@ -1122,6 +1648,7 @@ public class MoneyOperationsController : ControllerBase
             if (matchingPaymentExists)
             {
                 result.Skipped++;
+                pendingRows.Add(CreateImportRow(batch, item, importKey, BankStatementImportRowStatus.Skipped, "Найден уже выполненный банковский платёж."));
                 continue;
             }
 
@@ -1139,11 +1666,26 @@ public class MoneyOperationsController : ControllerBase
                 Date = item.Date,
                 RecognitionDate = item.Date,
                 Purpose = item.Purpose,
+                MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+                BankStatementImportBatch = batch,
                 CreatedAt = DateTime.UtcNow,
             };
+            var autoMatch = TryResolveBankStatementInvoiceMatch(item, invoiceCandidates);
+            var importRowMessage = (string?)null;
+            if (autoMatch is not null)
+            {
+                operation.LinkedInvoiceId = autoMatch.InvoiceId;
+                operation.PaidInvoiceNumber = autoMatch.InvoiceNumber;
+                operation.PaidAccountName = autoMatch.InvoiceNumber;
+                operation.MatchStatus = MoneyOperationMatchStatus.Matched;
+                operation.MatchedAt = DateTime.UtcNow;
+                operation.MatchComment = BuildBankStatementAutoMatchComment(item, autoMatch);
+                importRowMessage = operation.MatchComment;
+            }
 
             _db.MoneyOperations.Add(operation);
             pendingOperations.Add(operation);
+            pendingRows.Add(CreateImportRow(batch, item, importKey, BankStatementImportRowStatus.Created, importRowMessage, operation));
 
             result.Created++;
             result.Operations.Add(new BankStatementImportCreatedOperationDto
@@ -1153,21 +1695,71 @@ public class MoneyOperationsController : ControllerBase
                 Amount = operation.Amount,
                 CounterpartyName = operation.CounterpartyName,
                 PaymentOrderNumber = operation.PaymentOrderNumber,
+                MatchStatus = operation.MatchStatus,
             });
         }
+
+        batch.CreatedRows = result.Created;
+        batch.SkippedRows = result.Skipped;
+        batch.ErrorRows = result.Errors.Count;
+        batch.Status = result.Errors.Count > 0
+            ? BankStatementImportBatchStatus.AppliedWithErrors
+            : BankStatementImportBatchStatus.Applied;
+        _db.BankStatementImportRows.AddRange(pendingRows);
 
         if (pendingOperations.Count > 0)
         {
             await _db.SaveChangesAsync(ct);
-            for (var index = 0; index < pendingOperations.Count; index++)
+            var createdIndex = 0;
+            for (var index = 0; index < result.Operations.Count; index++)
             {
-                result.Operations[index].Id = pendingOperations[index].Id;
+                result.Operations[index].Id = pendingOperations[createdIndex].Id;
+                createdIndex++;
             }
+
+            foreach (var operation in pendingOperations.Where(item =>
+                         item.LinkedInvoiceId.HasValue && item.MatchStatus == MoneyOperationMatchStatus.Matched))
+            {
+                await ApplyMoneyOperationToInvoicePaymentAsync(operation, operation.LinkedInvoiceId!.Value, ct);
+            }
+
+            await _db.SaveChangesAsync(ct);
         }
+        else
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+
+        result.BatchId = batch.Id;
 
         await transaction.CommitAsync(ct);
         return result;
     }
+
+    private static BankStatementImportRow CreateImportRow(
+        BankStatementImportBatch batch,
+        BankStatementImportItem item,
+        string importKey,
+        string status,
+        string? message,
+        MoneyOperation? operation = null)
+        => new()
+        {
+            Batch = batch,
+            RowNumber = item.RowNumber,
+            ImportKey = importKey,
+            Status = status,
+            Message = message,
+            MoneyOperation = operation,
+            Date = item.Date,
+            Direction = item.Direction,
+            Amount = item.Amount,
+            AccountName = item.AccountName,
+            CounterpartyName = item.CounterpartyName,
+            Purpose = item.Purpose,
+            PaymentOrderNumber = item.DocumentNumber,
+            CreatedAt = DateTime.UtcNow,
+        };
 
     private static bool LooksLikeClientBankExchange(string text)
         => text.Contains("1CClientBankExchange", StringComparison.OrdinalIgnoreCase) ||
@@ -1273,6 +1865,7 @@ public class MoneyOperationsController : ControllerBase
         }
 
         items.Add(new BankStatementImportItem(
+            result.RowsRead,
             date.Date,
             direction,
             Math.Abs(amount),
@@ -1440,6 +2033,336 @@ public class MoneyOperationsController : ControllerBase
         string? counterparty)
         => string.Join("|", date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), direction, amount.ToString("0.00", CultureInfo.InvariantCulture), documentNumber ?? string.Empty, counterparty ?? string.Empty);
 
+    private static BankStatementInvoiceCandidate? TryResolveBankStatementInvoiceMatch(
+        BankStatementImportItem item,
+        IReadOnlyCollection<BankStatementInvoiceCandidate> candidates)
+    {
+        if (item.Direction != MoneyOperationDirection.Income)
+        {
+            return null;
+        }
+
+        var tokens = ExtractInvoiceNumberTokens(item.Purpose).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (tokens.Count > 0)
+        {
+            var matchingCandidates = candidates
+                .Where(candidate =>
+                    candidate.OutstandingAmount > 0m &&
+                    item.Amount <= candidate.OutstandingAmount + 0.009m &&
+                    candidate.NumberTokens.Any(tokens.Contains))
+                .GroupBy(candidate => candidate.InvoiceId)
+                .Select(group => group.First())
+                .ToList();
+
+            if (matchingCandidates.Count == 1)
+            {
+                return matchingCandidates[0];
+            }
+
+            var exactAmountCandidates = matchingCandidates
+                .Where(candidate => Math.Abs(candidate.OutstandingAmount - item.Amount) <= 0.009m)
+                .ToList();
+            if (exactAmountCandidates.Count == 1)
+            {
+                return exactAmountCandidates[0];
+            }
+        }
+
+        var exactNamedCandidates = candidates
+            .Where(candidate =>
+                candidate.OutstandingAmount > 0m &&
+                Math.Abs(candidate.OutstandingAmount - item.Amount) <= 0.009m &&
+                NamesLookRelated(item.CounterpartyName, candidate.ClientName ?? candidate.CounterpartyName))
+            .GroupBy(candidate => candidate.InvoiceId)
+            .Select(group => group.First())
+            .ToList();
+        return exactNamedCandidates.Count == 1 ? exactNamedCandidates[0] : null;
+    }
+
+    private static string BuildBankStatementAutoMatchComment(BankStatementImportItem item, BankStatementInvoiceCandidate candidate)
+    {
+        var tokens = ExtractInvoiceNumberTokens(item.Purpose).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (tokens.Count > 0 && candidate.NumberTokens.Any(tokens.Contains))
+        {
+            return $"Автоматически сверено по номеру счёта {candidate.InvoiceNumber} из назначения платежа.";
+        }
+
+        return $"Автоматически сверено со счётом {candidate.InvoiceNumber} по сумме и клиенту из выписки.";
+    }
+
+    private static IEnumerable<string> ExtractInvoiceNumberTokens(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            yield break;
+        }
+
+        foreach (Match match in Regex.Matches(
+                     text,
+                     @"(?:сч[её]т\w*|invoice|inv)\s*(?:№|#|n|no\.?)?\s*([A-Za-zА-Яа-я0-9][A-Za-zА-Яа-я0-9\/\-_]*)",
+                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                     TimeSpan.FromMilliseconds(100)))
+        {
+            var token = NormalizeInvoiceNumberToken(match.Groups[1].Value);
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                yield return token;
+            }
+        }
+
+        foreach (Match match in Regex.Matches(
+                     text,
+                     @"(?:№|#)\s*([A-Za-zА-Яа-я0-9][A-Za-zА-Яа-я0-9\/\-_]*)",
+                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                     TimeSpan.FromMilliseconds(100)))
+        {
+            var token = NormalizeInvoiceNumberToken(match.Groups[1].Value);
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                yield return token;
+            }
+        }
+    }
+
+    private static HashSet<string> BuildInvoiceNumberTokenSet(params string?[] values)
+    {
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in values)
+        {
+            var token = NormalizeInvoiceNumberToken(value);
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                tokens.Add(token);
+            }
+        }
+
+        return tokens;
+    }
+
+    private static string? NormalizeInvoiceNumberToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim().Trim('№', '#', '.', ',', ';', ':', ')', '(', '[', ']');
+        normalized = Regex.Replace(normalized, @"\s+", string.Empty, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+        normalized = normalized.ToLowerInvariant();
+        if (!normalized.All(char.IsDigit))
+        {
+            return normalized;
+        }
+
+        var withoutLeadingZeroes = normalized.TrimStart('0');
+        return withoutLeadingZeroes.Length == 0 ? "0" : withoutLeadingZeroes;
+    }
+
+    private static decimal CalculateOutstandingAmount(decimal amount, decimal paidAmount, PaymentStatus status)
+        => status == PaymentStatus.Completed
+            ? 0m
+            : Math.Round(Math.Max(amount - Math.Min(Math.Max(paidAmount, 0m), amount), 0m), 2, MidpointRounding.AwayFromZero);
+
+    private async Task<InvoiceLinkValidationResult> ValidateInvoiceLinkAsync(
+        MoneyOperation operation,
+        int invoiceId,
+        CancellationToken ct = default)
+    {
+        var invoice = await _db.Invoices
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == invoiceId, ct);
+        if (invoice is null)
+        {
+            return new(null, "Счёт для сверки денежной операции не найден.");
+        }
+
+        if (operation.Direction != MoneyOperationDirection.Income)
+        {
+            return new(invoice, "К счёту можно привязать только приходную денежную операцию.");
+        }
+
+        var invoicePayment = await _db.Payments
+            .AsNoTracking()
+            .Where(payment =>
+                payment.InvoiceId == invoiceId &&
+                payment.DocumentKind == DocumentKind.Invoice &&
+                payment.Type == PaymentType.Income &&
+                payment.Status != PaymentStatus.Cancelled)
+            .OrderByDescending(payment => payment.Id)
+            .FirstOrDefaultAsync(ct);
+        if (invoicePayment is null)
+        {
+            return new(invoice, null);
+        }
+
+        var outstandingAmount = CalculateOutstandingAmount(invoicePayment.Amount, invoicePayment.PaidAmount, invoicePayment.Status);
+        if (outstandingAmount <= 0m)
+        {
+            return new(invoice, "Счёт уже полностью оплачен, привязка денежной операции не выполнена.");
+        }
+
+        if (operation.Amount > outstandingAmount + 0.009m && !invoicePayment.ClientId.HasValue)
+        {
+            return new(invoice, $"Сумма денежной операции больше остатка по счёту, а клиент счёта не указан для зачисления переплаты. Остаток: {outstandingAmount:0.00}.");
+        }
+
+        return new(invoice, null);
+    }
+
+    private async Task ApplyMoneyOperationToInvoicePaymentAsync(
+        MoneyOperation operation,
+        int invoiceId,
+        CancellationToken ct = default)
+    {
+        if (operation.Direction != MoneyOperationDirection.Income || operation.Amount <= 0m)
+        {
+            return;
+        }
+
+        var payment = await _db.Payments
+            .Where(item =>
+                item.InvoiceId == invoiceId &&
+                item.DocumentKind == DocumentKind.Invoice &&
+                item.Type == PaymentType.Income &&
+                item.Status != PaymentStatus.Cancelled)
+            .OrderByDescending(item => item.Id)
+            .FirstOrDefaultAsync(ct);
+        if (payment is null)
+        {
+            return;
+        }
+
+        var currentPaidAmount = Math.Max(payment.PaidAmount, 0m);
+        var outstandingAmount = CalculateOutstandingAmount(payment.Amount, currentPaidAmount, payment.Status);
+        if (outstandingAmount <= 0m)
+        {
+            return;
+        }
+
+        var appliedAmount = Math.Round(Math.Min(operation.Amount, outstandingAmount), 2, MidpointRounding.AwayFromZero);
+        if (appliedAmount <= 0m)
+        {
+            return;
+        }
+        var overpaymentAmount = Math.Round(operation.Amount - appliedAmount, 2, MidpointRounding.AwayFromZero);
+
+        payment.PaidAmount = Math.Round(currentPaidAmount + appliedAmount, 2, MidpointRounding.AwayFromZero);
+        payment.LastPaymentDate = operation.Date;
+        payment.PaymentDocumentDate ??= operation.RecognitionDate ?? operation.Date;
+        payment.PaymentOrderNumber ??= operation.PaymentOrderNumber;
+
+        if (payment.PaidAmount + 0.009m >= payment.Amount)
+        {
+            payment.PaidAmount = payment.Amount;
+            payment.Status = PaymentStatus.Completed;
+            payment.IsPaid = true;
+            payment.PaidDate ??= operation.Date;
+        }
+        else
+        {
+            payment.Status = PaymentStatus.Processing;
+            payment.IsPaid = false;
+            payment.PaidDate = null;
+        }
+
+        var sourceLabel = operation.Source switch
+        {
+            MoneyOperationSource.Cash => "касса",
+            MoneyOperationSource.Card => "карты",
+            MoneyOperationSource.EMoney => "e-money",
+            _ => "банк",
+        };
+        var note = $"Системно: {DateTime.UtcNow:dd.MM.yyyy HH:mm:ss} — зачтено поступление из раздела \"Деньги\" ({sourceLabel}) на сумму {appliedAmount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"))}.";
+        payment.SystemNotes = string.IsNullOrWhiteSpace(payment.SystemNotes)
+            ? note
+            : $"{payment.SystemNotes.Trim()}\n{note}";
+
+        if (overpaymentAmount > 0.009m && payment.ClientId.HasValue && operation.Id > 0)
+        {
+            var externalKey = $"money-operation-overpayment:{operation.Id}";
+            var existing = await _db.ClientBalanceTransactions
+                .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
+            var description = $"Переплата по денежной операции #{operation.Id}";
+
+            if (existing is null)
+            {
+                _db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+                {
+                    ClientId = payment.ClientId.Value,
+                    InvoiceId = payment.InvoiceId,
+                    PaymentId = payment.Id,
+                    Amount = overpaymentAmount,
+                    Type = ClientBalanceTransactionType.Overpayment,
+                    Direction = ClientBalanceDirection.Credit,
+                    Description = description,
+                    ExternalKey = externalKey,
+                    CreatedAt = DateTime.UtcNow,
+                });
+            }
+            else
+            {
+                existing.ClientId = payment.ClientId.Value;
+                existing.InvoiceId = payment.InvoiceId;
+                existing.PaymentId = payment.Id;
+                existing.Amount = overpaymentAmount;
+                existing.Type = ClientBalanceTransactionType.Overpayment;
+                existing.Direction = ClientBalanceDirection.Credit;
+                existing.Description = description;
+            }
+
+            var overpaymentNote = $"Системно: {DateTime.UtcNow:dd.MM.yyyy HH:mm:ss} — переплата {overpaymentAmount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"))} зачислена на баланс клиента.";
+            payment.SystemNotes = $"{payment.SystemNotes.Trim()}\n{overpaymentNote}";
+        }
+    }
+
+    private static bool NamesLookRelated(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+        {
+            return false;
+        }
+
+        var normalizedLeft = NormalizeNameForMatch(left);
+        var normalizedRight = NormalizeNameForMatch(right);
+        if (normalizedLeft.Length < 4 || normalizedRight.Length < 4)
+        {
+            return false;
+        }
+
+        return normalizedLeft.Contains(normalizedRight, StringComparison.OrdinalIgnoreCase) ||
+               normalizedRight.Contains(normalizedLeft, StringComparison.OrdinalIgnoreCase) ||
+               normalizedLeft.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                   .Intersect(normalizedRight.Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.OrdinalIgnoreCase)
+                   .Any(part => part.Length >= 4);
+    }
+
+    private static string NormalizeNameForMatch(string value)
+        => Regex.Replace(value.Trim().ToLowerInvariant(), @"\s+", " ", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+
+    private sealed record BankStatementInvoiceCandidate(
+        int PaymentId,
+        int InvoiceId,
+        string InvoiceNumber,
+        string? Account,
+        decimal Amount,
+        decimal PaidAmount,
+        PaymentStatus Status,
+        int? ClientId,
+        string? ClientName,
+        string? CounterpartyName,
+        HashSet<string> NumberTokens)
+    {
+        public decimal OutstandingAmount => CalculateOutstandingAmount(Amount, PaidAmount, Status);
+    }
+
+    private sealed record InvoiceLinkValidationResult(Invoice? Invoice, string? Error);
+
+    public sealed class LinkMoneyOperationInvoiceRequest
+    {
+        public int InvoiceId { get; init; }
+        public string? Comment { get; init; }
+    }
+
     private static bool TryParseStatementDate(string value, out DateTime date)
     {
         var formats = new[] { "dd.MM.yyyy", "d.M.yyyy", "yyyy-MM-dd", "dd/MM/yyyy", "d/M/yyyy" };
@@ -1492,6 +2415,12 @@ public class MoneyOperationsController : ControllerBase
         public string? SalesPointName { get; init; }
         public int? PaymentPriority { get; init; }
         public string? PaidAccountName { get; init; }
+        public int? LinkedInvoiceId { get; init; }
+        public string? LinkedInvoiceNumber { get; init; }
+        public DateTime? LinkedInvoiceDate { get; init; }
+        public string? MatchStatus { get; init; }
+        public DateTime? MatchedAt { get; init; }
+        public string? MatchComment { get; init; }
         public DateTime CreatedAt { get; init; }
         public DateTime? UpdatedAt { get; init; }
         public bool IsReadonly { get; init; }
@@ -1536,6 +2465,7 @@ public class MoneyOperationsController : ControllerBase
     }
 
     private sealed record BankStatementImportItem(
+        int RowNumber,
         DateTime Date,
         MoneyOperationDirection Direction,
         decimal Amount,

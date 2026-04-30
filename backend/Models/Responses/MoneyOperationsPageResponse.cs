@@ -25,6 +25,12 @@ public sealed class MoneyOperationListItemDto
     public string? SalesPointName { get; init; }
     public int? PaymentPriority { get; init; }
     public string? PaidAccountName { get; init; }
+    public int? LinkedInvoiceId { get; init; }
+    public string? LinkedInvoiceNumber { get; init; }
+    public DateTime? LinkedInvoiceDate { get; init; }
+    public MoneyOperationMatchStatus MatchStatus { get; init; }
+    public DateTime? MatchedAt { get; init; }
+    public string? MatchComment { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime? UpdatedAt { get; init; }
     public bool IsReadonly { get; init; }
@@ -54,6 +60,23 @@ public sealed class MoneyOperationAccountSummaryDto
     public decimal EndBalance { get; init; }
     public int IncomeCount { get; init; }
     public int ExpenseCount { get; init; }
+}
+
+public sealed class MoneyOperationInvoiceCandidateDto
+{
+    public int InvoiceId { get; init; }
+    public int PaymentId { get; init; }
+    public string InvoiceNumber { get; init; } = string.Empty;
+    public DateTime? InvoiceDate { get; init; }
+    public decimal Amount { get; init; }
+    public decimal PaidAmount { get; init; }
+    public decimal OutstandingAmount { get; init; }
+    public PaymentStatus Status { get; init; }
+    public int? ClientId { get; init; }
+    public string? ClientName { get; init; }
+    public string? CounterpartyName { get; init; }
+    public string? MatchReason { get; init; }
+    public int Score { get; init; }
 }
 
 public sealed class MoneyOperationsSummaryDto
