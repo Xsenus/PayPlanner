@@ -341,6 +341,7 @@ describe('MoneyOperations integration', () => {
         source?: 'Bank' | 'Cash' | 'Card' | 'EMoney';
         moneyAccountId?: number;
         accountName?: string;
+        categoryName?: string;
         direction?: 'Income' | 'Expense' | 'Transfer';
         accountingType?: 'Fact' | 'Plan';
       }) => {
@@ -349,6 +350,7 @@ describe('MoneyOperations integration', () => {
           (!params?.source || item.source === params.source) &&
           (!params?.moneyAccountId || item.moneyAccountId === params.moneyAccountId) &&
           (!params?.accountName || item.accountName === params.accountName) &&
+          (!params?.categoryName || item.categoryName?.includes(params.categoryName)) &&
           (!params?.direction || item.direction === params.direction) &&
           (!params?.accountingType || item.accountingType === params.accountingType),
       );
@@ -812,6 +814,31 @@ describe('MoneyOperations integration', () => {
         expect.not.objectContaining({ direction: 'Income', accountingType: 'Fact' }),
       ),
     );
+  }, 15000);
+
+  it('applies a category filter to the money journal request', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({ id: 1, counterpartyName: 'Поставщик услуг', categoryName: 'Юридические услуги' }),
+      createOperation({ id: 2, counterpartyName: 'Поставщик офиса', categoryName: 'Офисные расходы' }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Поставщик услуг');
+    await user.click(screen.getByRole('button', { name: /Фильтр/ }));
+    await user.type(screen.getByLabelText('Статья'), 'Юридические');
+    await user.click(screen.getByRole('button', { name: 'Применить' }));
+
+    await waitFor(() =>
+      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ categoryName: 'Юридические' }),
+      ),
+    );
+    expect(await screen.findByText('Поставщик услуг')).toBeTruthy();
+    expect(screen.queryByText('Поставщик офиса')).toBeNull();
+    expect(screen.getByText('Статья')).toBeTruthy();
+    expect(screen.getByText('Юридические')).toBeTruthy();
   }, 15000);
 
   it('normalizes API dates in the edit form and updates the operation', async () => {

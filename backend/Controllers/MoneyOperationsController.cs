@@ -43,6 +43,7 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] MoneyOperationAccountingType? accountingType,
         [FromQuery] int? moneyAccountId = null,
         [FromQuery] string? accountName = null,
+        [FromQuery] string? categoryName = null,
         [FromQuery] int? linkedInvoiceId = null,
         [FromQuery] string? search = null,
         CancellationToken ct = default)
@@ -50,7 +51,7 @@ public class MoneyOperationsController : ControllerBase
         var list = await SqliteRetryHelper.ExecuteAsync(
             async cancellationToken =>
             {
-                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, search)
+                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
                     .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
                     .OrderByDescending(item => item.Date)
                     .ThenByDescending(item => item.Id)
@@ -73,6 +74,7 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] MoneyOperationAccountingType? accountingType,
         [FromQuery] int? moneyAccountId = null,
         [FromQuery] string? accountName = null,
+        [FromQuery] string? categoryName = null,
         [FromQuery] int? linkedInvoiceId = null,
         [FromQuery] string? search = null,
         [FromQuery] int page = 1,
@@ -84,7 +86,7 @@ public class MoneyOperationsController : ControllerBase
 
         var response = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
-            var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, search)
+            var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
                 .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value);
             var total = await query.CountAsync(cancellationToken);
             var itemRows = await query
@@ -112,7 +114,7 @@ public class MoneyOperationsController : ControllerBase
                 .FirstOrDefaultAsync(cancellationToken);
 
             var openingQuery = from.HasValue
-                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, direction, MoneyOperationAccountingType.Fact, moneyAccountId, accountName, search)
+                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, direction, MoneyOperationAccountingType.Fact, moneyAccountId, accountName, categoryName, search)
                 : null;
 
             var openingSummary = openingQuery is null
@@ -233,7 +235,7 @@ public class MoneyOperationsController : ControllerBase
         CancellationToken ct = default)
     {
         var accounts = await SqliteRetryHelper.ExecuteAsync(
-            async cancellationToken => await BuildMoneyOperationsQuery(null, null, source, null, null, null, null, null)
+            async cancellationToken => await BuildMoneyOperationsQuery(null, null, source, null, null, null, null, null, null)
                 .Where(item => item.AccountName != null && item.AccountName != "")
                 .Select(item => item.AccountName!)
                 .Distinct()
@@ -256,7 +258,7 @@ public class MoneyOperationsController : ControllerBase
         var summaries = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
             var openingQuery = from.HasValue
-                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, null, null)
+                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, null, null, null)
                     .Where(item => item.AccountName != null && item.AccountName != "")
                 : null;
 
@@ -284,7 +286,7 @@ public class MoneyOperationsController : ControllerBase
                 openingRows = openingSummaryRows.Select(MapAccountSummaryRow).ToList();
             }
 
-            var periodRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, null, null)
+            var periodRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, null, null, null)
                 .Where(item => item.AccountName != null && item.AccountName != "")
                 .GroupBy(item => new { item.Source, item.AccountName })
                 .Select(group => new MoneyOperationAccountSummaryQueryRow
@@ -350,6 +352,7 @@ public class MoneyOperationsController : ControllerBase
         MoneyOperationAccountingType? accountingType,
         int? moneyAccountId,
         string? accountName,
+        string? categoryName,
         string? search)
     {
         var customOperations = ApplyMoneyOperationFilters(
@@ -361,6 +364,7 @@ public class MoneyOperationsController : ControllerBase
                 accountingType,
                 moneyAccountId,
                 accountName,
+                categoryName,
                 search)
             .Select(operation => new MoneyOperationQueryRow
             {
@@ -452,6 +456,7 @@ public class MoneyOperationsController : ControllerBase
                 accountingType,
                 moneyAccountId,
                 accountName,
+                categoryName,
                 search)
             .Select(payment => new MoneyOperationQueryRow
             {
@@ -555,6 +560,7 @@ public class MoneyOperationsController : ControllerBase
         MoneyOperationAccountingType? accountingType,
         int? moneyAccountId,
         string? accountName,
+        string? categoryName,
         string? search)
     {
         if (from.HasValue)
@@ -595,6 +601,16 @@ public class MoneyOperationsController : ControllerBase
             query = query.Where(operation => operation.AccountName == accountTerm);
         }
 
+        if (!string.IsNullOrWhiteSpace(categoryName))
+        {
+            var categoryTerm = categoryName.Trim();
+            var categoryTitleTerm = ToTitleSearchTerm(categoryTerm);
+            query = query.Where(operation =>
+                (operation.CategoryName ?? string.Empty).Contains(categoryTerm) ||
+                (categoryTitleTerm != categoryTerm &&
+                    (operation.CategoryName ?? string.Empty).Contains(categoryTitleTerm)));
+        }
+
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim();
@@ -621,6 +637,7 @@ public class MoneyOperationsController : ControllerBase
         MoneyOperationAccountingType? accountingType,
         int? moneyAccountId,
         string? accountName,
+        string? categoryName,
         string? search)
     {
         query = query.Where(payment => payment.Status == PaymentStatus.Completed);
@@ -700,6 +717,17 @@ public class MoneyOperationsController : ControllerBase
         {
             var accountTerm = accountName.Trim();
             query = query.Where(payment => payment.Account == accountTerm);
+        }
+
+        if (!string.IsNullOrWhiteSpace(categoryName))
+        {
+            var categoryTerm = categoryName.Trim();
+            var categoryTitleTerm = ToTitleSearchTerm(categoryTerm);
+            query = query.Where(payment =>
+                payment.ClientCase != null &&
+                ((payment.ClientCase.Title ?? string.Empty).Contains(categoryTerm) ||
+                 (categoryTitleTerm != categoryTerm &&
+                    (payment.ClientCase.Title ?? string.Empty).Contains(categoryTitleTerm))));
         }
 
         if (!string.IsNullOrWhiteSpace(search))

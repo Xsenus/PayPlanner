@@ -2136,6 +2136,7 @@ export class ApiService {
     accountingType?: MoneyOperationAccountingType;
     moneyAccountId?: number;
     accountName?: string;
+    categoryName?: string;
     linkedInvoiceId?: number;
     search?: string;
   }) {
@@ -2151,6 +2152,7 @@ export class ApiService {
     accountingType?: MoneyOperationAccountingType;
     moneyAccountId?: number;
     accountName?: string;
+    categoryName?: string;
     linkedInvoiceId?: number;
     search?: string;
     page?: number;

@@ -391,6 +391,56 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task MoneyJournal_FiltersByCategoryName()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "Клиент",
+                CategoryName = "Юридические услуги",
+                Amount = 5_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 10),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "Другой клиент",
+                CategoryName = "Офисные расходы",
+                Amount = 2_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 11),
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            categoryName: "юридические",
+            search: null);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+        var item = Assert.Single(page.Items);
+        Assert.Equal("Юридические услуги", item.CategoryName);
+        Assert.Equal(5_000m, page.Summary.Income);
+    }
+
+    [Fact]
     public async Task MoneyJournal_TotalSummaryIncludesEMoneySource()
     {
         await using var db = await CreateContextAsync();
@@ -552,6 +602,7 @@ public class MoneyOperationsControllerTests
 
         var query = Assert.IsAssignableFrom<IQueryable>(method.Invoke(controller, new object?[]
         {
+            null,
             null,
             null,
             null,

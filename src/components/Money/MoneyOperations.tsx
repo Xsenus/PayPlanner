@@ -1484,6 +1484,7 @@ export function MoneyOperations({
   const [moneyAccountId, setMoneyAccountId] = useState<number | ''>('');
   const [moneyAccounts, setMoneyAccounts] = useState<MoneyAccount[]>([]);
   const [accountName, setAccountName] = useState('');
+  const [categoryName, setCategoryName] = useState('');
   const [accountSummaries, setAccountSummaries] = useState<MoneyOperationAccountSummary[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1563,6 +1564,7 @@ export function MoneyOperations({
     accountingType: accountingTypeFilter === 'all' ? undefined : accountingTypeFilter,
     moneyAccountId: moneyAccountId === '' ? undefined : moneyAccountId,
     accountName: accountName || undefined,
+    categoryName: categoryName.trim() || undefined,
     search: debouncedSearch,
     page,
     pageSize: effectivePageSize,
@@ -1641,6 +1643,14 @@ export function MoneyOperations({
         onClear: () => setAccountingTypeFilter('all'),
       });
     }
+    if (categoryName.trim()) {
+      filters.push({
+        key: 'categoryName',
+        label: 'Статья',
+        value: categoryName.trim(),
+        onClear: () => setCategoryName(''),
+      });
+    }
     if (source === 'Total' && totalSourceFilter !== 'all') {
       filters.push({
         key: 'source',
@@ -1651,7 +1661,7 @@ export function MoneyOperations({
     }
 
     return filters;
-  }, [accountName, accountingTypeFilter, directionFilter, source, totalSourceFilter]);
+  }, [accountName, accountingTypeFilter, categoryName, directionFilter, source, totalSourceFilter]);
 
   useEffect(() => {
     if (source === 'Total') {
@@ -2055,7 +2065,19 @@ export function MoneyOperations({
 
   useEffect(() => {
     setPage(1);
-  }, [accountName, accountingTypeFilter, debouncedSearch, directionFilter, from, moneyAccountId, pageSize, source, to, totalSourceFilter]);
+  }, [
+    accountName,
+    accountingTypeFilter,
+    categoryName,
+    debouncedSearch,
+    directionFilter,
+    from,
+    moneyAccountId,
+    pageSize,
+    source,
+    to,
+    totalSourceFilter,
+  ]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -2742,12 +2764,22 @@ export function MoneyOperations({
                         <option value="Plan">План</option>
                       </select>
                     </label>
+                    <label className="flex flex-col gap-1">
+                      Статья
+                      <input
+                        value={categoryName}
+                        onChange={(event) => setCategoryName(event.target.value)}
+                        className="rounded-lg border border-slate-200 px-3 py-2"
+                        placeholder="Например: услуги"
+                      />
+                    </label>
                     <div className="flex items-center justify-between pt-2">
                       <button
                         type="button"
                         onClick={() => {
                           setMoneyAccountId('');
                           setAccountName('');
+                          setCategoryName('');
                           setDirectionFilter('all');
                           setAccountingTypeFilter('all');
                           setShowFilters(false);
