@@ -151,6 +151,46 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task CreateMoneyOperation_ReturnsBadRequest_WhenLinkedInvoiceAlreadyPaid()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Account = "33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 25_000m,
+            PaidAmount = 25_000m,
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Create(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 25_000m,
+            Date = new DateTime(2026, 4, 29),
+            LinkedInvoiceId = invoice.Id,
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action);
+        Assert.Contains("полностью оплачен", Assert.IsType<string>(badRequest.Value));
+        Assert.False(await db.MoneyOperations.AnyAsync());
+    }
+
+    [Fact]
     public async Task CashPayment_CanCreateCashOrder_ThenReusesExistingOrder()
     {
         await using var db = await CreateContextAsync();
