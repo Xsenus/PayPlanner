@@ -1424,6 +1424,9 @@ describe('MoneyOperations integration', () => {
 
     render(<MoneyOperations source="Bank" />);
 
+    expect(getBankStatementImportsMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Открыть журнал импортов выписки' }));
+
     await screen.findByText('Журнал импортов выписки');
     await screen.findByText('statement.csv');
 

@@ -217,7 +217,7 @@
 - [x] Карточка `Баланс на конец`.
 - [x] Период.
 - [x] Кнопка `Добавить`.
-- [ ] Кнопка `Ещё`.
+- [x] Кнопка `Ещё`.
 - [x] Фильтр.
 - [x] Поиск по контрагенту, назначению, документу, счёту.
 - [x] Таблица с серверной пагинацией.
@@ -304,9 +304,9 @@
 
 Нужно добавить:
 
-- [ ] `GET /api/money-operations/bank/imports/paged`
-- [ ] `GET /api/money-operations/bank/imports/{id}`
-- [ ] `POST /api/money-operations/bank/imports/{id}/rollback`
+- [x] `GET /api/money-operations/bank-statement/imports`
+- [x] `GET /api/money-operations/bank-statement/imports/{id}`
+- [x] `POST /api/money-operations/bank-statement/imports/{id}/rollback`
 - [x] `POST /api/money-operations/{id}/link-invoice`
 - [x] `POST /api/money-operations/{id}/ignore`
 - [x] `GET /api/money-operations/{id}/invoice-candidates`

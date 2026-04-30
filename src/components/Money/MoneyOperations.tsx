@@ -1505,6 +1505,7 @@ export function MoneyOperations({
     errors: string[];
     operations: BankStatementImportCreatedOperation[];
   } | null>(null);
+  const [showBankImportsJournal, setShowBankImportsJournal] = useState(false);
   const [bankImportsRefreshKey, setBankImportsRefreshKey] = useState(0);
   const [bankImportBatches, setBankImportBatches] = useState<BankStatementImportBatch[]>([]);
   const [bankImportBatchesLoading, setBankImportBatchesLoading] = useState(false);
@@ -1700,8 +1701,12 @@ export function MoneyOperations({
 
   useEffect(() => {
     if (source !== 'Bank') {
+      setShowBankImportsJournal(false);
       setBankImportBatches([]);
       setSelectedBankImport(null);
+      return;
+    }
+    if (!showBankImportsJournal) {
       return;
     }
 
@@ -1731,7 +1736,7 @@ export function MoneyOperations({
     return () => {
       cancelled = true;
     };
-  }, [bankImportsRefreshKey, source]);
+  }, [bankImportsRefreshKey, showBankImportsJournal, source]);
 
   const totalRows = useMemo(() => {
     const bySource = new Map(summary.bySource.map((row) => [row.source, row]));
@@ -1898,6 +1903,7 @@ export function MoneyOperations({
       });
       toast.success(`Создано операций: ${result.created}. Пропущено: ${result.skipped}.`, 'Выписка банка');
       await reload();
+      setShowBankImportsJournal(true);
       setBankImportsRefreshKey((value) => value + 1);
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось загрузить банковскую выписку.');
@@ -2457,6 +2463,14 @@ export function MoneyOperations({
                 <UploadCloud className="h-4 w-4" />
                 {bankStatementImporting ? 'Загружаем...' : 'Загрузить выписку'}
               </button>
+              <button
+                type="button"
+                aria-label={showBankImportsJournal ? 'Скрыть журнал импортов выписки' : 'Открыть журнал импортов выписки'}
+                onClick={() => setShowBankImportsJournal((value) => !value)}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+                Ещё
+                <ChevronDown className={`h-4 w-4 transition-transform ${showBankImportsJournal ? 'rotate-180' : ''}`} />
+              </button>
               <div className="text-xs text-slate-500">CSV, TSV, TXT, выгрузка 1С</div>
             </>
           )}
@@ -2533,7 +2547,7 @@ export function MoneyOperations({
         </div>
       )}
 
-      {source === 'Bank' && (
+      {source === 'Bank' && showBankImportsJournal && (
         <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
