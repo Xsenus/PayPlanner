@@ -10,6 +10,7 @@ import {
   Download,
   Filter,
   GripVertical,
+  History,
   Plus,
   Pencil,
   Printer,
@@ -34,6 +35,7 @@ import { apiService } from '../../services/api';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { fromInputToApiDate, toDateInputValue, todayYMD } from '../../utils/dateUtils';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { ObjectAuditModal } from '../ui/ObjectAuditModal';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { TableSelectCheckbox } from '../ui/TableSelectCheckbox';
@@ -382,6 +384,7 @@ function CashOrderModal({
   const [error, setError] = useState<string | null>(null);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
 
   useEffect(() => {
@@ -390,6 +393,7 @@ function CashOrderModal({
       setError(null);
       setConfirmingCancel(false);
       setConfirmingDelete(false);
+      setHistoryOpen(false);
       setCancelReason(order.cancelledReason ?? '');
     }
   }, [open, order]);
@@ -619,6 +623,13 @@ function CashOrderModal({
             </button>
             <button
               type="button"
+              onClick={() => setHistoryOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <History className="h-4 w-4" />
+              История
+            </button>
+            <button
+              type="button"
               onClick={() => void onDownloadPdf(form.id)}
               disabled={isSaving}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
@@ -700,6 +711,16 @@ function CashOrderModal({
           </div>
         </div>
       </div>
+      <ObjectAuditModal
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        objectType="cash-order"
+        objectId={form.id}
+        createdAt={form.createdAt}
+        updatedAt={form.updatedAt}
+        title={`История кассового ордера ${form.number}`}
+        subtitle="Здесь видны создание, изменения, отмена и удаление кассового ордера."
+      />
     </div>,
     document.body,
   );

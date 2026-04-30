@@ -108,6 +108,7 @@ const OBJECT_TYPE_LABELS: Record<string, string> = {
   invoice: 'Счет',
   act: 'Акт',
   contract: 'Договор',
+  'cash-order': 'Кассовый ордер',
   'legal-entity': 'Юрлицо',
   contact: 'Контакт',
   user: 'Пользователь',
