@@ -1262,13 +1262,50 @@ public class MoneyOperationsControllerTests
         var content = Assert.IsType<ContentResult>(action);
         Assert.Equal("text/html; charset=utf-8", content.ContentType);
         Assert.Contains("Приходный кассовый ордер", content.Content);
-        Assert.Contains("Квитанция к приходный кассовый ордер", content.Content);
+        Assert.Contains("Унифицированная форма № КО-1", content.Content);
+        Assert.Contains("0310001", content.Content);
+        Assert.Contains("Квитанция к приходному кассовому ордеру", content.Content);
         Assert.Contains("Двадцать пять тысяч один рубль 25 копеек", content.Content);
         Assert.Contains("Принято от", content.Content);
         Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
         Assert.Contains("Основная касса", content.Content);
         Assert.Contains("Договор и счёт", content.Content);
         Assert.Contains("Без замечаний", content.Content);
+    }
+
+    [Fact]
+    public async Task CashOrder_PrintOutgoing_ReturnsKo2WithoutReceipt()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "РКО-2026-0001",
+            Type = CashOrderType.Outgoing,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 4, 29),
+            Amount = 1500m,
+            Currency = "RUB",
+            PayerName = "Основная касса",
+            ReceiverName = "Поставщик",
+            Basis = "Выдача наличных",
+            Account = "Основная касса",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var order = await db.CashOrders.SingleAsync();
+
+        var action = await controller.Print(order.Id, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(action);
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("Расходный кассовый ордер", content.Content);
+        Assert.Contains("Унифицированная форма № КО-2", content.Content);
+        Assert.Contains("0310002", content.Content);
+        Assert.Contains("Выдать", content.Content);
+        Assert.Contains("Поставщик", content.Content);
+        Assert.DoesNotContain("Квитанция к", content.Content);
     }
 
     [Fact]

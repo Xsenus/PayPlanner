@@ -685,6 +685,8 @@ public class CashOrdersController : ControllerBase
     {
         var isIncoming = order.Type == CashOrderType.Incoming;
         var title = isIncoming ? "Приходный кассовый ордер" : "Расходный кассовый ордер";
+        var formName = isIncoming ? "Унифицированная форма № КО-1" : "Унифицированная форма № КО-2";
+        var okud = isIncoming ? "0310001" : "0310002";
         var personLabel = isIncoming ? "Принято от" : "Выдать";
         var signatureLabel = isIncoming ? "Принял" : "Получил";
         var amount = order.Amount.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
@@ -697,6 +699,26 @@ public class CashOrdersController : ControllerBase
         var comment = System.Net.WebUtility.HtmlEncode(order.Comment ?? "-");
         var cancelNotice = order.Status == CashOrderStatus.Cancelled
             ? $"""<div class="cancelled">Документ отменён{(order.CancelledAt.HasValue ? $" {order.CancelledAt:dd.MM.yyyy HH:mm}" : string.Empty)}{(string.IsNullOrWhiteSpace(order.CancelledReason) ? string.Empty : $": {System.Net.WebUtility.HtmlEncode(order.CancelledReason)}")}</div>"""
+            : string.Empty;
+        var receiptHtml = isIncoming
+            ? $$"""
+    <section class="receipt">
+      <h2>Квитанция к приходному кассовому ордеру № {{System.Net.WebUtility.HtmlEncode(order.Number)}}</h2>
+      <div class="field"><div class="label">Принято от</div><div class="line">{{payer}}</div></div>
+      <div class="field"><div class="label">Получатель</div><div class="line">{{receiver}}</div></div>
+      <div class="field"><div class="label">Основание</div><div class="line">{{basis}}</div></div>
+      <div class="amount-box">
+        <div class="label">Сумма</div>
+        <div class="line">{{amountWords}}</div>
+        <div class="amount">{{amount}} руб.</div>
+      </div>
+      <div class="signatures">
+        <div class="signature">Бухгалтер</div>
+        <div class="signature">Кассир</div>
+        <div class="signature">М.П.</div>
+      </div>
+    </section>
+"""
             : string.Empty;
         return $$"""
 <!doctype html>
@@ -731,8 +753,10 @@ public class CashOrdersController : ControllerBase
 <body>
   <div class="doc">
     <div class="top">
-      <div class="muted">Унифицированная печатная форма кассового документа</div>
+      <div class="muted">{{formName}}</div>
       <table class="meta">
+        <tr><td>Форма</td><td>{{formName}}</td></tr>
+        <tr><td>ОКУД</td><td>{{okud}}</td></tr>
         <tr><td>Номер</td><td class="value">{{System.Net.WebUtility.HtmlEncode(order.Number)}}</td></tr>
         <tr><td>Дата</td><td>{{order.Date:dd.MM.yyyy}}</td></tr>
       </table>
@@ -759,22 +783,7 @@ public class CashOrdersController : ControllerBase
       <div class="signature">{{signatureLabel}}</div>
     </div>
 
-    <section class="receipt">
-      <h2>Квитанция к {{title.ToLowerInvariant()}} № {{System.Net.WebUtility.HtmlEncode(order.Number)}}</h2>
-      <div class="field"><div class="label">{{personLabel}}</div><div class="line">{{payer}}</div></div>
-      <div class="field"><div class="label">Получатель</div><div class="line">{{receiver}}</div></div>
-      <div class="field"><div class="label">Основание</div><div class="line">{{basis}}</div></div>
-      <div class="amount-box">
-        <div class="label">Сумма</div>
-        <div class="line">{{amountWords}}</div>
-        <div class="amount">{{amount}} руб.</div>
-      </div>
-      <div class="signatures">
-        <div class="signature">Бухгалтер</div>
-        <div class="signature">Кассир</div>
-        <div class="signature">М.П.</div>
-      </div>
-    </section>
+{{receiptHtml}}
   </div>
 </body>
 </html>
