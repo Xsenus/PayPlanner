@@ -24,6 +24,15 @@ public class MoneyOperationsController : ControllerBase
     private const string CashSourceAlternativeTitleToken = "\u041D\u0430\u043B\u0438\u0447";
     private const string CardSourceToken = "\u043A\u0430\u0440\u0442";
     private const string CardSourceTitleToken = "\u041A\u0430\u0440\u0442";
+    private const string EMoneySourceToken = "e-money";
+    private const string EMoneySourceTitleToken = "E-money";
+    private const string EMoneySourceCompactToken = "emoney";
+    private const string EMoneySourceCompactTitleToken = "EMoney";
+    private const string EMoneySourceRussianToken = "\u044D\u043B\u0435\u043A\u0442\u0440\u043E\u043D";
+    private const string EMoneySourceRussianTitleToken = "\u042D\u043B\u0435\u043A\u0442\u0440\u043E\u043D";
+    private const string EMoneySourceYuMoneyToken = "\u042EMoney";
+    private const string EMoneySourceYooMoneyToken = "YooMoney";
+    private const string EMoneySourceYandexToken = "\u042F\u043D\u0434\u0435\u043A\u0441";
 
     private readonly PaymentContext _db;
     private readonly ILogger<MoneyOperationsController> _logger;
@@ -474,7 +483,19 @@ public class MoneyOperationsController : ControllerBase
                           (payment.PaymentSource.Name.Contains(CardSourceToken) ||
                            payment.PaymentSource.Name.Contains(CardSourceTitleToken))
                             ? nameof(MoneyOperationSource.Card)
-                            : nameof(MoneyOperationSource.Bank),
+                            : payment.PaymentSource != null &&
+                              payment.PaymentSource.Name != null &&
+                              (payment.PaymentSource.Name.Contains(EMoneySourceToken) ||
+                               payment.PaymentSource.Name.Contains(EMoneySourceTitleToken) ||
+                               payment.PaymentSource.Name.Contains(EMoneySourceCompactToken) ||
+                               payment.PaymentSource.Name.Contains(EMoneySourceCompactTitleToken) ||
+                               payment.PaymentSource.Name.Contains(EMoneySourceRussianToken) ||
+                               payment.PaymentSource.Name.Contains(EMoneySourceRussianTitleToken) ||
+                               payment.PaymentSource.Name.Contains(EMoneySourceYuMoneyToken) ||
+                               payment.PaymentSource.Name.Contains(EMoneySourceYooMoneyToken) ||
+                               payment.PaymentSource.Name.Contains(EMoneySourceYandexToken))
+                                ? nameof(MoneyOperationSource.EMoney)
+                                : nameof(MoneyOperationSource.Bank),
                 Direction = payment.Type == PaymentType.Income
                     ? nameof(MoneyOperationDirection.Income)
                     : nameof(MoneyOperationDirection.Expense),
@@ -675,6 +696,18 @@ public class MoneyOperationsController : ControllerBase
                     payment.PaymentSource.Name != null &&
                     (payment.PaymentSource.Name.Contains(CardSourceToken) ||
                      payment.PaymentSource.Name.Contains(CardSourceTitleToken))),
+                MoneyOperationSource.EMoney => query.Where(payment =>
+                    payment.PaymentSource != null &&
+                    payment.PaymentSource.Name != null &&
+                    (payment.PaymentSource.Name.Contains(EMoneySourceToken) ||
+                     payment.PaymentSource.Name.Contains(EMoneySourceTitleToken) ||
+                     payment.PaymentSource.Name.Contains(EMoneySourceCompactToken) ||
+                     payment.PaymentSource.Name.Contains(EMoneySourceCompactTitleToken) ||
+                     payment.PaymentSource.Name.Contains(EMoneySourceRussianToken) ||
+                     payment.PaymentSource.Name.Contains(EMoneySourceRussianTitleToken) ||
+                     payment.PaymentSource.Name.Contains(EMoneySourceYuMoneyToken) ||
+                     payment.PaymentSource.Name.Contains(EMoneySourceYooMoneyToken) ||
+                     payment.PaymentSource.Name.Contains(EMoneySourceYandexToken))),
                 MoneyOperationSource.Bank => query.Where(payment =>
                     payment.PaymentSource == null ||
                     payment.PaymentSource.Name == null ||
@@ -683,7 +716,16 @@ public class MoneyOperationsController : ControllerBase
                      !payment.PaymentSource.Name.Contains(CashSourceAlternativeToken) &&
                      !payment.PaymentSource.Name.Contains(CashSourceAlternativeTitleToken) &&
                      !payment.PaymentSource.Name.Contains(CardSourceToken) &&
-                     !payment.PaymentSource.Name.Contains(CardSourceTitleToken))),
+                     !payment.PaymentSource.Name.Contains(CardSourceTitleToken) &&
+                     !payment.PaymentSource.Name.Contains(EMoneySourceToken) &&
+                     !payment.PaymentSource.Name.Contains(EMoneySourceTitleToken) &&
+                     !payment.PaymentSource.Name.Contains(EMoneySourceCompactToken) &&
+                     !payment.PaymentSource.Name.Contains(EMoneySourceCompactTitleToken) &&
+                     !payment.PaymentSource.Name.Contains(EMoneySourceRussianToken) &&
+                     !payment.PaymentSource.Name.Contains(EMoneySourceRussianTitleToken) &&
+                     !payment.PaymentSource.Name.Contains(EMoneySourceYuMoneyToken) &&
+                     !payment.PaymentSource.Name.Contains(EMoneySourceYooMoneyToken) &&
+                     !payment.PaymentSource.Name.Contains(EMoneySourceYandexToken))),
                 _ => query.Where(_ => false),
             };
         }
@@ -1615,10 +1657,19 @@ public class MoneyOperationsController : ControllerBase
         => string.IsNullOrWhiteSpace(sourceName) ||
            (!sourceName.Contains(CashSourceToken) &&
             !sourceName.Contains(CashSourceTitleToken) &&
-            !sourceName.Contains(CashSourceAlternativeToken) &&
-            !sourceName.Contains(CashSourceAlternativeTitleToken) &&
+           !sourceName.Contains(CashSourceAlternativeToken) &&
+           !sourceName.Contains(CashSourceAlternativeTitleToken) &&
             !sourceName.Contains(CardSourceToken) &&
-            !sourceName.Contains(CardSourceTitleToken));
+            !sourceName.Contains(CardSourceTitleToken) &&
+            !sourceName.Contains(EMoneySourceToken) &&
+            !sourceName.Contains(EMoneySourceTitleToken) &&
+            !sourceName.Contains(EMoneySourceCompactToken) &&
+            !sourceName.Contains(EMoneySourceCompactTitleToken) &&
+            !sourceName.Contains(EMoneySourceRussianToken) &&
+            !sourceName.Contains(EMoneySourceRussianTitleToken) &&
+            !sourceName.Contains(EMoneySourceYuMoneyToken) &&
+            !sourceName.Contains(EMoneySourceYooMoneyToken) &&
+            !sourceName.Contains(EMoneySourceYandexToken));
 
     private async Task<BankStatementImportResultDto> ImportBankStatementItemsAsync(
         IReadOnlyCollection<BankStatementImportItem> items,

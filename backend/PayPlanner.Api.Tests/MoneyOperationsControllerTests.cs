@@ -638,6 +638,12 @@ public class MoneyOperationsControllerTests
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
         };
+        var eMoneySource = new PaymentSource
+        {
+            Name = "\u042EMoney",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
 
         db.MoneyOperations.AddRange(
             new MoneyOperation
@@ -716,6 +722,20 @@ public class MoneyOperationsControllerTests
                 CounterpartyName = "Card supplier",
                 PaymentSource = cardSource,
                 CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Completed,
+                Amount = 700m,
+                PaidAmount = 700m,
+                Account = "Wallet",
+                Date = new DateTime(2026, 4, 14),
+                PaidDate = new DateTime(2026, 4, 14),
+                LastPaymentDate = new DateTime(2026, 4, 14),
+                CounterpartyName = "Wallet payment",
+                PaymentSource = eMoneySource,
+                CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
 
@@ -733,22 +753,22 @@ public class MoneyOperationsControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
-        Assert.Equal(6, page.Total);
+        Assert.Equal(7, page.Total);
         Assert.Contains(page.Items, item => item.Source == MoneyOperationSource.Cash && item.IsReadonly && item.RelatedPaymentId.HasValue);
         Assert.Contains(page.Items, item => item.Source == MoneyOperationSource.Card && item.Direction == MoneyOperationDirection.Expense && item.IsReadonly);
         Assert.Contains(page.Items, item => item.Source == MoneyOperationSource.EMoney && !item.IsReadonly);
         Assert.Contains(page.Items, item => item.AccountingType == MoneyOperationAccountingType.Plan);
 
-        Assert.Equal(4_200m, page.Summary.Income);
+        Assert.Equal(4_900m, page.Summary.Income);
         Assert.Equal(700m, page.Summary.Expense);
-        Assert.Equal(3_500m, page.Summary.EndBalance);
-        Assert.Equal(3, page.Summary.IncomeCount);
+        Assert.Equal(4_200m, page.Summary.EndBalance);
+        Assert.Equal(4, page.Summary.IncomeCount);
         Assert.Equal(2, page.Summary.ExpenseCount);
         Assert.Equal(4, page.Summary.BySource.Count);
         Assert.Equal(2_500m, page.Summary.BySource.Single(item => item.Source == MoneyOperationSource.Cash).Income);
         Assert.Equal(1_000m, page.Summary.BySource.Single(item => item.Source == MoneyOperationSource.Bank).Income);
         Assert.Equal(700m, page.Summary.BySource.Single(item => item.Source == MoneyOperationSource.Card).Expense);
-        Assert.Equal(700m, page.Summary.BySource.Single(item => item.Source == MoneyOperationSource.EMoney).Income);
+        Assert.Equal(1_400m, page.Summary.BySource.Single(item => item.Source == MoneyOperationSource.EMoney).Income);
     }
 
     [Fact]
@@ -764,6 +784,12 @@ public class MoneyOperationsControllerTests
         var cardSource = new PaymentSource
         {
             Name = "\u041A\u0430\u0440\u0442\u0430",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var eMoneySource = new PaymentSource
+        {
+            Name = "\u042EMoney",
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
         };
@@ -821,6 +847,20 @@ public class MoneyOperationsControllerTests
                 CounterpartyName = "Card supplier",
                 PaymentSource = cardSource,
                 CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Completed,
+                Amount = 700m,
+                PaidAmount = 700m,
+                Account = "Wallet",
+                Date = new DateTime(2026, 4, 14),
+                PaidDate = new DateTime(2026, 4, 14),
+                LastPaymentDate = new DateTime(2026, 4, 14),
+                CounterpartyName = "Wallet payment",
+                PaymentSource = eMoneySource,
+                CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
 
@@ -842,9 +882,9 @@ public class MoneyOperationsControllerTests
         Assert.Equal(MoneyOperationSource.Card, cardPage.Items[0].Source);
         Assert.Equal(400m, cardPage.Summary.Expense);
 
-        Assert.Single(eMoneyPage.Items);
-        Assert.Equal(MoneyOperationSource.EMoney, eMoneyPage.Items[0].Source);
-        Assert.Equal(2_000m, eMoneyPage.Summary.Income);
+        Assert.Equal(2, eMoneyPage.Items.Count);
+        Assert.All(eMoneyPage.Items, item => Assert.Equal(MoneyOperationSource.EMoney, item.Source));
+        Assert.Equal(2_700m, eMoneyPage.Summary.Income);
     }
 
     [Fact]
