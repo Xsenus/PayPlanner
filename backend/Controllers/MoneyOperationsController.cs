@@ -41,6 +41,7 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         [FromQuery] MoneyOperationDirection? direction,
         [FromQuery] MoneyOperationAccountingType? accountingType,
+        [FromQuery] int? moneyAccountId = null,
         [FromQuery] string? accountName = null,
         [FromQuery] int? linkedInvoiceId = null,
         [FromQuery] string? search = null,
@@ -49,7 +50,7 @@ public class MoneyOperationsController : ControllerBase
         var list = await SqliteRetryHelper.ExecuteAsync(
             async cancellationToken =>
             {
-                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, accountName, search)
+                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, search)
                     .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
                     .OrderByDescending(item => item.Date)
                     .ThenByDescending(item => item.Id)
@@ -70,6 +71,7 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         [FromQuery] MoneyOperationDirection? direction,
         [FromQuery] MoneyOperationAccountingType? accountingType,
+        [FromQuery] int? moneyAccountId = null,
         [FromQuery] string? accountName = null,
         [FromQuery] int? linkedInvoiceId = null,
         [FromQuery] string? search = null,
@@ -82,7 +84,7 @@ public class MoneyOperationsController : ControllerBase
 
         var response = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
-            var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, accountName, search)
+            var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, search)
                 .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value);
             var total = await query.CountAsync(cancellationToken);
             var itemRows = await query
@@ -110,7 +112,7 @@ public class MoneyOperationsController : ControllerBase
                 .FirstOrDefaultAsync(cancellationToken);
 
             var openingQuery = from.HasValue
-                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, direction, MoneyOperationAccountingType.Fact, accountName, search)
+                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, direction, MoneyOperationAccountingType.Fact, moneyAccountId, accountName, search)
                 : null;
 
             var openingSummary = openingQuery is null
@@ -231,7 +233,7 @@ public class MoneyOperationsController : ControllerBase
         CancellationToken ct = default)
     {
         var accounts = await SqliteRetryHelper.ExecuteAsync(
-            async cancellationToken => await BuildMoneyOperationsQuery(null, null, source, null, null, null, null)
+            async cancellationToken => await BuildMoneyOperationsQuery(null, null, source, null, null, null, null, null)
                 .Where(item => item.AccountName != null && item.AccountName != "")
                 .Select(item => item.AccountName!)
                 .Distinct()
@@ -254,7 +256,7 @@ public class MoneyOperationsController : ControllerBase
         var summaries = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
             var openingQuery = from.HasValue
-                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, null)
+                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, null, null)
                     .Where(item => item.AccountName != null && item.AccountName != "")
                 : null;
 
@@ -282,7 +284,7 @@ public class MoneyOperationsController : ControllerBase
                 openingRows = openingSummaryRows.Select(MapAccountSummaryRow).ToList();
             }
 
-            var periodRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, null)
+            var periodRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, null, null)
                 .Where(item => item.AccountName != null && item.AccountName != "")
                 .GroupBy(item => new { item.Source, item.AccountName })
                 .Select(group => new MoneyOperationAccountSummaryQueryRow
@@ -346,6 +348,7 @@ public class MoneyOperationsController : ControllerBase
         MoneyOperationSource? source,
         MoneyOperationDirection? direction,
         MoneyOperationAccountingType? accountingType,
+        int? moneyAccountId,
         string? accountName,
         string? search)
     {
@@ -356,6 +359,7 @@ public class MoneyOperationsController : ControllerBase
                 source,
                 direction,
                 accountingType,
+                moneyAccountId,
                 accountName,
                 search)
             .Select(operation => new MoneyOperationQueryRow
@@ -376,6 +380,8 @@ public class MoneyOperationsController : ControllerBase
                 AccountingType = operation.AccountingType == MoneyOperationAccountingType.Fact
                     ? nameof(MoneyOperationAccountingType.Fact)
                     : nameof(MoneyOperationAccountingType.Plan),
+                MoneyAccountId = operation.MoneyAccountId,
+                MoneyAccountName = operation.MoneyAccount != null ? operation.MoneyAccount.Name : null,
                 AccountName = operation.AccountName,
                 CounterpartyName = operation.CounterpartyName,
                 CategoryName = operation.CategoryName,
@@ -444,6 +450,7 @@ public class MoneyOperationsController : ControllerBase
                 source,
                 direction,
                 accountingType,
+                moneyAccountId,
                 accountName,
                 search)
             .Select(payment => new MoneyOperationQueryRow
@@ -469,6 +476,8 @@ public class MoneyOperationsController : ControllerBase
                 AccountingType = payment.Status == PaymentStatus.Completed
                     ? nameof(MoneyOperationAccountingType.Fact)
                     : nameof(MoneyOperationAccountingType.Plan),
+                MoneyAccountId = null,
+                MoneyAccountName = null,
                 AccountName = payment.Account,
                 CounterpartyName = payment.CounterpartyName,
                 CategoryName = payment.ClientCase != null ? payment.ClientCase.Title : null,
@@ -544,6 +553,7 @@ public class MoneyOperationsController : ControllerBase
         MoneyOperationSource? source,
         MoneyOperationDirection? direction,
         MoneyOperationAccountingType? accountingType,
+        int? moneyAccountId,
         string? accountName,
         string? search)
     {
@@ -572,6 +582,11 @@ public class MoneyOperationsController : ControllerBase
         if (accountingType.HasValue)
         {
             query = query.Where(operation => operation.AccountingType == accountingType.Value);
+        }
+
+        if (moneyAccountId.HasValue)
+        {
+            query = query.Where(operation => operation.MoneyAccountId == moneyAccountId.Value);
         }
 
         if (!string.IsNullOrWhiteSpace(accountName))
@@ -604,10 +619,16 @@ public class MoneyOperationsController : ControllerBase
         MoneyOperationSource? source,
         MoneyOperationDirection? direction,
         MoneyOperationAccountingType? accountingType,
+        int? moneyAccountId,
         string? accountName,
         string? search)
     {
         query = query.Where(payment => payment.Status == PaymentStatus.Completed);
+
+        if (moneyAccountId.HasValue)
+        {
+            query = query.Where(_ => false);
+        }
 
         if (from.HasValue)
         {
@@ -701,8 +722,43 @@ public class MoneyOperationsController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        var item = await _db.MoneyOperations.AsNoTracking().FirstOrDefaultAsync(operation => operation.Id == id, ct);
+        var item = await _db.MoneyOperations
+            .AsNoTracking()
+            .Include(operation => operation.MoneyAccount)
+            .FirstOrDefaultAsync(operation => operation.Id == id, ct);
         return item is null ? NotFound() : Ok(item);
+    }
+
+    private async Task<string?> ApplyMoneyAccountAsync(MoneyOperation model, CancellationToken ct)
+    {
+        var moneyAccountId = model.MoneyAccountId.GetValueOrDefault();
+        if (moneyAccountId <= 0)
+        {
+            model.MoneyAccountId = null;
+            return null;
+        }
+
+        var account = await _db.MoneyAccounts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == moneyAccountId, ct);
+        if (account is null)
+        {
+            return "Денежный счёт не найден.";
+        }
+
+        if (!account.IsActive)
+        {
+            return "Денежный счёт отключён и не может использоваться в новой операции.";
+        }
+
+        model.Source = account.Source;
+        model.AccountName = account.Name;
+        if (string.IsNullOrWhiteSpace(model.Currency))
+        {
+            model.Currency = account.Currency;
+        }
+
+        return null;
     }
 
     [HttpGet("{id:int}/invoice-candidates")]
@@ -866,11 +922,17 @@ public class MoneyOperationsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] MoneyOperation model)
+    public async Task<IActionResult> Create([FromBody] MoneyOperation model, CancellationToken ct = default)
     {
         if (model.Amount < 0)
         {
             return BadRequest("Amount must be non-negative.");
+        }
+
+        var moneyAccountError = await ApplyMoneyAccountAsync(model, ct);
+        if (moneyAccountError is not null)
+        {
+            return BadRequest(moneyAccountError);
         }
 
         model.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
@@ -887,7 +949,7 @@ public class MoneyOperationsController : ControllerBase
         model.MatchComment = string.IsNullOrWhiteSpace(model.MatchComment) ? null : model.MatchComment.Trim();
         if (model.LinkedInvoiceId.HasValue)
         {
-            var validation = await ValidateInvoiceLinkAsync(model, model.LinkedInvoiceId.Value);
+            var validation = await ValidateInvoiceLinkAsync(model, model.LinkedInvoiceId.Value, ct);
             var invoice = validation.Invoice;
             if (validation.Error is not null)
             {
@@ -907,11 +969,11 @@ public class MoneyOperationsController : ControllerBase
         model.CreatedAt = DateTime.UtcNow;
 
         _db.MoneyOperations.Add(model);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         if (model.LinkedInvoiceId.HasValue && model.MatchStatus == MoneyOperationMatchStatus.Matched)
         {
-            await ApplyMoneyOperationToInvoicePaymentAsync(model, model.LinkedInvoiceId.Value);
-            await _db.SaveChangesAsync();
+            await ApplyMoneyOperationToInvoicePaymentAsync(model, model.LinkedInvoiceId.Value, ct);
+            await _db.SaveChangesAsync(ct);
         }
         await SyncCashOrderAsync(model);
         return Created($"/api/money-operations/{model.Id}", model);
@@ -1224,9 +1286,9 @@ public class MoneyOperationsController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] MoneyOperation model)
+    public async Task<IActionResult> Update(int id, [FromBody] MoneyOperation model, CancellationToken ct = default)
     {
-        var entity = await _db.MoneyOperations.FindAsync(id);
+        var entity = await _db.MoneyOperations.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
             return NotFound();
@@ -1253,9 +1315,16 @@ public class MoneyOperationsController : ControllerBase
             }
         }
 
+        var moneyAccountError = await ApplyMoneyAccountAsync(model, ct);
+        if (moneyAccountError is not null)
+        {
+            return BadRequest(moneyAccountError);
+        }
+
         entity.Source = model.Source;
         entity.Direction = model.Direction;
         entity.AccountingType = model.AccountingType;
+        entity.MoneyAccountId = model.MoneyAccountId;
         entity.Amount = model.Amount;
         entity.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
         entity.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
@@ -1432,6 +1501,8 @@ public class MoneyOperationsController : ControllerBase
             Source = ParseEnum<MoneyOperationSource>(row.Source),
             Direction = ParseEnum<MoneyOperationDirection>(row.Direction),
             AccountingType = ParseEnum<MoneyOperationAccountingType>(row.AccountingType),
+            MoneyAccountId = row.MoneyAccountId,
+            MoneyAccountName = row.MoneyAccountName,
             AccountName = row.AccountName,
             CounterpartyName = row.CounterpartyName,
             CategoryName = row.CategoryName,
@@ -1568,6 +1639,10 @@ public class MoneyOperationsController : ControllerBase
                 (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) >= minDate &&
                 (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date) <= maxDate)
             .ToListAsync(ct);
+        var moneyAccountsByName = await _db.MoneyAccounts
+            .AsNoTracking()
+            .Where(account => account.Source == MoneyOperationSource.Bank && account.IsActive)
+            .ToDictionaryAsync(account => account.Name, StringComparer.OrdinalIgnoreCase, ct);
         var invoiceNumbersFromStatement = items
             .SelectMany(item => ExtractInvoiceNumberTokens(item.Purpose))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1670,6 +1745,14 @@ public class MoneyOperationsController : ControllerBase
                 BankStatementImportBatch = batch,
                 CreatedAt = DateTime.UtcNow,
             };
+            if (!string.IsNullOrWhiteSpace(item.AccountName) &&
+                moneyAccountsByName.TryGetValue(item.AccountName.Trim(), out var moneyAccount))
+            {
+                operation.MoneyAccountId = moneyAccount.Id;
+                operation.AccountName = moneyAccount.Name;
+                operation.Currency = moneyAccount.Currency;
+            }
+
             var autoMatch = TryResolveBankStatementInvoiceMatch(item, invoiceCandidates);
             var importRowMessage = (string?)null;
             if (autoMatch is not null)
@@ -2398,6 +2481,8 @@ public class MoneyOperationsController : ControllerBase
         public string Source { get; init; } = string.Empty;
         public string Direction { get; init; } = string.Empty;
         public string AccountingType { get; init; } = string.Empty;
+        public int? MoneyAccountId { get; init; }
+        public string? MoneyAccountName { get; init; }
         public string? AccountName { get; init; }
         public string? CounterpartyName { get; init; }
         public string? CategoryName { get; init; }

@@ -2290,6 +2290,70 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("LegalEntities");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.MoneyAccount", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BankAccountNumber")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("BankName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("RUB");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_MoneyAccounts_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_MoneyAccounts_Name");
+
+                    b.HasIndex("Source")
+                        .HasDatabaseName("IX_MoneyAccounts_Source");
+
+                    b.HasIndex("Source", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MoneyAccounts_Source_Name");
+
+                    b.ToTable("MoneyAccounts");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.MoneyOperation", b =>
                 {
                     b.Property<int>("Id")
@@ -2379,6 +2443,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("MatchedAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("MoneyAccountId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("PaidAccountName")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -2451,6 +2518,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("MatchStatus")
                         .HasDatabaseName("IX_MoneyOperations_MatchStatus");
+
+                    b.HasIndex("MoneyAccountId")
+                        .HasDatabaseName("IX_MoneyOperations_MoneyAccountId");
 
                     b.HasIndex("Source")
                         .HasDatabaseName("IX_MoneyOperations_Source");
@@ -4535,9 +4605,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("LinkedInvoiceId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.MoneyAccount", "MoneyAccount")
+                        .WithMany("MoneyOperations")
+                        .HasForeignKey("MoneyAccountId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("BankStatementImportBatch");
 
                     b.Navigation("LinkedInvoice");
+
+                    b.Navigation("MoneyAccount");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
@@ -4838,6 +4915,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Clients");
 
                     b.Navigation("UserCompanyAccesses");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.MoneyAccount", b =>
+                {
+                    b.Navigation("MoneyOperations");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.MoneyOperation", b =>

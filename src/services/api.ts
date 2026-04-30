@@ -2134,6 +2134,7 @@ export class ApiService {
     source?: MoneyOperationSource;
     direction?: MoneyOperationDirection;
     accountingType?: MoneyOperationAccountingType;
+    moneyAccountId?: number;
     accountName?: string;
     linkedInvoiceId?: number;
     search?: string;
@@ -2148,6 +2149,7 @@ export class ApiService {
     source?: MoneyOperationSource;
     direction?: MoneyOperationDirection;
     accountingType?: MoneyOperationAccountingType;
+    moneyAccountId?: number;
     accountName?: string;
     linkedInvoiceId?: number;
     search?: string;
@@ -2161,6 +2163,29 @@ export class ApiService {
   async getMoneyOperationAccounts(params?: { source?: MoneyOperationSource }) {
     const q = buildQuery(params ?? {});
     return this.request<string[]>(`/money-operations/accounts${q}`);
+  }
+
+  async getMoneyAccounts(params?: { source?: MoneyOperationSource; activeOnly?: boolean }) {
+    const q = buildQuery(params ?? {});
+    return this.request<MoneyAccount[]>(`/money-accounts${q}`);
+  }
+
+  async createMoneyAccount(payload: MoneyAccount) {
+    return this.request<MoneyAccount>('/money-accounts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateMoneyAccount(id: number, payload: MoneyAccount) {
+    return this.request<MoneyAccount>(`/money-accounts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteMoneyAccount(id: number) {
+    return this.request<void>(`/money-accounts/${id}`, { method: 'DELETE' });
   }
 
   async getMoneyOperationAccountSummaries(params?: {
@@ -2459,6 +2484,7 @@ import type {
   BankStatementImportBatch,
   BankStatementImportBatchDetail,
   BankStatementImportRollbackResult,
+  MoneyAccount,
   MoneyOperation,
   MoneyOperationAccountingType,
   MoneyOperationDirection,

@@ -6,6 +6,8 @@ public class MoneyOperation
     public MoneyOperationSource Source { get; set; }
     public MoneyOperationDirection Direction { get; set; }
     public MoneyOperationAccountingType AccountingType { get; set; }
+    public int? MoneyAccountId { get; set; }
+    public MoneyAccount? MoneyAccount { get; set; }
     public string? AccountName { get; set; }
     public string? CounterpartyName { get; set; }
     public string? CategoryName { get; set; }

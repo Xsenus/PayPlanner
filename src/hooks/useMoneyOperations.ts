@@ -14,6 +14,7 @@ export interface MoneyOperationsFilters {
   source?: MoneyOperationSource;
   direction?: MoneyOperationDirection;
   accountingType?: MoneyOperationAccountingType;
+  moneyAccountId?: number;
   accountName?: string;
   search?: string;
   page?: number;
@@ -44,6 +45,7 @@ export function useMoneyOperations(filters: MoneyOperationsFilters) {
       source: filters.source,
       direction: filters.direction,
       accountingType: filters.accountingType,
+      moneyAccountId: filters.moneyAccountId,
       accountName: filters.accountName,
       search: filters.search,
       page: filters.page,
@@ -54,6 +56,7 @@ export function useMoneyOperations(filters: MoneyOperationsFilters) {
       filters.accountingType,
       filters.direction,
       filters.from,
+      filters.moneyAccountId,
       filters.page,
       filters.pageSize,
       filters.search,

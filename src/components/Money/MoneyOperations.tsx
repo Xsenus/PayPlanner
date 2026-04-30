@@ -40,6 +40,7 @@ import type {
   BankStatementImportBatch,
   BankStatementImportBatchDetail,
   BankStatementImportCreatedOperation,
+  MoneyAccount,
   MoneyOperation,
   MoneyOperationAccountSummary,
   MoneyOperationAccountingType,
@@ -131,6 +132,9 @@ const DEFAULT_FORM: MoneyOperation = {
   source: 'Bank',
   direction: 'Income',
   accountingType: 'Fact',
+  moneyAccountId: null,
+  moneyAccountName: null,
+  moneyAccount: null,
   accountName: '',
   counterpartyName: '',
   categoryName: '',
@@ -1017,6 +1021,7 @@ function CashOrdersPanel({
 function MoneyOperationModal({
   source,
   initialData,
+  moneyAccounts,
   open,
   onClose,
   onSave,
@@ -1024,6 +1029,7 @@ function MoneyOperationModal({
 }: {
   source: MoneyOperationSource;
   initialData?: MoneyOperation | null;
+  moneyAccounts?: MoneyAccount[];
   open: boolean;
   onClose: () => void;
   onSave: (payload: MoneyOperation) => Promise<void>;
@@ -1033,13 +1039,30 @@ function MoneyOperationModal({
   const [error, setError] = useState<string | null>(null);
   const [invoiceCandidates, setInvoiceCandidates] = useState<MoneyOperationInvoiceCandidate[]>([]);
   const [invoiceCandidatesLoading, setInvoiceCandidatesLoading] = useState(false);
+  const sourceMoneyAccounts = useMemo(
+    () => (moneyAccounts ?? []).filter((account) => account.source === source && account.isActive),
+    [moneyAccounts, source],
+  );
 
   useEffect(() => {
     if (open) {
-      setForm(mapMoneyOperationToForm(source, initialData));
+      const nextForm = mapMoneyOperationToForm(source, initialData);
+      const defaultAccount = sourceMoneyAccounts.find((account) => account.isDefault) ?? sourceMoneyAccounts[0];
+      setForm(
+        !initialData && defaultAccount
+          ? {
+              ...nextForm,
+              moneyAccountId: defaultAccount.id,
+              moneyAccountName: defaultAccount.name,
+              accountName: defaultAccount.name,
+              source: defaultAccount.source,
+              currency: defaultAccount.currency || nextForm.currency || 'RUB',
+            }
+          : nextForm,
+      );
       setError(null);
     }
-  }, [initialData, open, source]);
+  }, [initialData, open, source, sourceMoneyAccounts]);
 
   useEffect(() => {
     if (!open || !initialData?.id || initialData.id < 0 || initialData.direction !== 'Income') {
@@ -1077,6 +1100,19 @@ function MoneyOperationModal({
 
   const setField = <K extends keyof MoneyOperation>(key: K, value: MoneyOperation[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleMoneyAccountChange = (value: string) => {
+    const accountId = Number(value);
+    const account = sourceMoneyAccounts.find((item) => item.id === accountId);
+    setForm((prev) => ({
+      ...prev,
+      moneyAccountId: account?.id ?? null,
+      moneyAccountName: account?.name ?? null,
+      accountName: account?.name ?? '',
+      source: account?.source ?? source,
+      currency: account?.currency || prev.currency || 'RUB',
+    }));
   };
 
   const handleSubmit = async () => {
@@ -1157,13 +1193,27 @@ function MoneyOperationModal({
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm text-slate-600">
-              Банковский счёт
-              <input
-                value={form.accountName ?? ''}
-                onChange={(event) => setField('accountName', event.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
-                placeholder="Основной счёт"
-              />
+              {SOURCE_ACCOUNT_FILTER_LABELS[source]}
+              {sourceMoneyAccounts.length > 0 ? (
+                <select
+                  value={form.moneyAccountId ?? ''}
+                  onChange={(event) => handleMoneyAccountChange(event.target.value)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
+                  <option value="">Без привязки к счету</option>
+                  {sourceMoneyAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={form.accountName ?? ''}
+                  onChange={(event) => setField('accountName', event.target.value)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
+                  placeholder="Основной счёт"
+                />
+              )}
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               {form.direction === 'Income' ? 'Покупатель' : 'Поставщик'}
@@ -1431,6 +1481,8 @@ export function MoneyOperations({
   const [directionFilter, setDirectionFilter] = useState<'all' | MoneyOperationDirection>('all');
   const [accountingTypeFilter, setAccountingTypeFilter] = useState<'all' | MoneyOperationAccountingType>('all');
   const [totalSourceFilter, setTotalSourceFilter] = useState<'all' | MoneyOperationSource>('all');
+  const [moneyAccountId, setMoneyAccountId] = useState<number | ''>('');
+  const [moneyAccounts, setMoneyAccounts] = useState<MoneyAccount[]>([]);
   const [accountName, setAccountName] = useState('');
   const [accountSummaries, setAccountSummaries] = useState<MoneyOperationAccountSummary[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -1509,6 +1561,7 @@ export function MoneyOperations({
     source: apiSource,
     direction: directionFilter === 'all' ? undefined : directionFilter,
     accountingType: accountingTypeFilter === 'all' ? undefined : accountingTypeFilter,
+    moneyAccountId: moneyAccountId === '' ? undefined : moneyAccountId,
     accountName: accountName || undefined,
     search: debouncedSearch,
     page,
@@ -1534,6 +1587,21 @@ export function MoneyOperations({
     () => accountSummaries.find((account) => account.accountName === accountName) ?? null,
     [accountName, accountSummaries],
   );
+  const moneyAccountOptions = useMemo(
+    () =>
+      moneyAccounts.length > 0
+        ? moneyAccounts.map((account) => ({
+            id: account.id as number | null,
+            source: account.source,
+            accountName: account.name,
+          }))
+        : accountSummaries.map((account) => ({
+            id: null,
+            source: account.source,
+            accountName: account.accountName,
+          })),
+    [accountSummaries, moneyAccounts],
+  );
   const activeMoneyFilters = useMemo(() => {
     const filters: Array<{ key: string; label: string; value: string; onClear: () => void }> = [];
 
@@ -1542,7 +1610,10 @@ export function MoneyOperations({
         key: 'accountName',
         label: 'Счет',
         value: accountName,
-        onClear: () => setAccountName(''),
+        onClear: () => {
+          setMoneyAccountId('');
+          setAccountName('');
+        },
       });
     }
     if (directionFilter !== 'all') {
@@ -1575,24 +1646,31 @@ export function MoneyOperations({
 
   useEffect(() => {
     if (source === 'Total') {
+      setMoneyAccountId('');
       setAccountName('');
+      setMoneyAccounts([]);
       setAccountSummaries([]);
       return;
     }
 
     let cancelled = false;
+    setMoneyAccountId('');
     setAccountName('');
 
-    apiService
-      .getMoneyOperationAccountSummaries({ from, to, source })
-      .then((accounts) => {
+    Promise.all([
+      apiService.getMoneyOperationAccountSummaries({ from, to, source }),
+      apiService.getMoneyAccounts({ source, activeOnly: true }),
+    ])
+      .then(([accounts, moneyAccountItems]) => {
         if (!cancelled) {
           setAccountSummaries(accounts);
+          setMoneyAccounts(moneyAccountItems);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setAccountSummaries([]);
+          setMoneyAccounts([]);
         }
       });
 
@@ -1968,7 +2046,7 @@ export function MoneyOperations({
 
   useEffect(() => {
     setPage(1);
-  }, [accountName, accountingTypeFilter, debouncedSearch, directionFilter, from, pageSize, source, to, totalSourceFilter]);
+  }, [accountName, accountingTypeFilter, debouncedSearch, directionFilter, from, moneyAccountId, pageSize, source, to, totalSourceFilter]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -2585,12 +2663,19 @@ export function MoneyOperations({
                     <label className="flex flex-col gap-1">
                       {SOURCE_ACCOUNT_FILTER_LABELS[source]}
                       <select
-                        value={accountName}
-                        onChange={(event) => setAccountName(event.target.value)}
+                        value={moneyAccountId === '' ? accountName : String(moneyAccountId)}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          const account = moneyAccounts.find((item) => String(item.id) === value);
+                          setMoneyAccountId(account?.id ?? '');
+                          setAccountName(account?.name ?? value);
+                        }}
                         className="rounded-lg border border-slate-200 px-3 py-2">
                         <option value="">{SOURCE_ALL_ACCOUNTS_LABELS[source]}</option>
-                        {accountSummaries.map((account) => (
-                          <option key={`${account.source}-${account.accountName}`} value={account.accountName}>
+                        {moneyAccountOptions.map((account) => (
+                          <option
+                            key={`${account.source}-${account.accountName}-${account.id ?? ''}`}
+                            value={account.id ?? account.accountName}>
                             {account.accountName}
                           </option>
                         ))}
@@ -2633,6 +2718,7 @@ export function MoneyOperations({
                       <button
                         type="button"
                         onClick={() => {
+                          setMoneyAccountId('');
                           setAccountName('');
                           setDirectionFilter('all');
                           setAccountingTypeFilter('all');
@@ -3022,6 +3108,7 @@ export function MoneyOperations({
       <MoneyOperationModal
         source={apiSource ?? 'Bank'}
         initialData={editingOperation}
+        moneyAccounts={moneyAccounts}
         open={modalOpen}
         onClose={() => {
           setModalOpen(false);

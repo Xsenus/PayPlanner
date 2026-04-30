@@ -8,6 +8,8 @@ public sealed class MoneyOperationListItemDto
     public MoneyOperationSource Source { get; init; }
     public MoneyOperationDirection Direction { get; init; }
     public MoneyOperationAccountingType AccountingType { get; init; }
+    public int? MoneyAccountId { get; init; }
+    public string? MoneyAccountName { get; init; }
     public string? AccountName { get; init; }
     public string? CounterpartyName { get; init; }
     public string? CategoryName { get; init; }

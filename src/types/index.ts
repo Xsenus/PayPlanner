@@ -487,11 +487,27 @@ export type MoneyOperationMatchStatus = 'None' | 'ClarificationRequired' | 'Matc
 export type CashOrderStatus = 'Draft' | 'Posted' | 'Cancelled';
 export type CashOrderType = 'Incoming' | 'Outgoing';
 
+export interface MoneyAccount {
+  id: number;
+  name: string;
+  source: MoneyOperationSource;
+  currency: string;
+  bankName?: string | null;
+  bankAccountNumber?: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
 export interface MoneyOperation {
   id: number;
   source: MoneyOperationSource;
   direction: MoneyOperationDirection;
   accountingType: MoneyOperationAccountingType;
+  moneyAccountId?: number | null;
+  moneyAccountName?: string | null;
+  moneyAccount?: MoneyAccount | null;
   accountName?: string | null;
   counterpartyName?: string | null;
   categoryName?: string | null;

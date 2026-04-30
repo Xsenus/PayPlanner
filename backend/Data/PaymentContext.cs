@@ -65,6 +65,7 @@ public class PaymentContext : DbContext
         typeof(Invoice),
         typeof(InvoiceLineItem),
         typeof(LegalEntity),
+        typeof(MoneyAccount),
         typeof(MoneyOperation),
         typeof(Payment),
         typeof(PowerOfAttorney),
@@ -129,6 +130,7 @@ public class PaymentContext : DbContext
     }
 
     public DbSet<MoneyOperation> MoneyOperations => Set<MoneyOperation>();
+    public DbSet<MoneyAccount> MoneyAccounts => Set<MoneyAccount>();
     public DbSet<CashOrder> CashOrders => Set<CashOrder>();
     public DbSet<BankStatementImportBatch> BankStatementImportBatches => Set<BankStatementImportBatch>();
     public DbSet<BankStatementImportRow> BankStatementImportRows => Set<BankStatementImportRow>();
@@ -701,6 +703,23 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ExternalKey).IsUnique().HasDatabaseName("IX_ClientBalanceTransactions_ExternalKey");
         });
 
+        // ------------------ MoneyAccount ------------------
+        modelBuilder.Entity<MoneyAccount>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Source).HasConversion<string>();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Currency).HasMaxLength(16).HasDefaultValue("RUB");
+            entity.Property(e => e.BankName).HasMaxLength(200);
+            entity.Property(e => e.BankAccountNumber).HasMaxLength(64);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.Name).HasDatabaseName("IX_MoneyAccounts_Name");
+            entity.HasIndex(e => e.Source).HasDatabaseName("IX_MoneyAccounts_Source");
+            entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_MoneyAccounts_IsActive");
+            entity.HasIndex(e => new { e.Source, e.Name }).IsUnique().HasDatabaseName("IX_MoneyAccounts_Source_Name");
+        });
+
         // ------------------ MoneyOperation ------------------
         modelBuilder.Entity<MoneyOperation>(entity =>
         {
@@ -732,11 +751,17 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.LinkedInvoiceId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.MoneyAccount)
+                  .WithMany(account => account.MoneyOperations)
+                  .HasForeignKey(e => e.MoneyAccountId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(e => e.BankStatementImportBatch)
                   .WithMany()
                   .HasForeignKey(e => e.BankStatementImportBatchId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasIndex(e => e.MoneyAccountId).HasDatabaseName("IX_MoneyOperations_MoneyAccountId");
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_MoneyOperations_Date");
             entity.HasIndex(e => e.Source).HasDatabaseName("IX_MoneyOperations_Source");
             entity.HasIndex(e => e.Direction).HasDatabaseName("IX_MoneyOperations_Direction");

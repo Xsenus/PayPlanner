@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MoneyOperations } from './MoneyOperations';
-import type { MoneyOperation, MoneyOperationsSummary } from '../../types';
+import type { MoneyAccount, MoneyOperation, MoneyOperationsSummary } from '../../types';
 
 const {
   createCashOrderFromPaymentMock,
@@ -21,6 +21,7 @@ const {
   getBankStatementImportMock,
   getBankStatementImportsMock,
   getCashOrderMock,
+  getMoneyAccountsMock,
   getMoneyOperationAccountsMock,
   getMoneyOperationAccountSummariesMock,
   getMoneyOperationInvoiceCandidatesMock,
@@ -48,6 +49,7 @@ const {
   getBankStatementImportMock: vi.fn(),
   getBankStatementImportsMock: vi.fn(),
   getCashOrderMock: vi.fn(),
+  getMoneyAccountsMock: vi.fn(),
   getMoneyOperationAccountsMock: vi.fn(),
   getMoneyOperationAccountSummariesMock: vi.fn(),
   getMoneyOperationInvoiceCandidatesMock: vi.fn(),
@@ -113,6 +115,7 @@ vi.mock('../../services/api', () => ({
     getBankStatementImport: getBankStatementImportMock,
     getBankStatementImports: getBankStatementImportsMock,
     getCashOrder: getCashOrderMock,
+    getMoneyAccounts: getMoneyAccountsMock,
     getMoneyOperationAccounts: getMoneyOperationAccountsMock,
     getMoneyOperationAccountSummaries: getMoneyOperationAccountSummariesMock,
     getMoneyOperationInvoiceCandidates: getMoneyOperationInvoiceCandidatesMock,
@@ -177,6 +180,9 @@ function createOperation(overrides: Partial<MoneyOperation> = {}): MoneyOperatio
     source: overrides.source ?? 'Bank',
     direction: overrides.direction ?? 'Expense',
     accountingType: overrides.accountingType ?? 'Fact',
+    moneyAccountId: overrides.moneyAccountId ?? null,
+    moneyAccountName: overrides.moneyAccountName ?? null,
+    moneyAccount: overrides.moneyAccount ?? null,
     accountName: overrides.accountName ?? 'Основной счёт',
     counterpartyName: overrides.counterpartyName ?? 'Поставщик А',
     categoryName: overrides.categoryName ?? 'Хозрасходы',
@@ -234,6 +240,7 @@ describe('MoneyOperations integration', () => {
     getCashOrderRegisterPrintHtmlMock.mockReset();
     getBankStatementImportMock.mockReset();
     getBankStatementImportsMock.mockReset();
+    getMoneyAccountsMock.mockReset();
     getMoneyOperationAccountsMock.mockReset();
     getMoneyOperationAccountSummariesMock.mockReset();
     getMoneyOperationInvoiceCandidatesMock.mockReset();
@@ -254,6 +261,37 @@ describe('MoneyOperations integration', () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:cash-order');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
     vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    const moneyAccounts: MoneyAccount[] = [
+      {
+        id: 101,
+        name: 'Основной счёт',
+        source: 'Bank',
+        currency: 'RUB',
+        bankName: 'Банк',
+        bankAccountNumber: null,
+        isDefault: true,
+        isActive: true,
+        createdAt: '2026-04-20T08:00:00Z',
+        updatedAt: null,
+      },
+      {
+        id: 102,
+        name: 'Резервный счёт',
+        source: 'Bank',
+        currency: 'RUB',
+        bankName: 'Банк',
+        bankAccountNumber: null,
+        isDefault: false,
+        isActive: true,
+        createdAt: '2026-04-20T08:00:00Z',
+        updatedAt: null,
+      },
+    ];
+
+    getMoneyAccountsMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' | 'EMoney' }) =>
+      moneyAccounts.filter((account) => !params?.source || account.source === params.source),
+    );
 
     getMoneyOperationAccountsMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' | 'EMoney' }) =>
       Array.from(
@@ -301,6 +339,7 @@ describe('MoneyOperations integration', () => {
     getMoneyOperationsPagedMock.mockImplementation(
       async (params?: {
         source?: 'Bank' | 'Cash' | 'Card' | 'EMoney';
+        moneyAccountId?: number;
         accountName?: string;
         direction?: 'Income' | 'Expense' | 'Transfer';
         accountingType?: 'Fact' | 'Plan';
@@ -308,6 +347,7 @@ describe('MoneyOperations integration', () => {
       const filtered = operations.filter(
         (item) =>
           (!params?.source || item.source === params.source) &&
+          (!params?.moneyAccountId || item.moneyAccountId === params.moneyAccountId) &&
           (!params?.accountName || item.accountName === params.accountName) &&
           (!params?.direction || item.direction === params.direction) &&
           (!params?.accountingType || item.accountingType === params.accountingType),
@@ -534,12 +574,7 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByLabelText(/^Дата$/)).toHaveProperty('value', '2026-04-21');
     await user.click(screen.getByLabelText('Расход'));
 
-    const bankAccountInput = screen
-      .getAllByLabelText('Банковский счёт')
-      .find((element): element is HTMLInputElement => element instanceof HTMLInputElement);
-    expect(bankAccountInput).toBeTruthy();
-    await user.clear(bankAccountInput!);
-    await user.type(bankAccountInput!, 'Расчётный счёт');
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '102');
     await user.clear(screen.getByLabelText('Поставщик'));
     await user.type(screen.getByLabelText('Поставщик'), 'Новый поставщик');
     await user.clear(screen.getByLabelText(/^Назначение$/));
@@ -553,7 +588,8 @@ describe('MoneyOperations integration', () => {
         id: 0,
         source: 'Bank',
         date: '2026-04-21',
-        accountName: 'Расчётный счёт',
+        moneyAccountId: 102,
+        accountName: 'Резервный счёт',
         counterpartyName: 'Новый поставщик',
         purpose: 'Оплата по договору',
       }),
@@ -565,8 +601,8 @@ describe('MoneyOperations integration', () => {
   it('filters money operations by selected account', async () => {
     const user = userEvent.setup();
     operations = [
-      createOperation({ id: 1, accountName: 'Основной счёт', counterpartyName: 'Поставщик А' }),
-      createOperation({ id: 2, accountName: 'Резервный счёт', counterpartyName: 'Поставщик Б' }),
+      createOperation({ id: 1, moneyAccountId: 101, moneyAccountName: 'Основной счёт', accountName: 'Основной счёт', counterpartyName: 'Поставщик А' }),
+      createOperation({ id: 2, moneyAccountId: 102, moneyAccountName: 'Резервный счёт', accountName: 'Резервный счёт', counterpartyName: 'Поставщик Б' }),
     ];
 
     render(<MoneyOperations source="Bank" />);
@@ -575,11 +611,11 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByText('Поставщик Б')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: /Фильтр/ }));
-    await user.selectOptions(screen.getByLabelText('Банковский счёт'), 'Резервный счёт');
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '102');
 
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
-        expect.objectContaining({ accountName: 'Резервный счёт' }),
+        expect.objectContaining({ moneyAccountId: 102, accountName: 'Резервный счёт' }),
       ),
     );
     expect(await screen.findByText('Поставщик Б')).toBeTruthy();

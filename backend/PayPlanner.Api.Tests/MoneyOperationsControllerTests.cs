@@ -559,6 +559,7 @@ public class MoneyOperationsControllerTests
             null,
             null,
             null,
+            null,
         }));
         var sql = query.ToQueryString();
 
@@ -2588,12 +2589,22 @@ public class MoneyOperationsControllerTests
     public async Task ImportBankStatement_CreatesOperationsAsClarificationRequired()
     {
         await using var db = await CreateContextAsync();
+        db.MoneyAccounts.Add(new MoneyAccount
+        {
+            Name = "Основной банк",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsDefault = true,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
         var controller = CreateController(db);
 
         var action = await controller.ImportBankStatement(
             CreateFormFile(
-                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
-                "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Оплата по счёту №33;301\n",
+                "Дата;Сумма;Счёт;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Основной банк;Ахмедова Айтан Рафик Кызы;Оплата по счёту №33;301\n",
                 "statement.csv"),
             CancellationToken.None);
 
@@ -2604,10 +2615,125 @@ public class MoneyOperationsControllerTests
 
         var operation = await db.MoneyOperations.SingleAsync();
         Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operation.MatchStatus);
+        Assert.NotNull(operation.MoneyAccountId);
+        Assert.Equal("Основной банк", operation.AccountName);
 
         var page = await GetMoneyPageAsync(controller, MoneyOperationSource.Bank);
         var item = Assert.Single(page.Items);
         Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, item.MatchStatus);
+    }
+
+    [Fact]
+    public async Task MoneyAccount_CreateOperation_BindsAccountAndFiltersById()
+    {
+        await using var db = await CreateContextAsync();
+        var account = new MoneyAccount
+        {
+            Name = "Основной банк",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsDefault = true,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var otherAccount = new MoneyAccount
+        {
+            Name = "Резервный банк",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsDefault = false,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyAccounts.AddRange(account, otherAccount);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var createAction = await controller.Create(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            MoneyAccountId = account.Id,
+            AccountName = "Будет заменено",
+            Amount = 25_000m,
+            Currency = "",
+            Date = new DateTime(2026, 4, 29),
+            Purpose = "Оплата по счету №33",
+        });
+
+        var created = Assert.IsType<CreatedResult>(createAction);
+        var operation = Assert.IsType<MoneyOperation>(created.Value);
+        Assert.Equal(MoneyOperationSource.Bank, operation.Source);
+        Assert.Equal(account.Id, operation.MoneyAccountId);
+        Assert.Equal("Основной банк", operation.AccountName);
+        Assert.Equal("RUB", operation.Currency);
+
+        db.MoneyOperations.Add(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            MoneyAccountId = otherAccount.Id,
+            AccountName = otherAccount.Name,
+            Amount = 1_000m,
+            Currency = "RUB",
+            Date = new DateTime(2026, 4, 29),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var pageAction = await controller.GetPaged(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: account.Id,
+            accountName: null,
+            search: null,
+            page: 1,
+            pageSize: 25);
+
+        var ok = Assert.IsType<OkObjectResult>(pageAction.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+        var item = Assert.Single(page.Items);
+        Assert.Equal(account.Id, item.MoneyAccountId);
+        Assert.Equal("Основной банк", item.MoneyAccountName);
+    }
+
+    [Fact]
+    public async Task MoneyAccountsController_CreatesSingleDefaultPerSource()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = new MoneyAccountsController(db);
+
+        var firstAction = await controller.Create(new MoneyAccount
+        {
+            Name = "Основной счет",
+            Source = MoneyOperationSource.Bank,
+            Currency = "rub",
+            IsActive = true,
+        }, CancellationToken.None);
+        var firstCreated = Assert.IsType<CreatedAtActionResult>(firstAction.Result);
+        var first = Assert.IsType<MoneyAccount>(firstCreated.Value);
+        Assert.True(first.IsDefault);
+        Assert.Equal("RUB", first.Currency);
+
+        var secondAction = await controller.Create(new MoneyAccount
+        {
+            Name = "Дополнительный счет",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsDefault = true,
+            IsActive = true,
+        }, CancellationToken.None);
+        var secondCreated = Assert.IsType<CreatedAtActionResult>(secondAction.Result);
+        var second = Assert.IsType<MoneyAccount>(secondCreated.Value);
+
+        Assert.True(second.IsDefault);
+        Assert.False(await db.MoneyAccounts.Where(item => item.Id == first.Id).Select(item => item.IsDefault).SingleAsync());
+        Assert.True(await db.MoneyAccounts.Where(item => item.Id == second.Id).Select(item => item.IsDefault).SingleAsync());
     }
 
     private static async Task<PaymentContext> CreateContextAsync()
