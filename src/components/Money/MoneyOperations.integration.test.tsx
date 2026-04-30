@@ -29,6 +29,7 @@ const {
   getMoneyOperationMock,
   getMoneyOperationsPagedMock,
   importBankStatementMock,
+  reprocessBankStatementImportMock,
   rollbackBankStatementImportMock,
   toastErrorMock,
   toastSuccessMock,
@@ -58,6 +59,7 @@ const {
   getMoneyOperationMock: vi.fn(),
   getMoneyOperationsPagedMock: vi.fn(),
   importBankStatementMock: vi.fn(),
+  reprocessBankStatementImportMock: vi.fn(),
   rollbackBankStatementImportMock: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -125,6 +127,7 @@ vi.mock('../../services/api', () => ({
     getMoneyOperation: getMoneyOperationMock,
     getMoneyOperationsPaged: getMoneyOperationsPagedMock,
     importBankStatement: importBankStatementMock,
+    reprocessBankStatementImport: reprocessBankStatementImportMock,
     rollbackBankStatementImport: rollbackBankStatementImportMock,
     updateCashOrder: updateCashOrderMock,
     updateMoneyOperation: updateMoneyOperationMock,
@@ -251,6 +254,7 @@ describe('MoneyOperations integration', () => {
     getMoneyOperationMock.mockReset();
     getMoneyOperationsPagedMock.mockReset();
     importBankStatementMock.mockReset();
+    reprocessBankStatementImportMock.mockReset();
     rollbackBankStatementImportMock.mockReset();
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
@@ -447,6 +451,14 @@ describe('MoneyOperations integration', () => {
       deletedOperations: 1,
       skippedRows: 0,
       messages: [],
+    });
+    reprocessBankStatementImportMock.mockResolvedValue({
+      batchId: 2,
+      rowsRead: 1,
+      created: 1,
+      skipped: 0,
+      errors: [],
+      operations: [],
     });
     getCashOrderMock.mockImplementation(async (id: number) => ({
       id,
@@ -1568,5 +1580,74 @@ describe('MoneyOperations integration', () => {
 
     await waitFor(() => expect(rollbackBankStatementImportMock).toHaveBeenCalledWith(1));
     expect(toastSuccessMock).toHaveBeenCalledWith('Откат импорта: удалено операций 1, пропущено строк 0.', 'Выписка банка');
+  }, 15000);
+
+  it('reprocesses a rolled back bank import batch', async () => {
+    const user = userEvent.setup();
+    operations = [];
+    getBankStatementImportsMock.mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          fileName: 'statement.csv',
+          status: 'RolledBack',
+          rowsRead: 1,
+          createdRows: 1,
+          skippedRows: 0,
+          errorRows: 0,
+          rollbackRows: 1,
+          createdAt: '2026-04-29T10:00:00Z',
+          rolledBackAt: '2026-04-29T11:00:00Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 5,
+    });
+    getBankStatementImportMock.mockResolvedValue({
+      id: 1,
+      fileName: 'statement.csv',
+      status: 'RolledBack',
+      rowsRead: 1,
+      createdRows: 1,
+      skippedRows: 0,
+      errorRows: 0,
+      rollbackRows: 1,
+      fileHash: 'hash',
+      fileSize: 128,
+      errorSummary: null,
+      createdAt: '2026-04-29T10:00:00Z',
+      rolledBackAt: '2026-04-29T11:00:00Z',
+      rows: [
+        {
+          id: 1,
+          rowNumber: 2,
+          status: 'RolledBack',
+          message: null,
+          moneyOperationId: 44,
+          date: '2026-04-29',
+          direction: 'Income',
+          amount: 25000,
+          accountName: 'Основной счет',
+          counterpartyName: 'Ахмедова Айтан Рафик Кызы',
+          purpose: 'Оплата по счету №33',
+          paymentOrderNumber: '101',
+          createdAt: '2026-04-29T10:00:00Z',
+          rolledBackAt: '2026-04-29T11:00:00Z',
+        },
+      ],
+    });
+
+    render(<MoneyOperations source="Bank" />);
+
+    await user.click(screen.getByRole('button', { name: 'Открыть журнал импортов выписки' }));
+    await screen.findByText('statement.csv');
+    await user.click(screen.getByRole('button', { name: 'Открыть' }));
+    await waitFor(() => expect(screen.getAllByText('Откат выполнен').length).toBeGreaterThan(0));
+    await user.click(screen.getByRole('button', { name: 'Повторить' }));
+
+    await waitFor(() => expect(reprocessBankStatementImportMock).toHaveBeenCalledWith(1));
+    expect(toastSuccessMock).toHaveBeenCalledWith('Повторная обработка: создано 1, пропущено 0.', 'Выписка банка');
+    expect(await screen.findByText('Импорт выписки: прочитано 1, создано 1, пропущено 0')).toBeTruthy();
   }, 15000);
 });

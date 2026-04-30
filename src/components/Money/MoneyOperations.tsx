@@ -1560,6 +1560,7 @@ export function MoneyOperations({
   const [selectedBankImport, setSelectedBankImport] = useState<BankStatementImportBatchDetail | null>(null);
   const [bankImportDetailsLoading, setBankImportDetailsLoading] = useState(false);
   const [bankImportRollbackLoading, setBankImportRollbackLoading] = useState(false);
+  const [bankImportReprocessLoading, setBankImportReprocessLoading] = useState(false);
   const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentYear = new Date().getFullYear();
@@ -2031,6 +2032,31 @@ export function MoneyOperations({
       toast.error(message, 'Выписка банка');
     } finally {
       setBankImportRollbackLoading(false);
+    }
+  };
+
+  const handleReprocessBankImport = async (batchId: number) => {
+    setBankImportReprocessLoading(true);
+    try {
+      const result = await apiService.reprocessBankStatementImport(batchId);
+      setBankStatementImportResult({
+        batchId: result.batchId ?? null,
+        rowsRead: result.rowsRead,
+        created: result.created,
+        skipped: result.skipped,
+        errors: result.errors ?? [],
+        operations: result.operations ?? [],
+      });
+      toast.success(`Повторная обработка: создано ${result.created}, пропущено ${result.skipped}.`, 'Выписка банка');
+      await reload();
+      setBankImportsRefreshKey((value) => value + 1);
+      const detail = await apiService.getBankStatementImport(batchId);
+      setSelectedBankImport(detail);
+    } catch (reprocessError) {
+      const message = extractDisplayErrorMessage(reprocessError, 'Не удалось повторно обработать импорт выписки.');
+      toast.error(message, 'Выписка банка');
+    } finally {
+      setBankImportReprocessLoading(false);
     }
   };
 
@@ -3186,6 +3212,17 @@ export function MoneyOperations({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleReprocessBankImport(selectedBankImport.id)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={
+                      bankImportReprocessLoading ||
+                      !selectedBankImport.rows.some((row) => ['Skipped', 'Error', 'RolledBack'].includes(row.status))
+                    }>
+                    <RefreshCw className="h-4 w-4" />
+                    Повторить
+                  </button>
                   <button
                     type="button"
                     onClick={() => void handleRollbackBankImport(selectedBankImport.id)}

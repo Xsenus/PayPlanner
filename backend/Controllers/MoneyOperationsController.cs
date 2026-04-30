@@ -1355,6 +1355,56 @@ public class MoneyOperationsController : ControllerBase
         });
     }
 
+    [HttpPost("bank-statement/imports/{batchId:int}/reprocess")]
+    public async Task<ActionResult<BankStatementImportResultDto>> ReprocessBankStatementImport(int batchId, CancellationToken ct)
+    {
+        var batch = await _db.BankStatementImportBatches
+            .Include(item => item.Rows)
+                .ThenInclude(row => row.MoneyOperation)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == batchId, ct);
+        if (batch is null)
+        {
+            return NotFound();
+        }
+
+        var rows = batch.Rows
+            .Where(row =>
+                (row.Status == BankStatementImportRowStatus.Skipped ||
+                 row.Status == BankStatementImportRowStatus.Error ||
+                 row.Status == BankStatementImportRowStatus.RolledBack) &&
+                (row.MoneyOperationId is null || row.MoneyOperation is null))
+            .OrderBy(row => row.RowNumber)
+            .ToList();
+
+        var result = new BankStatementImportResultDto { RowsRead = rows.Count };
+        if (rows.Count == 0)
+        {
+            result.Errors.Add("В batch нет строк, доступных для повторной обработки.");
+            return Ok(result);
+        }
+
+        var items = rows
+            .Select(row => new BankStatementImportItem(
+                row.RowNumber,
+                row.Date.Date,
+                row.Direction,
+                row.Amount,
+                row.AccountName ?? string.Empty,
+                row.CounterpartyName,
+                row.Purpose,
+                row.PaymentOrderNumber))
+            .ToList();
+
+        return Ok(await ImportBankStatementItemsAsync(
+            items,
+            result,
+            $"{batch.FileName} (повторная обработка)",
+            batch.FileSize,
+            $"{batch.FileHash}:reprocess:{batch.Id}:{DateTime.UtcNow:O}",
+            ct));
+    }
+
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] MoneyOperation model, CancellationToken ct = default)
     {

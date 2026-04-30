@@ -2260,6 +2260,12 @@ export class ApiService {
     });
   }
 
+  async reprocessBankStatementImport(id: number) {
+    return this.request<BankStatementImportResult>(`/money-operations/bank-statement/imports/${id}/reprocess`, {
+      method: 'POST',
+    });
+  }
+
   async createCashOrderFromPayment(paymentId: number) {
     return this.request<CashOrder>(`/cash-orders/from-payment/${paymentId}`, { method: 'POST' });
   }

@@ -1645,6 +1645,44 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task ReprocessBankStatementImport_RecreatesRolledBackRows()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db);
+        var importAction = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Оплата по счету №33;101\n",
+                "statement.csv"),
+            CancellationToken.None);
+        var importOk = Assert.IsType<OkObjectResult>(importAction.Result);
+        var importResult = Assert.IsType<BankStatementImportResultDto>(importOk.Value);
+
+        await controller.RollbackBankStatementImport(importResult.BatchId!.Value, CancellationToken.None);
+
+        var reprocessAction = await controller.ReprocessBankStatementImport(importResult.BatchId.Value, CancellationToken.None);
+
+        var reprocessOk = Assert.IsType<OkObjectResult>(reprocessAction.Result);
+        var reprocessResult = Assert.IsType<BankStatementImportResultDto>(reprocessOk.Value);
+        Assert.NotEqual(importResult.BatchId, reprocessResult.BatchId);
+        Assert.Equal(1, reprocessResult.RowsRead);
+        Assert.Equal(1, reprocessResult.Created);
+        Assert.Equal(0, reprocessResult.Skipped);
+
+        var operation = await db.MoneyOperations.SingleAsync();
+        Assert.Equal("Ахмедова Айтан Рафик Кызы", operation.CounterpartyName);
+
+        var batches = await db.BankStatementImportBatches
+            .Include(batch => batch.Rows)
+            .OrderBy(batch => batch.Id)
+            .ToListAsync();
+        Assert.Equal(2, batches.Count);
+        Assert.Equal(BankStatementImportBatchStatus.RolledBack, batches[0].Status);
+        Assert.Equal(BankStatementImportBatchStatus.Applied, batches[1].Status);
+        Assert.Equal(BankStatementImportRowStatus.Created, Assert.Single(batches[1].Rows).Status);
+    }
+
+    [Fact]
     public async Task RollbackBankStatementImport_SkipsMatchedOperations()
     {
         await using var db = await CreateContextAsync();
