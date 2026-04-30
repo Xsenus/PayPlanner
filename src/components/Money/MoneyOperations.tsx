@@ -1587,6 +1587,15 @@ export function MoneyOperations({
     () => accountSummaries.find((account) => account.accountName === accountName) ?? null,
     [accountName, accountSummaries],
   );
+  const selectedMoneyAccount = useMemo(
+    () => (moneyAccountId === '' ? null : moneyAccounts.find((account) => account.id === moneyAccountId) ?? null),
+    [moneyAccountId, moneyAccounts],
+  );
+  const selectMoneyAccount = (value: string) => {
+    const account = moneyAccounts.find((item) => String(item.id) === value);
+    setMoneyAccountId(account?.id ?? '');
+    setAccountName(account?.name ?? value);
+  };
   const moneyAccountOptions = useMemo(
     () =>
       moneyAccounts.length > 0
@@ -2383,12 +2392,34 @@ export function MoneyOperations({
         <>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">{SOURCE_LABELS[source]}</h1>
+          <h1 className="text-xl font-semibold text-slate-900">
+            {source === 'Bank' && selectedMoneyAccount ? selectedMoneyAccount.name : SOURCE_LABELS[source]}
+          </h1>
           <p className="text-sm text-slate-500">{SOURCE_OPERATION_SUBTITLES[source]}</p>
+          {source === 'Bank' && selectedMoneyAccount && (
+            <p className="mt-1 text-xs text-slate-400">
+              {selectedMoneyAccount.bankName ? `${selectedMoneyAccount.bankName} · ` : ''}
+              {selectedMoneyAccount.bankAccountNumber || selectedMoneyAccount.currency || 'RUB'}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {source === 'Bank' && (
             <>
+              <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+                Счет
+                <select
+                  value={moneyAccountId === '' ? accountName : String(moneyAccountId)}
+                  onChange={(event) => selectMoneyAccount(event.target.value)}
+                  className="min-w-52 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-700 focus:border-blue-500 focus:outline-none">
+                  <option value="">Все счета</option>
+                  {moneyAccountOptions.map((account) => (
+                    <option key={`${account.source}-${account.accountName}-${account.id ?? ''}`} value={account.id ?? account.accountName}>
+                      {account.accountName}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <input
                 ref={bankStatementInputRef}
                 type="file"
@@ -2665,10 +2696,7 @@ export function MoneyOperations({
                       <select
                         value={moneyAccountId === '' ? accountName : String(moneyAccountId)}
                         onChange={(event) => {
-                          const value = event.target.value;
-                          const account = moneyAccounts.find((item) => String(item.id) === value);
-                          setMoneyAccountId(account?.id ?? '');
-                          setAccountName(account?.name ?? value);
+                          selectMoneyAccount(event.target.value);
                         }}
                         className="rounded-lg border border-slate-200 px-3 py-2">
                         <option value="">{SOURCE_ALL_ACCOUNTS_LABELS[source]}</option>
