@@ -557,6 +557,8 @@ describe('ClientDetail integration', () => {
         type: 'Overpayment',
         direction: 'Credit',
         description: 'Переплата по платежу',
+        paymentId: 77,
+        invoiceId: 33,
         createdAt: '2026-04-28T08:00:00Z',
         createdByUserName: 'Администратор',
       },
@@ -572,6 +574,8 @@ describe('ClientDetail integration', () => {
     await user.click(balanceButton);
     expect(await screen.findByText('Баланс клиента')).toBeTruthy();
     expect(await screen.findByText('Переплата по платежу')).toBeTruthy();
+    expect(await screen.findByText('Источник #77')).toBeTruthy();
+    expect(await screen.findByText('Счёт #33')).toBeTruthy();
     expect(apiService.getClientBalanceTransactions).toHaveBeenCalledWith(1);
 
     await user.click(screen.getByRole('button', { name: 'История клиента' }));

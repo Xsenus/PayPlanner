@@ -44,6 +44,7 @@ import {
   getStatusSourcePaymentsForInvoice,
   isInvoiceManagedPayment,
 } from '../../utils/invoicePayments';
+import { getAppliedClientBalanceAmount } from '../../utils/systemNotes';
 
 type FormState = {
   number: string;
@@ -3273,6 +3274,7 @@ export function InvoiceModal({
                       <div className="space-y-2">
                         {displayPayments.map((payment) => {
                           const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
+                          const appliedClientBalanceAmount = getAppliedClientBalanceAmount(payment.systemNotes);
                           const installmentSequenceLabel = installmentMeta
                             ? `${installmentMeta.sequence}/${Math.max(installmentMeta.months, installmentMeta.sequence)}`
                             : null;
@@ -3314,6 +3316,11 @@ export function InvoiceModal({
                                 {installmentMeta ? (
                                   <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
                                     Рассрочка {installmentSequenceLabel}
+                                  </span>
+                                ) : null}
+                                {appliedClientBalanceAmount > 0 ? (
+                                  <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                                    Зачтено с баланса: {formatCurrencySmart(appliedClientBalanceAmount).full}
                                   </span>
                                 ) : null}
                               </div>
@@ -3779,6 +3786,7 @@ export function InvoiceModal({
                     {displayPayments.map((payment) => {
                       const invoiceManagedPayment = isInvoiceManagedPayment(payment);
                       const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
+                      const appliedClientBalanceAmount = getAppliedClientBalanceAmount(payment.systemNotes);
                       const canEditInvoiceManagedPayment = false;
                       const canEditRelatedPayment = Boolean(onEditRelatedPayment);
                       const canDeleteRelatedPayment = Boolean(onDeleteRelatedPayment) && !invoiceManagedPayment;
@@ -3806,6 +3814,11 @@ export function InvoiceModal({
                             {installmentMeta ? (
                               <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
                                 Рассрочка {installmentSequenceLabel}
+                              </span>
+                            ) : null}
+                            {appliedClientBalanceAmount > 0 ? (
+                              <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                                Зачтено с баланса: {formatCurrencySmart(appliedClientBalanceAmount).full}
                               </span>
                             ) : null}
                           </div>

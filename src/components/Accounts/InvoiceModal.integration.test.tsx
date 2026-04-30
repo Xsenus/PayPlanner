@@ -402,6 +402,7 @@ describe('InvoiceModal integration', () => {
       description: 'Оплата по счету №24',
       account: '24',
       accountDate: '2026-04-02',
+      systemNotes: 'Зачтено с баланса клиента: 750,00',
     } as unknown as Payment;
 
     render(
@@ -421,6 +422,7 @@ describe('InvoiceModal integration', () => {
 
     await screen.findByText('Оплата по счету №24');
     expect(screen.queryByText('Связанные платежи пока не добавлены.')).toBeNull();
+    expect(screen.getByText('Зачтено с баланса: 750 ₽')).toBeTruthy();
     expect(screen.getAllByText(/₽/).length).toBeGreaterThan(0);
   });
 

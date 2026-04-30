@@ -9265,6 +9265,8 @@ export function ClientDetail({
                     {clientBalanceTransactions.map((item) => {
                       const isCredit = item.direction === "Credit";
                       const signedAmount = `${isCredit ? "+" : "-"}${formatCurrencySmart(item.amount).full}`;
+                      const paymentLabel =
+                        item.type === "CreditApplied" ? "Зачтено в платёж" : "Источник";
 
                       return (
                         <div
@@ -9288,6 +9290,20 @@ export function ClientDetail({
                                 <p className="mt-1 text-xs text-slate-400">
                                   Автор: {item.createdByUserName}
                                 </p>
+                              ) : null}
+                              {item.paymentId || item.invoiceId ? (
+                                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                                  {item.paymentId ? (
+                                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600">
+                                      {paymentLabel} #{item.paymentId}
+                                    </span>
+                                  ) : null}
+                                  {item.invoiceId ? (
+                                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600">
+                                      Счёт #{item.invoiceId}
+                                    </span>
+                                  ) : null}
+                                </div>
                               ) : null}
                             </div>
                             <div
