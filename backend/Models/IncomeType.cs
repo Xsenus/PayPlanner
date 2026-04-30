@@ -40,6 +40,8 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public ICollection<Payment> Payments { get; set; } = new List<Payment>();
 
+        public ICollection<MoneyOperation> MoneyOperations { get; set; } = new List<MoneyOperation>();
+
         /// <summary>
         /// Тип платежа.
         /// </summary>

@@ -55,6 +55,8 @@ import type {
   CashOrder,
   CashOrderRegister,
   CashOrderType,
+  IncomeType,
+  PaymentKind,
 } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
@@ -141,6 +143,7 @@ const DEFAULT_FORM: MoneyOperation = {
   moneyAccount: null,
   accountName: '',
   counterpartyName: '',
+  incomeTypeId: null,
   categoryName: '',
   amount: 0,
   currency: 'RUB',
@@ -202,6 +205,32 @@ function buildUniqueOptions(values: Array<string | null | undefined>) {
         .filter((value): value is string => Boolean(value)),
     ),
   ).sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+type MoneyOperationCategoryOption = Pick<IncomeType, 'id' | 'name' | 'paymentType'>;
+
+function getPaymentKindForDirection(direction: MoneyOperationDirection): PaymentKind | null {
+  if (direction === 'Income') return 'Income';
+  if (direction === 'Expense') return 'Expense';
+  return null;
+}
+
+function findCategoryOption(
+  options: MoneyOperationCategoryOption[] | undefined,
+  direction: MoneyOperationDirection,
+  value: string | null | undefined,
+) {
+  const paymentKind = getPaymentKindForDirection(direction);
+  const normalizedValue = value?.trim().toLocaleLowerCase('ru');
+  if (!paymentKind || !normalizedValue) return null;
+
+  return (
+    options?.find(
+      (option) =>
+        option.paymentType === paymentKind &&
+        option.name.trim().toLocaleLowerCase('ru') === normalizedValue,
+    ) ?? null
+  );
 }
 
 function formatDate(value: string) {
@@ -1206,7 +1235,7 @@ function MoneyOperationModal({
   source: MoneyOperationSource;
   initialData?: MoneyOperation | null;
   moneyAccounts?: MoneyAccount[];
-  categoryOptions?: string[];
+  categoryOptions?: MoneyOperationCategoryOption[];
   open: boolean;
   onClose: () => void;
   onSave: (payload: MoneyOperation) => Promise<void>;
@@ -1220,6 +1249,12 @@ function MoneyOperationModal({
     () => (moneyAccounts ?? []).filter((account) => account.source === source && account.isActive),
     [moneyAccounts, source],
   );
+  const modalCategoryOptions = useMemo(() => {
+    const paymentKind = getPaymentKindForDirection(form.direction);
+    return paymentKind
+      ? (categoryOptions ?? []).filter((option) => option.paymentType === paymentKind)
+      : [];
+  }, [categoryOptions, form.direction]);
 
   useEffect(() => {
     if (open) {
@@ -1277,6 +1312,28 @@ function MoneyOperationModal({
 
   const setField = <K extends keyof MoneyOperation>(key: K, value: MoneyOperation[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleDirectionChange = (direction: MoneyOperationDirection) => {
+    setForm((prev) => {
+      const selectedCategory = findCategoryOption(categoryOptions, direction, prev.categoryName);
+      return {
+        ...prev,
+        direction,
+        incomeTypeId: selectedCategory?.id ?? null,
+      };
+    });
+  };
+
+  const handleCategoryChange = (value: string) => {
+    setForm((prev) => {
+      const selectedCategory = findCategoryOption(categoryOptions, prev.direction, value);
+      return {
+        ...prev,
+        categoryName: value,
+        incomeTypeId: selectedCategory?.id ?? null,
+      };
+    });
   };
 
   const handleMoneyAccountChange = (value: string) => {
@@ -1361,7 +1418,7 @@ function MoneyOperationModal({
                   type="radio"
                   name="direction"
                   checked={form.direction === direction}
-                  onChange={() => setField('direction', direction)}
+                  onChange={() => handleDirectionChange(direction)}
                 />
                 {direction === 'Income' ? 'Приход' : direction === 'Expense' ? 'Расход' : 'Между счетами'}
               </label>
@@ -1405,14 +1462,14 @@ function MoneyOperationModal({
               {form.direction === 'Income' ? 'Статья прихода' : 'Статья расхода'}
               <input
                 value={form.categoryName ?? ''}
-                onChange={(event) => setField('categoryName', event.target.value)}
+                onChange={(event) => handleCategoryChange(event.target.value)}
                 list={`money-operation-category-options-${source}`}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
                 placeholder="Статья"
               />
               <datalist id={`money-operation-category-options-${source}`}>
-                {(categoryOptions ?? []).map((option) => (
-                  <option key={option} value={option} />
+                {modalCategoryOptions.map((option) => (
+                  <option key={`${option.paymentType}-${option.id}`} value={option.name} />
                 ))}
               </datalist>
             </label>
@@ -1668,7 +1725,7 @@ export function MoneyOperations({
   const [moneyAccounts, setMoneyAccounts] = useState<MoneyAccount[]>([]);
   const [accountName, setAccountName] = useState('');
   const [categoryName, setCategoryName] = useState('');
-  const [categoryDictionaryOptions, setCategoryDictionaryOptions] = useState<string[]>([]);
+  const [categoryDictionaryOptions, setCategoryDictionaryOptions] = useState<MoneyOperationCategoryOption[]>([]);
   const [accountSummaries, setAccountSummaries] = useState<MoneyOperationAccountSummary[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1758,7 +1815,7 @@ export function MoneyOperations({
     pageSize: effectivePageSize,
   });
   const categoryOptions = useMemo(
-    () => buildUniqueOptions([...categoryDictionaryOptions, ...items.map((item) => item.categoryName)]),
+    () => buildUniqueOptions([...categoryDictionaryOptions.map((item) => item.name), ...items.map((item) => item.categoryName)]),
     [categoryDictionaryOptions, items],
   );
   const totalPages = useMemo(
@@ -1920,7 +1977,17 @@ export function MoneyOperations({
     Promise.all([apiService.getIncomeTypes('Income', true), apiService.getIncomeTypes('Expense', true)])
       .then(([incomeTypes, expenseTypes]) => {
         if (!cancelled) {
-          setCategoryDictionaryOptions(buildUniqueOptions([...incomeTypes, ...expenseTypes].map((item) => item.name)));
+          const uniqueOptions = new Map<string, MoneyOperationCategoryOption>();
+          [...incomeTypes, ...expenseTypes].forEach((item) => {
+            uniqueOptions.set(`${item.paymentType}-${item.id}`, {
+              id: item.id,
+              name: item.name,
+              paymentType: item.paymentType,
+            });
+          });
+          setCategoryDictionaryOptions(
+            Array.from(uniqueOptions.values()).sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+          );
         }
       })
       .catch(() => {
@@ -2380,12 +2447,14 @@ export function MoneyOperations({
         Number.isFinite(payload.linkedInvoiceId ?? NaN) && (payload.linkedInvoiceId ?? 0) > 0
           ? payload.linkedInvoiceId
           : null;
+      const selectedCategory = findCategoryOption(categoryDictionaryOptions, payload.direction, payload.categoryName);
       const prepared = {
         ...payload,
         source: apiSource ?? payload.source,
         date: normalizedDate,
         recognitionDate: normalizedRecognitionDate,
         paidAmount: normalizedPaidAmount,
+        incomeTypeId: selectedCategory?.id ?? payload.incomeTypeId ?? null,
         linkedInvoiceId: normalizedLinkedInvoiceId,
         matchStatus: normalizedLinkedInvoiceId ? 'Matched' : payload.matchStatus ?? 'None',
       };
@@ -3600,7 +3669,7 @@ export function MoneyOperations({
         source={apiSource ?? 'Bank'}
         initialData={editingOperation}
         moneyAccounts={moneyAccounts}
-        categoryOptions={categoryOptions}
+        categoryOptions={categoryDictionaryOptions}
         open={modalOpen}
         onClose={() => {
           setModalOpen(false);

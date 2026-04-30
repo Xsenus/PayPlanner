@@ -12,6 +12,7 @@ public sealed class MoneyOperationListItemDto
     public string? MoneyAccountName { get; init; }
     public string? AccountName { get; init; }
     public string? CounterpartyName { get; init; }
+    public int? IncomeTypeId { get; init; }
     public string? CategoryName { get; init; }
     public decimal Amount { get; init; }
     public string? Currency { get; init; }

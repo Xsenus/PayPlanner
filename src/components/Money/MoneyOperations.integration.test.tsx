@@ -634,14 +634,16 @@ describe('MoneyOperations integration', () => {
       .getAllByLabelText(/Статья/)
       .find((element) => element.getAttribute('list') === 'money-operation-category-options-Bank');
     expect(categoryInput).toBeTruthy();
-    expect(document.querySelector('datalist#money-operation-category-options-Bank option[value="Хозрасходы"]')).toBeTruthy();
 
     expect(screen.getByLabelText(/^Дата$/)).toHaveProperty('value', '2026-04-21');
     await user.click(screen.getByLabelText('Расход'));
+    expect(document.querySelector('datalist#money-operation-category-options-Bank option[value="Хозрасходы"]')).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText('Банковский счёт'), '102');
     await user.clear(screen.getByLabelText('Поставщик'));
     await user.type(screen.getByLabelText('Поставщик'), 'Новый поставщик');
+    await user.clear(categoryInput as HTMLElement);
+    await user.type(categoryInput as HTMLElement, 'Хозрасходы');
     await user.clear(screen.getByLabelText(/^Назначение$/));
     await user.type(screen.getByLabelText(/^Назначение$/), 'Оплата по договору');
 
@@ -656,6 +658,8 @@ describe('MoneyOperations integration', () => {
         moneyAccountId: 102,
         accountName: 'Резервный счёт',
         counterpartyName: 'Новый поставщик',
+        incomeTypeId: 2,
+        categoryName: 'Хозрасходы',
         purpose: 'Оплата по договору',
       }),
     );

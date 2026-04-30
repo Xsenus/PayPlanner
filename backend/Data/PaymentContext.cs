@@ -756,12 +756,18 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.MoneyAccountId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.IncomeType)
+                  .WithMany(incomeType => incomeType.MoneyOperations)
+                  .HasForeignKey(e => e.IncomeTypeId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(e => e.BankStatementImportBatch)
                   .WithMany()
                   .HasForeignKey(e => e.BankStatementImportBatchId)
                   .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasIndex(e => e.MoneyAccountId).HasDatabaseName("IX_MoneyOperations_MoneyAccountId");
+            entity.HasIndex(e => e.IncomeTypeId).HasDatabaseName("IX_MoneyOperations_IncomeTypeId");
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_MoneyOperations_Date");
             entity.HasIndex(e => e.Source).HasDatabaseName("IX_MoneyOperations_Source");
             entity.HasIndex(e => e.Direction).HasDatabaseName("IX_MoneyOperations_Direction");

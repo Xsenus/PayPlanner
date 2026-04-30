@@ -397,7 +397,8 @@ public class MoneyOperationsController : ControllerBase
                 MoneyAccountName = operation.MoneyAccount != null ? operation.MoneyAccount.Name : null,
                 AccountName = operation.AccountName,
                 CounterpartyName = operation.CounterpartyName,
-                CategoryName = operation.CategoryName,
+                IncomeTypeId = operation.IncomeTypeId,
+                CategoryName = operation.IncomeType != null ? operation.IncomeType.Name : operation.CategoryName,
                 Amount = operation.Amount,
                 Currency = operation.Currency,
                 PaymentOrderNumber = operation.PaymentOrderNumber,
@@ -506,7 +507,12 @@ public class MoneyOperationsController : ControllerBase
                 MoneyAccountName = null,
                 AccountName = payment.Account,
                 CounterpartyName = payment.CounterpartyName,
-                CategoryName = payment.ClientCase != null ? payment.ClientCase.Title : null,
+                IncomeTypeId = payment.IncomeTypeId,
+                CategoryName = payment.IncomeType != null
+                    ? payment.IncomeType.Name
+                    : payment.ClientCase != null
+                        ? payment.ClientCase.Title
+                        : null,
                 Amount =
                     payment.Status == PaymentStatus.Completed && payment.PaidAmount > 0m
                         ? payment.PaidAmount
@@ -628,8 +634,10 @@ public class MoneyOperationsController : ControllerBase
             var categoryTitleTerm = ToTitleSearchTerm(categoryTerm);
             query = query.Where(operation =>
                 (operation.CategoryName ?? string.Empty).Contains(categoryTerm) ||
+                (operation.IncomeType != null && operation.IncomeType.Name.Contains(categoryTerm)) ||
                 (categoryTitleTerm != categoryTerm &&
-                    (operation.CategoryName ?? string.Empty).Contains(categoryTitleTerm)));
+                    ((operation.CategoryName ?? string.Empty).Contains(categoryTitleTerm) ||
+                     (operation.IncomeType != null && operation.IncomeType.Name.Contains(categoryTitleTerm)))));
         }
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -640,10 +648,12 @@ public class MoneyOperationsController : ControllerBase
                 (operation.CounterpartyName ?? string.Empty).Contains(term) ||
                 (operation.Purpose ?? string.Empty).Contains(term) ||
                 (operation.CategoryName ?? string.Empty).Contains(term) ||
+                (operation.IncomeType != null && operation.IncomeType.Name.Contains(term)) ||
                 (titleTerm != term &&
                     ((operation.CounterpartyName ?? string.Empty).Contains(titleTerm) ||
                      (operation.Purpose ?? string.Empty).Contains(titleTerm) ||
-                     (operation.CategoryName ?? string.Empty).Contains(titleTerm))));
+                     (operation.CategoryName ?? string.Empty).Contains(titleTerm) ||
+                     (operation.IncomeType != null && operation.IncomeType.Name.Contains(titleTerm)))));
         }
 
         return query;
@@ -766,10 +776,11 @@ public class MoneyOperationsController : ControllerBase
             var categoryTerm = categoryName.Trim();
             var categoryTitleTerm = ToTitleSearchTerm(categoryTerm);
             query = query.Where(payment =>
-                payment.ClientCase != null &&
-                ((payment.ClientCase.Title ?? string.Empty).Contains(categoryTerm) ||
-                 (categoryTitleTerm != categoryTerm &&
-                    (payment.ClientCase.Title ?? string.Empty).Contains(categoryTitleTerm))));
+                (payment.IncomeType != null && payment.IncomeType.Name.Contains(categoryTerm)) ||
+                (payment.ClientCase != null && (payment.ClientCase.Title ?? string.Empty).Contains(categoryTerm)) ||
+                (categoryTitleTerm != categoryTerm &&
+                    ((payment.IncomeType != null && payment.IncomeType.Name.Contains(categoryTitleTerm)) ||
+                     (payment.ClientCase != null && (payment.ClientCase.Title ?? string.Empty).Contains(categoryTitleTerm)))));
         }
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -780,10 +791,12 @@ public class MoneyOperationsController : ControllerBase
                 (payment.CounterpartyName ?? string.Empty).Contains(term) ||
                 (payment.Description ?? string.Empty).Contains(term) ||
                 (payment.Account ?? string.Empty).Contains(term) ||
+                (payment.IncomeType != null && payment.IncomeType.Name.Contains(term)) ||
                 (titleTerm != term &&
                     ((payment.CounterpartyName ?? string.Empty).Contains(titleTerm) ||
                      (payment.Description ?? string.Empty).Contains(titleTerm) ||
-                     (payment.Account ?? string.Empty).Contains(titleTerm))));
+                     (payment.Account ?? string.Empty).Contains(titleTerm) ||
+                     (payment.IncomeType != null && payment.IncomeType.Name.Contains(titleTerm)))));
         }
 
         return query;
@@ -828,6 +841,50 @@ public class MoneyOperationsController : ControllerBase
             model.Currency = account.Currency;
         }
 
+        return null;
+    }
+
+    private async Task<string?> ApplyIncomeTypeAsync(MoneyOperation model, CancellationToken ct)
+    {
+        model.CategoryName = string.IsNullOrWhiteSpace(model.CategoryName) ? null : model.CategoryName.Trim();
+
+        var incomeTypeId = model.IncomeTypeId.GetValueOrDefault();
+        if (incomeTypeId <= 0)
+        {
+            model.IncomeTypeId = null;
+            return null;
+        }
+
+        if (model.Direction == MoneyOperationDirection.Transfer)
+        {
+            model.IncomeTypeId = null;
+            return null;
+        }
+
+        var incomeType = await _db.IncomeTypes
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == incomeTypeId, ct);
+        if (incomeType is null)
+        {
+            return "Статья движения денег не найдена.";
+        }
+
+        if (!incomeType.IsActive)
+        {
+            return "Статья движения денег отключена и не может использоваться в новой операции.";
+        }
+
+        var expectedPaymentType = model.Direction == MoneyOperationDirection.Expense
+            ? PaymentType.Expense
+            : PaymentType.Income;
+        if (incomeType.PaymentType != expectedPaymentType)
+        {
+            return model.Direction == MoneyOperationDirection.Expense
+                ? "Для расхода нужно выбрать статью расхода."
+                : "Для прихода нужно выбрать статью прихода.";
+        }
+
+        model.CategoryName = incomeType.Name;
         return null;
     }
 
@@ -1005,9 +1062,14 @@ public class MoneyOperationsController : ControllerBase
             return BadRequest(moneyAccountError);
         }
 
+        var incomeTypeError = await ApplyIncomeTypeAsync(model, ct);
+        if (incomeTypeError is not null)
+        {
+            return BadRequest(incomeTypeError);
+        }
+
         model.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
         model.CounterpartyName = string.IsNullOrWhiteSpace(model.CounterpartyName) ? null : model.CounterpartyName.Trim();
-        model.CategoryName = string.IsNullOrWhiteSpace(model.CategoryName) ? null : model.CategoryName.Trim();
         model.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
         model.PaymentOrderNumber = string.IsNullOrWhiteSpace(model.PaymentOrderNumber) ? null : model.PaymentOrderNumber.Trim();
         model.Purpose = string.IsNullOrWhiteSpace(model.Purpose) ? null : model.Purpose.Trim();
@@ -1441,6 +1503,12 @@ public class MoneyOperationsController : ControllerBase
             return BadRequest(moneyAccountError);
         }
 
+        var incomeTypeError = await ApplyIncomeTypeAsync(model, ct);
+        if (incomeTypeError is not null)
+        {
+            return BadRequest(incomeTypeError);
+        }
+
         entity.Source = model.Source;
         entity.Direction = model.Direction;
         entity.AccountingType = model.AccountingType;
@@ -1449,7 +1517,8 @@ public class MoneyOperationsController : ControllerBase
         entity.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
         entity.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
         entity.CounterpartyName = string.IsNullOrWhiteSpace(model.CounterpartyName) ? null : model.CounterpartyName.Trim();
-        entity.CategoryName = string.IsNullOrWhiteSpace(model.CategoryName) ? null : model.CategoryName.Trim();
+        entity.IncomeTypeId = model.IncomeTypeId;
+        entity.CategoryName = model.CategoryName;
         entity.PaymentOrderNumber = string.IsNullOrWhiteSpace(model.PaymentOrderNumber) ? null : model.PaymentOrderNumber.Trim();
         entity.Date = model.Date;
         entity.RecognitionDate = model.RecognitionDate;
@@ -1625,6 +1694,7 @@ public class MoneyOperationsController : ControllerBase
             MoneyAccountName = row.MoneyAccountName,
             AccountName = row.AccountName,
             CounterpartyName = row.CounterpartyName,
+            IncomeTypeId = row.IncomeTypeId,
             CategoryName = row.CategoryName,
             Amount = row.Amount,
             Currency = row.Currency,
@@ -2614,6 +2684,7 @@ public class MoneyOperationsController : ControllerBase
         public string? MoneyAccountName { get; init; }
         public string? AccountName { get; init; }
         public string? CounterpartyName { get; init; }
+        public int? IncomeTypeId { get; init; }
         public string? CategoryName { get; init; }
         public decimal Amount { get; init; }
         public string? Currency { get; init; }

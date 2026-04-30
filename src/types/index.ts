@@ -510,6 +510,7 @@ export interface MoneyOperation {
   moneyAccount?: MoneyAccount | null;
   accountName?: string | null;
   counterpartyName?: string | null;
+  incomeTypeId?: number | null;
   categoryName?: string | null;
   amount: number;
   currency?: string | null;

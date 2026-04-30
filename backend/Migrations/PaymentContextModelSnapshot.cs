@@ -2362,6 +2362,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("IncomeTypeId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("IsAdvancePayment")
                         .HasColumnType("INTEGER");
 
@@ -2450,6 +2453,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Direction")
                         .HasDatabaseName("IX_MoneyOperations_Direction");
+
+                    b.HasIndex("IncomeTypeId")
+                        .HasDatabaseName("IX_MoneyOperations_IncomeTypeId");
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_MoneyOperation_IsDeleted");
@@ -4490,6 +4496,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("BankStatementImportBatchId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.IncomeType", "IncomeType")
+                        .WithMany("MoneyOperations")
+                        .HasForeignKey("IncomeTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.Invoice", "LinkedInvoice")
                         .WithMany()
                         .HasForeignKey("LinkedInvoiceId")
@@ -4501,6 +4512,8 @@ namespace PayPlanner.Api.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("BankStatementImportBatch");
+
+                    b.Navigation("IncomeType");
 
                     b.Navigation("LinkedInvoice");
 
@@ -4790,6 +4803,8 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.IncomeType", b =>
                 {
+                    b.Navigation("MoneyOperations");
+
                     b.Navigation("Payments");
                 });
 

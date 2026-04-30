@@ -2421,6 +2421,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<int?>("IncomeTypeId")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("IsAdvancePayment")
                         .HasColumnType("boolean");
 
@@ -2509,6 +2512,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("Direction")
                         .HasDatabaseName("IX_MoneyOperations_Direction");
+
+                    b.HasIndex("IncomeTypeId")
+                        .HasDatabaseName("IX_MoneyOperations_IncomeTypeId");
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_MoneyOperation_IsDeleted");
@@ -4600,6 +4606,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("BankStatementImportBatchId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.IncomeType", "IncomeType")
+                        .WithMany("MoneyOperations")
+                        .HasForeignKey("IncomeTypeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.Invoice", "LinkedInvoice")
                         .WithMany()
                         .HasForeignKey("LinkedInvoiceId")
@@ -4611,6 +4622,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("BankStatementImportBatch");
+
+                    b.Navigation("IncomeType");
 
                     b.Navigation("LinkedInvoice");
 
@@ -4900,6 +4913,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.IncomeType", b =>
                 {
+                    b.Navigation("MoneyOperations");
+
                     b.Navigation("Payments");
                 });
 

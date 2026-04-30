@@ -10,6 +10,8 @@ public class MoneyOperation
     public MoneyAccount? MoneyAccount { get; set; }
     public string? AccountName { get; set; }
     public string? CounterpartyName { get; set; }
+    public int? IncomeTypeId { get; set; }
+    public IncomeType? IncomeType { get; set; }
     public string? CategoryName { get; set; }
     public decimal Amount { get; set; }
     public string? Currency { get; set; }
