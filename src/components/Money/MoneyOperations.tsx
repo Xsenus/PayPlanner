@@ -10,6 +10,7 @@ import {
   Download,
   Filter,
   GripVertical,
+  HelpCircle,
   History,
   Plus,
   Pencil,
@@ -384,6 +385,7 @@ function CashOrderModal({
   const [error, setError] = useState<string | null>(null);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
 
@@ -393,6 +395,7 @@ function CashOrderModal({
       setError(null);
       setConfirmingCancel(false);
       setConfirmingDelete(false);
+      setHelpOpen(false);
       setHistoryOpen(false);
       setCancelReason(order.cancelledReason ?? '');
     }
@@ -630,6 +633,13 @@ function CashOrderModal({
             </button>
             <button
               type="button"
+              onClick={() => setHelpOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
+              <HelpCircle className="h-4 w-4" />
+              Справка
+            </button>
+            <button
+              type="button"
               onClick={() => void onDownloadPdf(form.id)}
               disabled={isSaving}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
@@ -721,6 +731,36 @@ function CashOrderModal({
         title={`История кассового ордера ${form.number}`}
         subtitle="Здесь видны создание, изменения, отмена и удаление кассового ордера."
       />
+      {helpOpen && (
+        <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-950/45 p-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Справка</p>
+                <h3 className="mt-1 text-lg font-semibold text-slate-900">Как работает кассовый ордер</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(false)}
+                className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50"
+                aria-label="Закрыть справку">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4 px-6 py-5 text-sm leading-6 text-slate-600">
+              <p>
+                ПКО фиксирует поступление наличных в кассу, РКО фиксирует выдачу наличных из кассы. Проведённые ордера
+                участвуют в кассовой книге, оборотах и остатках.
+              </p>
+              <ul className="list-disc space-y-2 pl-5">
+                <li>Черновик можно сохранить, удалить или провести позже.</li>
+                <li>Проведённый ордер можно печатать, скачать в PDF, копировать или отменить.</li>
+                <li>Отменённый ордер остаётся в журнале для истории, но не участвует в остатках кассы.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body,
   );
