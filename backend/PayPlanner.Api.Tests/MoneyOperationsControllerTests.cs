@@ -151,6 +151,68 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task CreateMoneyOperation_LinksIncomeTypeAndUsesDictionaryName()
+    {
+        await using var db = await CreateContextAsync();
+        var incomeType = new IncomeType
+        {
+            Name = "Юридические услуги",
+            PaymentType = PaymentType.Income,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.IncomeTypes.Add(incomeType);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Create(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            IncomeTypeId = incomeType.Id,
+            CategoryName = "Ручной текст не должен победить справочник",
+            Amount = 25_000m,
+            Date = new DateTime(2026, 4, 30),
+        });
+
+        var created = Assert.IsType<CreatedResult>(action);
+        var operation = Assert.IsType<MoneyOperation>(created.Value);
+        Assert.Equal(incomeType.Id, operation.IncomeTypeId);
+        Assert.Equal("Юридические услуги", operation.CategoryName);
+    }
+
+    [Fact]
+    public async Task CreateMoneyOperation_ReturnsBadRequest_WhenIncomeTypeDirectionDoesNotMatch()
+    {
+        await using var db = await CreateContextAsync();
+        var incomeType = new IncomeType
+        {
+            Name = "Доход от услуг",
+            PaymentType = PaymentType.Income,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.IncomeTypes.Add(incomeType);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Create(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Expense,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            IncomeTypeId = incomeType.Id,
+            Amount = 15_000m,
+            Date = new DateTime(2026, 4, 30),
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action);
+        Assert.Equal("Для расхода нужно выбрать статью расхода.", badRequest.Value);
+        Assert.False(await db.MoneyOperations.AnyAsync());
+    }
+
+    [Fact]
     public async Task CreateMoneyOperation_ReturnsBadRequest_WhenLinkedInvoiceAlreadyPaid()
     {
         await using var db = await CreateContextAsync();
