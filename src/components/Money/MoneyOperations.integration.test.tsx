@@ -723,28 +723,73 @@ describe('MoneyOperations integration', () => {
   });
 
   it('renders the e-money journal with wallet labels', async () => {
+    const user = userEvent.setup();
     operations = [
       createOperation({
         id: 1,
         source: 'EMoney',
+        moneyAccountId: 301,
+        moneyAccountName: 'ЮMoney',
         direction: 'Income',
         amount: 3000,
         accountName: 'ЮMoney',
         counterpartyName: 'Онлайн клиент',
       }),
+      createOperation({
+        id: 2,
+        source: 'EMoney',
+        moneyAccountId: 302,
+        moneyAccountName: 'CloudPayments',
+        direction: 'Income',
+        amount: 1500,
+        accountName: 'CloudPayments',
+        counterpartyName: 'Другой клиент',
+      }),
     ];
+    getMoneyAccountsMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' | 'EMoney' }) => {
+      const accounts: MoneyAccount[] = [
+        {
+          id: 301,
+          name: 'ЮMoney',
+          source: 'EMoney',
+          currency: 'RUB',
+          bankName: null,
+          bankAccountNumber: null,
+          isDefault: true,
+          isActive: true,
+          createdAt: '2026-04-20T08:00:00Z',
+          updatedAt: null,
+        },
+        {
+          id: 302,
+          name: 'CloudPayments',
+          source: 'EMoney',
+          currency: 'RUB',
+          bankName: null,
+          bankAccountNumber: null,
+          isDefault: false,
+          isActive: true,
+          createdAt: '2026-04-20T08:00:00Z',
+          updatedAt: null,
+        },
+      ];
+      return accounts.filter((account) => !params?.source || account.source === params.source);
+    });
 
     render(<MoneyOperations source="EMoney" />);
 
     expect(await screen.findByText('E-money')).toBeTruthy();
     expect(screen.getByText('Операции по электронным кошелькам')).toBeTruthy();
-    await userEvent.click(screen.getByRole('button', { name: /Фильтр/ }));
-    expect(screen.getByLabelText('Кошелёк')).toBeTruthy();
-    expect(screen.getByRole('option', { name: 'Все кошельки' })).toBeTruthy();
-    expect(screen.getByText('Онлайн клиент')).toBeTruthy();
-    expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
-      expect.objectContaining({ source: 'EMoney' }),
+    await user.selectOptions(screen.getByLabelText('Кошелёк в заголовке'), '302');
+    await waitFor(() =>
+      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ source: 'EMoney', moneyAccountId: 302, accountName: 'CloudPayments' }),
+      ),
     );
+    expect(await screen.findByText('Другой клиент')).toBeTruthy();
+    expect(screen.queryByText('Онлайн клиент')).toBeNull();
+
+    expect(screen.getByRole('option', { name: 'Все кошельки' })).toBeTruthy();
   });
 
   it('applies direction and accounting filters to the money journal request', async () => {
