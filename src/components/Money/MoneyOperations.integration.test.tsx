@@ -1161,6 +1161,43 @@ describe('MoneyOperations integration', () => {
     });
   }, 15000);
 
+  it('deletes selected bank operations from the current page', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({ id: 1, counterpartyName: 'Поставщик А' }),
+      createOperation({ id: 2, counterpartyName: 'Поставщик Б' }),
+      createOperation({
+        id: 3,
+        counterpartyName: 'Клиент со счетом',
+        direction: 'Income',
+        linkedInvoiceId: 33,
+        linkedInvoiceNumber: '33',
+        matchStatus: 'Matched',
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('checkbox', { name: 'Выбрать операцию 1' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Выбрать операцию 2' }));
+    expect(screen.getByText('Выбрано операций: 2')).toBeTruthy();
+    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: 'Выбрать операцию 3' }).disabled).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: 'Удалить выбранные' }));
+    await screen.findByText('Удалить выбранные операции?');
+    const confirmButtons = screen.getAllByRole('button', { name: 'Удалить выбранные' });
+    await user.click(confirmButtons[confirmButtons.length - 1]);
+
+    await waitFor(() => expect(deleteMoneyOperationMock).toHaveBeenCalledWith(1));
+    expect(deleteMoneyOperationMock).toHaveBeenCalledWith(2);
+    expect(deleteMoneyOperationMock).not.toHaveBeenCalledWith(3);
+    expect(toastSuccessMock).toHaveBeenCalledWith('Удалено операций: 2.', 'Деньги');
+    await waitFor(() => expect(screen.queryByText('Поставщик А')).toBeNull());
+    expect(screen.queryByText('Поставщик Б')).toBeNull();
+    expect(screen.getByText('Клиент со счетом')).toBeTruthy();
+  }, 15000);
+
   it('does not allow deleting an operation already applied to an invoice', async () => {
     operations = [
       createOperation({

@@ -36,6 +36,7 @@ import { fromInputToApiDate, toDateInputValue, todayYMD } from '../../utils/date
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
+import { TableSelectCheckbox } from '../ui/TableSelectCheckbox';
 import type {
   BankStatementImportBatch,
   BankStatementImportBatchDetail,
@@ -1539,6 +1540,8 @@ export function MoneyOperations({
   const [editingOperation, setEditingOperation] = useState<MoneyOperation | null>(null);
   const [totalTab, setTotalTab] = useState<'total' | 'cashflow'>('total');
   const [confirmDelete, setConfirmDelete] = useState<MoneyOperation | null>(null);
+  const [selectedOperationIds, setSelectedOperationIds] = useState<number[]>([]);
+  const [confirmBulkDeleteOpen, setConfirmBulkDeleteOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [cashOrdersRefreshKey, setCashOrdersRefreshKey] = useState(0);
   const [cashOrderModalOpen, setCashOrderModalOpen] = useState(false);
@@ -1635,6 +1638,30 @@ export function MoneyOperations({
     () => orderedVisibleColumns.map((key) => moneyColumnsByKey[key]).filter(Boolean),
     [moneyColumnsByKey, orderedVisibleColumns],
   );
+  const selectionEnabled = source === 'Bank';
+  const selectedOperationIdSet = useMemo(() => new Set(selectedOperationIds), [selectedOperationIds]);
+  const selectableOperationIds = useMemo(
+    () =>
+      selectionEnabled
+        ? items.filter((item) => !item.isReadonly && item.id > 0 && !isAppliedToInvoice(item)).map((item) => item.id)
+        : [],
+    [items, selectionEnabled],
+  );
+  const selectedOperationsCount = selectedOperationIds.length;
+  const moneyTableColumnCount = visibleMoneyColumns.length + 1 + (selectionEnabled ? 1 : 0);
+  const allVisibleOperationsSelected =
+    selectableOperationIds.length > 0 && selectableOperationIds.every((id) => selectedOperationIdSet.has(id));
+  const someVisibleOperationsSelected =
+    selectableOperationIds.some((id) => selectedOperationIdSet.has(id)) && !allVisibleOperationsSelected;
+  useEffect(() => {
+    if (!selectionEnabled) {
+      setSelectedOperationIds([]);
+      return;
+    }
+
+    const availableIds = new Set(selectableOperationIds);
+    setSelectedOperationIds((current) => current.filter((id) => availableIds.has(id)));
+  }, [selectableOperationIds, selectionEnabled]);
   const selectedAccountSummary = useMemo(
     () => accountSummaries.find((account) => account.accountName === accountName) ?? null,
     [accountName, accountSummaries],
@@ -2242,6 +2269,20 @@ export function MoneyOperations({
     setConfirmDelete(item);
   };
 
+  const toggleOperationSelection = (id: number, checked: boolean) => {
+    setSelectedOperationIds((current) => {
+      if (checked) {
+        return current.includes(id) ? current : [...current, id];
+      }
+
+      return current.filter((itemId) => itemId !== id);
+    });
+  };
+
+  const toggleVisibleOperationsSelection = (checked: boolean) => {
+    setSelectedOperationIds(checked ? selectableOperationIds : []);
+  };
+
   const confirmDeleteOperation = async () => {
     if (!confirmDelete) return;
     try {
@@ -2255,6 +2296,26 @@ export function MoneyOperations({
       }
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось удалить операцию.');
+      toast.error(message, 'Деньги');
+    }
+  };
+
+  const confirmBulkDeleteOperations = async () => {
+    if (selectedOperationIds.length === 0) return;
+
+    const idsToDelete = [...selectedOperationIds];
+    try {
+      await Promise.all(idsToDelete.map((id) => apiService.deleteMoneyOperation(id)));
+      toast.success(`Удалено операций: ${idsToDelete.length}.`, 'Деньги');
+      setSelectedOperationIds([]);
+      setConfirmBulkDeleteOpen(false);
+      if (source !== 'Total' && items.length === idsToDelete.length && page > 1) {
+        setPage((prev) => Math.max(1, prev - 1));
+      } else {
+        await reload();
+      }
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось удалить выбранные операции.');
       toast.error(message, 'Деньги');
     }
   };
@@ -3023,9 +3084,33 @@ export function MoneyOperations({
           </div>
         )}
 
+        {selectionEnabled && selectedOperationsCount > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-blue-50 px-4 py-3">
+            <div className="text-sm font-medium text-blue-900">
+              Выбрано операций: {selectedOperationsCount}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedOperationIds([])}
+                className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
+                Снять выбор
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmBulkDeleteOpen(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50">
+                <Trash2 className="h-4 w-4" />
+                Удалить выбранные
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1500px] table-fixed text-sm">
             <colgroup>
+              {selectionEnabled && <col style={{ width: 48 }} />}
               {orderedVisibleColumns.map((columnKey) => (
                 <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />
               ))}
@@ -3033,6 +3118,17 @@ export function MoneyOperations({
             </colgroup>
             <thead className="bg-slate-50 text-slate-500">
               <tr>
+                {selectionEnabled && (
+                  <th className="px-3 py-2 text-left font-medium">
+                    <TableSelectCheckbox
+                      aria-label="Выбрать операции на странице"
+                      checked={allVisibleOperationsSelected}
+                      indeterminate={someVisibleOperationsSelected}
+                      disabled={selectableOperationIds.length === 0}
+                      onChange={(event) => toggleVisibleOperationsSelection(event.target.checked)}
+                    />
+                  </th>
+                )}
                 {visibleMoneyColumns.map((column) => (
                   <th
                     key={column.key}
@@ -3067,25 +3163,35 @@ export function MoneyOperations({
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={visibleMoneyColumns.length + 1} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={moneyTableColumnCount} className="px-4 py-10 text-center text-slate-500">
                     Загрузка операций...
                   </td>
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={visibleMoneyColumns.length + 1} className="px-4 py-10 text-center text-red-500">
+                  <td colSpan={moneyTableColumnCount} className="px-4 py-10 text-center text-red-500">
                     {error}
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={visibleMoneyColumns.length + 1} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={moneyTableColumnCount} className="px-4 py-10 text-center text-slate-500">
                     В указанном периоде нет операций. Добавить операцию или импортировать из банка
                   </td>
                 </tr>
               ) : (
                 items.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50">
+                    {selectionEnabled && (
+                      <td className="px-3 py-2 align-top">
+                        <TableSelectCheckbox
+                          aria-label={`Выбрать операцию ${item.id}`}
+                          checked={selectedOperationIdSet.has(item.id)}
+                          disabled={item.isReadonly || item.id <= 0 || isAppliedToInvoice(item)}
+                          onChange={(event) => toggleOperationSelection(item.id, event.target.checked)}
+                        />
+                      </td>
+                    )}
                     {visibleMoneyColumns.map((column) => (
                       <td
                         key={column.key}
@@ -3329,6 +3435,16 @@ export function MoneyOperations({
         variant="danger"
         onConfirm={confirmDeleteOperation}
         onCancel={() => setConfirmDelete(null)}
+      />
+      <ConfirmDialog
+        open={confirmBulkDeleteOpen}
+        title="Удалить выбранные операции?"
+        description={`Будет удалено операций: ${selectedOperationsCount}. Действие необратимо.`}
+        confirmLabel="Удалить выбранные"
+        cancelLabel="Отмена"
+        variant="danger"
+        onConfirm={confirmBulkDeleteOperations}
+        onCancel={() => setConfirmBulkDeleteOpen(false)}
       />
         </>
       )}
