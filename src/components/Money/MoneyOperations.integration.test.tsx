@@ -22,6 +22,7 @@ const {
   getBankStatementImportMock,
   getBankStatementImportsMock,
   getCashOrderMock,
+  getIncomeTypesMock,
   getMoneyAccountsMock,
   getMoneyOperationAccountsMock,
   getMoneyOperationAccountSummariesMock,
@@ -52,6 +53,7 @@ const {
   getBankStatementImportMock: vi.fn(),
   getBankStatementImportsMock: vi.fn(),
   getCashOrderMock: vi.fn(),
+  getIncomeTypesMock: vi.fn(),
   getMoneyAccountsMock: vi.fn(),
   getMoneyOperationAccountsMock: vi.fn(),
   getMoneyOperationAccountSummariesMock: vi.fn(),
@@ -120,6 +122,7 @@ vi.mock('../../services/api', () => ({
     getBankStatementImport: getBankStatementImportMock,
     getBankStatementImports: getBankStatementImportsMock,
     getCashOrder: getCashOrderMock,
+    getIncomeTypes: getIncomeTypesMock,
     getMoneyAccounts: getMoneyAccountsMock,
     getMoneyOperationAccounts: getMoneyOperationAccountsMock,
     getMoneyOperationAccountSummaries: getMoneyOperationAccountSummariesMock,
@@ -247,6 +250,7 @@ describe('MoneyOperations integration', () => {
     getCashOrderRegisterPrintHtmlMock.mockReset();
     getBankStatementImportMock.mockReset();
     getBankStatementImportsMock.mockReset();
+    getIncomeTypesMock.mockReset();
     getMoneyAccountsMock.mockReset();
     getMoneyOperationAccountsMock.mockReset();
     getMoneyOperationAccountSummariesMock.mockReset();
@@ -300,6 +304,16 @@ describe('MoneyOperations integration', () => {
     getMoneyAccountsMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' | 'EMoney' }) =>
       moneyAccounts.filter((account) => !params?.source || account.source === params.source),
     );
+    getIncomeTypesMock.mockImplementation(async (paymentType?: 'Income' | 'Expense') => [
+      {
+        id: paymentType === 'Expense' ? 2 : 1,
+        name: paymentType === 'Expense' ? 'Хозрасходы' : 'Доход от услуг',
+        description: '',
+        paymentType: paymentType ?? 'Income',
+        isActive: true,
+        createdAt: '2026-04-20T08:00:00Z',
+      },
+    ]);
 
     getMoneyOperationAccountsMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' | 'EMoney' }) =>
       Array.from(
@@ -611,9 +625,16 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Bank" />);
 
     await screen.findByText('Поставщик А');
+    await waitFor(() => expect(getIncomeTypesMock).toHaveBeenCalledWith('Income', true));
+    await waitFor(() => expect(getIncomeTypesMock).toHaveBeenCalledWith('Expense', true));
 
     await user.click(screen.getByRole('button', { name: 'Добавить' }));
     await screen.findByText('Добавить операцию по банку');
+    const categoryInput = screen
+      .getAllByLabelText(/Статья/)
+      .find((element) => element.getAttribute('list') === 'money-operation-category-options-Bank');
+    expect(categoryInput).toBeTruthy();
+    expect(document.querySelector('datalist#money-operation-category-options-Bank option[value="Хозрасходы"]')).toBeTruthy();
 
     expect(screen.getByLabelText(/^Дата$/)).toHaveProperty('value', '2026-04-21');
     await user.click(screen.getByLabelText('Расход'));

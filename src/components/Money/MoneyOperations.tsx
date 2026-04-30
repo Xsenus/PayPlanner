@@ -194,6 +194,16 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
 
+function buildUniqueOptions(values: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ).sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
 function formatDate(value: string) {
   if (!value) return '—';
 
@@ -1187,6 +1197,7 @@ function MoneyOperationModal({
   source,
   initialData,
   moneyAccounts,
+  categoryOptions,
   open,
   onClose,
   onSave,
@@ -1195,6 +1206,7 @@ function MoneyOperationModal({
   source: MoneyOperationSource;
   initialData?: MoneyOperation | null;
   moneyAccounts?: MoneyAccount[];
+  categoryOptions?: string[];
   open: boolean;
   onClose: () => void;
   onSave: (payload: MoneyOperation) => Promise<void>;
@@ -1394,9 +1406,15 @@ function MoneyOperationModal({
               <input
                 value={form.categoryName ?? ''}
                 onChange={(event) => setField('categoryName', event.target.value)}
+                list={`money-operation-category-options-${source}`}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
                 placeholder="Статья"
               />
+              <datalist id={`money-operation-category-options-${source}`}>
+                {(categoryOptions ?? []).map((option) => (
+                  <option key={option} value={option} />
+                ))}
+              </datalist>
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Номер ПП
@@ -1650,6 +1668,7 @@ export function MoneyOperations({
   const [moneyAccounts, setMoneyAccounts] = useState<MoneyAccount[]>([]);
   const [accountName, setAccountName] = useState('');
   const [categoryName, setCategoryName] = useState('');
+  const [categoryDictionaryOptions, setCategoryDictionaryOptions] = useState<string[]>([]);
   const [accountSummaries, setAccountSummaries] = useState<MoneyOperationAccountSummary[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1738,6 +1757,10 @@ export function MoneyOperations({
     page,
     pageSize: effectivePageSize,
   });
+  const categoryOptions = useMemo(
+    () => buildUniqueOptions([...categoryDictionaryOptions, ...items.map((item) => item.categoryName)]),
+    [categoryDictionaryOptions, items],
+  );
   const totalPages = useMemo(
     () => (effectivePageSize > 0 ? Math.max(1, Math.ceil(total / effectivePageSize)) : 1),
     [effectivePageSize, total],
@@ -1890,6 +1913,26 @@ export function MoneyOperations({
       cancelled = true;
     };
   }, [from, source, to]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all([apiService.getIncomeTypes('Income', true), apiService.getIncomeTypes('Expense', true)])
+      .then(([incomeTypes, expenseTypes]) => {
+        if (!cancelled) {
+          setCategoryDictionaryOptions(buildUniqueOptions([...incomeTypes, ...expenseTypes].map((item) => item.name)));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCategoryDictionaryOptions([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (source !== 'Bank') {
@@ -3077,9 +3120,15 @@ export function MoneyOperations({
                       <input
                         value={categoryName}
                         onChange={(event) => setCategoryName(event.target.value)}
+                        list="money-operation-category-filter-options"
                         className="rounded-lg border border-slate-200 px-3 py-2"
                         placeholder="Например: услуги"
                       />
+                      <datalist id="money-operation-category-filter-options">
+                        {categoryOptions.map((option) => (
+                          <option key={option} value={option} />
+                        ))}
+                      </datalist>
                     </label>
                     <div className="flex items-center justify-between pt-2">
                       <button
@@ -3551,6 +3600,7 @@ export function MoneyOperations({
         source={apiSource ?? 'Bank'}
         initialData={editingOperation}
         moneyAccounts={moneyAccounts}
+        categoryOptions={categoryOptions}
         open={modalOpen}
         onClose={() => {
           setModalOpen(false);
