@@ -371,6 +371,26 @@ public class CashOrdersController : ControllerBase
         return Ok(Map(order));
     }
 
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    {
+        var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (order is null)
+        {
+            return NotFound();
+        }
+
+        if (order.Status != CashOrderStatus.Draft)
+        {
+            return BadRequest("Удалить можно только черновик кассового ордера. Проведённый документ нужно отменить.");
+        }
+
+        _db.CashOrders.Remove(order);
+        await _db.SaveChangesAsync(ct);
+
+        return NoContent();
+    }
+
     [HttpPost("{id:int}/cancel")]
     public async Task<IActionResult> Cancel(int id, [FromBody] CashOrderCancelRequest? request, CancellationToken ct)
     {

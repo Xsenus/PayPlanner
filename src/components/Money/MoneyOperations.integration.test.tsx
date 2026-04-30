@@ -11,6 +11,7 @@ const {
   cancelCashOrderMock,
   copyCashOrderMock,
   createMoneyOperationMock,
+  deleteCashOrderMock,
   deleteMoneyOperationMock,
   downloadCashOrderPdfMock,
   getCashBookMock,
@@ -39,6 +40,7 @@ const {
   cancelCashOrderMock: vi.fn(),
   copyCashOrderMock: vi.fn(),
   createMoneyOperationMock: vi.fn(),
+  deleteCashOrderMock: vi.fn(),
   deleteMoneyOperationMock: vi.fn(),
   downloadCashOrderPdfMock: vi.fn(),
   getCashBookMock: vi.fn(),
@@ -105,6 +107,7 @@ vi.mock('../../services/api', () => ({
     cancelCashOrder: cancelCashOrderMock,
     copyCashOrder: copyCashOrderMock,
     createMoneyOperation: createMoneyOperationMock,
+    deleteCashOrder: deleteCashOrderMock,
     deleteMoneyOperation: deleteMoneyOperationMock,
     downloadCashOrderPdf: downloadCashOrderPdfMock,
     getCashBook: getCashBookMock,
@@ -230,6 +233,7 @@ describe('MoneyOperations integration', () => {
     cancelCashOrderMock.mockReset();
     copyCashOrderMock.mockReset();
     createMoneyOperationMock.mockReset();
+    deleteCashOrderMock.mockReset();
     deleteMoneyOperationMock.mockReset();
     downloadCashOrderPdfMock.mockReset();
     getCashBookMock.mockReset();
@@ -480,6 +484,7 @@ describe('MoneyOperations integration', () => {
       id: 10,
       number: 'ПКО-2026-0004',
     }));
+    deleteCashOrderMock.mockResolvedValue(undefined);
     downloadCashOrderPdfMock.mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' }));
 
     getMoneyOperationMock.mockImplementation(async (id: number) => operations.find((item) => item.id === id));
@@ -1355,6 +1360,83 @@ describe('MoneyOperations integration', () => {
     await waitFor(() => expect(cancelCashOrderMock).toHaveBeenCalledWith(10, 'Дубликат'));
     await screen.findByText('Документ отменён');
     await screen.findByText(/Причина: Дубликат/);
+  }, 15000);
+
+  it('deletes a draft cash order from the cash order card', async () => {
+    const user = userEvent.setup();
+    operations = [];
+    getCashOrderRegisterMock.mockResolvedValue({
+      items: [
+        {
+          id: 12,
+          number: 'ПКО-2026-0005',
+          type: 'Incoming',
+          status: 'Draft',
+          date: '2026-04-29',
+          amount: 1500,
+          currency: 'RUB',
+          clientId: null,
+          clientName: null,
+          paymentId: null,
+          moneyOperationId: null,
+          invoiceId: null,
+          account: 'Основная касса',
+          payerName: 'Черновой клиент',
+          receiverName: 'Основная касса',
+          basis: 'Черновик приёма наличных',
+          appendix: null,
+          comment: null,
+          cancelledAt: null,
+          cancelledReason: null,
+          createdAt: '2026-04-29T10:00:00Z',
+          updatedAt: null,
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+      incomingCount: 1,
+      outgoingCount: 0,
+      postedCount: 0,
+      cancelledCount: 0,
+      incomingAmount: 0,
+      outgoingAmount: 0,
+    });
+    getCashOrderMock.mockResolvedValueOnce({
+      id: 12,
+      number: 'ПКО-2026-0005',
+      type: 'Incoming',
+      status: 'Draft',
+      date: '2026-04-29',
+      amount: 1500,
+      currency: 'RUB',
+      clientId: null,
+      clientName: null,
+      paymentId: null,
+      moneyOperationId: null,
+      invoiceId: null,
+      account: 'Основная касса',
+      payerName: 'Черновой клиент',
+      receiverName: 'Основная касса',
+      basis: 'Черновик приёма наличных',
+      appendix: null,
+      comment: null,
+      cancelledAt: null,
+      cancelledReason: null,
+      createdAt: '2026-04-29T10:00:00Z',
+      updatedAt: null,
+    });
+
+    render(<MoneyOperations source="Cash" />);
+
+    await screen.findByText('ПКО-2026-0005');
+    await user.click(screen.getByRole('button', { name: 'ПКО-2026-0005' }));
+    await screen.findByText('Черновик');
+    await user.click(screen.getByRole('button', { name: 'Удалить' }));
+    await user.click(screen.getByRole('button', { name: 'Подтвердить удаление' }));
+
+    await waitFor(() => expect(deleteCashOrderMock).toHaveBeenCalledWith(12));
+    expect(toastSuccessMock).toHaveBeenCalledWith('Черновик кассового ордера удалён.', 'Касса');
   }, 15000);
 
   it('filters the cash orders journal by outgoing orders', async () => {

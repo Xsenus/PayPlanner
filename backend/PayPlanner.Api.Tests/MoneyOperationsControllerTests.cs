@@ -1309,6 +1309,47 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task CashOrder_Delete_RemovesDraftOnly()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = "ПКО-2026-0001",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Draft,
+                Date = new DateTime(2026, 4, 29),
+                Amount = 1000m,
+                Currency = "RUB",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "ПКО-2026-0002",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 29),
+                Amount = 2000m,
+                Currency = "RUB",
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var draft = await db.CashOrders.SingleAsync(order => order.Status == CashOrderStatus.Draft);
+        var posted = await db.CashOrders.SingleAsync(order => order.Status == CashOrderStatus.Posted);
+
+        var deleted = await controller.Delete(draft.Id, CancellationToken.None);
+        var postedDelete = await controller.Delete(posted.Id, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(deleted);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(postedDelete);
+        Assert.Contains("черновик", Assert.IsType<string>(badRequest.Value));
+        Assert.False(await db.CashOrders.AnyAsync(order => order.Id == draft.Id));
+        Assert.True(await db.CashOrders.AnyAsync(order => order.Id == posted.Id));
+    }
+
+    [Fact]
     public async Task CashOrder_CashBook_ReturnsPeriodBalancesByDay()
     {
         await using var db = await CreateContextAsync();

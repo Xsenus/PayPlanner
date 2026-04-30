@@ -361,6 +361,7 @@ function CashOrderModal({
   onClose,
   onSave,
   onCancelOrder,
+  onDeleteOrder,
   onCopy,
   onDownloadPdf,
   onPrint,
@@ -371,6 +372,7 @@ function CashOrderModal({
   onClose: () => void;
   onSave: (payload: CashOrder) => Promise<void>;
   onCancelOrder: (order: CashOrder, reason?: string) => Promise<void>;
+  onDeleteOrder: (order: CashOrder) => Promise<void>;
   onCopy: (order: CashOrder) => Promise<void>;
   onDownloadPdf: (id: number) => Promise<void>;
   onPrint: (id: number) => void;
@@ -378,6 +380,7 @@ function CashOrderModal({
   const [form, setForm] = useState<CashOrder | null>(order ? mapCashOrderToForm(order) : null);
   const [error, setError] = useState<string | null>(null);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
 
   useEffect(() => {
@@ -385,6 +388,7 @@ function CashOrderModal({
       setForm(mapCashOrderToForm(order));
       setError(null);
       setConfirmingCancel(false);
+      setConfirmingDelete(false);
       setCancelReason(order.cancelledReason ?? '');
     }
   }, [open, order]);
@@ -392,6 +396,13 @@ function CashOrderModal({
   if (!open || !order || !form) return null;
 
   const isCancelled = form.status === 'Cancelled';
+  const isDraft = form.status === 'Draft';
+  const statusLabel = isCancelled ? 'Отменён' : isDraft ? 'Черновик' : 'Проведён';
+  const statusClassName = isCancelled
+    ? 'bg-rose-50 text-rose-700'
+    : isDraft
+      ? 'bg-amber-50 text-amber-700'
+      : 'bg-emerald-50 text-emerald-700';
   const title = `${form.type === 'Incoming' ? 'Приходный кассовый ордер' : 'Расходный кассовый ордер'} ${form.number}`;
   const clientLabel = form.clientName ?? '—';
   const paymentLabel = form.paymentId ? `#${form.paymentId}` : '—';
@@ -426,11 +437,8 @@ function CashOrderModal({
               <span>•</span>
               <span>{formatMoney(form.amount)} ₽</span>
               <span
-                className={[
-                  'rounded-full px-2 py-0.5 text-xs font-medium',
-                  isCancelled ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700',
-                ].join(' ')}>
-                {isCancelled ? 'Отменён' : 'Проведён'}
+                className={['rounded-full px-2 py-0.5 text-xs font-medium', statusClassName].join(' ')}>
+                {statusLabel}
               </span>
             </div>
           </div>
@@ -645,6 +653,31 @@ function CashOrderModal({
                 onClick={() => setConfirmingCancel(false)}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                 Назад
+              </button>
+            )}
+            {isDraft && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!confirmingDelete) {
+                    setConfirmingDelete(true);
+                    return;
+                  }
+
+                  void onDeleteOrder(form);
+                }}
+                disabled={isSaving}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
+                <Trash2 className="h-4 w-4" />
+                {confirmingDelete ? 'Подтвердить удаление' : 'Удалить'}
+              </button>
+            )}
+            {confirmingDelete && (
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+                Не удалять
               </button>
             )}
           </div>
@@ -1841,6 +1874,24 @@ export function MoneyOperations({
       toast.success('Кассовый ордер отменён.', 'Касса');
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось отменить кассовый ордер.');
+      toast.error(message, 'Касса');
+      throw new Error(message);
+    } finally {
+      setCashOrderSaving(false);
+    }
+  };
+
+  const handleDeleteCashOrder = async (order: CashOrder) => {
+    setCashOrderSaving(true);
+    try {
+      await apiService.deleteCashOrder(order.id);
+      setSelectedCashOrder(null);
+      setCashOrderModalOpen(false);
+      setCashOrdersRefreshKey((value) => value + 1);
+      await reload();
+      toast.success('Черновик кассового ордера удалён.', 'Касса');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось удалить кассовый ордер.');
       toast.error(message, 'Касса');
       throw new Error(message);
     } finally {
@@ -3110,6 +3161,7 @@ export function MoneyOperations({
         }}
         onSave={handleSaveCashOrder}
         onCancelOrder={handleCancelCashOrder}
+        onDeleteOrder={handleDeleteCashOrder}
         onCopy={handleCopyCashOrder}
         onDownloadPdf={handleDownloadCashOrderPdf}
         onPrint={handlePrintCashOrder}
