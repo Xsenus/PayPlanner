@@ -942,7 +942,7 @@ describe('MoneyOperations integration', () => {
 
     await screen.findByText('Клиент по выписке');
 
-    await user.click(screen.getByRole('button', { name: 'Изменить' }));
+    await user.click(screen.getByRole('button', { name: 'Уточнить' }));
     await user.clear(screen.getByLabelText('ID счёта'));
     await user.type(screen.getByLabelText('ID счёта'), '33');
     await user.type(screen.getByLabelText('Комментарий сверки'), 'Оплата по выписке');

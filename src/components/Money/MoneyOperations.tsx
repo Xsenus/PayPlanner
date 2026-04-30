@@ -224,6 +224,7 @@ function formatDate(value: string) {
 function renderMatchStatusBadge(
   item: MoneyOperation,
   onOpenInvoice?: (invoiceId: number, type?: 'Income' | 'Expense') => void,
+  onClarify?: (item: MoneyOperation) => void,
 ) {
   if (item.matchStatus === 'Matched') {
     if (item.linkedInvoiceId && onOpenInvoice) {
@@ -250,10 +251,24 @@ function renderMatchStatusBadge(
   }
 
   if (item.matchStatus === 'ClarificationRequired') {
+    const title = item.matchComment ?? 'Нужно проверить назначение и привязать счёт';
+    if (onClarify && !item.isReadonly && item.id > 0) {
+      return (
+        <button
+          type="button"
+          onClick={() => onClarify(item)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 transition hover:bg-amber-100 hover:text-amber-800"
+          title={title}>
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Уточнить
+        </button>
+      );
+    }
+
     return (
       <span
         className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700"
-        title={item.matchComment ?? 'Нужно проверить назначение и привязать счёт'}>
+        title={title}>
         <AlertTriangle className="h-3.5 w-3.5" />
         Уточнить
       </span>
@@ -2038,7 +2053,7 @@ export function MoneyOperations({
           item.paidAccountName ?? '—'
         );
       case 'matchStatus':
-        return renderMatchStatusBadge(item, onOpenInvoice);
+        return renderMatchStatusBadge(item, onOpenInvoice, handleEdit);
       case 'categoryName':
         return item.categoryName ?? '—';
       case 'cashOrder':
@@ -2383,15 +2398,27 @@ export function MoneyOperations({
                               {item.purpose || '—'}
                             </div>
                           </td>
-                          <td className="px-3 py-2">{renderMatchStatusBadge(item, onOpenInvoice)}</td>
+                          <td className="px-3 py-2">{renderMatchStatusBadge(item, onOpenInvoice, handleEdit)}</td>
                           <td className="px-3 py-2 text-right">
-                            <button
-                              onClick={() => handleEdit(item)}
-                              disabled={Boolean(item.isReadonly) || item.id <= 0}
-                              className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              aria-label="Изменить">
-                              <Pencil className="h-4 w-4" />
-                            </button>
+                            <div className="inline-flex items-center gap-2">
+                              {item.matchStatus === 'ClarificationRequired' && (
+                                <button
+                                  onClick={() => handleEdit(item)}
+                                  disabled={Boolean(item.isReadonly) || item.id <= 0}
+                                  className="rounded-md border border-amber-200 p-2 text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                  aria-label="Уточнить"
+                                  title="Уточнить операцию и привязать счёт">
+                                  <AlertTriangle className="h-4 w-4" />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleEdit(item)}
+                                disabled={Boolean(item.isReadonly) || item.id <= 0}
+                                className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                aria-label="Изменить">
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -3011,6 +3038,16 @@ export function MoneyOperations({
                             aria-label="Открыть карточку кассового ордера"
                             title="Открыть карточку кассового ордера">
                             <ReceiptText className="h-4 w-4" />
+                          </button>
+                        )}
+                        {item.matchStatus === 'ClarificationRequired' && (
+                          <button
+                            onClick={() => handleEdit(item)}
+                            disabled={Boolean(item.isReadonly) || item.id <= 0}
+                            className="rounded-md border border-amber-200 p-2 text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            aria-label="Уточнить"
+                            title="Уточнить операцию и привязать счёт">
+                            <AlertTriangle className="h-4 w-4" />
                           </button>
                         )}
                         <button
