@@ -1212,6 +1212,7 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Bank" />);
 
     await screen.findByText('Клиент со счётом');
+    expect(screen.getByText('Зачтено в счет')).toBeTruthy();
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Удалить' }).disabled).toBe(true);
   });
 
@@ -1234,6 +1235,7 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Cash" />);
 
     await screen.findByText('Ахмедова Айтан Рафик Кызы');
+    expect(screen.getByText('Из графика')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Создать ПКО' }));
 
     await waitFor(() => expect(createCashOrderFromPaymentMock).toHaveBeenCalledWith(77));

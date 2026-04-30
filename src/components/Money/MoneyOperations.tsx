@@ -301,6 +301,34 @@ function isAppliedToInvoice(item: MoneyOperation) {
   return Boolean(item.linkedInvoiceId && item.matchStatus === 'Matched');
 }
 
+function getOperationOriginBadge(item: MoneyOperation) {
+  if (item.isReadonly) {
+    return {
+      label: 'Из графика',
+      title: 'Строка построена из платежного графика. Редактируйте исходный платеж или счет.',
+      className: 'bg-slate-100 text-slate-500',
+    };
+  }
+
+  if (isAppliedToInvoice(item)) {
+    return {
+      label: 'Зачтено в счет',
+      title: 'Операция уже зачтена в счет. Удаление и перенос заблокированы, чтобы не задвоить оплату.',
+      className: 'bg-blue-50 text-blue-700',
+    };
+  }
+
+  if (item.cashOrderId) {
+    return {
+      label: 'Кассовый ордер',
+      title: 'Операция связана с кассовым ордером.',
+      className: 'bg-emerald-50 text-emerald-700',
+    };
+  }
+
+  return null;
+}
+
 function getBankImportStatusLabel(status: string) {
   switch (status) {
     case 'Applied':
@@ -3263,9 +3291,16 @@ export function MoneyOperations({
                     ))}
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
-                        {item.isReadonly && (
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-500">Из графика</span>
-                        )}
+                        {(() => {
+                          const badge = getOperationOriginBadge(item);
+                          return badge ? (
+                            <span
+                              className={`rounded-full px-2 py-1 text-xs font-medium ${badge.className}`}
+                              title={badge.title}>
+                              {badge.label}
+                            </span>
+                          ) : null;
+                        })()}
                         {item.canCreateCashOrder && (
                           <button
                             onClick={() => handleCreateCashOrder(item)}
