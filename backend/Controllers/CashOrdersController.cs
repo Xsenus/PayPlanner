@@ -766,8 +766,10 @@ public class CashOrdersController : ControllerBase
     .notice { margin-top: 18px; border: 1px solid #cbd5e1; padding: 10px 12px; color: #334155; font-size: 13px; }
     .cancelled { margin-top: 18px; border: 1px solid #fecdd3; background: #fff1f2; color: #be123c; padding: 10px 12px; font-weight: 700; }
     .receipt { margin-top: 28px; border-top: 2px dashed #cbd5e1; padding-top: 20px; }
-    .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin-top: 42px; }
+    .signatures { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; margin-top: 42px; }
+    .receipt .signatures { grid-template-columns: repeat(3, 1fr); }
     .signature { border-top: 1px solid #111827; padding-top: 7px; color: #334155; font-size: 13px; text-align: center; }
+    .signature small { display: block; margin-top: 5px; color: #64748b; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -798,9 +800,10 @@ public class CashOrdersController : ControllerBase
     </div>
     <div class="notice">Документ сформирован в PayPlanner. Перед выдачей проверьте реквизиты, сумму и основание операции.</div>
     <div class="signatures">
-      <div class="signature">Главный бухгалтер</div>
-      <div class="signature">Кассир</div>
-      <div class="signature">{{signatureLabel}}</div>
+      <div class="signature">Руководитель<small>подпись, расшифровка</small></div>
+      <div class="signature">Главный бухгалтер<small>подпись, расшифровка</small></div>
+      <div class="signature">Кассир<small>подпись, расшифровка</small></div>
+      <div class="signature">{{signatureLabel}}<small>подпись, расшифровка</small></div>
     </div>
 
 {{receiptHtml}}

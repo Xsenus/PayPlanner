@@ -1311,6 +1311,9 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Основная касса", content.Content);
         Assert.Contains("Договор и счёт", content.Content);
         Assert.Contains("Без замечаний", content.Content);
+        Assert.Contains("Руководитель", content.Content);
+        Assert.Contains("Главный бухгалтер", content.Content);
+        Assert.Contains("подпись, расшифровка", content.Content);
     }
 
     [Fact]
@@ -1345,6 +1348,8 @@ public class MoneyOperationsControllerTests
         Assert.Contains("0310002", content.Content);
         Assert.Contains("Выдать", content.Content);
         Assert.Contains("Поставщик", content.Content);
+        Assert.Contains("Руководитель", content.Content);
+        Assert.Contains("Главный бухгалтер", content.Content);
         Assert.DoesNotContain("Квитанция к", content.Content);
     }
 
