@@ -12,6 +12,7 @@ import { BankDirectorySettings } from './BankDirectorySettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
 import { MainCompanySettings } from './MainCompanySettings';
+import { MoneyAccountSettings } from './MoneyAccountSettings';
 import { SpreadsheetImportSettings } from './SpreadsheetImportSettings';
 import { UserMergeSettings } from './UserMergeSettings';
 import type {
@@ -777,6 +778,7 @@ export function AppSettings() {
             {activeSection === 'companies' && (
               <div className="space-y-6">
                 <MainCompanySettings />
+                <MoneyAccountSettings />
                 <BankDirectorySettings />
               </div>
             )}
