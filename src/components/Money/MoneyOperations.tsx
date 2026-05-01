@@ -3250,9 +3250,11 @@ export function MoneyOperations({
           </button>
           <button
             type="button"
-            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-            Ещё
-            <ChevronDown className="h-4 w-4" />
+            onClick={() => void reload()}
+            disabled={loading}
+            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Обновить
           </button>
         </div>
       </div>

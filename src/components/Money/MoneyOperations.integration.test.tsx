@@ -633,6 +633,18 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByRole('button', { name: 'Скрыть расширенный поиск' })).toBeTruthy();
   }, 15000);
 
+  it('refreshes the money journal from the side panel', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Bank" />);
+
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole('button', { name: 'Обновить' }));
+
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(2));
+  }, 15000);
+
   it('shows balance reconciliation for the journal and selected account', async () => {
     operations = [
       createOperation({
