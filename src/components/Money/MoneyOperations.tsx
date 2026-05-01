@@ -910,7 +910,7 @@ function CashOrdersPanel({
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [typeFilter, setTypeFilter] = useState<CashOrderType | 'all'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'Posted' | 'Cancelled'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Draft' | 'Posted' | 'Cancelled'>('all');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pageSize = 10;
@@ -1045,6 +1045,7 @@ function CashOrdersPanel({
           <span className="mx-1 h-6 w-px bg-slate-200" aria-hidden="true" />
           {([
             { key: 'all', label: 'Все статусы' },
+            { key: 'Draft', label: 'Черновики' },
             { key: 'Posted', label: 'Проведён' },
             { key: 'Cancelled', label: 'Отменён' },
           ] as const).map((item) => (
@@ -1066,7 +1067,7 @@ function CashOrdersPanel({
       </div>
 
       {registerSummary && (
-        <div className="grid gap-3 border-b border-slate-200 px-4 py-3 md:grid-cols-4">
+        <div className="grid gap-3 border-b border-slate-200 px-4 py-3 md:grid-cols-5">
           <div className="rounded-lg bg-emerald-50 px-3 py-2">
             <div className="text-xs uppercase text-emerald-700/70">Приходные ордера</div>
             <div className="mt-1 text-base font-semibold text-emerald-700">
@@ -1078,6 +1079,10 @@ function CashOrdersPanel({
             <div className="mt-1 text-base font-semibold text-rose-700">
               {registerSummary.outgoingCount} на {formatMoney(registerSummary.outgoingAmount)} ₽
             </div>
+          </div>
+          <div className="rounded-lg bg-slate-50 px-3 py-2">
+            <div className="text-xs uppercase text-slate-500">Черновики</div>
+            <div className="mt-1 text-base font-semibold text-slate-800">{registerSummary.draftCount}</div>
           </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2">
             <div className="text-xs uppercase text-slate-500">Проведено</div>

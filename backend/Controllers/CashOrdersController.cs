@@ -105,6 +105,7 @@ public class CashOrdersController : ControllerBase
             {
                 IncomingCount = group.Count(order => order.Type == CashOrderType.Incoming),
                 OutgoingCount = group.Count(order => order.Type == CashOrderType.Outgoing),
+                DraftCount = group.Count(order => order.Status == CashOrderStatus.Draft),
                 PostedCount = group.Count(order => order.Status == CashOrderStatus.Posted),
                 CancelledCount = group.Count(order => order.Status == CashOrderStatus.Cancelled),
                 IncomingAmount = group
@@ -132,6 +133,7 @@ public class CashOrdersController : ControllerBase
             PageSize = pageSize,
             IncomingCount = summary?.IncomingCount ?? 0,
             OutgoingCount = summary?.OutgoingCount ?? 0,
+            DraftCount = summary?.DraftCount ?? 0,
             PostedCount = summary?.PostedCount ?? 0,
             CancelledCount = summary?.CancelledCount ?? 0,
             IncomingAmount = summary?.IncomingAmount ?? 0m,
@@ -157,6 +159,7 @@ public class CashOrdersController : ControllerBase
             {
                 IncomingCount = group.Count(order => order.Type == CashOrderType.Incoming),
                 OutgoingCount = group.Count(order => order.Type == CashOrderType.Outgoing),
+                DraftCount = group.Count(order => order.Status == CashOrderStatus.Draft),
                 PostedCount = group.Count(order => order.Status == CashOrderStatus.Posted),
                 CancelledCount = group.Count(order => order.Status == CashOrderStatus.Cancelled),
                 IncomingAmount = group
@@ -182,6 +185,7 @@ public class CashOrdersController : ControllerBase
             PageSize = items.Count,
             IncomingCount = summary?.IncomingCount ?? 0,
             OutgoingCount = summary?.OutgoingCount ?? 0,
+            DraftCount = summary?.DraftCount ?? 0,
             PostedCount = summary?.PostedCount ?? 0,
             CancelledCount = summary?.CancelledCount ?? 0,
             IncomingAmount = summary?.IncomingAmount ?? 0m,
@@ -929,7 +933,11 @@ public class CashOrdersController : ControllerBase
             : string.Join(Environment.NewLine, register.Items.Select((order, index) =>
             {
                 var typeLabel = order.Type == CashOrderType.Incoming ? "ПКО" : "РКО";
-                var statusLabel = order.Status == CashOrderStatus.Cancelled ? "Отменён" : "Проведён";
+                var statusLabel = order.Status == CashOrderStatus.Cancelled
+                    ? "Отменён"
+                    : order.Status == CashOrderStatus.Draft
+                        ? "Черновик"
+                        : "Проведён";
                 var amountClass = order.Type == CashOrderType.Incoming ? "income" : "expense";
                 return $$"""
               <tr>
@@ -965,6 +973,7 @@ public class CashOrdersController : ControllerBase
     <section class="summary">
       <div><span>Приходные ордера</span><strong class="income">{{register.IncomingCount}} на {{FormatRub(register.IncomingAmount)}}</strong></div>
       <div><span>Расходные ордера</span><strong class="expense">{{register.OutgoingCount}} на {{FormatRub(register.OutgoingAmount)}}</strong></div>
+      <div><span>Черновиков</span><strong>{{register.DraftCount}}</strong></div>
       <div><span>Проведено</span><strong>{{register.PostedCount}}</strong></div>
       <div><span>Отменено</span><strong>{{register.CancelledCount}}</strong></div>
     </section>

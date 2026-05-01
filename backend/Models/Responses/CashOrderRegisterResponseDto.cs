@@ -8,6 +8,7 @@ public sealed class CashOrderRegisterResponseDto
     public int PageSize { get; init; }
     public int IncomingCount { get; init; }
     public int OutgoingCount { get; init; }
+    public int DraftCount { get; init; }
     public int PostedCount { get; init; }
     public int CancelledCount { get; init; }
     public decimal IncomingAmount { get; init; }

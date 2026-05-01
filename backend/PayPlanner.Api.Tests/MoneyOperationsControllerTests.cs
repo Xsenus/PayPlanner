@@ -1762,6 +1762,18 @@ public class MoneyOperationsControllerTests
                 PayerName = "Ахмедова Айтан Рафик Кызы",
                 Basis = "Ошибочный документ",
                 CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "ПКО-2026-0003",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Draft,
+                Date = new DateTime(2026, 4, 28),
+                Amount = 2_000m,
+                Currency = "RUB",
+                PayerName = "Ахмедова Айтан Рафик Кызы",
+                Basis = "Черновик оплаты",
+                CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
 
@@ -1778,14 +1790,15 @@ public class MoneyOperationsControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var register = Assert.IsType<CashOrderRegisterResponseDto>(ok.Value);
-        Assert.Equal(2, register.Total);
-        Assert.Equal(2, register.IncomingCount);
+        Assert.Equal(3, register.Total);
+        Assert.Equal(3, register.IncomingCount);
         Assert.Equal(0, register.OutgoingCount);
+        Assert.Equal(1, register.DraftCount);
         Assert.Equal(1, register.PostedCount);
         Assert.Equal(1, register.CancelledCount);
         Assert.Equal(25_000m, register.IncomingAmount);
         Assert.Equal(0m, register.OutgoingAmount);
-        Assert.Equal(["ПКО-2026-0002", "ПКО-2026-0001"], register.Items.Select(item => item.Number).ToArray());
+        Assert.Equal(["ПКО-2026-0002", "ПКО-2026-0001", "ПКО-2026-0003"], register.Items.Select(item => item.Number).ToArray());
     }
 
     [Fact]
@@ -1847,6 +1860,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Журнал регистрации кассовых документов", content.Content);
         Assert.Contains("ПКО-2026-0001", content.Content);
         Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
+        Assert.Contains("Черновиков", content.Content);
         AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
         AssertPrintHtmlUsesSharedDocumentStyle(content.Content);
     }

@@ -397,6 +397,7 @@ describe('MoneyOperations integration', () => {
       pageSize: 10,
       incomingCount: 0,
       outgoingCount: 0,
+      draftCount: 0,
       postedCount: 0,
       cancelledCount: 0,
       incomingAmount: 0,
@@ -1362,6 +1363,7 @@ describe('MoneyOperations integration', () => {
       pageSize: 10,
       incomingCount: 1,
       outgoingCount: 0,
+      draftCount: 0,
       postedCount: 1,
       cancelledCount: 0,
       incomingAmount: 25000,
@@ -1471,6 +1473,7 @@ describe('MoneyOperations integration', () => {
       pageSize: 10,
       incomingCount: 1,
       outgoingCount: 0,
+      draftCount: 0,
       postedCount: 1,
       cancelledCount: 0,
       incomingAmount: 25000,
@@ -1551,6 +1554,7 @@ describe('MoneyOperations integration', () => {
       pageSize: 10,
       incomingCount: 1,
       outgoingCount: 0,
+      draftCount: 1,
       postedCount: 0,
       cancelledCount: 0,
       incomingAmount: 0,
@@ -1662,6 +1666,26 @@ describe('MoneyOperations integration', () => {
       expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(
         expect.objectContaining({
           status: 'Cancelled',
+          page: 1,
+          pageSize: 10,
+        }),
+      ),
+    );
+  }, 15000);
+
+  it('filters the cash orders journal by draft status', async () => {
+    const user = userEvent.setup();
+    operations = [];
+
+    render(<MoneyOperations source="Cash" />);
+
+    await screen.findByText('Кассовые ордера');
+    await user.click(screen.getByRole('button', { name: 'Черновики' }));
+
+    await waitFor(() =>
+      expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: 'Draft',
           page: 1,
           pageSize: 10,
         }),

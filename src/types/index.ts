@@ -597,6 +597,7 @@ export interface CashOrderRegister {
   pageSize: number;
   incomingCount: number;
   outgoingCount: number;
+  draftCount: number;
   postedCount: number;
   cancelledCount: number;
   incomingAmount: number;
