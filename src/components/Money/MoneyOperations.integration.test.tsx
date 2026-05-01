@@ -1877,21 +1877,16 @@ describe('MoneyOperations integration', () => {
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(2));
   }, 15000);
 
-  it('keeps the bank statement auto import switch setting', async () => {
-    const user = userEvent.setup();
-
+  it('shows bank statement auto import as a planned disabled feature', async () => {
     render(<MoneyOperations source="Bank" />);
 
     const importJournalButton = await screen.findByRole('button', { name: 'Открыть журнал импортов выписки' });
     expect(importJournalButton.textContent).toContain('Журнал импортов');
     const switcher = await screen.findByRole<HTMLInputElement>('switch', { name: /Автоподгрузка/ });
     expect(switcher.checked).toBe(false);
-
-    await user.click(switcher);
-
-    expect(switcher.checked).toBe(true);
-    expect(await screen.findByText('Ожидает настройки интеграции')).toBeTruthy();
-    expect(window.localStorage.getItem('pp.bank_statement_auto_import_enabled')).toBe('true');
+    expect(switcher.disabled).toBe(true);
+    expect(await screen.findByText('Скоро')).toBeTruthy();
+    expect(window.localStorage.getItem('pp.bank_statement_auto_import_enabled')).toBeNull();
   }, 15000);
 
   it('shows bank import journal details and rolls back an import batch', async () => {
