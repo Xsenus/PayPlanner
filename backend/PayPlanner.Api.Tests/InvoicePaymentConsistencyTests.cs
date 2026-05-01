@@ -850,13 +850,13 @@ public class InvoicePaymentConsistencyTests
     {
         var client = new Client
         {
-            Name = "Р‘РµР·РЅСЏРєРѕРІ Р”Р°РЅРёР» РђРЅРґСЂРµРµРІРёС‡",
+            Name = "Безняков Данил Андреевич",
         };
 
         var clientCase = new ClientCase
         {
             Client = client,
-            Title = "Р‘Р•Р—РќРЇРљРћР’ - Р РђРЎРЎР РћР§РљРђ",
+            Title = "БЕЗНЯКОВ - РАССРОЧКА",
         };
 
         var invoice = new Invoice
@@ -874,7 +874,7 @@ public class InvoicePaymentConsistencyTests
             CounterpartyName = client.Name,
             Date = new DateTime(2026, 8, 25),
             PlannedDate = new DateTime(2026, 8, 25),
-            Description = "РЎС‡РµС‚ в„–155",
+            Description = "Счет №155",
             DocumentKind = DocumentKind.Invoice,
             Status = PaymentStatus.Pending,
             IsPaid = false,
@@ -895,7 +895,7 @@ public class InvoicePaymentConsistencyTests
             PaidDate = new DateTime(2025, 11, 27),
             LastPaymentDate = new DateTime(2025, 11, 27),
             PaidAmount = 18_000m,
-            Description = "РџР»Р°С‚РµР¶ 1",
+            Description = "Платеж 1",
             DocumentKind = DocumentKind.Invoice,
             Status = PaymentStatus.Completed,
             IsPaid = true,
@@ -916,7 +916,7 @@ public class InvoicePaymentConsistencyTests
             PaidDate = new DateTime(2026, 1, 30),
             LastPaymentDate = new DateTime(2026, 1, 30),
             PaidAmount = 18_000m,
-            Description = "РџР»Р°С‚РµР¶ 2",
+            Description = "Платеж 2",
             DocumentKind = DocumentKind.Invoice,
             Status = PaymentStatus.Completed,
             IsPaid = true,
@@ -934,7 +934,7 @@ public class InvoicePaymentConsistencyTests
             CounterpartyName = client.Name,
             Date = new DateTime(2026, 4, 27),
             PlannedDate = new DateTime(2026, 4, 27),
-            Description = "РџР»Р°С‚РµР¶ 3",
+            Description = "Платеж 3",
             DocumentKind = DocumentKind.Payment,
             Status = PaymentStatus.Pending,
             IsPaid = false,

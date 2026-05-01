@@ -22,7 +22,7 @@ public class CountryDictionaryCatalogTests
         Assert.Contains(all, item => item.Name == "Россия");
         Assert.Contains(all, item => item.Name == "Казахстан");
         Assert.Contains(all, item => item.Name == "Германия");
-        Assert.DoesNotContain(all, item => item.Name == "??????");
+        Assert.DoesNotContain(all, item => item.Name == new string('?', 6));
         Assert.Equal(all.Count, all.Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 

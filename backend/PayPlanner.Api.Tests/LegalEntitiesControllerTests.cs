@@ -584,7 +584,7 @@ public class LegalEntitiesControllerTests
 
         var controller = CreateController(db, userId: 17);
         var request = BuildRequest();
-        request.ServiceLanguage = "???????";
+        request.ServiceLanguage = new string('?', 7);
 
         var action = await controller.Create(request, CancellationToken.None);
 
@@ -665,9 +665,9 @@ public class LegalEntitiesControllerTests
     public async Task Update_ReplacesClientLinks_AndClearsRemovedClients()
     {
         await using var db = await CreateContextAsync();
-        var firstClientId = await CreateClientAsync(db, "РљР»РёРµРЅС‚ 1");
-        var secondClientId = await CreateClientAsync(db, "РљР»РёРµРЅС‚ 2");
-        var thirdClientId = await CreateClientAsync(db, "РљР»РёРµРЅС‚ 3");
+        var firstClientId = await CreateClientAsync(db, "Клиент 1");
+        var secondClientId = await CreateClientAsync(db, "Клиент 2");
+        var thirdClientId = await CreateClientAsync(db, "Клиент 3");
 
         var controller = CreateController(db, userId: 56);
         var createRequest = BuildRequest();
@@ -701,7 +701,7 @@ public class LegalEntitiesControllerTests
     public async Task Delete_RejectsLegalEntity_WhenLinkedClientsExist()
     {
         await using var db = await CreateContextAsync();
-        var clientId = await CreateClientAsync(db, "РљР»РёРµРЅС‚ РґР»СЏ РєРѕРЅС„Р»РёРєС‚Р°");
+        var clientId = await CreateClientAsync(db, "Клиент для конфликта");
 
         var controller = CreateController(db, userId: 57);
         var createRequest = BuildRequest();
@@ -726,8 +726,8 @@ public class LegalEntitiesControllerTests
 
         var entity = new LegalEntity
         {
-            ShortName = "РЈРґР°Р»СЏРµРјРѕРµ СЋСЂР»РёС†Рѕ",
-            FullName = "РЈРґР°Р»СЏРµРјРѕРµ СЋСЂРёРґРёС‡РµСЃРєРѕРµ Р»РёС†Рѕ",
+            ShortName = "Удаляемое юрлицо",
+            FullName = "Удаляемое юридическое лицо",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -739,7 +739,7 @@ public class LegalEntitiesControllerTests
         {
             LegalEntityId = entity.Id,
             Type = AddressType.Legal,
-            Value = "РђРґСЂРµСЃ РґР»СЏ СѓРґР°Р»РµРЅРёСЏ",
+            Value = "Адрес для удаления",
             IsPrimary = true,
         });
         db.UserCompanyAccesses.Add(new UserCompanyAccess

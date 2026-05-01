@@ -780,19 +780,19 @@ public class ClientsControllerTests
     {
         await using var db = await CreateContextAsync();
         var userId = await CreateUserAsync(db, roleName: "admin");
-        var firstLegalEntityId = await CreateLegalEntityAsync(db, "РЋСЂР»РёС†Рѕ 1");
-        var secondLegalEntityId = await CreateLegalEntityAsync(db, "РЋСЂР»РёС†Рѕ 2");
-        var firstStatusId = await CreateClientStatusAsync(db, "РќРѕРІС‹Р№");
+        var firstLegalEntityId = await CreateLegalEntityAsync(db, "Юрлицо 1");
+        var secondLegalEntityId = await CreateLegalEntityAsync(db, "Юрлицо 2");
+        var firstStatusId = await CreateClientStatusAsync(db, "Новый");
         var secondStatusId = await CreateClientStatusAsync(db, "VIP");
         var controller = CreateController(db, userId);
 
         var createModel = new Client
         {
-            Name = "РљР»РёРµРЅС‚ CRUD",
+            Name = "Клиент CRUD",
             Email = "client-crud@example.com",
             Phone = "+7 (900) 000-00-00",
-            Company = "РћРћРћ РџРµСЂРІРѕРµ",
-            Address = "РџРµСЂРІС‹Р№ Р°РґСЂРµСЃ",
+            Company = "ООО Первое",
+            Address = "Первый адрес",
             Notes = ClientProfileNotesPrefix + JsonSerializer.Serialize(new
             {
                 addressEntries = new[]
@@ -800,13 +800,13 @@ public class ClientsControllerTests
                     new
                     {
                         type = "registration",
-                        sourceQuery = "РџРµСЂРІС‹Р№ Р°РґСЂРµСЃ",
-                        fullAddress = "РџРµСЂРІС‹Р№ Р°РґСЂРµСЃ",
+                        sourceQuery = "Первый адрес",
+                        fullAddress = "Первый адрес",
                         postalCode = "630001",
-                        country = "Р РѕСЃСЃРёСЏ",
-                        region = "РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р»",
-                        city = "Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє",
-                        street = "СѓР» РџРµСЂРІР°СЏ",
+                        country = "Россия",
+                        region = "Новосибирская обл",
+                        city = "г Новосибирск",
+                        street = "ул Первая",
                         house = "1",
                         flat = "10",
                     },
@@ -817,7 +817,7 @@ public class ClientsControllerTests
                     {
                         series = "1234",
                         number = "567890",
-                        issuedBy = "РћР’Р” 1",
+                        issuedBy = "ОВД 1",
                         issueDate = new DateTime(2020, 1, 1),
                     },
                 },
@@ -836,16 +836,16 @@ public class ClientsControllerTests
         Assert.Equal(firstStatusId, dto.ClientStatusId);
         Assert.Equal(userId, dto.ResponsibleUserId);
         Assert.Single(dto.Addresses);
-        Assert.Equal("РџРµСЂРІС‹Р№ Р°РґСЂРµСЃ", dto.Addresses.Single().UnrestrictedValue);
+        Assert.Equal("Первый адрес", dto.Addresses.Single().UnrestrictedValue);
         Assert.Equal("1234", (await db.ClientPassports.AsNoTracking().SingleAsync(item => item.ClientId == dto.Id)).Series);
 
         var updateModel = new Client
         {
-            Name = "РљР»РёРµРЅС‚ CRUD Updated",
+            Name = "Клиент CRUD Updated",
             Email = "client-crud-updated@example.com",
             Phone = "+7 (900) 111-11-11",
-            Company = "РћРћРћ Р’С‚РѕСЂРѕРµ",
-            Address = "Р’С‚РѕСЂРѕР№ Р°РґСЂРµСЃ",
+            Company = "ООО Второе",
+            Address = "Второй адрес",
             Notes = ClientProfileNotesPrefix + JsonSerializer.Serialize(new
             {
                 addressEntries = new[]
@@ -853,13 +853,13 @@ public class ClientsControllerTests
                     new
                     {
                         type = "actual",
-                        sourceQuery = "Р’С‚РѕСЂРѕР№ Р°РґСЂРµСЃ",
-                        fullAddress = "Р’С‚РѕСЂРѕР№ Р°РґСЂРµСЃ",
+                        sourceQuery = "Второй адрес",
+                        fullAddress = "Второй адрес",
                         postalCode = "630002",
-                        country = "Р РѕСЃСЃРёСЏ",
-                        region = "РќРѕРІРѕСЃРёР±РёСЂСЃРєР°СЏ РѕР±Р»",
-                        city = "Рі РќРѕРІРѕСЃРёР±РёСЂСЃРє",
-                        street = "СѓР» Р’С‚РѕСЂР°СЏ",
+                        country = "Россия",
+                        region = "Новосибирская обл",
+                        city = "г Новосибирск",
+                        street = "ул Вторая",
                         house = "2",
                         flat = "20",
                     },
@@ -870,7 +870,7 @@ public class ClientsControllerTests
                     {
                         series = "4321",
                         number = "098765",
-                        issuedBy = "РћР’Р” 2",
+                        issuedBy = "ОВД 2",
                         issueDate = new DateTime(2021, 2, 2),
                     },
                 },
@@ -885,12 +885,12 @@ public class ClientsControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(updateAction);
         var updated = Assert.IsType<Client>(ok.Value);
-        Assert.Equal("РљР»РёРµРЅС‚ CRUD Updated", updated.Name);
+        Assert.Equal("Клиент CRUD Updated", updated.Name);
         Assert.Equal(secondLegalEntityId, updated.LegalEntityId);
         Assert.Equal(secondStatusId, updated.ClientStatusId);
         Assert.False(updated.IsActive);
         Assert.Single(updated.Addresses);
-        Assert.Equal("Р’С‚РѕСЂРѕР№ Р°РґСЂРµСЃ", updated.Addresses.Single().UnrestrictedValue);
+        Assert.Equal("Второй адрес", updated.Addresses.Single().UnrestrictedValue);
 
         var storedPassport = await db.ClientPassports.AsNoTracking().SingleAsync(item => item.ClientId == dto.Id);
         Assert.Equal("4321", storedPassport.Series);
@@ -920,12 +920,12 @@ public class ClientsControllerTests
 
         var missingStructuredFieldModel = new Client
         {
-            Name = "РРІР°РЅРѕРІ РРІР°РЅ",
+            Name = "Иванов Иван",
             Phone = "+7 (999) 000-00-00",
             Notes = ClientProfileNotesPrefix + JsonSerializer.Serialize(new
             {
-                lastName = "РРІР°РЅРѕРІ",
-                firstName = "РРІР°РЅ",
+                lastName = "Иванов",
+                firstName = "Иван",
                 middleName = "",
                 comment = "",
             }),
@@ -946,14 +946,14 @@ public class ClientsControllerTests
 
         var validModel = new Client
         {
-            Name = "РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡",
+            Name = "Иванов Иван Иванович",
             Phone = "+7 (999) 000-00-00",
             Notes = ClientProfileNotesPrefix + JsonSerializer.Serialize(new
             {
-                lastName = "РРІР°РЅРѕРІ",
-                firstName = "РРІР°РЅ",
-                middleName = "РРІР°РЅРѕРІРёС‡",
-                comment = "РџРµСЂРµР·РІРѕРЅРёС‚СЊ РїРѕСЃР»Рµ РѕР±РµРґР°",
+                lastName = "Иванов",
+                firstName = "Иван",
+                middleName = "Иванович",
+                comment = "Перезвонить после обеда",
             }),
             IsActive = true,
         };
@@ -962,7 +962,7 @@ public class ClientsControllerTests
 
         var created = Assert.IsType<CreatedResult>(createAction);
         var dto = Assert.IsType<Client>(created.Value);
-        Assert.Equal("РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡", dto.Name);
+        Assert.Equal("Иванов Иван Иванович", dto.Name);
         Assert.Equal("+7 (999) 000-00-00", dto.Phone);
         Assert.Equal(string.Empty, dto.Email);
     }
@@ -1009,7 +1009,7 @@ public class ClientsControllerTests
 
         var client = new Client
         {
-            Name = "РљР»РёРµРЅС‚ СЃ РїР»Р°С‚РµР¶РѕРј",
+            Name = "Клиент с платежом",
             ResponsibleUserId = userId,
             IsActive = true,
         };
@@ -1021,10 +1021,10 @@ public class ClientsControllerTests
         {
             Amount = 7_500m,
             PaidAmount = 0m,
-            CounterpartyName = "РљР»РёРµРЅС‚ СЃ РїР»Р°С‚РµР¶РѕРј",
+            CounterpartyName = "Клиент с платежом",
             Date = new DateTime(2026, 4, 12),
             PlannedDate = new DateTime(2026, 4, 12),
-            Description = "РџР»Р°С‚РµР¶ РєР»РёРµРЅС‚Р°",
+            Description = "Платеж клиента",
             DocumentKind = DocumentKind.Payment,
             Status = PaymentStatus.Pending,
             Type = PaymentType.Income,
@@ -1053,14 +1053,14 @@ public class ClientsControllerTests
 
         var firstClient = new Client
         {
-            Name = "РљР»РёРµРЅС‚ 1",
+            Name = "Клиент 1",
             ResponsibleUserId = userId,
             IsActive = true,
         };
 
         var secondClient = new Client
         {
-            Name = "РљР»РёРµРЅС‚ 2",
+            Name = "Клиент 2",
             ResponsibleUserId = userId,
             IsActive = true,
         };
@@ -1069,8 +1069,8 @@ public class ClientsControllerTests
         await db.SaveChangesAsync();
 
         db.AddressRecords.AddRange(
-            new AddressRecord { ClientId = firstClient.Id, Type = AddressType.Registration, Value = "РђРґСЂРµСЃ 1", IsPrimary = true },
-            new AddressRecord { ClientId = secondClient.Id, Type = AddressType.Registration, Value = "РђРґСЂРµСЃ 2", IsPrimary = true });
+            new AddressRecord { ClientId = firstClient.Id, Type = AddressType.Registration, Value = "Адрес 1", IsPrimary = true },
+            new AddressRecord { ClientId = secondClient.Id, Type = AddressType.Registration, Value = "Адрес 2", IsPrimary = true });
         db.ClientPassports.AddRange(
             new ClientPassport { ClientId = firstClient.Id, Series = "1111", Number = "111111", IsPrimary = true },
             new ClientPassport { ClientId = secondClient.Id, Series = "2222", Number = "222222", IsPrimary = true });
@@ -1098,14 +1098,14 @@ public class ClientsControllerTests
 
         var firstClient = new Client
         {
-            Name = "РљР»РёРµРЅС‚ A",
+            Name = "Клиент A",
             ResponsibleUserId = adminUserId,
             IsActive = true,
         };
 
         var secondClient = new Client
         {
-            Name = "РљР»РёРµРЅС‚ B",
+            Name = "Клиент B",
             ResponsibleUserId = adminUserId,
             IsActive = true,
         };
@@ -1221,7 +1221,7 @@ public class ClientsControllerTests
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-            new Claim(ClaimTypes.Name, "РўРµСЃС‚РѕРІС‹Р№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ"),
+            new Claim(ClaimTypes.Name, "Тестовый пользователь"),
         };
 
         return new ClientsV2Controller(db)

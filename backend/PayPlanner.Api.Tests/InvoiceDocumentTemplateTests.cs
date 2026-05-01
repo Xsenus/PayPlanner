@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -1334,21 +1335,21 @@ public class InvoiceDocumentTemplateTests
                     <td colspan="2" rowspan="2" class="v-al-t bor0-b" style="width: 50%;">
                       {{seller.bankName}}
                     </td>
-                    <td style="width: 15%;">Р‘РРљ</td>
+                    <td style="width: 15%;">БИК</td>
                     <td class="bor0-b" style="width: 35%;">{{seller.bik}}</td>
                   </tr>
                   <tr>
-                    <td class="v-al-t bor0-b" style="width: 15%;">РЎС‡. в„–</td>
+                    <td class="v-al-t bor0-b" style="width: 15%;">Сч. №</td>
                     <td rowspan="2" class="v-al-t bor0-t" style="width: 35%;">{{seller.corrAccountNumber}}</td>
                   </tr>
                   <tr>
-                    <td colspan="2" class="bor0-t" style="width: 50%;">Р‘Р°РЅРє РїРѕР»СѓС‡Р°С‚РµР»СЏ</td>
+                    <td colspan="2" class="bor0-t" style="width: 50%;">Банк получателя</td>
                     <td class="v-al-t bor0-t" style="width: 15%;">&nbsp;</td>
                   </tr>
                   <tr>
-                    <td style="width: 25%;">РРќРќ {{seller.inn}}</td>
-                    <td style="width: 25%;">РљРџРџ {{seller.kppOrDash}}</td>
-                    <td class="v-al-t bor0-b" style="width: 15%;">РЎС‡. в„–</td>
+                    <td style="width: 25%;">ИНН {{seller.inn}}</td>
+                    <td style="width: 25%;">КПП {{seller.kppOrDash}}</td>
+                    <td class="v-al-t bor0-b" style="width: 15%;">Сч. №</td>
                     <td rowspan="4" class="v-al-t" style="width: 35%;">{{seller.accountNumber}}</td>
                   </tr>
                   <tr>
@@ -1359,7 +1360,7 @@ public class InvoiceDocumentTemplateTests
                     <td class="v-al-t bor0-t bor0-b" style="width: 15%;">&nbsp;</td>
                   </tr>
                   <tr>
-                    <td colspan="2" class="bor0-t" style="width: 50%;">РџРѕР»СѓС‡Р°С‚РµР»СЊ</td>
+                    <td colspan="2" class="bor0-t" style="width: 50%;">Получатель</td>
                     <td class="v-al-t bor0-t" style="width: 15%;">&nbsp;</td>
                   </tr>
                 </tbody>
@@ -1372,7 +1373,7 @@ public class InvoiceDocumentTemplateTests
         </tbody>
       </table>
 """;
-        var brokenHeaderHtml = """
+        var brokenHeaderHtml = EncodeUtf8AsWindows1251Mojibake("""
       <table class="header-table" style="margin: 0 0 10px;">
         <tbody>
           <tr>
@@ -1398,21 +1399,21 @@ public class InvoiceDocumentTemplateTests
                     <td colspan="2" rowspan="2" class="v-al-t bor0-b" style="width: 50%;">
                       {{seller.bankName}}
                     </td>
-                    <td style="width: 15%;">Р‘РРљ</td>
+                    <td style="width: 15%;">БИК</td>
                     <td class="bor0-b" style="width: 35%;">{{seller.bik}}</td>
                   </tr>
                   <tr>
-                    <td class="v-al-t bor0-b" style="width: 15%;">РЎС‡. в„–</td>
+                    <td class="v-al-t bor0-b" style="width: 15%;">Сч. №</td>
                     <td rowspan="2" class="v-al-t bor0-t" style="width: 35%;">{{seller.corrAccountNumber}}</td>
                   </tr>
                   <tr>
-                    <td colspan="2" class="bor0-t" style="width: 50%;">Р‘Р°РЅРє РїРѕР»СѓС‡Р°С‚РµР»СЏ</td>
+                    <td colspan="2" class="bor0-t" style="width: 50%;">Банк получателя</td>
                     <td class="v-al-t bor0-t" style="width: 15%;">&nbsp;</td>
                   </tr>
                   <tr>
-                    <td style="width: 25%;">РРќРќ {{seller.inn}}</td>
-                    <td style="width: 25%;">РљРџРџ {{seller.kppOrDash}}</td>
-                    <td class="v-al-t bor0-b" style="width: 15%;">РЎС‡. в„–</td>
+                    <td style="width: 25%;">ИНН {{seller.inn}}</td>
+                    <td style="width: 25%;">КПП {{seller.kppOrDash}}</td>
+                    <td class="v-al-t bor0-b" style="width: 15%;">Сч. №</td>
                     <td rowspan="4" class="v-al-t" style="width: 35%;">{{seller.accountNumber}}</td>
                   </tr>
                   <tr>
@@ -1423,7 +1424,7 @@ public class InvoiceDocumentTemplateTests
                     <td class="v-al-t bor0-t bor0-b" style="width: 15%;">&nbsp;</td>
                   </tr>
                   <tr>
-                    <td colspan="2" class="bor0-t" style="width: 50%;">РџРѕР»СѓС‡Р°С‚РµР»СЊ</td>
+                    <td colspan="2" class="bor0-t" style="width: 50%;">Получатель</td>
                     <td class="v-al-t bor0-t" style="width: 15%;">&nbsp;</td>
                   </tr>
                 </tbody>
@@ -1432,11 +1433,17 @@ public class InvoiceDocumentTemplateTests
           </tr>
         </tbody>
       </table>
-""";
+""");
 
         return currentDefaultHtml
             .Replace(fixedHeaderCss, brokenHeaderCss, StringComparison.Ordinal)
             .Replace(fixedHeaderHtml, brokenHeaderHtml, StringComparison.Ordinal);
+    }
+
+    private static string EncodeUtf8AsWindows1251Mojibake(string value)
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        return Encoding.GetEncoding(1251).GetString(Encoding.UTF8.GetBytes(value));
     }
 
     private static InvoicesController CreateController(

@@ -21,6 +21,7 @@ public static class InvoiceDocumentTemplateEngine
         "8c5beee74da7dafc884bfc05d78b4681371f0bc9874540b0676d1e1c15bce7e4",
         "92ca4fb24fbf8673ebc6256a299fdb9580ef9f3a64f78a3e3db7209bc226b18f",
         "af28afb12f128c846dd0261081335eb96d8c4b4770947616f8a4f1b17783f534",
+        "6df3df7d4529e7073c7f2293989494b8d31f6107ec08f7ced8eb11cd32e31a9d",
     };
 
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");

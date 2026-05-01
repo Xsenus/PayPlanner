@@ -625,18 +625,18 @@ public class PaymentsControllerTests
 
         var client = new Client
         {
-            Name = "РљР»РёРµРЅС‚ РґР»СЏ РїСЂРёРІСЏР·РєРё",
+            Name = "Клиент для привязки",
         };
 
         var clientCase = new ClientCase
         {
             Client = client,
-            Title = "Р”РµР»Рѕ РґР»СЏ РїСЂРёРІСЏР·РєРё",
+            Title = "Дело для привязки",
         };
 
         var incomeType = new IncomeType
         {
-            Name = "РћРїР»Р°С‚Р° РїРѕ СЃС‡С‘С‚Сѓ",
+            Name = "Оплата по счёту",
             PaymentType = PaymentType.Income,
         };
 
@@ -649,7 +649,7 @@ public class PaymentsControllerTests
         db.AddRange(client, clientCase, incomeType, invoice);
         await db.SaveChangesAsync();
 
-        var invoiceDocument = CreatePayment(invoice.Date, 20_000m, "РЎС‡С‘С‚ INV-400");
+        var invoiceDocument = CreatePayment(invoice.Date, 20_000m, "Счёт INV-400");
         invoiceDocument.ClientId = client.Id;
         invoiceDocument.ClientCaseId = clientCase.Id;
         invoiceDocument.DocumentKind = DocumentKind.Invoice;
@@ -660,7 +660,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
-        var model = CreatePayment(new DateTime(2026, 4, 3), 5_500m, "Р”РѕРїР»Р°С‚Р° РїРѕ СЃС‡С‘С‚Сѓ");
+        var model = CreatePayment(new DateTime(2026, 4, 3), 5_500m, "Доплата по счёту");
         model.ClientId = client.Id;
         model.ClientCaseId = clientCase.Id;
         model.IncomeTypeId = incomeType.Id;
@@ -701,34 +701,34 @@ public class PaymentsControllerTests
 
         var client = new Client
         {
-            Name = "РљР»РёРµРЅС‚ РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ",
+            Name = "Клиент для обновления",
         };
 
         var clientCase = new ClientCase
         {
             Client = client,
-            Title = "Р”РµР»Рѕ РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ",
+            Title = "Дело для обновления",
         };
 
         var incomeType = new IncomeType
         {
-            Name = "Р”РѕС…РѕРґ",
+            Name = "Доход",
             PaymentType = PaymentType.Income,
         };
 
         var paymentSource = new PaymentSource
         {
-            Name = "Р‘Р°РЅРє",
+            Name = "Банк",
         };
 
         var paymentStatus = new PaymentStatusEntity
         {
-            Name = "Р’ СЂР°Р±РѕС‚Рµ",
+            Name = "В работе",
         };
 
         var dealType = new DealType
         {
-            Name = "РЎРґРµР»РєР°",
+            Name = "Сделка",
         };
 
         var invoice = new Invoice
@@ -740,7 +740,7 @@ public class PaymentsControllerTests
         db.AddRange(client, clientCase, incomeType, paymentSource, paymentStatus, dealType, invoice);
         await db.SaveChangesAsync();
 
-        var invoiceDocument = CreatePayment(invoice.Date, 12_000m, "РЎС‡С‘С‚ INV-401");
+        var invoiceDocument = CreatePayment(invoice.Date, 12_000m, "Счёт INV-401");
         invoiceDocument.ClientId = client.Id;
         invoiceDocument.ClientCaseId = clientCase.Id;
         invoiceDocument.DocumentKind = DocumentKind.Invoice;
@@ -749,11 +749,11 @@ public class PaymentsControllerTests
         invoiceDocument.AccountDate = invoice.Date;
         db.Payments.Add(invoiceDocument);
 
-        var standalonePayment = CreatePayment(new DateTime(2026, 4, 5), 4_500m, "РЎС‚Р°СЂС‹Р№ РїР»Р°С‚С‘Р¶");
+        var standalonePayment = CreatePayment(new DateTime(2026, 4, 5), 4_500m, "Старый платёж");
         standalonePayment.ClientId = client.Id;
         standalonePayment.ClientCaseId = clientCase.Id;
         standalonePayment.IncomeTypeId = incomeType.Id;
-        standalonePayment.SystemNotes = "РСЃС…РѕРґРЅР°СЏ Р·Р°РјРµС‚РєР°";
+        standalonePayment.SystemNotes = "Исходная заметка";
         standalonePayment.RescheduleCount = 2;
         db.Payments.Add(standalonePayment);
         await db.SaveChangesAsync();
@@ -766,11 +766,11 @@ public class PaymentsControllerTests
             CounterpartyName = standalonePayment.CounterpartyName,
             Date = new DateTime(2026, 4, 10),
             PlannedDate = new DateTime(2026, 4, 12),
-            Description = "РћР±РЅРѕРІР»С‘РЅРЅС‹Р№ РїР»Р°С‚С‘Р¶",
+            Description = "Обновлённый платёж",
             DocumentKind = DocumentKind.Payment,
-            Notes = "РќРѕРІС‹Рµ Р·Р°РјРµС‚РєРё",
+            Notes = "Новые заметки",
             Status = PaymentStatus.Completed,
-            SystemNotes = "РСЃС…РѕРґРЅР°СЏ Р·Р°РјРµС‚РєР°\nР СѓС‡РЅРѕРµ РїСЂРёРјРµС‡Р°РЅРёРµ",
+            SystemNotes = "Исходная заметка\nРучное примечание",
             Type = PaymentType.Income,
             ClientId = client.Id,
             ClientCaseId = clientCase.Id,
@@ -800,8 +800,8 @@ public class PaymentsControllerTests
         Assert.Equal(paymentStatus.Id, updated.PaymentStatusId);
         Assert.Equal(dealType.Id, updated.DealTypeId);
         Assert.Equal(updateModel.PaidDate!.Value.Date, updated.LastPaymentDate);
-        Assert.Contains("Р СѓС‡РЅРѕРµ РїСЂРёРјРµС‡Р°РЅРёРµ", updated.SystemNotes);
-        Assert.Equal(1, updated.SystemNotes.Split('\n').Count(line => line.Contains("РСЃС…РѕРґРЅР°СЏ")));
+        Assert.Contains("Ручное примечание", updated.SystemNotes);
+        Assert.Equal(1, updated.SystemNotes.Split('\n').Count(line => line.Contains("Исходная")));
 
         var stored = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == standalonePayment.Id);
         Assert.Equal(invoice.Id, stored.InvoiceId);
@@ -889,13 +889,13 @@ public class PaymentsControllerTests
 
         var client = new Client
         {
-            Name = "РљР»РёРµРЅС‚ РґР»СЏ РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ",
+            Name = "Клиент для восстановления",
         };
 
         var clientCase = new ClientCase
         {
             Client = client,
-            Title = "Р”РµР»Рѕ РґР»СЏ repair",
+            Title = "Дело для repair",
         };
 
         var invoice = new Invoice
@@ -907,7 +907,7 @@ public class PaymentsControllerTests
         db.AddRange(client, clientCase, invoice);
         await db.SaveChangesAsync();
 
-        var primaryInvoiceDocument = CreatePayment(invoice.Date, 18_000m, "РћСЃРЅРѕРІРЅРѕР№ С‡РµРє");
+        var primaryInvoiceDocument = CreatePayment(invoice.Date, 18_000m, "Основной чек");
         primaryInvoiceDocument.ClientId = client.Id;
         primaryInvoiceDocument.ClientCaseId = clientCase.Id;
         primaryInvoiceDocument.DocumentKind = DocumentKind.Invoice;
@@ -916,7 +916,7 @@ public class PaymentsControllerTests
         primaryInvoiceDocument.AccountDate = invoice.Date;
         primaryInvoiceDocument.CreatedAt = new DateTime(2026, 4, 15, 8, 0, 0, DateTimeKind.Utc);
 
-        var duplicateInvoiceDocument = CreatePayment(invoice.Date, 18_000m, "Р”СѓР±Р»СЊ С‡РµРєР°");
+        var duplicateInvoiceDocument = CreatePayment(invoice.Date, 18_000m, "Дубль чека");
         duplicateInvoiceDocument.ClientId = client.Id;
         duplicateInvoiceDocument.ClientCaseId = clientCase.Id;
         duplicateInvoiceDocument.DocumentKind = DocumentKind.Invoice;
@@ -925,7 +925,7 @@ public class PaymentsControllerTests
         duplicateInvoiceDocument.AccountDate = invoice.Date;
         duplicateInvoiceDocument.CreatedAt = new DateTime(2026, 4, 15, 9, 0, 0, DateTimeKind.Utc);
 
-        var orphanPayment = CreatePayment(new DateTime(2026, 4, 16), 6_000m, "РћРїР»Р°С‚Р° Р±РµР· РїСЂРёРІСЏР·РєРё");
+        var orphanPayment = CreatePayment(new DateTime(2026, 4, 16), 6_000m, "Оплата без привязки");
         orphanPayment.ClientId = client.Id;
         orphanPayment.ClientCaseId = clientCase.Id;
         orphanPayment.DocumentKind = DocumentKind.Payment;
