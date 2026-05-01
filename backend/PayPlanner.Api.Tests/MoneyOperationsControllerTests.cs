@@ -1438,6 +1438,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Руководитель", content.Content);
         Assert.Contains("Главный бухгалтер", content.Content);
         Assert.Contains("подпись, расшифровка", content.Content);
+        AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
     }
 
     [Fact]
@@ -1475,6 +1476,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Руководитель", content.Content);
         Assert.Contains("Главный бухгалтер", content.Content);
         Assert.DoesNotContain("Квитанция к", content.Content);
+        AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
     }
 
     [Fact]
@@ -1681,6 +1683,7 @@ public class MoneyOperationsControllerTests
         Assert.Equal("text/html; charset=utf-8", content.ContentType);
         Assert.Contains("Кассовая книга", content.Content);
         Assert.Contains("25", content.Content);
+        AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
     }
 
     [Fact]
@@ -1715,6 +1718,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Журнал регистрации кассовых документов", content.Content);
         Assert.Contains("ПКО-2026-0001", content.Content);
         Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
+        AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
     }
 
     [Fact]
@@ -3164,6 +3168,16 @@ public class MoneyOperationsControllerTests
             Headers = new HeaderDictionary(),
             ContentType = "text/csv",
         };
+    }
+
+    private static void AssertPrintHtmlHasNoGeneratedTimestamp(string? html)
+    {
+        Assert.NotNull(html);
+        Assert.DoesNotContain("Дата печати", html);
+        Assert.DoesNotContain("Сформировано:", html);
+        Assert.DoesNotContain("Generated", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DateTime", html);
+        Assert.DoesNotContain("new Date", html, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class FakeInvoiceDocumentPdfService : IInvoiceDocumentPdfService
