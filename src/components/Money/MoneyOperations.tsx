@@ -2455,6 +2455,7 @@ export function MoneyOperations({
         recognitionDate: normalizedRecognitionDate,
         paidAmount: normalizedPaidAmount,
         incomeTypeId: selectedCategory?.id ?? payload.incomeTypeId ?? null,
+        categoryName: selectedCategory ? null : payload.categoryName,
         linkedInvoiceId: normalizedLinkedInvoiceId,
         matchStatus: normalizedLinkedInvoiceId ? 'Matched' : payload.matchStatus ?? 'None',
       };

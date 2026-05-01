@@ -659,7 +659,7 @@ describe('MoneyOperations integration', () => {
         accountName: 'Резервный счёт',
         counterpartyName: 'Новый поставщик',
         incomeTypeId: 2,
-        categoryName: 'Хозрасходы',
+        categoryName: null,
         purpose: 'Оплата по договору',
       }),
     );

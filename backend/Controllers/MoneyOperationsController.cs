@@ -884,7 +884,7 @@ public class MoneyOperationsController : ControllerBase
                 : "Для прихода нужно выбрать статью прихода.";
         }
 
-        model.CategoryName = incomeType.Name;
+        model.CategoryName = null;
         return null;
     }
 

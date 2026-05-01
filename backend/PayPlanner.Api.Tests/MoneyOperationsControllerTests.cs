@@ -151,7 +151,7 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
-    public async Task CreateMoneyOperation_LinksIncomeTypeAndUsesDictionaryName()
+    public async Task CreateMoneyOperation_LinksIncomeTypeWithoutDuplicatingCategoryName()
     {
         await using var db = await CreateContextAsync();
         var incomeType = new IncomeType
@@ -179,7 +179,7 @@ public class MoneyOperationsControllerTests
         var created = Assert.IsType<CreatedResult>(action);
         var operation = Assert.IsType<MoneyOperation>(created.Value);
         Assert.Equal(incomeType.Id, operation.IncomeTypeId);
-        Assert.Equal("Юридические услуги", operation.CategoryName);
+        Assert.Null(operation.CategoryName);
     }
 
     [Fact]
@@ -538,6 +538,68 @@ public class MoneyOperationsControllerTests
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
         var item = Assert.Single(page.Items);
+        Assert.Equal("Юридические услуги", item.CategoryName);
+        Assert.Equal(5_000m, page.Summary.Income);
+    }
+
+    [Fact]
+    public async Task MoneyJournal_FiltersByIncomeTypeName()
+    {
+        await using var db = await CreateContextAsync();
+        var incomeType = new IncomeType
+        {
+            Name = "Юридические услуги",
+            PaymentType = PaymentType.Income,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.IncomeTypes.Add(incomeType);
+        await db.SaveChangesAsync();
+
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "Клиент",
+                IncomeTypeId = incomeType.Id,
+                CategoryName = null,
+                Amount = 5_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 10),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "Другой клиент",
+                CategoryName = "Офисные расходы",
+                Amount = 2_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 11),
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.GetPaged(
+            from: null,
+            to: null,
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            categoryName: "юридические",
+            search: null);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+        var item = Assert.Single(page.Items);
+        Assert.Equal(incomeType.Id, item.IncomeTypeId);
         Assert.Equal("Юридические услуги", item.CategoryName);
         Assert.Equal(5_000m, page.Summary.Income);
     }
