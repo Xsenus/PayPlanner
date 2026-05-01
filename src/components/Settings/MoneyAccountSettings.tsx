@@ -170,22 +170,10 @@ export function MoneyAccountSettings() {
       setError(null);
       setMessage(null);
 
-      const saved = editingAccount
+      editingAccount
         ? await apiService.updateMoneyAccount(editingAccount.id, payload)
         : await apiService.createMoneyAccount(payload);
-
-      setAccounts((prev) => {
-        const next = editingAccount
-          ? prev.map((account) => (account.id === saved.id ? saved : account))
-          : [...prev, saved];
-        return next
-          .map((account) =>
-            saved.isDefault && account.source === saved.source && account.id !== saved.id
-              ? { ...account, isDefault: false }
-              : account,
-          )
-          .sort((left, right) => left.source.localeCompare(right.source) || left.name.localeCompare(right.name, 'ru'));
-      });
+      await loadAccounts();
 
       const successMessage = editingAccount ? 'Денежный счет обновлен.' : 'Денежный счет добавлен.';
       setMessage(successMessage);

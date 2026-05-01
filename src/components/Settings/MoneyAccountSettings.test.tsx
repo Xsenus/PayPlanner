@@ -54,6 +54,19 @@ describe('MoneyAccountSettings', () => {
 
   it('closes the editor after creating a money account', async () => {
     const user = userEvent.setup();
+    const createdAccount: MoneyAccount = {
+      id: 10,
+      name: 'Основная касса',
+      source: 'Cash',
+      currency: 'RUB',
+      bankName: null,
+      bankAccountNumber: null,
+      isDefault: true,
+      isActive: true,
+      createdAt: '2026-05-01T10:00:00Z',
+      updatedAt: null,
+    };
+    getMoneyAccountsMock.mockResolvedValueOnce([]).mockResolvedValueOnce([createdAccount]);
 
     render(<MoneyAccountSettings />);
 
@@ -77,6 +90,7 @@ describe('MoneyAccountSettings', () => {
     );
 
     await waitFor(() => expect(screen.queryByText('Добавить денежный счет')).toBeNull());
+    await waitFor(() => expect(getMoneyAccountsMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('Основная касса')).toBeTruthy();
     expect(toastSuccessMock).toHaveBeenCalledWith('Денежный счет добавлен.', 'Денежные счета');
   });
