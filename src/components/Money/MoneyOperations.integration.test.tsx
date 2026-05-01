@@ -1662,6 +1662,23 @@ describe('MoneyOperations integration', () => {
     expect(toastSuccessMock).toHaveBeenCalledWith('Кассовый ордер создан.', 'Касса');
   }, 15000);
 
+  it('does not create a cash order with zero amount', async () => {
+    const user = userEvent.setup();
+    operations = [];
+
+    render(<MoneyOperations source="Cash" />);
+
+    await screen.findByText('Кассовые ордера');
+    await user.click(screen.getByRole('button', { name: 'Создать ордер' }));
+    await screen.findByText('Приходный кассовый ордер Новый');
+
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    expect(await screen.findByText('Сумма кассового ордера должна быть больше нуля.')).toBeTruthy();
+    expect(createCashOrderMock).not.toHaveBeenCalled();
+    expect(updateCashOrderMock).not.toHaveBeenCalled();
+  }, 15000);
+
   it('posts a draft cash order from the modal', async () => {
     const user = userEvent.setup();
     operations = [];

@@ -545,6 +545,11 @@ function CashOrderModal({
 
   const handleSave = async () => {
     setError(null);
+    if (form.amount <= 0) {
+      setError('Сумма кассового ордера должна быть больше нуля.');
+      return;
+    }
+
     try {
       await onSave({
         ...form,
