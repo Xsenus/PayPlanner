@@ -1053,7 +1053,7 @@ public class MoneyOperationsController : ControllerBase
     {
         if (model.Amount < 0)
         {
-            return BadRequest("Amount must be non-negative.");
+            return BadRequest("Сумма денежной операции не может быть отрицательной.");
         }
 
         var moneyAccountError = await ApplyMoneyAccountAsync(model, ct);
@@ -1478,7 +1478,7 @@ public class MoneyOperationsController : ControllerBase
 
         if (model.Amount < 0)
         {
-            return BadRequest("Amount must be non-negative.");
+            return BadRequest("Сумма денежной операции не может быть отрицательной.");
         }
 
         var originalLinkedInvoiceId = entity.LinkedInvoiceId;

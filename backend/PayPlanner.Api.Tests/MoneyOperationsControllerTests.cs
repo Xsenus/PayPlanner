@@ -147,7 +147,7 @@ public class MoneyOperationsControllerTests
         });
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action);
-        Assert.Equal("Amount must be non-negative.", badRequest.Value);
+        Assert.Equal("Сумма денежной операции не может быть отрицательной.", badRequest.Value);
     }
 
     [Fact]
