@@ -2357,6 +2357,10 @@ export class ApiService {
     });
   }
 
+  async postCashOrder(id: number) {
+    return this.request<CashOrder>(`/cash-orders/${id}/post`, { method: 'POST' });
+  }
+
   async deleteCashOrder(id: number) {
     return this.request<void>(`/cash-orders/${id}`, { method: 'DELETE' });
   }

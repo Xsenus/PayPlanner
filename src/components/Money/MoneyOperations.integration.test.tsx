@@ -31,6 +31,7 @@ const {
   getMoneyOperationMock,
   getMoneyOperationsPagedMock,
   importBankStatementMock,
+  postCashOrderMock,
   reprocessBankStatementImportMock,
   rollbackBankStatementImportMock,
   toastErrorMock,
@@ -63,6 +64,7 @@ const {
   getMoneyOperationMock: vi.fn(),
   getMoneyOperationsPagedMock: vi.fn(),
   importBankStatementMock: vi.fn(),
+  postCashOrderMock: vi.fn(),
   reprocessBankStatementImportMock: vi.fn(),
   rollbackBankStatementImportMock: vi.fn(),
   toastErrorMock: vi.fn(),
@@ -133,6 +135,7 @@ vi.mock('../../services/api', () => ({
     getMoneyOperation: getMoneyOperationMock,
     getMoneyOperationsPaged: getMoneyOperationsPagedMock,
     importBankStatement: importBankStatementMock,
+    postCashOrder: postCashOrderMock,
     reprocessBankStatementImport: reprocessBankStatementImportMock,
     rollbackBankStatementImport: rollbackBankStatementImportMock,
     updateCashOrder: updateCashOrderMock,
@@ -262,6 +265,7 @@ describe('MoneyOperations integration', () => {
     getMoneyOperationMock.mockReset();
     getMoneyOperationsPagedMock.mockReset();
     importBankStatementMock.mockReset();
+    postCashOrderMock.mockReset();
     reprocessBankStatementImportMock.mockReset();
     rollbackBankStatementImportMock.mockReset();
     toastErrorMock.mockReset();
@@ -505,6 +509,11 @@ describe('MoneyOperations integration', () => {
       updatedAt: null,
     }));
     updateCashOrderMock.mockImplementation(async (_id: number, payload: unknown) => payload);
+    postCashOrderMock.mockImplementation(async (id: number) => ({
+      ...(await getCashOrderMock(id)),
+      status: 'Posted',
+      updatedAt: '2026-04-29T12:30:00Z',
+    }));
     createCashOrderMock.mockImplementation(async (payload: unknown) => ({
       ...(payload as object),
       id: 77,
@@ -1651,6 +1660,73 @@ describe('MoneyOperations integration', () => {
     );
     expect(updateCashOrderMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith('Кассовый ордер создан.', 'Касса');
+  }, 15000);
+
+  it('posts a draft cash order from the modal', async () => {
+    const user = userEvent.setup();
+    operations = [];
+    getCashOrderRegisterMock.mockResolvedValueOnce({
+      items: [
+        {
+          id: 12,
+          number: 'ПКО-2026-0005',
+          type: 'Incoming',
+          status: 'Draft',
+          date: '2026-04-29',
+          amount: 1500,
+          currency: 'RUB',
+          account: 'Основная касса',
+          payerName: 'Черновой клиент',
+          receiverName: 'Основная касса',
+          basis: 'Черновик приёма наличных',
+          createdAt: '2026-04-29T10:00:00Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+      incomingCount: 1,
+      outgoingCount: 0,
+      draftCount: 1,
+      postedCount: 0,
+      cancelledCount: 0,
+      incomingAmount: 0,
+      outgoingAmount: 0,
+    });
+    getCashOrderMock.mockResolvedValueOnce({
+      id: 12,
+      number: 'ПКО-2026-0005',
+      type: 'Incoming',
+      status: 'Draft',
+      date: '2026-04-29',
+      amount: 1500,
+      currency: 'RUB',
+      clientId: null,
+      clientName: null,
+      paymentId: null,
+      moneyOperationId: null,
+      invoiceId: null,
+      account: 'Основная касса',
+      payerName: 'Черновой клиент',
+      receiverName: 'Основная касса',
+      basis: 'Черновик приёма наличных',
+      appendix: null,
+      comment: null,
+      cancelledAt: null,
+      cancelledReason: null,
+      createdAt: '2026-04-29T10:00:00Z',
+      updatedAt: null,
+    });
+
+    render(<MoneyOperations source="Cash" />);
+
+    await screen.findByText('ПКО-2026-0005');
+    await user.click(screen.getByRole('button', { name: 'ПКО-2026-0005' }));
+    await screen.findByText('Черновик');
+    await user.click(screen.getByRole('button', { name: 'Провести' }));
+
+    await waitFor(() => expect(postCashOrderMock).toHaveBeenCalledWith(12));
+    expect(toastSuccessMock).toHaveBeenCalledWith('Кассовый ордер проведён.', 'Касса');
   }, 15000);
 
   it('filters the cash orders journal by cancelled status', async () => {

@@ -400,6 +400,35 @@ public class CashOrdersController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{id:int}/post")]
+    public async Task<IActionResult> Post(int id, CancellationToken ct)
+    {
+        var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (order is null)
+        {
+            return NotFound();
+        }
+
+        if (order.Status == CashOrderStatus.Cancelled)
+        {
+            return BadRequest("Отменённый кассовый ордер нельзя провести.");
+        }
+
+        if (order.Amount <= 0m)
+        {
+            return BadRequest("Сумма кассового ордера должна быть больше нуля.");
+        }
+
+        if (order.Status != CashOrderStatus.Posted)
+        {
+            order.Status = CashOrderStatus.Posted;
+            order.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return Ok(Map(order));
+    }
+
     [HttpPost("{id:int}/cancel")]
     public async Task<IActionResult> Cancel(int id, [FromBody] CashOrderCancelRequest? request, CancellationToken ct)
     {

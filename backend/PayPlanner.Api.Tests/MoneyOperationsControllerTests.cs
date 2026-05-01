@@ -1331,6 +1331,37 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task CashOrder_Post_ChangesDraftToPosted()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.Add(new CashOrder
+        {
+            Number = "ПКО-2026-0001",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Draft,
+            Date = new DateTime(2026, 4, 29),
+            Amount = 25_000m,
+            Currency = "RUB",
+            Account = "Основная касса",
+            PayerName = "Ахмедова Айтан Рафик Кызы",
+            Basis = "Оплата по счёту №33",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var order = await db.CashOrders.SingleAsync();
+
+        var action = await controller.Post(order.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var posted = Assert.IsType<CashOrderDto>(ok.Value);
+        Assert.Equal(CashOrderStatus.Posted, posted.Status);
+        Assert.Equal(CashOrderStatus.Posted, (await db.CashOrders.SingleAsync()).Status);
+        Assert.NotNull((await db.CashOrders.SingleAsync()).UpdatedAt);
+    }
+
+    [Fact]
     public async Task CashOrder_UpdateCancelAndCopy_Workflow()
     {
         await using var db = await CreateContextAsync();

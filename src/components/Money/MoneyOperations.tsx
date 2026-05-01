@@ -483,6 +483,7 @@ function CashOrderModal({
   isSaving,
   onClose,
   onSave,
+  onPostOrder,
   onCancelOrder,
   onDeleteOrder,
   onCopy,
@@ -494,6 +495,7 @@ function CashOrderModal({
   isSaving: boolean;
   onClose: () => void;
   onSave: (payload: CashOrder) => Promise<void>;
+  onPostOrder: (order: CashOrder) => Promise<void>;
   onCancelOrder: (order: CashOrder, reason?: string) => Promise<void>;
   onDeleteOrder: (order: CashOrder) => Promise<void>;
   onCopy: (order: CashOrder) => Promise<void>;
@@ -524,6 +526,7 @@ function CashOrderModal({
 
   const isCancelled = form.status === 'Cancelled';
   const isDraft = form.status === 'Draft';
+  const isPersisted = form.id > 0;
   const statusLabel = isCancelled ? 'Отменён' : isDraft ? 'Черновик' : 'Проведён';
   const statusClassName = isCancelled
     ? 'bg-rose-50 text-rose-700'
@@ -739,14 +742,16 @@ function CashOrderModal({
             <button
               type="button"
               onClick={() => onPrint(form.id)}
-              className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50">
+              disabled={!isPersisted}
+              className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
               <Printer className="h-4 w-4" />
               Печать
             </button>
             <button
               type="button"
               onClick={() => setHistoryOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              disabled={!isPersisted}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               <History className="h-4 w-4" />
               История
             </button>
@@ -760,7 +765,7 @@ function CashOrderModal({
             <button
               type="button"
               onClick={() => void onDownloadPdf(form.id)}
-              disabled={isSaving}
+              disabled={!isPersisted || isSaving}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               <Download className="h-4 w-4" />
               PDF
@@ -768,11 +773,21 @@ function CashOrderModal({
             <button
               type="button"
               onClick={() => void onCopy(form)}
-              disabled={isSaving}
+              disabled={!isPersisted || isSaving}
               className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
               <Copy className="h-4 w-4" />
               Копировать
             </button>
+            {isDraft && isPersisted && (
+              <button
+                type="button"
+                onClick={() => void onPostOrder(form)}
+                disabled={isSaving}
+                className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+                <CheckCircle2 className="h-4 w-4" />
+                Провести
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -783,7 +798,7 @@ function CashOrderModal({
 
                 void onCancelOrder(form, cancelReason.trim() || undefined);
               }}
-              disabled={isCancelled || isSaving}
+              disabled={!isPersisted || isCancelled || isSaving}
               className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50">
               <Ban className="h-4 w-4" />
               {confirmingCancel ? 'Подтвердить отмену' : 'Отменить'}
@@ -796,7 +811,7 @@ function CashOrderModal({
                 Назад
               </button>
             )}
-            {isDraft && (
+            {isDraft && isPersisted && (
               <button
                 type="button"
                 onClick={() => {
@@ -2217,6 +2232,23 @@ export function MoneyOperations({
       toast.success('Кассовый ордер отменён.', 'Касса');
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось отменить кассовый ордер.');
+      toast.error(message, 'Касса');
+      throw new Error(message);
+    } finally {
+      setCashOrderSaving(false);
+    }
+  };
+
+  const handlePostCashOrder = async (order: CashOrder) => {
+    setCashOrderSaving(true);
+    try {
+      const posted = await apiService.postCashOrder(order.id);
+      setSelectedCashOrder(posted);
+      setCashOrdersRefreshKey((value) => value + 1);
+      await reload();
+      toast.success('Кассовый ордер проведён.', 'Касса');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось провести кассовый ордер.');
       toast.error(message, 'Касса');
       throw new Error(message);
     } finally {
@@ -3658,6 +3690,7 @@ export function MoneyOperations({
           setSelectedCashOrder(null);
         }}
         onSave={handleSaveCashOrder}
+        onPostOrder={handlePostCashOrder}
         onCancelOrder={handleCancelCashOrder}
         onDeleteOrder={handleDeleteCashOrder}
         onCopy={handleCopyCashOrder}
