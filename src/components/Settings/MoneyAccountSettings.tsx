@@ -335,6 +335,7 @@ export function MoneyAccountSettings() {
                         type="button"
                         onClick={() => openEdit(account)}
                         className="rounded-lg border border-gray-200 p-2 text-blue-600 hover:bg-blue-50"
+                        aria-label={`Редактировать ${account.name}`}
                         title="Редактировать">
                         <Pencil className="h-4 w-4" />
                       </button>
@@ -342,6 +343,7 @@ export function MoneyAccountSettings() {
                         type="button"
                         onClick={() => void deleteAccount(account)}
                         className="rounded-lg border border-red-100 p-2 text-red-600 hover:bg-red-50"
+                        aria-label={`Удалить или отключить ${account.name}`}
                         title="Удалить или отключить">
                         <Trash2 className="h-4 w-4" />
                       </button>

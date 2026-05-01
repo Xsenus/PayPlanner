@@ -116,7 +116,7 @@ describe('MoneyAccountSettings', () => {
     render(<MoneyAccountSettings />);
 
     await screen.findByText('Резервная касса');
-    await user.click(screen.getByTitle('Удалить или отключить'));
+    await user.click(screen.getByRole('button', { name: 'Удалить или отключить Резервная касса' }));
 
     await waitFor(() => expect(deleteMoneyAccountMock).toHaveBeenCalledWith(20));
     await waitFor(() => expect(getMoneyAccountsMock).toHaveBeenCalledTimes(2));
