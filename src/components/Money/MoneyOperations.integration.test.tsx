@@ -1882,6 +1882,8 @@ describe('MoneyOperations integration', () => {
 
     render(<MoneyOperations source="Bank" />);
 
+    const importJournalButton = await screen.findByRole('button', { name: 'Открыть журнал импортов выписки' });
+    expect(importJournalButton.textContent).toContain('Журнал импортов');
     const switcher = await screen.findByRole<HTMLInputElement>('switch', { name: /Автоподгрузка/ });
     expect(switcher.checked).toBe(false);
 

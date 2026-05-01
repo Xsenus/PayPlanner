@@ -3039,7 +3039,7 @@ export function MoneyOperations({
                 aria-label={showBankImportsJournal ? 'Скрыть журнал импортов выписки' : 'Открыть журнал импортов выписки'}
                 onClick={() => setShowBankImportsJournal((value) => !value)}
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
-                Ещё
+                Журнал импортов
                 <ChevronDown className={`h-4 w-4 transition-transform ${showBankImportsJournal ? 'rotate-180' : ''}`} />
               </button>
               <div className="text-xs text-slate-500">CSV, TSV, TXT, выгрузка 1С</div>
