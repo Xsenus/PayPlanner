@@ -1455,7 +1455,13 @@ function MoneyOperationModal({
             <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
             <p className="text-sm text-slate-500">Заполните основные параметры операции.</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600"
+            aria-label="Закрыть форму денежной операции">
+            ✕
+          </button>
         </div>
 
         <div className="flex-1 space-y-6 overflow-y-auto p-6">
@@ -3233,7 +3239,9 @@ export function MoneyOperations({
             <Plus className="h-4 w-4" />
             Добавить
           </button>
-          <button className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+          <button
+            type="button"
+            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
             Ещё
             <ChevronDown className="h-4 w-4" />
           </button>
@@ -3243,12 +3251,13 @@ export function MoneyOperations({
       <div className="mt-6 rounded-xl border border-slate-200 bg-white">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-4 py-3">
           <div className="flex items-center gap-2">
-            <button className="rounded-lg bg-blue-600 p-2 text-white">
+            <button type="button" className="rounded-lg bg-blue-600 p-2 text-white" aria-label="Журнал денег">
               <WalletCards className="h-4 w-4" />
             </button>
             <button
               type="button"
               onClick={() => setSettingsOpen((prev) => !prev)}
+              aria-label={settingsOpen ? 'Скрыть настройки таблицы' : 'Показать настройки таблицы'}
               className={`rounded-lg border p-2 transition-colors ${
                 settingsOpen
                   ? 'border-slate-900 bg-slate-900 text-white'
@@ -3259,6 +3268,7 @@ export function MoneyOperations({
             <button
               type="button"
               onClick={() => setShowAdvancedSearch((prev) => !prev)}
+              aria-label={showAdvancedSearch ? 'Скрыть расширенный поиск' : 'Показать расширенный поиск'}
               className={`rounded-lg border p-2 transition-colors ${
                 showAdvancedSearch
                   ? 'border-slate-900 bg-slate-900 text-white'

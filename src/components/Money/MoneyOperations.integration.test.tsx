@@ -616,6 +616,23 @@ describe('MoneyOperations integration', () => {
     });
   });
 
+  it('labels icon-only journal controls', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByRole('button', { name: 'Журнал денег' })).toBeTruthy();
+
+    const settingsButton = screen.getByRole('button', { name: 'Показать настройки таблицы' });
+    const searchButton = screen.getByRole('button', { name: 'Показать расширенный поиск' });
+
+    await user.click(settingsButton);
+    expect(screen.getByRole('button', { name: 'Скрыть настройки таблицы' })).toBeTruthy();
+
+    await user.click(searchButton);
+    expect(screen.getByRole('button', { name: 'Скрыть расширенный поиск' })).toBeTruthy();
+  }, 15000);
+
   it('shows balance reconciliation for the journal and selected account', async () => {
     operations = [
       createOperation({
