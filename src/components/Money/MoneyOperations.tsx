@@ -1761,12 +1761,14 @@ function MoneyOperationModal({
         <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4">
           {error ? <div className="text-sm text-red-500">{error}</div> : <span />}
           <button
+            type="button"
             onClick={handleSubmit}
             disabled={isSaving}
             className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
             {isSaving ? 'Сохранение...' : 'Сохранить'}
           </button>
           <button
+            type="button"
             onClick={onClose}
             className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:border-slate-300">
             Отменить
@@ -2687,6 +2689,7 @@ export function MoneyOperations({
         <div className="space-y-4">
           <div className="flex items-center gap-6 border-b border-slate-200">
             <button
+              type="button"
               onClick={() => setTotalTab('total')}
               className={[
                 'px-1 py-3 text-sm font-medium',
@@ -2695,6 +2698,7 @@ export function MoneyOperations({
               Итого
             </button>
             <button
+              type="button"
               onClick={() => setTotalTab('cashflow')}
               className={[
                 'px-1 py-3 text-sm font-medium',
@@ -2729,6 +2733,7 @@ export function MoneyOperations({
                 />
               </label>
               <button
+                type="button"
                 onClick={handleCurrentYear}
                 className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 <Calendar className="h-4 w-4" />
@@ -2902,6 +2907,7 @@ export function MoneyOperations({
                             <div className="inline-flex items-center gap-2">
                               {item.matchStatus === 'ClarificationRequired' && (
                                 <button
+                                  type="button"
                                   onClick={() => handleEdit(item)}
                                   disabled={Boolean(item.isReadonly) || item.id <= 0}
                                   className="rounded-md border border-amber-200 p-2 text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
@@ -2911,6 +2917,7 @@ export function MoneyOperations({
                                 </button>
                               )}
                               <button
+                                type="button"
                                 onClick={() => handleEdit(item)}
                                 disabled={Boolean(item.isReadonly) || item.id <= 0}
                                 className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
@@ -3225,12 +3232,14 @@ export function MoneyOperations({
             {renderBalanceCheckBadge(summary)}
           </div>
           <button
+            type="button"
             onClick={handleCurrentYear}
             className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
             <Calendar className="h-4 w-4" />
             Текущий год
           </button>
           <button
+            type="button"
             onClick={() => {
               setEditingOperation(null);
               setModalOpen(true);
@@ -3281,6 +3290,7 @@ export function MoneyOperations({
           <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
             <div className="relative">
               <button
+                type="button"
                 onClick={() => setShowFilters((prev) => !prev)}
                 className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">
                 <Filter className="h-4 w-4" />
@@ -3392,12 +3402,13 @@ export function MoneyOperations({
               className="min-w-[220px] rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 focus:border-blue-500 focus:outline-none"
             />
             <button
+              type="button"
               onClick={() => setShowAdvancedSearch((prev) => !prev)}
               className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50"
               title="Расширенный поиск">
               <SlidersHorizontal className="h-4 w-4" />
             </button>
-            <button className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            <button type="button" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
               Найти
             </button>
           </div>
@@ -3618,6 +3629,7 @@ export function MoneyOperations({
                         })()}
                         {item.canCreateCashOrder && (
                           <button
+                            type="button"
                             onClick={() => handleCreateCashOrder(item)}
                             className="rounded-md border border-amber-200 p-2 text-amber-700 hover:bg-amber-50"
                             aria-label="Создать ПКО"
@@ -3627,6 +3639,7 @@ export function MoneyOperations({
                         )}
                         {item.cashOrderId && (
                           <button
+                            type="button"
                             onClick={() => void handleOpenCashOrder(item.cashOrderId!)}
                             className="rounded-md border border-emerald-200 p-2 text-emerald-700 hover:bg-emerald-50"
                             aria-label="Открыть карточку кассового ордера"
@@ -3636,6 +3649,7 @@ export function MoneyOperations({
                         )}
                         {item.matchStatus === 'ClarificationRequired' && (
                           <button
+                            type="button"
                             onClick={() => handleEdit(item)}
                             disabled={Boolean(item.isReadonly) || item.id <= 0}
                             className="rounded-md border border-amber-200 p-2 text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
@@ -3645,6 +3659,7 @@ export function MoneyOperations({
                           </button>
                         )}
                         <button
+                          type="button"
                           onClick={() => handleEdit(item)}
                           disabled={Boolean(item.isReadonly) || item.id <= 0}
                           className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
@@ -3652,6 +3667,7 @@ export function MoneyOperations({
                           <Pencil className="h-4 w-4" />
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleDelete(item)}
                           disabled={Boolean(item.isReadonly) || item.id <= 0 || isAppliedToInvoice(item)}
                           className="rounded-md border border-red-200 p-2 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
