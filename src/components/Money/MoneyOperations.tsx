@@ -110,6 +110,7 @@ const MONEY_ACCOUNTING_FILTER_LABELS: Record<MoneyOperationAccountingType, strin
 };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const BANK_STATEMENT_AUTO_IMPORT_STORAGE_KEY = 'pp.bank_statement_auto_import_enabled';
 
 const MONEY_OPERATION_COLUMNS = [
   { key: 'source', label: 'Источник', defaultVisible: false, defaultWidth: 120 },
@@ -205,6 +206,30 @@ function buildUniqueOptions(values: Array<string | null | undefined>) {
         .filter((value): value is string => Boolean(value)),
     ),
   ).sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+function readBankStatementAutoImportSetting() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(BANK_STATEMENT_AUTO_IMPORT_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function saveBankStatementAutoImportSetting(enabled: boolean) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(BANK_STATEMENT_AUTO_IMPORT_STORAGE_KEY, enabled ? 'true' : 'false');
+  } catch {
+    // Настройка не критична: если браузер запретил localStorage, оставляем состояние только на экране.
+  }
 }
 
 type MoneyOperationCategoryOption = Pick<IncomeType, 'id' | 'name' | 'paymentType'>;
@@ -1740,6 +1765,9 @@ export function MoneyOperations({
   const [selectedCashOrder, setSelectedCashOrder] = useState<CashOrder | null>(null);
   const [cashOrderSaving, setCashOrderSaving] = useState(false);
   const [bankStatementImporting, setBankStatementImporting] = useState(false);
+  const [bankStatementAutoImportEnabled, setBankStatementAutoImportEnabled] = useState(
+    readBankStatementAutoImportSetting,
+  );
   const [bankStatementImportResult, setBankStatementImportResult] = useState<{
     batchId?: number | null;
     rowsRead: number;
@@ -1870,6 +1898,10 @@ export function MoneyOperations({
     const account = moneyAccounts.find((item) => String(item.id) === value);
     setMoneyAccountId(account?.id ?? '');
     setAccountName(account?.name ?? value);
+  };
+  const handleBankStatementAutoImportChange = (enabled: boolean) => {
+    setBankStatementAutoImportEnabled(enabled);
+    saveBankStatementAutoImportSetting(enabled);
   };
   const moneyAccountOptions = useMemo(
     () =>
@@ -2860,6 +2892,24 @@ export function MoneyOperations({
                 <UploadCloud className="h-4 w-4" />
                 {bankStatementImporting ? 'Загружаем...' : 'Загрузить выписку'}
               </button>
+              <label
+                className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                title="Подготовленный переключатель для будущей автоматической загрузки банковской выписки">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={bankStatementAutoImportEnabled}
+                  onChange={(event) => handleBankStatementAutoImportChange(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="font-medium">Автоподгрузка</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                    bankStatementAutoImportEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                  }`}>
+                  {bankStatementAutoImportEnabled ? 'Вкл' : 'Выкл'}
+                </span>
+              </label>
               <button
                 type="button"
                 aria-label={showBankImportsJournal ? 'Скрыть журнал импортов выписки' : 'Открыть журнал импортов выписки'}

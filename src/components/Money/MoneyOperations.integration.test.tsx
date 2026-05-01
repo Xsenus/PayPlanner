@@ -264,6 +264,7 @@ describe('MoneyOperations integration', () => {
     toastSuccessMock.mockReset();
     updateCashOrderMock.mockReset();
     updateMoneyOperationMock.mockReset();
+    window.localStorage.clear();
     if (!URL.createObjectURL) {
       Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(), configurable: true });
     }
@@ -1624,6 +1625,20 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Редактировать операцию по банку');
     expect(toastSuccessMock).toHaveBeenCalledWith('Создано операций: 2. Пропущено: 0.', 'Выписка банка');
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(2));
+  }, 15000);
+
+  it('keeps the bank statement auto import switch setting', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Bank" />);
+
+    const switcher = await screen.findByRole<HTMLInputElement>('switch', { name: /Автоподгрузка/ });
+    expect(switcher.checked).toBe(false);
+
+    await user.click(switcher);
+
+    expect(switcher.checked).toBe(true);
+    expect(window.localStorage.getItem('pp.bank_statement_auto_import_enabled')).toBe('true');
   }, 15000);
 
   it('shows bank import journal details and rolls back an import batch', async () => {
