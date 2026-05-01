@@ -2274,6 +2274,13 @@ export class ApiService {
     return this.request<CashOrder>(`/cash-orders/from-money-operation/${operationId}`, { method: 'POST' });
   }
 
+  async createCashOrder(payload: CashOrder) {
+    return this.request<CashOrder>('/cash-orders', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getCashOrdersPaged(params?: {
     from?: string;
     to?: string;

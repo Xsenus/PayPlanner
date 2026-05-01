@@ -1293,6 +1293,44 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task CashOrder_Create_GeneratesNumberAndNormalizesDraft()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = new CashOrdersController(db);
+
+        var action = await controller.Create(new CashOrder
+        {
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Draft,
+            Date = new DateTime(2026, 4, 29),
+            Amount = 25_000m,
+            Currency = "",
+            Account = "  Основная касса  ",
+            PayerName = "  Ахмедова Айтан Рафик Кызы  ",
+            ReceiverName = "  Касса  ",
+            Basis = "  Оплата по счёту №33  ",
+            Appendix = "",
+            Comment = "  ручной ордер  ",
+        }, CancellationToken.None);
+
+        var createdResult = Assert.IsType<CreatedResult>(action);
+        var created = Assert.IsType<CashOrderDto>(createdResult.Value);
+        Assert.StartsWith("ПКО-2026-", created.Number);
+        Assert.Equal(CashOrderStatus.Draft, created.Status);
+        Assert.Equal("RUB", created.Currency);
+        Assert.Equal("Основная касса", created.Account);
+        Assert.Equal("Ахмедова Айтан Рафик Кызы", created.PayerName);
+        Assert.Equal("Касса", created.ReceiverName);
+        Assert.Equal("Оплата по счёту №33", created.Basis);
+        Assert.Null(created.Appendix);
+        Assert.Equal("ручной ордер", created.Comment);
+
+        var saved = await db.CashOrders.SingleAsync();
+        Assert.Equal(created.Id, saved.Id);
+        Assert.Equal(CashOrderStatus.Draft, saved.Status);
+    }
+
+    [Fact]
     public async Task CashOrder_UpdateCancelAndCopy_Workflow()
     {
         await using var db = await CreateContextAsync();

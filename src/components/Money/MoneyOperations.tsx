@@ -891,6 +891,7 @@ function CashOrdersPanel({
   search,
   accountName,
   refreshKey,
+  onCreate,
   onOpen,
   onPrint,
 }: {
@@ -899,6 +900,7 @@ function CashOrdersPanel({
   search: string;
   accountName: string;
   refreshKey: number;
+  onCreate: () => void;
   onOpen: (cashOrderId: number) => void;
   onPrint: (cashOrderId: number) => void;
 }) {
@@ -1001,6 +1003,13 @@ function CashOrdersPanel({
           <p className="text-sm text-slate-500">ПКО и РКО по выбранному периоду кассы</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">
+            <Plus className="h-4 w-4" />
+            Создать ордер
+          </button>
           <button
             type="button"
             onClick={() => void handlePrintCashBook()}
@@ -2142,14 +2151,48 @@ export function MoneyOperations({
     }
   };
 
+  const handleCreateStandaloneCashOrder = () => {
+    const cashAccountName = accountName || selectedMoneyAccount?.name || '';
+    const draft: CashOrder = {
+      id: 0,
+      number: 'Новый',
+      type: 'Incoming',
+      status: 'Draft',
+      date: todayYMD(),
+      amount: 0,
+      currency: selectedMoneyAccount?.currency || 'RUB',
+      clientId: null,
+      clientName: null,
+      paymentId: null,
+      moneyOperationId: null,
+      invoiceId: null,
+      account: cashAccountName,
+      payerName: '',
+      receiverName: cashAccountName,
+      basis: '',
+      appendix: '',
+      comment: '',
+      cancelledAt: null,
+      cancelledReason: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: null,
+    };
+
+    setSelectedCashOrder(draft);
+    setCashOrderModalOpen(true);
+  };
+
   const handleSaveCashOrder = async (payload: CashOrder) => {
     setCashOrderSaving(true);
     try {
-      const updated = await apiService.updateCashOrder(payload.id, payload);
+      const isNewOrder = payload.id <= 0;
+      const updated = isNewOrder
+        ? await apiService.createCashOrder(payload)
+        : await apiService.updateCashOrder(payload.id, payload);
       setSelectedCashOrder(updated);
       setCashOrdersRefreshKey((value) => value + 1);
       await reload();
-      toast.success('Кассовый ордер сохранён.', 'Касса');
+      toast.success(isNewOrder ? 'Кассовый ордер создан.' : 'Кассовый ордер сохранён.', 'Касса');
     } catch (error) {
       const message = extractDisplayErrorMessage(error, 'Не удалось сохранить кассовый ордер.');
       toast.error(message, 'Касса');
@@ -3595,6 +3638,7 @@ export function MoneyOperations({
           search={debouncedSearch}
           accountName={accountName}
           refreshKey={cashOrdersRefreshKey}
+          onCreate={handleCreateStandaloneCashOrder}
           onOpen={(cashOrderId) => void handleOpenCashOrder(cashOrderId)}
           onPrint={handlePrintCashOrder}
         />

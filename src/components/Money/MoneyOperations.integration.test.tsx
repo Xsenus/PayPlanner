@@ -6,6 +6,7 @@ import { MoneyOperations } from './MoneyOperations';
 import type { MoneyAccount, MoneyOperation, MoneyOperationsSummary } from '../../types';
 
 const {
+  createCashOrderMock,
   createCashOrderFromPaymentMock,
   createCashOrderFromMoneyOperationMock,
   cancelCashOrderMock,
@@ -37,6 +38,7 @@ const {
   updateCashOrderMock,
   updateMoneyOperationMock,
 } = vi.hoisted(() => ({
+  createCashOrderMock: vi.fn(),
   createCashOrderFromPaymentMock: vi.fn(),
   createCashOrderFromMoneyOperationMock: vi.fn(),
   cancelCashOrderMock: vi.fn(),
@@ -106,6 +108,7 @@ vi.mock('../../hooks/usePersistedTableSettings', () => ({
 
 vi.mock('../../services/api', () => ({
   apiService: {
+    createCashOrder: createCashOrderMock,
     createCashOrderFromPayment: createCashOrderFromPaymentMock,
     createCashOrderFromMoneyOperation: createCashOrderFromMoneyOperationMock,
     cancelCashOrder: cancelCashOrderMock,
@@ -234,6 +237,7 @@ describe('MoneyOperations integration', () => {
     operations = [createOperation()];
     nextId = 10;
 
+    createCashOrderMock.mockReset();
     createCashOrderFromPaymentMock.mockReset();
     createCashOrderFromMoneyOperationMock.mockReset();
     cancelCashOrderMock.mockReset();
@@ -500,6 +504,13 @@ describe('MoneyOperations integration', () => {
       updatedAt: null,
     }));
     updateCashOrderMock.mockImplementation(async (_id: number, payload: unknown) => payload);
+    createCashOrderMock.mockImplementation(async (payload: unknown) => ({
+      ...(payload as object),
+      id: 77,
+      number: 'ПКО-2026-0100',
+      createdAt: '2026-04-29T12:00:00Z',
+      updatedAt: null,
+    }));
     cancelCashOrderMock.mockImplementation(async (_id: number, reason?: string) => ({
       ...(await getCashOrderMock(_id)),
       status: 'Cancelled',
@@ -1600,6 +1611,42 @@ describe('MoneyOperations integration', () => {
         }),
       ),
     );
+  }, 15000);
+
+  it('creates a standalone cash order from the cash journal', async () => {
+    const user = userEvent.setup();
+    operations = [];
+
+    render(<MoneyOperations source="Cash" />);
+
+    await screen.findByText('Кассовые ордера');
+    await user.click(screen.getByRole('button', { name: 'Создать ордер' }));
+    await screen.findByText('Приходный кассовый ордер Новый');
+
+    await user.clear(screen.getByLabelText('Сумма'));
+    await user.type(screen.getByLabelText('Сумма'), '25000');
+    await user.clear(screen.getByLabelText('Счёт / касса'));
+    await user.type(screen.getByLabelText('Счёт / касса'), 'Основная касса');
+    await user.type(screen.getByLabelText('Плательщик'), 'Ахмедова Айтан Рафик Кызы');
+    await user.type(screen.getByLabelText('Основание'), 'Оплата по счёту №33');
+
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() =>
+      expect(createCashOrderMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 0,
+          type: 'Incoming',
+          status: 'Draft',
+          amount: 25000,
+          account: 'Основная касса',
+          payerName: 'Ахмедова Айтан Рафик Кызы',
+          basis: 'Оплата по счёту №33',
+        }),
+      ),
+    );
+    expect(updateCashOrderMock).not.toHaveBeenCalled();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Кассовый ордер создан.', 'Касса');
   }, 15000);
 
   it('filters the cash orders journal by cancelled status', async () => {
