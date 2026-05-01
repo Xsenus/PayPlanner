@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type {
   MoneyOperation,
@@ -38,6 +38,7 @@ export function useMoneyOperations(filters: MoneyOperationsFilters) {
   const [summary, setSummary] = useState<MoneyOperationsSummary>(EMPTY_SUMMARY);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   const stableFilters = useMemo(
     () => ({
@@ -69,28 +70,44 @@ export function useMoneyOperations(filters: MoneyOperationsFilters) {
   );
 
   const load = useCallback(async () => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setLoading(true);
     setError(null);
 
     try {
       const data = await apiService.getMoneyOperationsPaged(stableFilters);
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
       setItems(data.items);
       setTotal(data.total);
       setSummary(data.summary ?? EMPTY_SUMMARY);
     } catch (err) {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
       const message = err instanceof Error ? err.message : 'Не удалось загрузить операции.';
       setError(message);
       setItems([]);
       setTotal(0);
       setSummary(EMPTY_SUMMARY);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [stableFilters]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => () => {
+    requestIdRef.current += 1;
+  }, []);
 
   return {
     items,
