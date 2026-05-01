@@ -3303,6 +3303,94 @@ public class MoneyOperationsControllerTests
         Assert.True(await db.MoneyAccounts.Where(item => item.Id == second.Id).Select(item => item.IsDefault).SingleAsync());
     }
 
+    [Fact]
+    public async Task MoneyAccountsController_UpdateInactiveDefault_PromotesFallbackDefault()
+    {
+        await using var db = await CreateContextAsync();
+        var primary = new MoneyAccount
+        {
+            Name = "Основной банк",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsDefault = true,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var reserve = new MoneyAccount
+        {
+            Name = "Резервный банк",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsDefault = false,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyAccounts.AddRange(primary, reserve);
+        await db.SaveChangesAsync();
+
+        var controller = new MoneyAccountsController(db);
+        var action = await controller.Update(primary.Id, new MoneyAccount
+        {
+            Name = primary.Name,
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsDefault = true,
+            IsActive = false,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(action.Result);
+        Assert.False(await db.MoneyAccounts.Where(item => item.Id == primary.Id).Select(item => item.IsDefault).SingleAsync());
+        Assert.False(await db.MoneyAccounts.Where(item => item.Id == primary.Id).Select(item => item.IsActive).SingleAsync());
+        Assert.True(await db.MoneyAccounts.Where(item => item.Id == reserve.Id).Select(item => item.IsDefault).SingleAsync());
+    }
+
+    [Fact]
+    public async Task MoneyAccountsController_DeleteUsedDefault_PromotesFallbackDefault()
+    {
+        await using var db = await CreateContextAsync();
+        var primary = new MoneyAccount
+        {
+            Name = "Основная касса",
+            Source = MoneyOperationSource.Cash,
+            Currency = "RUB",
+            IsDefault = true,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var reserve = new MoneyAccount
+        {
+            Name = "Резервная касса",
+            Source = MoneyOperationSource.Cash,
+            Currency = "RUB",
+            IsDefault = false,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyAccounts.AddRange(primary, reserve);
+        await db.SaveChangesAsync();
+        db.MoneyOperations.Add(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            MoneyAccountId = primary.Id,
+            AccountName = primary.Name,
+            Amount = 1_000m,
+            Currency = "RUB",
+            Date = new DateTime(2026, 5, 1),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new MoneyAccountsController(db);
+        var action = await controller.Delete(primary.Id, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(action);
+        Assert.False(await db.MoneyAccounts.Where(item => item.Id == primary.Id).Select(item => item.IsDefault).SingleAsync());
+        Assert.False(await db.MoneyAccounts.Where(item => item.Id == primary.Id).Select(item => item.IsActive).SingleAsync());
+        Assert.True(await db.MoneyAccounts.Where(item => item.Id == reserve.Id).Select(item => item.IsDefault).SingleAsync());
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

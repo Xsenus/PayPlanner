@@ -70,8 +70,12 @@ public class MoneyAccountsController : ControllerBase
             return Conflict("Денежный счёт с таким названием уже существует для выбранного источника.");
         }
 
-        var hasAccountsForSource = await _db.MoneyAccounts.AnyAsync(account => account.Source == normalized.Source, ct);
+        var hasAccountsForSource = await _db.MoneyAccounts.AnyAsync(account => account.Source == normalized.Source && account.IsActive, ct);
         normalized.IsDefault = normalized.IsDefault || !hasAccountsForSource;
+        if (!normalized.IsActive)
+        {
+            normalized.IsDefault = false;
+        }
         normalized.CreatedAt = DateTime.UtcNow;
 
         _db.MoneyAccounts.Add(normalized);
@@ -107,16 +111,22 @@ public class MoneyAccountsController : ControllerBase
             return Conflict("Денежный счёт с таким названием уже существует для выбранного источника.");
         }
 
+        var previousSource = entity.Source;
+
         entity.Name = normalized.Name;
         entity.Source = normalized.Source;
         entity.Currency = normalized.Currency;
         entity.BankName = normalized.BankName;
         entity.BankAccountNumber = normalized.BankAccountNumber;
-        entity.IsDefault = normalized.IsDefault;
+        entity.IsDefault = normalized.IsActive && normalized.IsDefault;
         entity.IsActive = normalized.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;
 
         await EnsureSingleDefaultAsync(entity, ct);
+        await _db.SaveChangesAsync(ct);
+
+        await EnsureDefaultExistsAsync(previousSource, ct);
+        await EnsureDefaultExistsAsync(entity.Source, ct);
         await _db.SaveChangesAsync(ct);
 
         return Ok(entity);
@@ -132,6 +142,7 @@ public class MoneyAccountsController : ControllerBase
             return NotFound();
         }
 
+        var source = entity.Source;
         var isUsed = await _db.MoneyOperations.AnyAsync(operation => operation.MoneyAccountId == id, ct);
         if (isUsed)
         {
@@ -144,6 +155,9 @@ public class MoneyAccountsController : ControllerBase
             _db.MoneyAccounts.Remove(entity);
         }
 
+        await _db.SaveChangesAsync(ct);
+
+        await EnsureDefaultExistsAsync(source, ct);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -163,6 +177,28 @@ public class MoneyAccountsController : ControllerBase
             item.IsDefault = false;
             item.UpdatedAt = DateTime.UtcNow;
         }
+    }
+
+    private async Task EnsureDefaultExistsAsync(MoneyOperationSource source, CancellationToken ct)
+    {
+        var hasActiveDefault = await _db.MoneyAccounts
+            .AnyAsync(item => item.Source == source && item.IsActive && item.IsDefault, ct);
+        if (hasActiveDefault)
+        {
+            return;
+        }
+
+        var fallback = await _db.MoneyAccounts
+            .Where(item => item.Source == source && item.IsActive)
+            .OrderBy(item => item.Name)
+            .FirstOrDefaultAsync(ct);
+        if (fallback is null)
+        {
+            return;
+        }
+
+        fallback.IsDefault = true;
+        fallback.UpdatedAt = DateTime.UtcNow;
     }
 
     private static MoneyAccount Normalize(MoneyAccount model)
