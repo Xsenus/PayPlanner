@@ -80,4 +80,33 @@ describe('MoneyAccountSettings', () => {
     expect(await screen.findByText('Основная касса')).toBeTruthy();
     expect(toastSuccessMock).toHaveBeenCalledWith('Денежный счет добавлен.', 'Денежные счета');
   });
+
+  it('reloads money accounts after deleting an account', async () => {
+    const user = userEvent.setup();
+    const account: MoneyAccount = {
+      id: 20,
+      name: 'Резервная касса',
+      source: 'Cash',
+      currency: 'RUB',
+      bankName: null,
+      bankAccountNumber: null,
+      isDefault: false,
+      isActive: true,
+      createdAt: '2026-05-01T10:00:00Z',
+      updatedAt: null,
+    };
+
+    getMoneyAccountsMock.mockResolvedValueOnce([account]).mockResolvedValueOnce([]);
+    deleteMoneyAccountMock.mockResolvedValue(undefined);
+
+    render(<MoneyAccountSettings />);
+
+    await screen.findByText('Резервная касса');
+    await user.click(screen.getByTitle('Удалить или отключить'));
+
+    await waitFor(() => expect(deleteMoneyAccountMock).toHaveBeenCalledWith(20));
+    await waitFor(() => expect(getMoneyAccountsMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Денежные счета не найдены.')).toBeTruthy();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Денежный счет удален или отключен.', 'Денежные счета');
+  });
 });

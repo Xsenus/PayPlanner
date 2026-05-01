@@ -212,13 +212,7 @@ export function MoneyAccountSettings() {
 
     try {
       await apiService.deleteMoneyAccount(account.id);
-      setAccounts((prev) =>
-        prev.map((item) =>
-          item.id === account.id
-            ? { ...item, isActive: false, isDefault: false, updatedAt: new Date().toISOString() }
-            : item,
-        ),
-      );
+      await loadAccounts();
       setMessage('Денежный счет удален или отключен.');
       toast.success('Денежный счет удален или отключен.', 'Денежные счета');
     } catch (deleteError) {
