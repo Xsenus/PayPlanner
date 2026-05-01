@@ -1870,7 +1870,7 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Импорт выписки: прочитано 2, создано 2, пропущено 0');
     await screen.findByText('Ахмедова Айтан Рафик Кызы');
     await screen.findByText('101');
-    await userEvent.click(screen.getByRole('button', { name: 'Открыть' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Открыть операцию импорта 301' }));
     await waitFor(() => expect(getMoneyOperationMock).toHaveBeenCalledWith(301));
     await screen.findByText('Редактировать операцию по банку');
     expect(toastSuccessMock).toHaveBeenCalledWith('Создано операций: 2. Пропущено: 0.', 'Выписка банка');
@@ -1921,14 +1921,14 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Журнал импортов выписки');
     await screen.findByText('statement.csv');
 
-    await user.click(screen.getByRole('button', { name: 'Открыть' }));
+    await user.click(screen.getByRole('button', { name: 'Открыть импорт выписки statement.csv' }));
 
     await waitFor(() => expect(getBankStatementImportMock).toHaveBeenCalledWith(1));
     await screen.findByText('Импорт банковской выписки');
     await screen.findByText('Ахмедова Айтан Рафик Кызы');
     await screen.findByText('Оплата по счету №33');
 
-    await user.click(screen.getAllByRole('button', { name: 'Откатить' })[1]);
+    await user.click(screen.getByRole('button', { name: 'Откатить импорт выписки statement.csv из карточки' }));
 
     await waitFor(() => expect(rollbackBankStatementImportMock).toHaveBeenCalledWith(1));
     expect(toastSuccessMock).toHaveBeenCalledWith('Откат импорта: удалено операций 1, пропущено строк 0.', 'Выписка банка');
@@ -1994,9 +1994,9 @@ describe('MoneyOperations integration', () => {
 
     await user.click(screen.getByRole('button', { name: 'Открыть журнал импортов выписки' }));
     await screen.findByText('statement.csv');
-    await user.click(screen.getByRole('button', { name: 'Открыть' }));
+    await user.click(screen.getByRole('button', { name: 'Открыть импорт выписки statement.csv' }));
     await waitFor(() => expect(screen.getAllByText('Откат выполнен').length).toBeGreaterThan(0));
-    await user.click(screen.getByRole('button', { name: 'Повторить' }));
+    await user.click(screen.getByRole('button', { name: 'Повторить обработку импорта выписки statement.csv' }));
 
     await waitFor(() => expect(reprocessBankStatementImportMock).toHaveBeenCalledWith(1));
     expect(toastSuccessMock).toHaveBeenCalledWith('Повторная обработка: создано 1, пропущено 0.', 'Выписка банка');

@@ -3019,6 +3019,7 @@ export function MoneyOperations({
               <button
                 type="button"
                 onClick={() => void handleOpenBankImport(bankStatementImportResult.batchId!)}
+                aria-label={`Открыть импорт выписки ${bankStatementImportResult.fileName || `#${bankStatementImportResult.batchId}`}`}
                 className="rounded-md border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50">
                 Открыть импорт
               </button>
@@ -3061,6 +3062,7 @@ export function MoneyOperations({
                         <button
                           type="button"
                           className="rounded-md border border-blue-200 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                          aria-label={`Открыть операцию импорта ${operation.id}`}
                           onClick={() => void handleOpenImportedOperation(operation.id)}>
                           Открыть
                         </button>
@@ -3145,6 +3147,7 @@ export function MoneyOperations({
                           <button
                             type="button"
                             onClick={() => void handleOpenBankImport(batch.id)}
+                            aria-label={`Открыть импорт выписки ${batch.fileName || `#${batch.id}`}`}
                             className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                             disabled={bankImportDetailsLoading}>
                             Открыть
@@ -3152,6 +3155,7 @@ export function MoneyOperations({
                           <button
                             type="button"
                             onClick={() => void handleRollbackBankImport(batch.id)}
+                            aria-label={`Откатить импорт выписки ${batch.fileName || `#${batch.id}`} из списка`}
                             className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
                             disabled={bankImportRollbackLoading || batch.status === 'RolledBack'}>
                             <RotateCcw className="h-3.5 w-3.5" />
@@ -3730,6 +3734,7 @@ export function MoneyOperations({
                   <button
                     type="button"
                     onClick={() => void handleReprocessBankImport(selectedBankImport.id)}
+                    aria-label={`Повторить обработку импорта выписки ${selectedBankImport.fileName || `#${selectedBankImport.id}`}`}
                     className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={
                       bankImportReprocessLoading ||
@@ -3741,6 +3746,7 @@ export function MoneyOperations({
                   <button
                     type="button"
                     onClick={() => void handleRollbackBankImport(selectedBankImport.id)}
+                    aria-label={`Откатить импорт выписки ${selectedBankImport.fileName || `#${selectedBankImport.id}`} из карточки`}
                     className="inline-flex items-center gap-2 rounded-lg border border-amber-200 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={bankImportRollbackLoading || selectedBankImport.status === 'RolledBack'}>
                     <RotateCcw className="h-4 w-4" />
