@@ -30,18 +30,20 @@ public class CashOrdersController : ControllerBase
     public async Task<ActionResult<CashBookResponseDto>> GetCashBook(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
+        [FromQuery] string? accountName = null,
         CancellationToken ct = default)
     {
-        return Ok(await BuildCashBookAsync(from, to, ct));
+        return Ok(await BuildCashBookAsync(from, to, accountName, ct));
     }
 
     [HttpGet("cashbook/print")]
     public async Task<IActionResult> PrintCashBook(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
+        [FromQuery] string? accountName = null,
         CancellationToken ct = default)
     {
-        var cashBook = await BuildCashBookAsync(from, to, ct);
+        var cashBook = await BuildCashBookAsync(from, to, accountName, ct);
         return Content(BuildCashBookPrintHtml(cashBook), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
@@ -54,12 +56,13 @@ public class CashOrdersController : ControllerBase
         [FromQuery] string? search,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
+        [FromQuery] string? accountName = null,
         CancellationToken ct = default)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 5, 200);
 
-        var query = BuildFilteredQuery(from, to, type, status, search);
+        var query = BuildFilteredQuery(from, to, type, status, search, accountName);
 
         var total = await query.CountAsync(ct);
         var items = await query
@@ -88,12 +91,13 @@ public class CashOrdersController : ControllerBase
         [FromQuery] string? search,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
+        [FromQuery] string? accountName = null,
         CancellationToken ct = default)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 5, 200);
 
-        var query = BuildFilteredQuery(from, to, type, status, search);
+        var query = BuildFilteredQuery(from, to, type, status, search, accountName);
         var total = await query.CountAsync(ct);
         var summary = await query
             .GroupBy(_ => 1)
@@ -142,9 +146,10 @@ public class CashOrdersController : ControllerBase
         [FromQuery] CashOrderType? type,
         [FromQuery] CashOrderStatus? status,
         [FromQuery] string? search,
+        [FromQuery] string? accountName = null,
         CancellationToken ct = default)
     {
-        var query = BuildFilteredQuery(from, to, type, status, search);
+        var query = BuildFilteredQuery(from, to, type, status, search, accountName);
         var total = await query.CountAsync(ct);
         var summary = await query
             .GroupBy(_ => 1)
@@ -499,7 +504,7 @@ public class CashOrdersController : ControllerBase
            (operation.Direction == MoneyOperationDirection.Income ||
             operation.Direction == MoneyOperationDirection.Expense);
 
-    private async Task<CashBookResponseDto> BuildCashBookAsync(DateTime? from, DateTime? to, CancellationToken ct)
+    private async Task<CashBookResponseDto> BuildCashBookAsync(DateTime? from, DateTime? to, string? accountName, CancellationToken ct)
     {
         var fromDate = (from ?? DateTime.Today).Date;
         var toDate = (to ?? fromDate).Date;
@@ -511,6 +516,11 @@ public class CashOrdersController : ControllerBase
         var postedOrders = _db.CashOrders
             .AsNoTracking()
             .Where(order => order.Status == CashOrderStatus.Posted);
+        var accountFilter = NormalizeAccountFilter(accountName);
+        if (accountFilter is not null)
+        {
+            postedOrders = postedOrders.Where(order => order.Account == accountFilter);
+        }
 
         var openingBalance = await postedOrders
             .Where(order => order.Date < fromDate)
@@ -570,7 +580,8 @@ public class CashOrdersController : ControllerBase
         DateTime? to,
         CashOrderType? type,
         CashOrderStatus? status,
-        string? search)
+        string? search,
+        string? accountName = null)
     {
         var query = _db.CashOrders
             .Include(order => order.Client)
@@ -598,6 +609,12 @@ public class CashOrdersController : ControllerBase
             query = query.Where(order => order.Status == status.Value);
         }
 
+        var accountFilter = NormalizeAccountFilter(accountName);
+        if (accountFilter is not null)
+        {
+            query = query.Where(order => order.Account == accountFilter);
+        }
+
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim();
@@ -619,6 +636,12 @@ public class CashOrdersController : ControllerBase
         }
 
         return query;
+    }
+
+    private static string? NormalizeAccountFilter(string? accountName)
+    {
+        var value = accountName?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
     private async Task<string> GenerateNumberAsync(CashOrderType type, DateTime date, CancellationToken ct)

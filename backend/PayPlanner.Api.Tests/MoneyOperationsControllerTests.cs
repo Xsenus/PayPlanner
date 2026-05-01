@@ -1570,7 +1570,7 @@ public class MoneyOperationsControllerTests
         await db.SaveChangesAsync();
 
         var controller = new CashOrdersController(db);
-        var action = await controller.GetCashBook(new DateTime(2026, 4, 29), new DateTime(2026, 4, 30), CancellationToken.None);
+        var action = await controller.GetCashBook(new DateTime(2026, 4, 29), new DateTime(2026, 4, 30), ct: CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var book = Assert.IsType<CashBookResponseDto>(ok.Value);
@@ -1594,6 +1594,76 @@ public class MoneyOperationsControllerTests
                 Assert.Equal(35_000m, day.OpeningBalance);
                 Assert.Equal(32_000m, day.ClosingBalance);
             });
+    }
+
+    [Fact]
+    public async Task CashOrder_CashBookAndRegister_FilterByAccount()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = "PKO-2026-0001",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 1),
+                Amount = 1_000m,
+                Currency = "RUB",
+                Account = "Cashbox A",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "PKO-2026-0002",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 2),
+                Amount = 5_000m,
+                Currency = "RUB",
+                Account = "Cashbox B",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "RKO-2026-0001",
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 3),
+                Amount = 300m,
+                Currency = "RUB",
+                Account = "Cashbox A",
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var bookAction = await controller.GetCashBook(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            accountName: " Cashbox A ",
+            ct: CancellationToken.None);
+        var bookOk = Assert.IsType<OkObjectResult>(bookAction.Result);
+        var book = Assert.IsType<CashBookResponseDto>(bookOk.Value);
+        Assert.Equal(1_000m, book.Income);
+        Assert.Equal(300m, book.Expense);
+        Assert.Equal(700m, book.ClosingBalance);
+
+        var registerAction = await controller.GetRegister(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            type: null,
+            status: null,
+            search: null,
+            page: 1,
+            pageSize: 10,
+            accountName: "Cashbox A",
+            ct: CancellationToken.None);
+        var registerOk = Assert.IsType<OkObjectResult>(registerAction.Result);
+        var register = Assert.IsType<CashOrderRegisterResponseDto>(registerOk.Value);
+        Assert.Equal(2, register.Total);
+        Assert.Equal(1_000m, register.IncomingAmount);
+        Assert.Equal(300m, register.OutgoingAmount);
+        Assert.DoesNotContain(register.Items, item => item.Account == "Cashbox B");
     }
 
     [Fact]
@@ -1679,7 +1749,7 @@ public class MoneyOperationsControllerTests
         await db.SaveChangesAsync();
 
         var controller = new CashOrdersController(db);
-        var action = await controller.PrintCashBook(new DateTime(2026, 4, 29), new DateTime(2026, 4, 29), CancellationToken.None);
+        var action = await controller.PrintCashBook(new DateTime(2026, 4, 29), new DateTime(2026, 4, 29), ct: CancellationToken.None);
 
         var content = Assert.IsType<ContentResult>(action);
         Assert.Equal("text/html; charset=utf-8", content.ContentType);

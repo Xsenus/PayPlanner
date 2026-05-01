@@ -2280,6 +2280,7 @@ export class ApiService {
     type?: 'Incoming' | 'Outgoing';
     status?: 'Draft' | 'Posted' | 'Cancelled';
     search?: string;
+    accountName?: string;
     page?: number;
     pageSize?: number;
   }) {
@@ -2291,12 +2292,12 @@ export class ApiService {
     return this.request<PagedResult<CashOrder>>(`/cash-orders/paged${q}`);
   }
 
-  async getCashBook(params?: { from?: string; to?: string }) {
+  async getCashBook(params?: { from?: string; to?: string; accountName?: string }) {
     const q = buildQuery(params ?? {});
     return this.request<CashBookSummary>(`/cash-orders/cashbook${q}`);
   }
 
-  async getCashBookPrintHtml(params?: { from?: string; to?: string }) {
+  async getCashBookPrintHtml(params?: { from?: string; to?: string; accountName?: string }) {
     const q = buildQuery(params ?? {});
     return this.request<string>(`/cash-orders/cashbook/print${q}`);
   }
@@ -2307,6 +2308,7 @@ export class ApiService {
     type?: 'Incoming' | 'Outgoing';
     status?: 'Draft' | 'Posted' | 'Cancelled';
     search?: string;
+    accountName?: string;
     page?: number;
     pageSize?: number;
   }) {
@@ -2324,6 +2326,7 @@ export class ApiService {
     type?: 'Incoming' | 'Outgoing';
     status?: 'Draft' | 'Posted' | 'Cancelled';
     search?: string;
+    accountName?: string;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<string>(`/cash-orders/register/print${q}`);

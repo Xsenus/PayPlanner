@@ -889,6 +889,7 @@ function CashOrdersPanel({
   from,
   to,
   search,
+  accountName,
   refreshKey,
   onOpen,
   onPrint,
@@ -896,6 +897,7 @@ function CashOrdersPanel({
   from: string;
   to: string;
   search: string;
+  accountName: string;
   refreshKey: number;
   onOpen: (cashOrderId: number) => void;
   onPrint: (cashOrderId: number) => void;
@@ -920,7 +922,7 @@ function CashOrdersPanel({
 
   const handlePrintCashBook = async () => {
     try {
-      const html = await apiService.getCashBookPrintHtml({ from, to });
+      const html = await apiService.getCashBookPrintHtml({ from, to, accountName: accountName || undefined });
       openPrintHtml(html);
     } catch (err) {
       setError(extractDisplayErrorMessage(err, 'Не удалось открыть печатную форму кассовой книги.'));
@@ -932,6 +934,7 @@ function CashOrdersPanel({
       const html = await apiService.getCashOrderRegisterPrintHtml({
         from,
         to,
+        accountName: accountName || undefined,
         type: typeFilter === 'all' ? undefined : typeFilter,
         status: statusFilter === 'all' ? undefined : statusFilter,
         search,
@@ -954,10 +957,11 @@ function CashOrdersPanel({
         type: typeFilter === 'all' ? undefined : typeFilter,
         status: statusFilter === 'all' ? undefined : statusFilter,
         search,
+        accountName: accountName || undefined,
         page,
         pageSize,
       }),
-      apiService.getCashBook({ from, to }),
+      apiService.getCashBook({ from, to, accountName: accountName || undefined }),
     ])
       .then(([data, book]) => {
         if (cancelled) return;
@@ -981,11 +985,11 @@ function CashOrdersPanel({
     return () => {
       cancelled = true;
     };
-  }, [from, page, refreshKey, search, statusFilter, to, typeFilter]);
+  }, [accountName, from, page, refreshKey, search, statusFilter, to, typeFilter]);
 
   useEffect(() => {
     setPage(1);
-  }, [from, search, statusFilter, to, typeFilter]);
+  }, [accountName, from, search, statusFilter, to, typeFilter]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -3584,6 +3588,7 @@ export function MoneyOperations({
           from={from}
           to={to}
           search={debouncedSearch}
+          accountName={accountName}
           refreshKey={cashOrdersRefreshKey}
           onOpen={(cashOrderId) => void handleOpenCashOrder(cashOrderId)}
           onPrint={handlePrintCashOrder}

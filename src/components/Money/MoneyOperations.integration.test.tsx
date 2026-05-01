@@ -1371,7 +1371,11 @@ describe('MoneyOperations integration', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Кассовая книга' }));
-    await waitFor(() => expect(getCashBookPrintHtmlMock).toHaveBeenCalledWith({ from: '2026-01-01', to: '2026-12-31' }));
+    await waitFor(() =>
+      expect(getCashBookPrintHtmlMock).toHaveBeenCalledWith(
+        expect.objectContaining({ from: '2026-01-01', to: '2026-12-31' }),
+      ),
+    );
 
     await user.click(screen.getByRole('button', { name: 'Журнал' }));
     await waitFor(() =>
@@ -1382,6 +1386,42 @@ describe('MoneyOperations integration', () => {
         }),
       ),
     );
+  }, 15000);
+
+  it('passes the selected cash account to cash orders and cash book requests', async () => {
+    const user = userEvent.setup();
+    operations = [
+      createOperation({
+        id: 401,
+        source: 'Cash',
+        direction: 'Income',
+        amount: 25_000,
+        accountName: 'Основная касса',
+      }),
+      createOperation({
+        id: 402,
+        source: 'Cash',
+        direction: 'Income',
+        amount: 5_000,
+        accountName: 'Резервная касса',
+      }),
+    ];
+
+    render(<MoneyOperations source="Cash" />);
+
+    await screen.findByText('Кассовые ордера');
+    await user.selectOptions(screen.getByLabelText('Касса в заголовке'), 'Резервная касса');
+
+    await waitFor(() =>
+      expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          accountName: 'Резервная касса',
+          page: 1,
+          pageSize: 10,
+        }),
+      ),
+    );
+    expect(getCashBookMock).toHaveBeenLastCalledWith(expect.objectContaining({ accountName: 'Резервная касса' }));
   }, 15000);
 
   it('opens and manages a cash order card from the cash journal', async () => {
