@@ -748,7 +748,17 @@ public class CashOrdersController : ControllerBase
   <title>{{title}} {{System.Net.WebUtility.HtmlEncode(order.Number)}}</title>
   <style>
     @page { size: A4 portrait; margin: 14mm; }
-    body { margin: 0; color: #111827; font-family: Arial, sans-serif; background: #fff; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #111827;
+      font-family: Arial, "DejaVu Sans", sans-serif;
+      font-size: 12px;
+      line-height: 1.25;
+      background: #fff;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
     .doc { max-width: 820px; margin: 0 auto; }
     .top { display: grid; grid-template-columns: 1fr 190px; gap: 20px; align-items: start; }
     .meta { border: 1px solid #111827; border-collapse: collapse; width: 100%; font-size: 12px; }
@@ -961,7 +971,17 @@ public class CashOrdersController : ControllerBase
         => """
           <style>
             @page { size: A4 landscape; margin: 14mm; }
-            body { margin: 0; color: #111827; font-family: Arial, sans-serif; background: #fff; }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              color: #111827;
+              font-family: Arial, "DejaVu Sans", sans-serif;
+              font-size: 12px;
+              line-height: 1.25;
+              background: #fff;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
             .document { max-width: 1180px; margin: 0 auto; }
             header { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
             .eyebrow { color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }

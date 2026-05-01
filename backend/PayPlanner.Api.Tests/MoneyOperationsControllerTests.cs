@@ -1439,6 +1439,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Главный бухгалтер", content.Content);
         Assert.Contains("подпись, расшифровка", content.Content);
         AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
+        AssertPrintHtmlUsesSharedDocumentStyle(content.Content);
     }
 
     [Fact]
@@ -1477,6 +1478,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Главный бухгалтер", content.Content);
         Assert.DoesNotContain("Квитанция к", content.Content);
         AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
+        AssertPrintHtmlUsesSharedDocumentStyle(content.Content);
     }
 
     [Fact]
@@ -1684,6 +1686,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Кассовая книга", content.Content);
         Assert.Contains("25", content.Content);
         AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
+        AssertPrintHtmlUsesSharedDocumentStyle(content.Content);
     }
 
     [Fact]
@@ -1719,6 +1722,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("ПКО-2026-0001", content.Content);
         Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
         AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
+        AssertPrintHtmlUsesSharedDocumentStyle(content.Content);
     }
 
     [Fact]
@@ -3178,6 +3182,15 @@ public class MoneyOperationsControllerTests
         Assert.DoesNotContain("Generated", html, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("DateTime", html);
         Assert.DoesNotContain("new Date", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AssertPrintHtmlUsesSharedDocumentStyle(string? html)
+    {
+        Assert.NotNull(html);
+        Assert.Contains("* { box-sizing: border-box; }", html);
+        Assert.Contains("font-family: Arial, \"DejaVu Sans\", sans-serif;", html);
+        Assert.Contains("-webkit-print-color-adjust: exact !important;", html);
+        Assert.Contains("print-color-adjust: exact !important;", html);
     }
 
     private sealed class FakeInvoiceDocumentPdfService : IInvoiceDocumentPdfService
