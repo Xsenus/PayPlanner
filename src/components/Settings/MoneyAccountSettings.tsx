@@ -147,11 +147,15 @@ export function MoneyAccountSettings() {
     setEditorOpen(true);
   };
 
-  const closeEditor = () => {
-    if (saving) return;
+  const resetEditor = () => {
     setEditorOpen(false);
     setEditingAccount(null);
     setForm(EMPTY_FORM);
+  };
+
+  const closeEditor = () => {
+    if (saving) return;
+    resetEditor();
   };
 
   const saveAccount = async () => {
@@ -186,7 +190,7 @@ export function MoneyAccountSettings() {
       const successMessage = editingAccount ? 'Денежный счет обновлен.' : 'Денежный счет добавлен.';
       setMessage(successMessage);
       toast.success(successMessage, 'Денежные счета');
-      closeEditor();
+      resetEditor();
     } catch (saveError) {
       const nextError = extractDisplayErrorMessage(saveError, 'Не удалось сохранить денежный счет.');
       setError(nextError);
