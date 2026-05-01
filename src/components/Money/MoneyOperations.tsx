@@ -2910,6 +2910,11 @@ export function MoneyOperations({
                   {bankStatementAutoImportEnabled ? 'Вкл' : 'Выкл'}
                 </span>
               </label>
+              {bankStatementAutoImportEnabled && (
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700">
+                  Ожидает настройки интеграции
+                </span>
+              )}
               <button
                 type="button"
                 aria-label={showBankImportsJournal ? 'Скрыть журнал импортов выписки' : 'Открыть журнал импортов выписки'}

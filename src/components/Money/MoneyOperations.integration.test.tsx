@@ -1639,6 +1639,7 @@ describe('MoneyOperations integration', () => {
     await user.click(switcher);
 
     expect(switcher.checked).toBe(true);
+    expect(await screen.findByText('Ожидает настройки интеграции')).toBeTruthy();
     expect(window.localStorage.getItem('pp.bank_statement_auto_import_enabled')).toBe('true');
   }, 15000);
 
