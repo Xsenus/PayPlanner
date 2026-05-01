@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Calendar,
@@ -1794,6 +1794,7 @@ export function MoneyOperations({
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [manualSearchTerm, setManualSearchTerm] = useState<string | null>(null);
   const [directionFilter, setDirectionFilter] = useState<'all' | MoneyOperationDirection>('all');
   const [accountingTypeFilter, setAccountingTypeFilter] = useState<'all' | MoneyOperationAccountingType>('all');
   const [totalSourceFilter, setTotalSourceFilter] = useState<'all' | MoneyOperationSource>('all');
@@ -1848,6 +1849,16 @@ export function MoneyOperations({
   };
 
   const debouncedSearch = useDebouncedValue(search, 300);
+  const effectiveSearch = manualSearchTerm === search ? manualSearchTerm : debouncedSearch;
+  const applySearch = () => {
+    setManualSearchTerm(search);
+  };
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      applySearch();
+    }
+  };
   const {
     columnOrder,
     orderedVisibleColumns,
@@ -1889,7 +1900,7 @@ export function MoneyOperations({
     moneyAccountId: moneyAccountId === '' ? undefined : moneyAccountId,
     accountName: accountName || undefined,
     categoryName: categoryName.trim() || undefined,
-    search: debouncedSearch,
+    search: effectiveSearch,
     page,
     pageSize: effectivePageSize,
   });
@@ -2554,7 +2565,7 @@ export function MoneyOperations({
     accountName,
     accountingTypeFilter,
     categoryName,
-    debouncedSearch,
+    effectiveSearch,
     directionFilter,
     from,
     moneyAccountId,
@@ -2846,6 +2857,7 @@ export function MoneyOperations({
                   <input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
+                    onKeyDown={handleSearchKeyDown}
                     placeholder="Поиск по контрагенту, назначению или документу"
                     className="min-w-[260px] rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none"
                   />
@@ -3400,6 +3412,7 @@ export function MoneyOperations({
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
               placeholder="Поиск по контрагенту..."
               className="min-w-[220px] rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 focus:border-blue-500 focus:outline-none"
             />
@@ -3410,7 +3423,10 @@ export function MoneyOperations({
               title="Расширенный поиск">
               <SlidersHorizontal className="h-4 w-4" />
             </button>
-            <button type="button" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            <button
+              type="button"
+              onClick={applySearch}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
               Найти
             </button>
           </div>
@@ -3705,7 +3721,7 @@ export function MoneyOperations({
         <CashOrdersPanel
           from={from}
           to={to}
-          search={debouncedSearch}
+          search={effectiveSearch}
           accountName={accountName}
           refreshKey={cashOrdersRefreshKey}
           onCreate={handleCreateStandaloneCashOrder}

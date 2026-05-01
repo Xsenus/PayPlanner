@@ -645,6 +645,21 @@ describe('MoneyOperations integration', () => {
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(2));
   }, 15000);
 
+  it('applies the money journal search immediately from the find button', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Bank" />);
+
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(1));
+
+    await user.type(screen.getByPlaceholderText('Поиск по контрагенту...'), 'Ахмедова');
+    await user.click(screen.getByRole('button', { name: 'Найти' }));
+
+    await waitFor(() =>
+      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'Ахмедова' })),
+    );
+  }, 15000);
+
   it('shows balance reconciliation for the journal and selected account', async () => {
     operations = [
       createOperation({
