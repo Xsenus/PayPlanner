@@ -2731,7 +2731,7 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
-    public async Task ImportBankStatement_ReadsClientBankExchangeTxt()
+    public async Task ImportBankStatement_ReadsClientBankExchangeTxtAndOneCExtension()
     {
         await using var db = await CreateContextAsync();
         var controller = CreateController(db);
@@ -2786,6 +2786,18 @@ public class MoneyOperationsControllerTests
                 Assert.Equal("Банк", expense.CounterpartyName);
                 Assert.Equal("402", expense.PaymentOrderNumber);
             });
+
+        var oneCExtensionAction = await controller.ImportBankStatement(
+            CreateFormFile(
+                content
+                    .Replace("Номер=401", "Номер=403", StringComparison.Ordinal)
+                    .Replace("Номер=402", "Номер=404", StringComparison.Ordinal),
+                "client-bank.1c"),
+            CancellationToken.None);
+        var oneCExtensionOk = Assert.IsType<OkObjectResult>(oneCExtensionAction.Result);
+        var oneCExtensionResult = Assert.IsType<BankStatementImportResultDto>(oneCExtensionOk.Value);
+        Assert.Equal(2, oneCExtensionResult.RowsRead);
+        Assert.Equal(2, oneCExtensionResult.Created);
     }
 
     [Fact]

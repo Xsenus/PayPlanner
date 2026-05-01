@@ -2880,7 +2880,7 @@ export function MoneyOperations({
               <input
                 ref={bankStatementInputRef}
                 type="file"
-                accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+                accept=".csv,.tsv,.txt,.1c,text/csv,text/tab-separated-values,text/plain"
                 className="hidden"
                 onChange={handleBankStatementFileSelected}
               />

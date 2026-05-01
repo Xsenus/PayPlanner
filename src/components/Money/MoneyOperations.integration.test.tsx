@@ -1613,6 +1613,7 @@ describe('MoneyOperations integration', () => {
 
     await screen.findByText('Загрузить выписку');
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input.accept).toContain('.1c');
     const file = new File(['Дата;Сумма\n29.04.2026;25000'], 'statement.csv', { type: 'text/csv' });
     fireEvent.change(input, { target: { files: [file] } });
 

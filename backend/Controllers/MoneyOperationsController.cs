@@ -1127,9 +1127,9 @@ public class MoneyOperationsController : ControllerBase
         }
 
         var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (extension is not ".csv" and not ".txt" and not ".tsv")
+        if (extension is not ".csv" and not ".txt" and not ".tsv" and not ".1c")
         {
-            return BadRequest("Поддерживаются файлы CSV, TSV и TXT.");
+            return BadRequest("Поддерживаются файлы CSV, TSV, TXT и 1C ClientBankExchange.");
         }
 
         await using var stream = file.OpenReadStream();
