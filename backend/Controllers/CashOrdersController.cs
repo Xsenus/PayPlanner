@@ -188,7 +188,7 @@ public class CashOrdersController : ControllerBase
             OutgoingAmount = summary?.OutgoingAmount ?? 0m,
         };
 
-        return Content(BuildRegisterPrintHtml(register, from, to), "text/html; charset=utf-8", Encoding.UTF8);
+        return Content(BuildRegisterPrintHtml(register, from, to, accountName), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
     [HttpGet("{id:int}")]
@@ -565,6 +565,7 @@ public class CashOrdersController : ControllerBase
         {
             From = fromDate,
             To = toDate,
+            AccountName = accountFilter,
             OpeningBalance = openingBalance,
             Income = income,
             Expense = expense,
@@ -848,6 +849,9 @@ public class CashOrdersController : ControllerBase
 
     private static string BuildCashBookPrintHtml(CashBookResponseDto cashBook)
     {
+        var accountText = string.IsNullOrWhiteSpace(cashBook.AccountName)
+            ? "Все кассы"
+            : cashBook.AccountName;
         var rows = cashBook.Days.Count == 0
             ? """
               <tr><td colspan="6" class="empty">За выбранный период движений кассы нет.</td></tr>
@@ -877,6 +881,7 @@ public class CashOrdersController : ControllerBase
       <div class="eyebrow">Касса</div>
       <h1>Кассовая книга</h1>
       <div class="period">Период: {{cashBook.From:dd.MM.yyyy}} - {{cashBook.To:dd.MM.yyyy}}</div>
+      <div class="period">Касса: {{Html(accountText)}}</div>
     </header>
 
     <section class="summary">
@@ -912,10 +917,11 @@ public class CashOrdersController : ControllerBase
 """;
     }
 
-    private static string BuildRegisterPrintHtml(CashOrderRegisterResponseDto register, DateTime? from, DateTime? to)
+    private static string BuildRegisterPrintHtml(CashOrderRegisterResponseDto register, DateTime? from, DateTime? to, string? accountName)
     {
         var fromText = from?.Date.ToString("dd.MM.yyyy") ?? "не задано";
         var toText = to?.Date.ToString("dd.MM.yyyy") ?? "не задано";
+        var accountText = string.IsNullOrWhiteSpace(accountName) ? "Все кассы" : accountName.Trim();
         var rows = register.Items.Count == 0
             ? """
               <tr><td colspan="8" class="empty">За выбранный период кассовых ордеров нет.</td></tr>
@@ -953,6 +959,7 @@ public class CashOrdersController : ControllerBase
       <div class="eyebrow">Касса</div>
       <h1>Журнал регистрации кассовых документов</h1>
       <div class="period">Период: {{fromText}} - {{toText}}</div>
+      <div class="period">Касса: {{Html(accountText)}}</div>
     </header>
 
     <section class="summary">

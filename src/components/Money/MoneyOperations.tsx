@@ -1083,6 +1083,11 @@ function CashOrdersPanel({
 
       {cashBook && (
         <div className="grid gap-3 border-b border-slate-200 bg-slate-50/60 p-4 md:grid-cols-4">
+          <div className="md:col-span-4">
+            <div className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+              Касса: {cashBook.accountName || accountName || 'Все кассы'}
+            </div>
+          </div>
           <div className="rounded-lg border border-slate-200 bg-white p-3">
             <div className="text-xs uppercase text-slate-400">Остаток на начало</div>
             <div className="mt-1 text-lg font-semibold text-amber-600">{formatMoney(cashBook.openingBalance)} ₽</div>

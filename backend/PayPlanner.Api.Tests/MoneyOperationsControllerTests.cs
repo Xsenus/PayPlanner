@@ -1644,6 +1644,7 @@ public class MoneyOperationsControllerTests
             ct: CancellationToken.None);
         var bookOk = Assert.IsType<OkObjectResult>(bookAction.Result);
         var book = Assert.IsType<CashBookResponseDto>(bookOk.Value);
+        Assert.Equal("Cashbox A", book.AccountName);
         Assert.Equal(1_000m, book.Income);
         Assert.Equal(300m, book.Expense);
         Assert.Equal(700m, book.ClosingBalance);
@@ -1664,6 +1665,23 @@ public class MoneyOperationsControllerTests
         Assert.Equal(1_000m, register.IncomingAmount);
         Assert.Equal(300m, register.OutgoingAmount);
         Assert.DoesNotContain(register.Items, item => item.Account == "Cashbox B");
+
+        var printBookAction = await controller.PrintCashBook(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            accountName: "Cashbox A",
+            ct: CancellationToken.None);
+        Assert.Contains("Cashbox A", Assert.IsType<ContentResult>(printBookAction).Content);
+
+        var printRegisterAction = await controller.PrintRegister(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            type: null,
+            status: null,
+            search: null,
+            accountName: "Cashbox A",
+            ct: CancellationToken.None);
+        Assert.Contains("Cashbox A", Assert.IsType<ContentResult>(printRegisterAction).Content);
     }
 
     [Fact]

@@ -4,6 +4,7 @@ public sealed class CashBookResponseDto
 {
     public DateTime From { get; init; }
     public DateTime To { get; init; }
+    public string? AccountName { get; init; }
     public decimal OpeningBalance { get; init; }
     public decimal Income { get; init; }
     public decimal Expense { get; init; }

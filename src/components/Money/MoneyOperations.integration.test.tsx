@@ -1422,6 +1422,7 @@ describe('MoneyOperations integration', () => {
       ),
     );
     expect(getCashBookMock).toHaveBeenLastCalledWith(expect.objectContaining({ accountName: 'Резервная касса' }));
+    await screen.findByText('Касса: Резервная касса');
   }, 15000);
 
   it('opens and manages a cash order card from the cash journal', async () => {

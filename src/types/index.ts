@@ -580,6 +580,7 @@ export interface CashBookDay {
 export interface CashBookSummary {
   from: string;
   to: string;
+  accountName?: string | null;
   openingBalance: number;
   income: number;
   expense: number;
