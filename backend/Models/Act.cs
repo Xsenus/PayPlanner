@@ -14,6 +14,8 @@ public class Act
     public string? CounterpartyInn { get; set; }
     public ActStatus Status { get; set; } = ActStatus.Created;
     public string WorkflowStatus { get; set; } = ActWorkflowStatus.Draft;
+    public DateTime? SentForSigningAt { get; set; }
+    public DateTime? SignedAt { get; set; }
     public int? ClientId { get; set; }
     public Client? Client { get; set; }
     public int? ResponsibleId { get; set; }

@@ -13,6 +13,8 @@ public class ContractDto
     public string? Description { get; set; }
     public string BillingMode { get; set; } = ContractBillingMode.Fixed;
     public string Status { get; set; } = ContractStatus.Draft;
+    public DateTime? SentForSigningAt { get; set; }
+    public DateTime? ConcludedAt { get; set; }
     public bool IsOpenEnded { get; set; }
     public decimal? Amount { get; set; }
     public DateTime? ValidUntil { get; set; }

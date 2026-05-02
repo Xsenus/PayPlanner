@@ -123,6 +123,49 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task SigningWorkflowActions_UpdateStatusAndTimestamps()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-SIGN-1",
+                Date = new DateTime(2026, 4, 20),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 25_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var sendAction = await controller.SendToSigning(createdDto.Id, CancellationToken.None);
+
+        var sendOk = Assert.IsType<OkObjectResult>(sendAction.Result);
+        var sentDto = Assert.IsType<ContractDto>(sendOk.Value);
+        Assert.Equal(ContractStatus.OnSigning, sentDto.Status);
+        Assert.NotNull(sentDto.SentForSigningAt);
+        Assert.Null(sentDto.ConcludedAt);
+
+        var concludeAction = await controller.MarkConcluded(createdDto.Id, CancellationToken.None);
+
+        var concludeOk = Assert.IsType<OkObjectResult>(concludeAction.Result);
+        var concludedDto = Assert.IsType<ContractDto>(concludeOk.Value);
+        Assert.Equal(ContractStatus.Concluded, concludedDto.Status);
+        Assert.NotNull(concludedDto.SentForSigningAt);
+        Assert.NotNull(concludedDto.ConcludedAt);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Contracts.AsNoTracking().SingleAsync(contract => contract.Id == createdDto.Id);
+        Assert.Equal(ContractStatus.Concluded, stored.Status);
+        Assert.NotNull(stored.SentForSigningAt);
+        Assert.NotNull(stored.ConcludedAt);
+    }
+
+    [Fact]
     public async Task Update_ClearsAmountAndValidUntil_WhenSwitchingToActualOpenEndedContract()
     {
         await using var db = await CreateContextAsync();

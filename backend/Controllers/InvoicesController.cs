@@ -314,6 +314,38 @@ public class InvoicesController : ControllerBase
         return Ok(dto);
     }
 
+    [HttpPost("{id:int}/send-to-signing")]
+    public async Task<ActionResult<InvoiceDto>> SendToSigning(int id, CancellationToken ct)
+    {
+        var payment = await _db.Payments.FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.OnSigning;
+        payment.InvoiceSentForSigningAt ??= DateTime.UtcNow;
+        var dto = await SaveAndReloadInvoiceAsync(payment, ct);
+        return Ok(dto);
+    }
+
+    [HttpPost("{id:int}/mark-signed")]
+    public async Task<ActionResult<InvoiceDto>> MarkSigned(int id, CancellationToken ct)
+    {
+        var payment = await _db.Payments.FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        var now = DateTime.UtcNow;
+        payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.SignedByClient;
+        payment.InvoiceSentForSigningAt ??= now;
+        payment.InvoiceSignedAt ??= now;
+        var dto = await SaveAndReloadInvoiceAsync(payment, ct);
+        return Ok(dto);
+    }
+
     [HttpPost]
     public async Task<ActionResult<InvoiceDto>> Create([FromBody] UpsertInvoiceRequest request, CancellationToken ct)
     {
@@ -2579,6 +2611,8 @@ public class InvoicesController : ControllerBase
         Type = x.Payment.Type,
         Status = x.Payment.Status,
         WorkflowStatus = x.Payment.InvoiceWorkflowStatus,
+        SentForSigningAt = x.Payment.InvoiceSentForSigningAt,
+        SignedAt = x.Payment.InvoiceSignedAt,
         IsPaid = x.Payment.IsPaid,
         PaidDate = x.Payment.PaidDate,
         ClientId = x.Payment.ClientId,
@@ -2665,6 +2699,8 @@ public class InvoicesController : ControllerBase
             Type = raw.Type,
             Status = raw.Status,
             WorkflowStatus = raw.WorkflowStatus,
+            SentForSigningAt = raw.SentForSigningAt,
+            SignedAt = raw.SignedAt,
             IsPaid = raw.IsPaid,
             PaidDate = raw.PaidDate,
             ClientId = raw.ClientId,
@@ -2727,10 +2763,20 @@ public class InvoicesController : ControllerBase
     {
         dto.Status = payment.Status;
         dto.WorkflowStatus = payment.InvoiceWorkflowStatus;
+        dto.SentForSigningAt = payment.InvoiceSentForSigningAt;
+        dto.SignedAt = payment.InvoiceSignedAt;
         dto.IsPaid = payment.IsPaid;
         dto.PaidDate = payment.PaidDate;
         dto.PaidAmount = ResolvePaidAmount(payment);
         dto.OutstandingAmount = ResolveOutstandingAmount(payment);
+    }
+
+    private async Task<InvoiceDto> SaveAndReloadInvoiceAsync(Payment payment, CancellationToken ct)
+    {
+        await _db.SaveChangesAsync(ct);
+        var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
+        ApplyPersistedPaymentState(dto, payment);
+        return dto;
     }
 
     private async Task<List<InvoiceDto>> QueryInvoiceDtosAsync(
@@ -4856,6 +4902,8 @@ public class InvoicesController : ControllerBase
         public PaymentType Type { get; init; }
         public PaymentStatus Status { get; init; }
         public string WorkflowStatus { get; init; } = InvoiceWorkflowStatus.Draft;
+        public DateTime? SentForSigningAt { get; init; }
+        public DateTime? SignedAt { get; init; }
         public bool IsPaid { get; init; }
         public DateTime? PaidDate { get; init; }
         public int? ClientId { get; init; }

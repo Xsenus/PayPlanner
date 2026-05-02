@@ -15,6 +15,8 @@ public class InvoiceDto
     public PaymentType Type { get; set; }
     public PaymentStatus Status { get; set; }
     public string WorkflowStatus { get; set; } = InvoiceWorkflowStatus.Draft;
+    public DateTime? SentForSigningAt { get; set; }
+    public DateTime? SignedAt { get; set; }
     public bool IsPaid { get; set; }
     public DateTime? PaidDate { get; set; }
     public int? ClientId { get; set; }

@@ -1,4 +1,4 @@
-import { ArrowLeft, GripVertical, Loader2, Pencil, Plus, Save, Search, Settings2, X } from 'lucide-react';
+import { ArrowLeft, Check, GripVertical, Loader2, Pencil, Plus, Save, Search, Send, Settings2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -112,6 +112,14 @@ const formatAmount = (value?: number | null) =>
 
 const formatAmountInput = (value?: number | null) => (typeof value === 'number' ? String(value) : '');
 
+const contractStatusLabels: Record<NonNullable<Contract['status']>, string> = {
+  Draft: 'Черновик',
+  OnSigning: 'На подписании',
+  Concluded: 'Заключён',
+  Terminated: 'Расторгнут',
+  Cancelled: 'Отменён',
+};
+
 function parseAmountInput(value: string): number | null | undefined {
   const normalized = value.replace(/\s+/g, '').replace(',', '.').trim();
   if (!normalized) return null;
@@ -141,6 +149,7 @@ export function ContractDetailPage({
   const [activeTab, setActiveTab] = useState<Tab>('clients');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [workflowSaving, setWorkflowSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -655,6 +664,30 @@ export function ContractDetailPage({
     });
   };
 
+  const runWorkflowAction = async (action: 'sendToSigning' | 'markConcluded') => {
+    if (!contract || workflowSaving) return;
+
+    setWorkflowSaving(true);
+    try {
+      const updatedContract = action === 'sendToSigning'
+        ? await apiService.sendContractToSigning(contract.id)
+        : await apiService.markContractConcluded(contract.id);
+
+      setContract(updatedContract);
+      setAmountInput(formatAmountInput(updatedContract.billingMode === 'Fixed' ? updatedContract.amount : null));
+      toast.success(
+        action === 'sendToSigning'
+          ? 'Договор отправлен на подписание.'
+          : 'Договор отмечен заключённым.',
+        'Workflow договора обновлён',
+      );
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось обновить workflow договора'), 'Договоры');
+    } finally {
+      setWorkflowSaving(false);
+    }
+  };
+
   const executionMetrics = getContractExecutionMetrics(contract ?? {
     billingMode: 'Fixed',
     amount: null,
@@ -683,6 +716,24 @@ export function ContractDetailPage({
         </button>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void runWorkflowAction('sendToSigning')}
+            disabled={workflowSaving || editMode}
+            className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
+          >
+            {workflowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            На подписание
+          </button>
+          <button
+            type="button"
+            onClick={() => void runWorkflowAction('markConcluded')}
+            disabled={workflowSaving || editMode}
+            className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
+          >
+            {workflowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            Заключён
+          </button>
           {!editMode ? (
             <button
               onClick={() => setEditMode(true)}
@@ -881,7 +932,7 @@ export function ContractDetailPage({
         </label>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
         <div className="rounded border bg-white p-4">
           <div className="text-xs uppercase tracking-wide text-slate-500">Сумма договора</div>
           <div className="mt-2 text-xl font-semibold text-slate-900">{formatAmount(effectiveAmount)}</div>
@@ -907,6 +958,16 @@ export function ContractDetailPage({
           <div className="mt-1 text-xs text-slate-500">
             {executionMetrics.percent !== null ? `${executionMetrics.percent}%` : 'Сумма считается по счетам в договоре'}
             {executionMetrics.delta !== null ? ` · Остаток ${formatAmount(executionMetrics.delta)}` : ''}
+          </div>
+        </div>
+        <div className="rounded border bg-white p-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Workflow</div>
+          <div className="mt-2 text-xl font-semibold text-slate-900">
+            {contractStatusLabels[contract.status ?? 'Draft']}
+          </div>
+          <div className="mt-1 text-xs text-slate-500">
+            Подписание: {formatDate(contract.sentForSigningAt)}
+            {contract.concludedAt ? ` · заключён ${formatDate(contract.concludedAt)}` : ''}
           </div>
         </div>
       </div>

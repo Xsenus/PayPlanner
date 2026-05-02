@@ -412,7 +412,10 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
 
     setPageActionLoading(actionKey);
     try {
-      const updated = normalizeAct(await apiService.updateAct(act.id, buildActPayload(act, { status: targetStatus })));
+      void targetStatus;
+      const updated = normalizeAct(actionKey === 'transferred'
+        ? await apiService.sendActToSigning(act.id)
+        : await apiService.markActSigned(act.id));
       if (!updated) {
         throw new Error('Не удалось обновить статус акта.');
       }

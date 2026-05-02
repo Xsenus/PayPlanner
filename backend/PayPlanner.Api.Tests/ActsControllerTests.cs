@@ -63,6 +63,53 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task SigningWorkflowActions_UpdateStatusAndTimestamps()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var createAction = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-SIGN-1",
+                Date = new DateTime(2026, 4, 20),
+                Amount = 9_500m,
+                CreationMode = ActCreationMode.Manual,
+                ClientId = client.Id,
+                Status = ActStatus.Created,
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<ActDto>(created.Value);
+
+        var sendAction = await controller.SendToSigning(createdDto.Id, CancellationToken.None);
+
+        var sendOk = Assert.IsType<OkObjectResult>(sendAction.Result);
+        var sentDto = Assert.IsType<ActDto>(sendOk.Value);
+        Assert.Equal(ActStatus.Transferred, sentDto.Status);
+        Assert.Equal(ActWorkflowStatus.OnSigning, sentDto.WorkflowStatus);
+        Assert.NotNull(sentDto.SentForSigningAt);
+        Assert.Null(sentDto.SignedAt);
+
+        var signAction = await controller.MarkSigned(createdDto.Id, CancellationToken.None);
+
+        var signOk = Assert.IsType<OkObjectResult>(signAction.Result);
+        var signedDto = Assert.IsType<ActDto>(signOk.Value);
+        Assert.Equal(ActStatus.Signed, signedDto.Status);
+        Assert.Equal(ActWorkflowStatus.Signed, signedDto.WorkflowStatus);
+        Assert.NotNull(signedDto.SentForSigningAt);
+        Assert.NotNull(signedDto.SignedAt);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Acts.AsNoTracking().SingleAsync(act => act.Id == createdDto.Id);
+        Assert.Equal(ActStatus.Signed, stored.Status);
+        Assert.Equal(ActWorkflowStatus.Signed, stored.WorkflowStatus);
+        Assert.NotNull(stored.SentForSigningAt);
+        Assert.NotNull(stored.SignedAt);
+    }
+
+    [Fact]
     public async Task Create_FullAct_UsesAllRemainingInvoiceLineItems()
     {
         await using var db = await CreateContextAsync();

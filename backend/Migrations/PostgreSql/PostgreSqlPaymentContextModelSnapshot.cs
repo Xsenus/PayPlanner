@@ -96,6 +96,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("ResponsibleId")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("SentForSigningAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("SignedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1233,6 +1239,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<DateTime?>("ConcludedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp without time zone")
@@ -1276,6 +1285,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("SentForSigningAt")
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<DateTime?>("StartDate")
                         .HasColumnType("timestamp without time zone");
@@ -2850,6 +2862,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("InvoiceSentForSigningAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("InvoiceSignedAt")
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("InvoiceWorkflowStatus")
                         .IsRequired()

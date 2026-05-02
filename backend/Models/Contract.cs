@@ -42,6 +42,10 @@ public class Contract
 
     public string Status { get; set; } = ContractStatus.Draft;
 
+    public DateTime? SentForSigningAt { get; set; }
+
+    public DateTime? ConcludedAt { get; set; }
+
     public bool IsOpenEnded { get; set; }
 
     /// <summary>

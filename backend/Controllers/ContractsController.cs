@@ -65,6 +65,38 @@ public class ContractsController : ControllerBase
         return dto is null ? NotFound() : Ok(dto);
     }
 
+    [HttpPost("{id:int}/send-to-signing")]
+    public async Task<ActionResult<ContractDto>> SendToSigning(int id, CancellationToken ct)
+    {
+        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (contract is null) return NotFound();
+
+        contract.Status = ContractStatus.OnSigning;
+        contract.SentForSigningAt ??= DateTime.UtcNow;
+        contract.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        return Ok(dto);
+    }
+
+    [HttpPost("{id:int}/mark-concluded")]
+    public async Task<ActionResult<ContractDto>> MarkConcluded(int id, CancellationToken ct)
+    {
+        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (contract is null) return NotFound();
+
+        var now = DateTime.UtcNow;
+        contract.Status = ContractStatus.Concluded;
+        contract.SentForSigningAt ??= now;
+        contract.ConcludedAt ??= now;
+        contract.UpdatedAt = now;
+        await _db.SaveChangesAsync(ct);
+
+        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        return Ok(dto);
+    }
+
     [HttpGet("numbering-settings")]
     public async Task<ActionResult<ContractNumberingSettingsDto>> GetNumberingSettings(CancellationToken ct)
         => Ok(await GetContractNumberingSettingsAsync(ct));
@@ -236,6 +268,8 @@ public class ContractsController : ControllerBase
         Description = contract.Description,
         BillingMode = contract.BillingMode,
         Status = contract.Status,
+        SentForSigningAt = contract.SentForSigningAt,
+        ConcludedAt = contract.ConcludedAt,
         IsOpenEnded = contract.IsOpenEnded,
         Amount = contract.Amount,
         Date = contract.Date,
@@ -334,6 +368,8 @@ public class ContractsController : ControllerBase
             Description = contract.Description,
             BillingMode = contract.BillingMode,
             Status = contract.Status,
+            SentForSigningAt = contract.SentForSigningAt,
+            ConcludedAt = contract.ConcludedAt,
             IsOpenEnded = contract.IsOpenEnded,
             Amount = contract.Amount,
             Date = contract.Date,

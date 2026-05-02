@@ -2573,13 +2573,15 @@ export function InvoiceModal({
   };
 
 
-  const handlePageAction = async (action: 'send' | 'copy' | 'paid' | 'cancel' | 'delete') => {
+  const handlePageAction = async (action: 'send' | 'sendToSigning' | 'markSigned' | 'copy' | 'paid' | 'cancel' | 'delete') => {
     const actionMeta = {
       send: { title: 'Отправить счёт', message: 'Сформировать документ WORD и отправить на email клиента?', confirmLabel: 'Отправить' },
       copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
       paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
       cancel: { title: 'Отменить счёт', message: 'Подтвердите отмену счёта.', confirmLabel: 'Отменить' },
       delete: { title: 'Удалить счёт', message: 'Удалить счёт без возможности восстановления?', confirmLabel: 'Удалить' },
+      sendToSigning: { title: 'Отправить на подписание', message: 'Перевести счёт в статус “на подписании”?', confirmLabel: 'На подписание' },
+      markSigned: { title: 'Отметить подписанным', message: 'Отметить счёт как подписанный клиентом?', confirmLabel: 'Подписан' },
     }[action];
 
     const accepted = await confirm({
@@ -2602,6 +2604,29 @@ export function InvoiceModal({
             ? `Документ WORD отправлен на ${selectedClient.email}.`
             : 'Документ WORD отправлен клиенту по email.',
           'Счет отправлен',
+        );
+        return;
+      }
+
+      if (action === 'sendToSigning' || action === 'markSigned') {
+        if (!invoice?.id) {
+          throw new Error('Сначала сохраните счёт, затем можно менять workflow подписания.');
+        }
+
+        const updated = action === 'sendToSigning'
+          ? await apiService.sendInvoiceToSigning(invoice.id)
+          : await apiService.markInvoiceSigned(invoice.id);
+
+        setForm((prev) => ({
+          ...prev,
+          workflowStatus: updated.workflowStatus ?? prev.workflowStatus,
+        }));
+        await onRefreshRequested?.();
+        toast.success(
+          action === 'sendToSigning'
+            ? 'Счёт отправлен на подписание.'
+            : 'Счёт отмечен подписанным.',
+          'Workflow счёта обновлён',
         );
         return;
       }
@@ -3423,9 +3448,11 @@ export function InvoiceModal({
             </aside>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-7">
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-9">
             <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
             <button type="button" onClick={() => void handlePrintDocument()} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
+            <button type="button" onClick={() => void handlePageAction('sendToSigning')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />На подписание</button>
+            <button type="button" onClick={() => void handlePageAction('markSigned')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Check className="h-4 w-4" />Подписан</button>
             <div className="relative" ref={downloadMenuRef}>
               <button
                 type="button"

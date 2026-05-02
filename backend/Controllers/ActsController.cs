@@ -135,6 +135,42 @@ public class ActsController : ControllerBase
         return dto is null ? NotFound() : Ok(dto);
     }
 
+    [HttpPost("{id:int}/send-to-signing")]
+    public async Task<ActionResult<ActDto>> SendToSigning(int id, CancellationToken ct)
+    {
+        var act = await LoadActForWorkflowAsync(id, ct);
+        if (act is null)
+        {
+            return NotFound();
+        }
+
+        act.Status = ActStatus.Transferred;
+        act.WorkflowStatus = ActWorkflowStatus.OnSigning;
+        act.SentForSigningAt ??= DateTime.UtcNow;
+        act.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return Ok(Map(act));
+    }
+
+    [HttpPost("{id:int}/mark-signed")]
+    public async Task<ActionResult<ActDto>> MarkSigned(int id, CancellationToken ct)
+    {
+        var act = await LoadActForWorkflowAsync(id, ct);
+        if (act is null)
+        {
+            return NotFound();
+        }
+
+        var now = DateTime.UtcNow;
+        act.Status = ActStatus.Signed;
+        act.WorkflowStatus = ActWorkflowStatus.Signed;
+        act.SentForSigningAt ??= now;
+        act.SignedAt ??= now;
+        act.UpdatedAt = now;
+        await _db.SaveChangesAsync(ct);
+        return Ok(Map(act));
+    }
+
     [HttpGet("summary")]
     public async Task<IActionResult> GetSummary(
         [FromQuery] DateTime? from,
@@ -519,6 +555,9 @@ public class ActsController : ControllerBase
         ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
         CounterpartyInn = act.CounterpartyInn,
         Status = act.Status,
+        WorkflowStatus = act.WorkflowStatus,
+        SentForSigningAt = act.SentForSigningAt,
+        SignedAt = act.SignedAt,
         ClientId = act.ClientId,
         ClientName = act.Client != null ? act.Client.Name : null,
         ResponsibleId = act.ResponsibleId,
@@ -567,6 +606,8 @@ public class ActsController : ControllerBase
         CounterpartyInn = act.CounterpartyInn,
         Status = act.Status,
         WorkflowStatus = act.WorkflowStatus,
+        SentForSigningAt = act.SentForSigningAt,
+        SignedAt = act.SignedAt,
         ClientId = act.ClientId,
         ClientName = act.Client != null ? act.Client.Name : null,
         ResponsibleId = act.ResponsibleId,
@@ -973,6 +1014,14 @@ public class ActsController : ControllerBase
         return ValidationProblem(ModelState);
     }
 
+    private async Task<Act?> LoadActForWorkflowAsync(int id, CancellationToken ct)
+        => await _db.Acts
+            .Include(act => act.Client)
+            .Include(act => act.Responsible)
+            .Include(act => act.Invoice)
+            .Include(act => act.LineItems)
+            .FirstOrDefaultAsync(act => act.Id == id, ct);
+
     private static string? NormalizeActWorkflowStatusOrNull(string? value)
         => ActWorkflowStatus.Normalize(value);
 
@@ -1007,6 +1056,8 @@ public class ActsController : ControllerBase
             CounterpartyInn = act.CounterpartyInn,
             Status = act.Status,
             WorkflowStatus = act.WorkflowStatus,
+            SentForSigningAt = act.SentForSigningAt,
+            SignedAt = act.SignedAt,
             ClientId = act.ClientId,
             ClientName = act.Client?.Name,
             ResponsibleId = act.ResponsibleId,

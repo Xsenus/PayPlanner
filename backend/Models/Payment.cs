@@ -61,6 +61,10 @@ namespace PayPlanner.Api.Models
 
         public string InvoiceWorkflowStatus { get; set; } = PayPlanner.Api.Models.InvoiceWorkflowStatus.Draft;
 
+        public DateTime? InvoiceSentForSigningAt { get; set; }
+
+        public DateTime? InvoiceSignedAt { get; set; }
+
         /// <summary>
         /// Внешний ключ на дело клиента, к которому относится платеж.
         /// </summary>

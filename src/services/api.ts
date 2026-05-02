@@ -806,6 +806,14 @@ export class ApiService {
     return this.request<Act>(`/acts/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   }
 
+  async sendActToSigning(id: number) {
+    return this.request<Act>(`/acts/${id}/send-to-signing`, { method: 'POST' });
+  }
+
+  async markActSigned(id: number) {
+    return this.request<Act>(`/acts/${id}/mark-signed`, { method: 'POST' });
+  }
+
   async deleteAct(id: number) {
     return this.request<void>(`/acts/${id}`, { method: 'DELETE' });
   }
@@ -873,6 +881,14 @@ export class ApiService {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+  }
+
+  async sendContractToSigning(id: number) {
+    return this.request<Contract>(`/contracts/${id}/send-to-signing`, { method: 'POST' });
+  }
+
+  async markContractConcluded(id: number) {
+    return this.request<Contract>(`/contracts/${id}/mark-concluded`, { method: 'POST' });
   }
 
   async deleteContract(id: number) {
@@ -1242,6 +1258,14 @@ export class ApiService {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+  }
+
+  async sendInvoiceToSigning(id: number) {
+    return this.request<Invoice>(`/invoices/${id}/send-to-signing`, { method: 'POST' });
+  }
+
+  async markInvoiceSigned(id: number) {
+    return this.request<Invoice>(`/invoices/${id}/mark-signed`, { method: 'POST' });
   }
 
   async deleteInvoice(id: number) {

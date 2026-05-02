@@ -851,6 +851,8 @@ export interface Act {
   counterpartyInn?: string | null;
   status: ActStatus;
   workflowStatus?: ActWorkflowStatus;
+  sentForSigningAt?: string | null;
+  signedAt?: string | null;
   clientId?: number | null;
   clientName?: string | null;
   responsibleId?: number | null;
@@ -929,6 +931,8 @@ export interface Contract {
   description?: string | null;
   billingMode: ContractBillingMode;
   status?: ContractStatus;
+  sentForSigningAt?: string | null;
+  concludedAt?: string | null;
   isOpenEnded: boolean;
   amount?: number | null;
   validUntil?: string | null;
@@ -1092,6 +1096,8 @@ export interface Invoice {
   type: 'Income' | 'Expense';
   status: PaymentStatus;
   workflowStatus?: InvoiceWorkflowStatus;
+  sentForSigningAt?: string | null;
+  signedAt?: string | null;
   isPaid: boolean;
   paidDate?: string | null;
   clientId?: number | null;

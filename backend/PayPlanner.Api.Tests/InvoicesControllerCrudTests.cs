@@ -258,6 +258,46 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task SigningWorkflowActions_UpdateStatusAndTimestamps()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Signing");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createAction = await controller.Create(
+            CreateRequest("INV-SIGN-1", clientId, new DateTime(2026, 4, 20), 12_000m),
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var sendAction = await controller.SendToSigning(createdDto.Id, CancellationToken.None);
+
+        var sendOk = Assert.IsType<OkObjectResult>(sendAction.Result);
+        var sentDto = Assert.IsType<InvoiceDto>(sendOk.Value);
+        Assert.Equal(InvoiceWorkflowStatus.OnSigning, sentDto.WorkflowStatus);
+        Assert.NotNull(sentDto.SentForSigningAt);
+        Assert.Null(sentDto.SignedAt);
+
+        var signAction = await controller.MarkSigned(createdDto.Id, CancellationToken.None);
+
+        var signOk = Assert.IsType<OkObjectResult>(signAction.Result);
+        var signedDto = Assert.IsType<InvoiceDto>(signOk.Value);
+        Assert.Equal(InvoiceWorkflowStatus.SignedByClient, signedDto.WorkflowStatus);
+        Assert.NotNull(signedDto.SentForSigningAt);
+        Assert.NotNull(signedDto.SignedAt);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(InvoiceWorkflowStatus.SignedByClient, stored.InvoiceWorkflowStatus);
+        Assert.NotNull(stored.InvoiceSentForSigningAt);
+        Assert.NotNull(stored.InvoiceSignedAt);
+        Assert.Equal(PaymentStatus.Pending, stored.Status);
+    }
+
+    [Fact]
     public async Task Create_ExpenseInvoice_UsesExpenseClientAsCaseOwner()
     {
         await using var db = await CreateContextAsync();

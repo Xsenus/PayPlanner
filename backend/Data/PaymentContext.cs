@@ -237,6 +237,8 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.WorkflowStatus).HasMaxLength(32).HasDefaultValue(ActWorkflowStatus.Draft).IsRequired();
+            entity.Property(e => e.SentForSigningAt);
+            entity.Property(e => e.SignedAt);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.Date).HasColumnType("date");
 
@@ -293,6 +295,8 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Description).HasMaxLength(2000);
             entity.Property(e => e.BillingMode).HasMaxLength(32).HasDefaultValue(ContractBillingMode.Fixed).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue(ContractStatus.Draft).IsRequired();
+            entity.Property(e => e.SentForSigningAt);
+            entity.Property(e => e.ConcludedAt);
             entity.Property(e => e.IsOpenEnded).HasDefaultValue(false);
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Date).HasColumnType("date");
@@ -553,6 +557,8 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.DocumentKind).HasConversion<string>();
             entity.Property(e => e.InvoiceWorkflowStatus).HasMaxLength(32).HasDefaultValue(InvoiceWorkflowStatus.Draft).IsRequired();
+            entity.Property(e => e.InvoiceSentForSigningAt);
+            entity.Property(e => e.InvoiceSignedAt);
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.CounterpartyName).HasMaxLength(200);
             entity.Property(e => e.ClientCaseReference).HasMaxLength(300);

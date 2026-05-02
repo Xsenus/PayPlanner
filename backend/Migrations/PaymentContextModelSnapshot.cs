@@ -89,6 +89,12 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("ResponsibleId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("SentForSigningAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("SignedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1200,6 +1206,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("ConcludedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
@@ -1242,6 +1251,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<string>("Number")
                         .IsRequired()
                         .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("SentForSigningAt")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("StartDate")
@@ -2779,6 +2791,12 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("InvoiceSentForSigningAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("InvoiceSignedAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("InvoiceWorkflowStatus")
                         .IsRequired()
