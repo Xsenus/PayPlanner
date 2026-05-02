@@ -1835,6 +1835,7 @@ export function MoneyOperations({
   const [selectedCashOrder, setSelectedCashOrder] = useState<CashOrder | null>(null);
   const [cashOrderSaving, setCashOrderSaving] = useState(false);
   const [bankStatementImporting, setBankStatementImporting] = useState(false);
+  const [moneyOperationsExporting, setMoneyOperationsExporting] = useState(false);
   const [bankStatementImportResult, setBankStatementImportResult] = useState<{
     batchId?: number | null;
     rowsRead: number;
@@ -2143,7 +2144,7 @@ export function MoneyOperations({
     return () => {
       cancelled = true;
     };
-  }, [bankImportsRefreshKey, showBankImportsJournal, source]);
+  }, [bankImportsRefreshKey, showBankImportsJournal, source, toast]);
 
   const totalRows = useMemo(() => {
     const bySource = new Map(summary.bySource.map((row) => [row.source, row]));
@@ -2181,6 +2182,37 @@ export function MoneyOperations({
 
     return { rows, total };
   }, [summary.bySource]);
+
+  const handleExportCsv = async () => {
+    setMoneyOperationsExporting(true);
+    try {
+      const { blob, fileName } = await apiService.exportMoneyOperationsCsv({
+        from,
+        to,
+        source: apiSource,
+        direction: directionFilter === 'all' ? undefined : directionFilter,
+        accountingType: accountingTypeFilter === 'all' ? undefined : accountingTypeFilter,
+        moneyAccountId: moneyAccountId === '' ? undefined : moneyAccountId,
+        accountName: accountName || undefined,
+        categoryName: categoryName.trim() || undefined,
+        search: effectiveSearch,
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName || 'money-operations.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      toast.success('Журнал экспортирован в CSV.', 'Журнал денег');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось экспортировать журнал в CSV.');
+      toast.error(message, 'Журнал денег');
+    } finally {
+      setMoneyOperationsExporting(false);
+    }
+  };
 
   const handlePrintCashOrder = async (cashOrderId: number) => {
     try {
@@ -3277,6 +3309,14 @@ export function MoneyOperations({
             className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Обновить
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExportCsv()}
+            disabled={moneyOperationsExporting}
+            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+            <Download className={`h-4 w-4 ${moneyOperationsExporting ? 'animate-pulse' : ''}`} />
+            {moneyOperationsExporting ? 'Экспорт...' : 'CSV'}
           </button>
         </div>
       </div>

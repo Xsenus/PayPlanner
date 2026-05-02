@@ -224,6 +224,72 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task ExportCsv_ReturnsFilteredJournalRowsWithRussianLabels()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "ООО Ромашка",
+                CategoryName = "Оплата услуг",
+                Amount = 10_000m,
+                Currency = "RUB",
+                PaymentOrderNumber = "101",
+                Date = new DateTime(2026, 5, 1),
+                Purpose = "Оплата по счету; май",
+                PaidInvoiceNumber = "INV-1",
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Cash,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Касса",
+                CounterpartyName = "Поставщик",
+                Amount = 500m,
+                Date = new DateTime(2026, 5, 1),
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ExportCsv(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 31),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: null,
+            accountName: null,
+            categoryName: null,
+            linkedInvoiceId: null,
+            search: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(action);
+        Assert.Equal("text/csv; charset=utf-8", file.ContentType);
+        Assert.StartsWith("money-operations-", file.FileDownloadName);
+        Assert.EndsWith(".csv", file.FileDownloadName);
+
+        var preamble = Encoding.UTF8.GetPreamble();
+        Assert.True(file.FileContents.Take(preamble.Length).SequenceEqual(preamble));
+        var csv = Encoding.UTF8.GetString(file.FileContents[preamble.Length..]);
+
+        Assert.Contains("Дата;Источник;Статус;Движение;Учет;Счет;Контрагент;Сумма;Валюта", csv);
+        Assert.Contains("Банк;В обработке;Приход;Факт;Основной банк;ООО Ромашка;10000.00;RUB", csv);
+        Assert.Contains("\"Оплата по счету; май\"", csv);
+        Assert.Contains("Не сверено", csv);
+        Assert.DoesNotContain("Поставщик", csv);
+    }
+
+    [Fact]
     public async Task CreateMoneyOperation_LinksIncomeTypeWithoutDuplicatingCategoryName()
     {
         await using var db = await CreateContextAsync();

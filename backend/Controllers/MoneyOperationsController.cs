@@ -238,6 +238,43 @@ public class MoneyOperationsController : ControllerBase
         return Ok(response);
     }
 
+    [HttpGet("export.csv")]
+    public async Task<IActionResult> ExportCsv(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        [FromQuery] MoneyOperationDirection? direction,
+        [FromQuery] MoneyOperationAccountingType? accountingType,
+        [FromQuery] int? moneyAccountId = null,
+        [FromQuery] string? accountName = null,
+        [FromQuery] string? categoryName = null,
+        [FromQuery] int? linkedInvoiceId = null,
+        [FromQuery] string? search = null,
+        CancellationToken ct = default)
+    {
+        var csv = await SqliteRetryHelper.ExecuteAsync(
+            async cancellationToken =>
+            {
+                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
+                    .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
+                    .OrderByDescending(item => item.Date)
+                    .ThenByDescending(item => item.Id)
+                    .ToListAsync(cancellationToken);
+
+                return BuildMoneyOperationsCsv(rows.Select(MapMoneyOperationRow));
+            },
+            _logger,
+            ct);
+
+        var content = Encoding.UTF8.GetBytes(csv);
+        var preamble = Encoding.UTF8.GetPreamble();
+        var bytes = new byte[preamble.Length + content.Length];
+        Buffer.BlockCopy(preamble, 0, bytes, 0, preamble.Length);
+        Buffer.BlockCopy(content, 0, bytes, preamble.Length, content.Length);
+
+        return File(bytes, "text/csv; charset=utf-8", $"money-operations-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv");
+    }
+
     [HttpGet("accounts")]
     public async Task<ActionResult<IReadOnlyList<string>>> GetAccounts(
         [FromQuery] MoneyOperationSource? source,
@@ -1765,6 +1802,122 @@ public class MoneyOperationsController : ControllerBase
 
         return MoneyOperationJournalStatus.Posted;
     }
+
+    private static string BuildMoneyOperationsCsv(IEnumerable<MoneyOperationListItemDto> items)
+    {
+        var builder = new StringBuilder();
+        AppendCsvRow(builder, new[]
+        {
+            "Дата",
+            "Источник",
+            "Статус",
+            "Движение",
+            "Учет",
+            "Счет",
+            "Контрагент",
+            "Сумма",
+            "Валюта",
+            "Назначение",
+            "Платежное поручение",
+            "Статья",
+            "Связанный счет",
+            "Статус сверки",
+            "Комментарий сверки",
+        });
+
+        foreach (var item in items)
+        {
+            AppendCsvRow(builder, new[]
+            {
+                item.Date.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU")),
+                GetMoneyOperationSourceLabel(item.Source),
+                GetJournalStatusLabel(item.JournalStatus),
+                GetMoneyOperationDirectionLabel(item.Direction),
+                GetMoneyOperationAccountingTypeLabel(item.AccountingType),
+                item.AccountName ?? item.MoneyAccountName ?? string.Empty,
+                item.CounterpartyName ?? string.Empty,
+                item.Amount.ToString("0.00", CultureInfo.InvariantCulture),
+                item.Currency ?? string.Empty,
+                item.Purpose ?? string.Empty,
+                item.PaymentOrderNumber ?? string.Empty,
+                item.CategoryName ?? string.Empty,
+                item.LinkedInvoiceNumber ?? item.PaidInvoiceNumber ?? string.Empty,
+                GetMoneyOperationMatchStatusLabel(item.MatchStatus),
+                item.MatchComment ?? string.Empty,
+            });
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendCsvRow(StringBuilder builder, IReadOnlyList<string> values)
+    {
+        for (var index = 0; index < values.Count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(';');
+            }
+
+            builder.Append(EscapeCsvField(values[index]));
+        }
+
+        builder.AppendLine();
+    }
+
+    private static string EscapeCsvField(string value)
+    {
+        var text = value.Replace("\"", "\"\"");
+        return text.IndexOfAny([';', '"', '\r', '\n']) >= 0
+            ? $"\"{text}\""
+            : text;
+    }
+
+    private static string GetMoneyOperationSourceLabel(MoneyOperationSource source)
+        => source switch
+        {
+            MoneyOperationSource.Bank => "Банк",
+            MoneyOperationSource.Cash => "Касса",
+            MoneyOperationSource.Card => "Карта",
+            MoneyOperationSource.EMoney => "E-money",
+            _ => source.ToString(),
+        };
+
+    private static string GetJournalStatusLabel(MoneyOperationJournalStatus status)
+        => status switch
+        {
+            MoneyOperationJournalStatus.Posted => "Проведено",
+            MoneyOperationJournalStatus.Processing => "В обработке",
+            MoneyOperationJournalStatus.Error => "Ошибка",
+            _ => status.ToString(),
+        };
+
+    private static string GetMoneyOperationDirectionLabel(MoneyOperationDirection direction)
+        => direction switch
+        {
+            MoneyOperationDirection.Income => "Приход",
+            MoneyOperationDirection.Expense => "Расход",
+            MoneyOperationDirection.Transfer => "Перевод",
+            _ => direction.ToString(),
+        };
+
+    private static string GetMoneyOperationAccountingTypeLabel(MoneyOperationAccountingType accountingType)
+        => accountingType switch
+        {
+            MoneyOperationAccountingType.Fact => "Факт",
+            MoneyOperationAccountingType.Plan => "План",
+            _ => accountingType.ToString(),
+        };
+
+    private static string GetMoneyOperationMatchStatusLabel(MoneyOperationMatchStatus matchStatus)
+        => matchStatus switch
+        {
+            MoneyOperationMatchStatus.Matched => "Сверено",
+            MoneyOperationMatchStatus.ClarificationRequired => "Требует уточнения",
+            MoneyOperationMatchStatus.Ignored => "Игнорируется",
+            MoneyOperationMatchStatus.None => "Не сверено",
+            _ => matchStatus.ToString(),
+        };
 
     private static MoneyOperationSourceSummaryDto MapSourceSummaryRow(MoneyOperationSourceSummaryQueryRow row)
         => new()
