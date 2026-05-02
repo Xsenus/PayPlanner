@@ -94,9 +94,9 @@ vi.mock('../../hooks/useToast', () => ({
 
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
   usePersistedTableSettings: () => ({
-    columnOrder: ['date', 'accountName', 'counterpartyName', 'categoryName', 'purpose'],
-    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'categoryName', 'purpose'],
-    visibleColumns: ['date', 'accountName', 'counterpartyName', 'categoryName', 'purpose'],
+    columnOrder: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'categoryName', 'purpose'],
+    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'categoryName', 'purpose'],
+    visibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'categoryName', 'purpose'],
     pageSize: 25,
     setPageSize: vi.fn(),
     draggingColumn: null,
@@ -206,6 +206,8 @@ function createOperation(overrides: Partial<MoneyOperation> = {}): MoneyOperatio
     moneyAccount: overrides.moneyAccount ?? null,
     accountName: overrides.accountName ?? 'Основной счёт',
     counterpartyName: overrides.counterpartyName ?? 'Поставщик А',
+    responsibleUserId: overrides.responsibleUserId ?? null,
+    responsibleName: overrides.responsibleName ?? null,
     categoryName: overrides.categoryName ?? 'Хозрасходы',
     amount: overrides.amount ?? 1500,
     currency: overrides.currency ?? 'RUB',
@@ -627,6 +629,20 @@ describe('MoneyOperations integration', () => {
     deleteMoneyOperationMock.mockImplementation(async (id: number) => {
       operations = operations.filter((item) => item.id !== id);
     });
+  });
+
+  it('renders operation responsible in the money journal table', async () => {
+    operations = [
+      createOperation({
+        responsibleUserId: 12,
+        responsibleName: 'Анна Иванова',
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByText('Ответственный')).toBeTruthy();
+    expect(await screen.findByText('Анна Иванова')).toBeTruthy();
   });
 
   it('labels icon-only journal controls', async () => {

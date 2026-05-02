@@ -224,6 +224,97 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task GetPaged_ReturnsResponsibleFromLinkedInvoicePayment()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = "Lawyer",
+            Description = "Responsible user role",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var responsible = new User
+        {
+            Email = "anna@example.test",
+            PasswordHash = "hash",
+            FullName = "Анна Иванова",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var invoice = new Invoice
+        {
+            Number = "INV-RESP",
+            Date = new DateTime(2026, 5, 5),
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.AddRange(role, responsible, invoice);
+        await db.SaveChangesAsync();
+
+        var payment = new Payment
+        {
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            InvoiceId = invoice.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 15_000m,
+            PaidAmount = 15_000m,
+            Date = new DateTime(2026, 5, 6),
+            PlannedDate = new DateTime(2026, 5, 6),
+            PaidDate = new DateTime(2026, 5, 6),
+            LastPaymentDate = new DateTime(2026, 5, 6),
+            CounterpartyName = "ООО Ромашка",
+            Description = "Оплата по счету",
+            CreatedAt = DateTime.UtcNow,
+        };
+        payment.Responsibles.Add(new PaymentResponsible
+        {
+            UserId = responsible.Id,
+        });
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 9_000m,
+            Date = new DateTime(2026, 5, 7),
+            LinkedInvoiceId = invoice.Id,
+            MatchStatus = MoneyOperationMatchStatus.Matched,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.AddRange(payment, operation);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 31),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: null,
+            accountName: null,
+            categoryName: null,
+            linkedInvoiceId: null,
+            search: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+        var manualRow = Assert.Single(page.Items, item => item.Id == operation.Id);
+        var paymentRow = Assert.Single(page.Items, item => item.RelatedPaymentId == payment.Id);
+        Assert.Equal(responsible.Id, manualRow.ResponsibleUserId);
+        Assert.Equal("Анна Иванова", manualRow.ResponsibleName);
+        Assert.Equal(responsible.Id, paymentRow.ResponsibleUserId);
+        Assert.Equal("Анна Иванова", paymentRow.ResponsibleName);
+    }
+
+    [Fact]
     public async Task ExportCsv_ReturnsFilteredJournalRowsWithRussianLabels()
     {
         await using var db = await CreateContextAsync();
@@ -282,8 +373,8 @@ public class MoneyOperationsControllerTests
         Assert.True(file.FileContents.Take(preamble.Length).SequenceEqual(preamble));
         var csv = Encoding.UTF8.GetString(file.FileContents[preamble.Length..]);
 
-        Assert.Contains("Дата;Источник;Статус;Движение;Учет;Счет;Контрагент;Сумма;Валюта", csv);
-        Assert.Contains("Банк;В обработке;Приход;Факт;Основной банк;ООО Ромашка;10000.00;RUB", csv);
+        Assert.Contains("Дата;Источник;Статус;Движение;Учет;Счет;Контрагент;Ответственный;Сумма;Валюта", csv);
+        Assert.Contains("Банк;В обработке;Приход;Факт;Основной банк;ООО Ромашка;;10000.00;RUB", csv);
         Assert.Contains("\"Оплата по счету; май\"", csv);
         Assert.Contains("Не сверено", csv);
         Assert.DoesNotContain("Поставщик", csv);
@@ -340,6 +431,7 @@ public class MoneyOperationsControllerTests
         Assert.Equal("text/html; charset=utf-8", content.ContentType);
         Assert.Contains("<h1>Денежный журнал</h1>", content.Content);
         Assert.Contains("Источник: Банк", content.Content);
+        Assert.Contains("<th>Ответственный</th>", content.Content);
         Assert.Contains("В обработке", content.Content);
         Assert.Contains("&lt;ООО Ромашка&gt;", content.Content);
         Assert.DoesNotContain("<ООО Ромашка>", content.Content);

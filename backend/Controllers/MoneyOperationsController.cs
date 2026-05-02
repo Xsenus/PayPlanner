@@ -469,6 +469,18 @@ public class MoneyOperationsController : ControllerBase
                 MoneyAccountName = operation.MoneyAccount != null ? operation.MoneyAccount.Name : null,
                 AccountName = operation.AccountName,
                 CounterpartyName = operation.CounterpartyName,
+                ResponsibleUserId = _db.Payments
+                    .Where(payment => operation.LinkedInvoiceId.HasValue && payment.InvoiceId == operation.LinkedInvoiceId.Value)
+                    .SelectMany(payment => payment.Responsibles)
+                    .OrderBy(link => link.UserId)
+                    .Select(link => (int?)link.UserId)
+                    .FirstOrDefault(),
+                ResponsibleName = _db.Payments
+                    .Where(payment => operation.LinkedInvoiceId.HasValue && payment.InvoiceId == operation.LinkedInvoiceId.Value)
+                    .SelectMany(payment => payment.Responsibles)
+                    .OrderBy(link => link.UserId)
+                    .Select(link => link.User.FullName != null && link.User.FullName != "" ? link.User.FullName : link.User.Email)
+                    .FirstOrDefault(),
                 IncomeTypeId = operation.IncomeTypeId,
                 CategoryName = operation.IncomeType != null ? operation.IncomeType.Name : operation.CategoryName,
                 Amount = operation.Amount,
@@ -579,6 +591,14 @@ public class MoneyOperationsController : ControllerBase
                 MoneyAccountName = null,
                 AccountName = payment.Account,
                 CounterpartyName = payment.CounterpartyName,
+                ResponsibleUserId = payment.Responsibles
+                    .OrderBy(link => link.UserId)
+                    .Select(link => (int?)link.UserId)
+                    .FirstOrDefault(),
+                ResponsibleName = payment.Responsibles
+                    .OrderBy(link => link.UserId)
+                    .Select(link => link.User.FullName != null && link.User.FullName != "" ? link.User.FullName : link.User.Email)
+                    .FirstOrDefault(),
                 IncomeTypeId = payment.IncomeTypeId,
                 CategoryName = payment.IncomeType != null
                     ? payment.IncomeType.Name
@@ -1775,6 +1795,8 @@ public class MoneyOperationsController : ControllerBase
             MoneyAccountName = row.MoneyAccountName,
             AccountName = row.AccountName,
             CounterpartyName = row.CounterpartyName,
+            ResponsibleUserId = row.ResponsibleUserId,
+            ResponsibleName = row.ResponsibleName,
             IncomeTypeId = row.IncomeTypeId,
             CategoryName = row.CategoryName,
             Amount = row.Amount,
@@ -1850,6 +1872,7 @@ public class MoneyOperationsController : ControllerBase
             "Учет",
             "Счет",
             "Контрагент",
+            "Ответственный",
             "Сумма",
             "Валюта",
             "Назначение",
@@ -1871,6 +1894,7 @@ public class MoneyOperationsController : ControllerBase
                 GetMoneyOperationAccountingTypeLabel(item.AccountingType),
                 item.AccountName ?? item.MoneyAccountName ?? string.Empty,
                 item.CounterpartyName ?? string.Empty,
+                item.ResponsibleName ?? string.Empty,
                 item.Amount.ToString("0.00", CultureInfo.InvariantCulture),
                 item.Currency ?? string.Empty,
                 item.Purpose ?? string.Empty,
@@ -1984,6 +2008,7 @@ public class MoneyOperationsController : ControllerBase
                 <td>{Html(GetMoneyOperationAccountingTypeLabel(item.AccountingType))}</td>
                 <td>{Html(item.AccountName ?? item.MoneyAccountName ?? "-")}</td>
                 <td>{Html(item.CounterpartyName ?? "-")}</td>
+                <td>{Html(item.ResponsibleName ?? "-")}</td>
                 <td class="num">{Html(item.Amount.ToString("N2", ru))}</td>
                 <td>{Html(item.Currency ?? "-")}</td>
                 <td>{Html(item.Purpose ?? "-")}</td>
@@ -1995,7 +2020,7 @@ public class MoneyOperationsController : ControllerBase
         }
 
         var emptyRow = items.Count == 0
-            ? """<tr><td colspan="13" class="empty">Операции не найдены</td></tr>"""
+            ? """<tr><td colspan="14" class="empty">Операции не найдены</td></tr>"""
             : string.Empty;
 
         return $$"""
@@ -2057,6 +2082,7 @@ public class MoneyOperationsController : ControllerBase
           <th>Учет</th>
           <th>Счет</th>
           <th>Контрагент</th>
+          <th>Ответственный</th>
           <th>Сумма</th>
           <th>Валюта</th>
           <th>Назначение</th>
@@ -3040,6 +3066,8 @@ public class MoneyOperationsController : ControllerBase
         public string? MoneyAccountName { get; init; }
         public string? AccountName { get; init; }
         public string? CounterpartyName { get; init; }
+        public int? ResponsibleUserId { get; init; }
+        public string? ResponsibleName { get; init; }
         public int? IncomeTypeId { get; init; }
         public string? CategoryName { get; init; }
         public decimal Amount { get; init; }

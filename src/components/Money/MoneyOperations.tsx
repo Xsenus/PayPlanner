@@ -128,6 +128,7 @@ const MONEY_OPERATION_COLUMNS = [
   { key: 'currency', label: 'Валюта', defaultVisible: true, defaultWidth: 90 },
   { key: 'accountName', label: 'Счета', defaultVisible: true, defaultWidth: 180 },
   { key: 'counterpartyName', label: 'Контрагент', defaultVisible: true, defaultWidth: 180 },
+  { key: 'responsibleName', label: 'Ответственный', defaultVisible: true, defaultWidth: 170 },
   { key: 'projectName', label: 'Проект', defaultVisible: true, defaultWidth: 160 },
   { key: 'salesPointName', label: 'Точка продаж', defaultVisible: false, defaultWidth: 160 },
   { key: 'directionName', label: 'Направление', defaultVisible: false, defaultWidth: 160 },
@@ -2565,6 +2566,8 @@ export function MoneyOperations({
         );
       case 'counterpartyName':
         return item.counterpartyName ?? '—';
+      case 'responsibleName':
+        return item.responsibleName ?? '—';
       case 'projectName':
         return item.projectName ? (
           <button

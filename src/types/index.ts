@@ -520,6 +520,8 @@ export interface MoneyOperation {
   moneyAccount?: MoneyAccount | null;
   accountName?: string | null;
   counterpartyName?: string | null;
+  responsibleUserId?: number | null;
+  responsibleName?: string | null;
   incomeTypeId?: number | null;
   categoryName?: string | null;
   amount: number;
