@@ -425,6 +425,112 @@ public class MoneyOperationsController : ControllerBase
         return Ok(summaries);
     }
 
+    [HttpGet("daily-balances")]
+    public async Task<ActionResult<IReadOnlyList<MoneyOperationDailyBalanceDto>>> GetDailyBalances(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
+        CancellationToken ct = default)
+    {
+        var balances = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
+        {
+            var openingQuery = from.HasValue
+                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null)
+                    .Where(item => item.AccountName != null && item.AccountName != "")
+                : null;
+
+            var openingBalances = new Dictionary<(MoneyOperationSource Source, string AccountName), decimal>();
+            if (openingQuery is not null)
+            {
+                var openingRows = await openingQuery
+                    .GroupBy(item => new { item.Source, item.AccountName })
+                    .Select(group => new MoneyOperationDailyBalanceOpeningQueryRow
+                    {
+                        Source = group.Key.Source,
+                        AccountName = group.Key.AccountName!,
+                        Balance =
+                            group.Where(item => item.Direction == MoneyOperationDirection.Income.ToString()).Sum(item => item.Amount) -
+                            group.Where(item => item.Direction == MoneyOperationDirection.Expense.ToString()).Sum(item => item.Amount),
+                    })
+                    .ToListAsync(cancellationToken);
+
+                openingBalances = openingRows
+                    .Select(row => new
+                    {
+                        Source = ParseEnum<MoneyOperationSource>(row.Source),
+                        row.AccountName,
+                        row.Balance,
+                    })
+                    .ToDictionary(row => (row.Source, row.AccountName), row => row.Balance);
+            }
+
+            var movementRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null)
+                .Where(item => item.AccountName != null && item.AccountName != "")
+                .GroupBy(item => new { item.Source, item.AccountName, Date = item.Date.Date })
+                .Select(group => new MoneyOperationDailyBalanceQueryRow
+                {
+                    Date = group.Key.Date,
+                    Source = group.Key.Source,
+                    AccountName = group.Key.AccountName!,
+                    Income = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Income.ToString())
+                        .Sum(item => item.Amount),
+                    Expense = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Expense.ToString())
+                        .Sum(item => item.Amount),
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income.ToString()),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense.ToString()),
+                })
+                .ToListAsync(cancellationToken);
+
+            return movementRows
+                .Select(row => new
+                {
+                    Row = row,
+                    Source = ParseEnum<MoneyOperationSource>(row.Source),
+                })
+                .GroupBy(item => new { item.Source, item.Row.AccountName })
+                .OrderBy(group => group.Key.AccountName)
+                .ThenBy(group => group.Key.Source)
+                .SelectMany(group =>
+                {
+                    var runningBalance = openingBalances.TryGetValue((group.Key.Source, group.Key.AccountName), out var openingBalance)
+                        ? openingBalance
+                        : 0m;
+
+                    return group
+                        .OrderBy(item => item.Row.Date)
+                        .Select(item =>
+                        {
+                            var row = item.Row;
+                            var closingBalance = runningBalance + row.Income - row.Expense;
+                            var result = new MoneyOperationDailyBalanceDto
+                            {
+                                Date = row.Date,
+                                Source = item.Source,
+                                AccountName = row.AccountName,
+                                OpeningBalance = runningBalance,
+                                Income = row.Income,
+                                Expense = row.Expense,
+                                ClosingBalance = closingBalance,
+                                IncomeCount = row.IncomeCount,
+                                ExpenseCount = row.ExpenseCount,
+                                IsBalanced = closingBalance == runningBalance + row.Income - row.Expense,
+                            };
+                            runningBalance = closingBalance;
+                            return result;
+                        });
+                })
+                .OrderBy(row => row.Date)
+                .ThenBy(row => row.AccountName)
+                .ThenBy(row => row.Source)
+                .ToList();
+        }, _logger, ct);
+
+        return Ok(balances);
+    }
+
     private IQueryable<MoneyOperationQueryRow> BuildMoneyOperationsQuery(
         DateTime? from,
         DateTime? to,
@@ -3260,6 +3366,24 @@ public class MoneyOperationsController : ControllerBase
         public decimal Income { get; init; }
         public decimal Expense { get; init; }
         public decimal EndBalance { get; init; }
+        public int IncomeCount { get; init; }
+        public int ExpenseCount { get; init; }
+    }
+
+    private sealed class MoneyOperationDailyBalanceOpeningQueryRow
+    {
+        public string Source { get; init; } = string.Empty;
+        public string AccountName { get; init; } = string.Empty;
+        public decimal Balance { get; init; }
+    }
+
+    private sealed class MoneyOperationDailyBalanceQueryRow
+    {
+        public DateTime Date { get; init; }
+        public string Source { get; init; } = string.Empty;
+        public string AccountName { get; init; } = string.Empty;
+        public decimal Income { get; init; }
+        public decimal Expense { get; init; }
         public int IncomeCount { get; init; }
         public int ExpenseCount { get; init; }
     }

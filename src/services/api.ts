@@ -2319,6 +2319,16 @@ export class ApiService {
     return this.request<MoneyOperationAccountSummary[]>(`/money-operations/account-summaries${q}`);
   }
 
+  async getMoneyOperationDailyBalances(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+    accountName?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<MoneyOperationDailyBalance[]>(`/money-operations/daily-balances${q}`);
+  }
+
   async getMoneyOperation(id: number) {
     return this.request<MoneyOperation>(`/money-operations/${id}`);
   }
@@ -2639,6 +2649,7 @@ import type {
   MoneyOperationDirection,
   MoneyOperationSource,
   MoneyOperationAccountSummary,
+  MoneyOperationDailyBalance,
   MoneyOperationInvoiceCandidate,
   MoneyOperationsSummary,
   PaymentsListSummary,

@@ -48,6 +48,7 @@ import type {
   MoneyOperation,
   MoneyOperationAccountSummary,
   MoneyOperationAccountingType,
+  MoneyOperationDailyBalance,
   MoneyOperationDirection,
   MoneyOperationInvoiceCandidate,
   MoneyOperationJournalStatus,
@@ -1825,6 +1826,7 @@ export function MoneyOperations({
   const [categoryName, setCategoryName] = useState('');
   const [categoryDictionaryOptions, setCategoryDictionaryOptions] = useState<MoneyOperationCategoryOption[]>([]);
   const [accountSummaries, setAccountSummaries] = useState<MoneyOperationAccountSummary[]>([]);
+  const [dailyBalances, setDailyBalances] = useState<MoneyOperationDailyBalance[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingOperation, setEditingOperation] = useState<MoneyOperation | null>(null);
@@ -1972,6 +1974,10 @@ export function MoneyOperations({
     () => accountSummaries.find((account) => account.accountName === accountName) ?? null,
     [accountName, accountSummaries],
   );
+  const visibleDailyBalances = useMemo(
+    () => (accountName ? dailyBalances.filter((item) => item.accountName === accountName) : dailyBalances),
+    [accountName, dailyBalances],
+  );
   const selectedMoneyAccount = useMemo(
     () => (moneyAccountId === '' ? null : moneyAccounts.find((account) => account.id === moneyAccountId) ?? null),
     [moneyAccountId, moneyAccounts],
@@ -2052,6 +2058,7 @@ export function MoneyOperations({
       setAccountName('');
       setMoneyAccounts([]);
       setAccountSummaries([]);
+      setDailyBalances([]);
       return;
     }
 
@@ -2061,17 +2068,20 @@ export function MoneyOperations({
 
     Promise.all([
       apiService.getMoneyOperationAccountSummaries({ from, to, source }),
+      apiService.getMoneyOperationDailyBalances({ from, to, source }),
       apiService.getMoneyAccounts({ source, activeOnly: true }),
     ])
-      .then(([accounts, moneyAccountItems]) => {
+      .then(([accounts, balances, moneyAccountItems]) => {
         if (!cancelled) {
           setAccountSummaries(accounts);
+          setDailyBalances(balances);
           setMoneyAccounts(moneyAccountItems);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setAccountSummaries([]);
+          setDailyBalances([]);
           setMoneyAccounts([]);
         }
       });
@@ -3370,6 +3380,66 @@ export function MoneyOperations({
           </button>
         </div>
       </div>
+
+      {source !== 'Total' && visibleDailyBalances.length > 0 && (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-800">Дневная сверка остатков</div>
+              <div className="mt-1 text-xs text-slate-500">Начало дня + приход - расход = конец дня</div>
+            </div>
+            <div className="text-xs text-slate-500">
+              {accountName || SOURCE_LABELS[source]} · {formatDate(from)} - {formatDate(to)}
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[860px] text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium">День</th>
+                  <th className="px-4 py-2 text-left font-medium">Счет</th>
+                  <th className="px-4 py-2 text-right font-medium">Начало</th>
+                  <th className="px-4 py-2 text-right font-medium">Приход</th>
+                  <th className="px-4 py-2 text-right font-medium">Расход</th>
+                  <th className="px-4 py-2 text-right font-medium">Конец</th>
+                  <th className="px-4 py-2 text-right font-medium">Сверка</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visibleDailyBalances.slice(0, 12).map((item) => (
+                  <tr key={`${item.source}-${item.accountName}-${item.date}`} className="hover:bg-slate-50">
+                    <td className="px-4 py-2 text-slate-700">{formatDate(item.date)}</td>
+                    <td className="px-4 py-2 text-slate-700">{item.accountName}</td>
+                    <td className="px-4 py-2 text-right text-amber-600">{formatMoney(item.openingBalance)} ₽</td>
+                    <td className="px-4 py-2 text-right text-emerald-600">
+                      {formatMoney(item.income)} ₽
+                      <div className="text-[11px] text-slate-400">{item.incomeCount}</div>
+                    </td>
+                    <td className="px-4 py-2 text-right text-rose-600">
+                      {formatMoney(item.expense)} ₽
+                      <div className="text-[11px] text-slate-400">{item.expenseCount}</div>
+                    </td>
+                    <td className="px-4 py-2 text-right font-medium text-amber-600">{formatMoney(item.closingBalance)} ₽</td>
+                    <td className="px-4 py-2 text-right">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
+                          item.isBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                        }`}>
+                        {item.isBalanced ? 'Сходится' : 'Расхождение'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {visibleDailyBalances.length > 12 && (
+            <div className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+              Показаны первые 12 дней из {visibleDailyBalances.length}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-6 rounded-xl border border-slate-200 bg-white">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-4 py-3">

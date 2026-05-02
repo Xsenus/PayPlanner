@@ -27,6 +27,7 @@ const {
   getMoneyAccountsMock,
   getMoneyOperationAccountsMock,
   getMoneyOperationAccountSummariesMock,
+  getMoneyOperationDailyBalancesMock,
   getMoneyOperationInvoiceCandidatesMock,
   getMoneyOperationMock,
   getMoneyOperationsPagedMock,
@@ -62,6 +63,7 @@ const {
   getMoneyAccountsMock: vi.fn(),
   getMoneyOperationAccountsMock: vi.fn(),
   getMoneyOperationAccountSummariesMock: vi.fn(),
+  getMoneyOperationDailyBalancesMock: vi.fn(),
   getMoneyOperationInvoiceCandidatesMock: vi.fn(),
   getMoneyOperationMock: vi.fn(),
   getMoneyOperationsPagedMock: vi.fn(),
@@ -135,6 +137,7 @@ vi.mock('../../services/api', () => ({
     getMoneyAccounts: getMoneyAccountsMock,
     getMoneyOperationAccounts: getMoneyOperationAccountsMock,
     getMoneyOperationAccountSummaries: getMoneyOperationAccountSummariesMock,
+    getMoneyOperationDailyBalances: getMoneyOperationDailyBalancesMock,
     getMoneyOperationInvoiceCandidates: getMoneyOperationInvoiceCandidatesMock,
     getMoneyOperation: getMoneyOperationMock,
     getMoneyOperationsPaged: getMoneyOperationsPagedMock,
@@ -273,6 +276,7 @@ describe('MoneyOperations integration', () => {
     getMoneyAccountsMock.mockReset();
     getMoneyOperationAccountsMock.mockReset();
     getMoneyOperationAccountSummariesMock.mockReset();
+    getMoneyOperationDailyBalancesMock.mockReset();
     getMoneyOperationInvoiceCandidatesMock.mockReset();
     getMoneyOperationMock.mockReset();
     getMoneyOperationsPagedMock.mockReset();
@@ -379,6 +383,7 @@ describe('MoneyOperations integration', () => {
         };
       });
     });
+    getMoneyOperationDailyBalancesMock.mockResolvedValue([]);
     getMoneyOperationInvoiceCandidatesMock.mockResolvedValue([]);
 
     getMoneyOperationsPagedMock.mockImplementation(
@@ -675,6 +680,33 @@ describe('MoneyOperations integration', () => {
 
     expect(await screen.findByText('Вложения')).toBeTruthy();
     expect(await screen.findByText('statement-may.csv')).toBeTruthy();
+  });
+
+  it('renders daily balance reconciliation rows', async () => {
+    operations = [createOperation({ accountName: 'Основной банк', amount: 500 })];
+    getMoneyOperationDailyBalancesMock.mockResolvedValueOnce([
+      {
+        date: '2026-05-01',
+        accountName: 'Основной банк',
+        source: 'Bank',
+        openingBalance: 1000,
+        income: 500,
+        expense: 200,
+        closingBalance: 1300,
+        incomeCount: 1,
+        expenseCount: 1,
+        isBalanced: true,
+      },
+    ]);
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByText('Дневная сверка остатков')).toBeTruthy();
+    expect((await screen.findAllByText('Основной банк')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('Сходится')).toBeTruthy();
+    expect(getMoneyOperationDailyBalancesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'Bank', from: '2026-01-01', to: '2026-12-31' }),
+    );
   });
 
   it('labels icon-only journal controls', async () => {

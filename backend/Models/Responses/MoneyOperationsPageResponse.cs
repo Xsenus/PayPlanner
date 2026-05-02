@@ -72,6 +72,20 @@ public sealed class MoneyOperationAccountSummaryDto
     public int ExpenseCount { get; init; }
 }
 
+public sealed class MoneyOperationDailyBalanceDto
+{
+    public DateTime Date { get; init; }
+    public string AccountName { get; init; } = string.Empty;
+    public MoneyOperationSource Source { get; init; }
+    public decimal OpeningBalance { get; init; }
+    public decimal Income { get; init; }
+    public decimal Expense { get; init; }
+    public decimal ClosingBalance { get; init; }
+    public int IncomeCount { get; init; }
+    public int ExpenseCount { get; init; }
+    public bool IsBalanced { get; init; } = true;
+}
+
 public sealed class MoneyOperationInvoiceCandidateDto
 {
     public int InvoiceId { get; init; }

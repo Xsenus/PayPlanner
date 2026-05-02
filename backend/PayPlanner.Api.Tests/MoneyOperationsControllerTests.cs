@@ -951,6 +951,120 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task GetDailyBalances_ReturnsOpeningAndClosingByAccountDay()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Main bank",
+                CounterpartyName = "Opening",
+                Amount = 1_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 30),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Main bank",
+                CounterpartyName = "Client",
+                Amount = 500m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 5, 1, 10, 15, 0),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Main bank",
+                CounterpartyName = "Supplier",
+                Amount = 200m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 5, 1, 16, 30, 0),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Main bank",
+                CounterpartyName = "Bank fee",
+                Amount = 100m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 5, 2),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Cash,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Cashbox",
+                Amount = 9_999m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 5, 1),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Plan,
+                AccountName = "Main bank",
+                Amount = 9_999m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 5, 1),
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var action = await controller.GetDailyBalances(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 2),
+            source: MoneyOperationSource.Bank,
+            accountName: "Main bank");
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var balances = Assert.IsAssignableFrom<IReadOnlyList<MoneyOperationDailyBalanceDto>>(ok.Value);
+        Assert.Collection(
+            balances,
+            first =>
+            {
+                Assert.Equal(new DateTime(2026, 5, 1), first.Date);
+                Assert.Equal(MoneyOperationSource.Bank, first.Source);
+                Assert.Equal("Main bank", first.AccountName);
+                Assert.Equal(1_000m, first.OpeningBalance);
+                Assert.Equal(500m, first.Income);
+                Assert.Equal(200m, first.Expense);
+                Assert.Equal(1_300m, first.ClosingBalance);
+                Assert.Equal(1, first.IncomeCount);
+                Assert.Equal(1, first.ExpenseCount);
+                Assert.True(first.IsBalanced);
+            },
+            second =>
+            {
+                Assert.Equal(new DateTime(2026, 5, 2), second.Date);
+                Assert.Equal(1_300m, second.OpeningBalance);
+                Assert.Equal(0m, second.Income);
+                Assert.Equal(100m, second.Expense);
+                Assert.Equal(1_200m, second.ClosingBalance);
+                Assert.Equal(0, second.IncomeCount);
+                Assert.Equal(1, second.ExpenseCount);
+                Assert.True(second.IsBalanced);
+            });
+    }
+
+    [Fact]
     public async Task MoneyJournal_FiltersByCategoryName()
     {
         await using var db = await CreateContextAsync();
