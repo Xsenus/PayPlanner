@@ -541,6 +541,8 @@ export interface MoneyOperation {
   linkedInvoiceId?: number | null;
   linkedInvoiceNumber?: string | null;
   linkedInvoiceDate?: string | null;
+  linkedContractId?: number | null;
+  linkedContractNumber?: string | null;
   matchStatus?: MoneyOperationMatchStatus;
   matchedAt?: string | null;
   matchComment?: string | null;

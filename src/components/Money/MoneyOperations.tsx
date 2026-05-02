@@ -135,6 +135,7 @@ const MONEY_OPERATION_COLUMNS = [
   { key: 'paymentPriority', label: 'Приоритет в оплате', defaultVisible: false, defaultWidth: 150 },
   { key: 'purpose', label: 'Назначение', defaultVisible: true, defaultWidth: 240 },
   { key: 'paidAccountName', label: 'Опл. счета', defaultVisible: false, defaultWidth: 160 },
+  { key: 'linkedContractNumber', label: 'Договор', defaultVisible: true, defaultWidth: 160 },
   { key: 'categoryName', label: 'Статья', defaultVisible: true, defaultWidth: 160 },
   { key: 'matchStatus', label: 'Сверка', defaultVisible: true, defaultWidth: 180 },
   { key: 'cashOrder', label: 'Кассовый ордер', defaultVisible: true, defaultWidth: 190 },
@@ -2602,6 +2603,8 @@ export function MoneyOperations({
         ) : (
           item.paidAccountName ?? '—'
         );
+      case 'linkedContractNumber':
+        return item.linkedContractNumber ?? '—';
       case 'matchStatus':
         return renderMatchStatusBadge(item, onOpenInvoice, handleEdit);
       case 'categoryName':

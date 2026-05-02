@@ -250,7 +250,14 @@ public class MoneyOperationsControllerTests
             Date = new DateTime(2026, 5, 5),
             CreatedAt = DateTime.UtcNow,
         };
-        db.AddRange(role, responsible, invoice);
+        var contract = new Contract
+        {
+            Number = "ДОГ-55/26",
+            Date = new DateTime(2026, 5, 1),
+            Status = ContractStatus.Concluded,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.AddRange(role, responsible, invoice, contract);
         await db.SaveChangesAsync();
 
         var payment = new Payment
@@ -258,6 +265,7 @@ public class MoneyOperationsControllerTests
             Account = invoice.Number,
             AccountDate = invoice.Date,
             InvoiceId = invoice.Id,
+            ContractId = contract.Id,
             Type = PaymentType.Income,
             Status = PaymentStatus.Completed,
             Amount = 15_000m,
@@ -312,6 +320,10 @@ public class MoneyOperationsControllerTests
         Assert.Equal("Анна Иванова", manualRow.ResponsibleName);
         Assert.Equal(responsible.Id, paymentRow.ResponsibleUserId);
         Assert.Equal("Анна Иванова", paymentRow.ResponsibleName);
+        Assert.Equal(contract.Id, manualRow.LinkedContractId);
+        Assert.Equal("ДОГ-55/26", manualRow.LinkedContractNumber);
+        Assert.Equal(contract.Id, paymentRow.LinkedContractId);
+        Assert.Equal("ДОГ-55/26", paymentRow.LinkedContractNumber);
     }
 
     [Fact]
@@ -374,6 +386,7 @@ public class MoneyOperationsControllerTests
         var csv = Encoding.UTF8.GetString(file.FileContents[preamble.Length..]);
 
         Assert.Contains("Дата;Источник;Статус;Движение;Учет;Счет;Контрагент;Ответственный;Сумма;Валюта", csv);
+        Assert.Contains("Связанный счет;Договор;Статус сверки", csv);
         Assert.Contains("Банк;В обработке;Приход;Факт;Основной банк;ООО Ромашка;;10000.00;RUB", csv);
         Assert.Contains("\"Оплата по счету; май\"", csv);
         Assert.Contains("Не сверено", csv);
@@ -432,6 +445,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("<h1>Денежный журнал</h1>", content.Content);
         Assert.Contains("Источник: Банк", content.Content);
         Assert.Contains("<th>Ответственный</th>", content.Content);
+        Assert.Contains("<th>Договор</th>", content.Content);
         Assert.Contains("В обработке", content.Content);
         Assert.Contains("&lt;ООО Ромашка&gt;", content.Content);
         Assert.DoesNotContain("<ООО Ромашка>", content.Content);

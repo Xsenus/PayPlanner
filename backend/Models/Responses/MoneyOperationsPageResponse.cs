@@ -34,6 +34,8 @@ public sealed class MoneyOperationListItemDto
     public int? LinkedInvoiceId { get; init; }
     public string? LinkedInvoiceNumber { get; init; }
     public DateTime? LinkedInvoiceDate { get; init; }
+    public int? LinkedContractId { get; init; }
+    public string? LinkedContractNumber { get; init; }
     public MoneyOperationMatchStatus MatchStatus { get; init; }
     public DateTime? MatchedAt { get; init; }
     public string? MatchComment { get; init; }

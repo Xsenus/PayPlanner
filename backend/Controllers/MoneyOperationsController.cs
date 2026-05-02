@@ -500,6 +500,16 @@ public class MoneyOperationsController : ControllerBase
                 LinkedInvoiceId = operation.LinkedInvoiceId,
                 LinkedInvoiceNumber = operation.LinkedInvoice != null ? operation.LinkedInvoice.Number : null,
                 LinkedInvoiceDate = operation.LinkedInvoice != null ? operation.LinkedInvoice.Date : null,
+                LinkedContractId = _db.Payments
+                    .Where(payment => operation.LinkedInvoiceId.HasValue && payment.InvoiceId == operation.LinkedInvoiceId.Value)
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment => payment.ContractId)
+                    .FirstOrDefault(),
+                LinkedContractNumber = _db.Payments
+                    .Where(payment => operation.LinkedInvoiceId.HasValue && payment.InvoiceId == operation.LinkedInvoiceId.Value)
+                    .OrderBy(payment => payment.Id)
+                    .Select(payment => payment.Contract != null ? payment.Contract.Number : null)
+                    .FirstOrDefault(),
                 MatchStatus = operation.MatchStatus == MoneyOperationMatchStatus.Matched
                     ? nameof(MoneyOperationMatchStatus.Matched)
                     : operation.MatchStatus == MoneyOperationMatchStatus.ClarificationRequired
@@ -627,6 +637,8 @@ public class MoneyOperationsController : ControllerBase
                 LinkedInvoiceId = payment.InvoiceId,
                 LinkedInvoiceNumber = payment.Invoice != null ? payment.Invoice.Number : payment.Account,
                 LinkedInvoiceDate = payment.Invoice != null ? payment.Invoice.Date : payment.AccountDate,
+                LinkedContractId = payment.ContractId,
+                LinkedContractNumber = payment.Contract != null ? payment.Contract.Number : null,
                 MatchStatus = payment.InvoiceId.HasValue
                     ? nameof(MoneyOperationMatchStatus.Matched)
                     : nameof(MoneyOperationMatchStatus.None),
@@ -1816,6 +1828,8 @@ public class MoneyOperationsController : ControllerBase
             LinkedInvoiceId = row.LinkedInvoiceId,
             LinkedInvoiceNumber = row.LinkedInvoiceNumber,
             LinkedInvoiceDate = row.LinkedInvoiceDate,
+            LinkedContractId = row.LinkedContractId,
+            LinkedContractNumber = row.LinkedContractNumber,
             MatchStatus = matchStatus,
             MatchedAt = row.MatchedAt,
             MatchComment = row.MatchComment,
@@ -1879,6 +1893,7 @@ public class MoneyOperationsController : ControllerBase
             "Платежное поручение",
             "Статья",
             "Связанный счет",
+            "Договор",
             "Статус сверки",
             "Комментарий сверки",
         });
@@ -1901,6 +1916,7 @@ public class MoneyOperationsController : ControllerBase
                 item.PaymentOrderNumber ?? string.Empty,
                 item.CategoryName ?? string.Empty,
                 item.LinkedInvoiceNumber ?? item.PaidInvoiceNumber ?? string.Empty,
+                item.LinkedContractNumber ?? string.Empty,
                 GetMoneyOperationMatchStatusLabel(item.MatchStatus),
                 item.MatchComment ?? string.Empty,
             });
@@ -2014,13 +2030,14 @@ public class MoneyOperationsController : ControllerBase
                 <td>{Html(item.Purpose ?? "-")}</td>
                 <td>{Html(item.PaymentOrderNumber ?? "-")}</td>
                 <td>{Html(item.LinkedInvoiceNumber ?? item.PaidInvoiceNumber ?? "-")}</td>
+                <td>{Html(item.LinkedContractNumber ?? "-")}</td>
                 <td>{Html(GetMoneyOperationMatchStatusLabel(item.MatchStatus))}</td>
               </tr>
             """);
         }
 
         var emptyRow = items.Count == 0
-            ? """<tr><td colspan="14" class="empty">Операции не найдены</td></tr>"""
+            ? """<tr><td colspan="15" class="empty">Операции не найдены</td></tr>"""
             : string.Empty;
 
         return $$"""
@@ -2088,6 +2105,7 @@ public class MoneyOperationsController : ControllerBase
           <th>Назначение</th>
           <th>П/п</th>
           <th>Счет</th>
+          <th>Договор</th>
           <th>Сверка</th>
         </tr>
       </thead>
@@ -3087,6 +3105,8 @@ public class MoneyOperationsController : ControllerBase
         public int? LinkedInvoiceId { get; init; }
         public string? LinkedInvoiceNumber { get; init; }
         public DateTime? LinkedInvoiceDate { get; init; }
+        public int? LinkedContractId { get; init; }
+        public string? LinkedContractNumber { get; init; }
         public string? MatchStatus { get; init; }
         public DateTime? MatchedAt { get; init; }
         public string? MatchComment { get; init; }

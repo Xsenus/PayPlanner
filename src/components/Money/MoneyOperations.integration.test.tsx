@@ -94,9 +94,9 @@ vi.mock('../../hooks/useToast', () => ({
 
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
   usePersistedTableSettings: () => ({
-    columnOrder: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'categoryName', 'purpose'],
-    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'categoryName', 'purpose'],
-    visibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'categoryName', 'purpose'],
+    columnOrder: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'categoryName', 'purpose'],
+    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'categoryName', 'purpose'],
+    visibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'categoryName', 'purpose'],
     pageSize: 25,
     setPageSize: vi.fn(),
     draggingColumn: null,
@@ -226,6 +226,8 @@ function createOperation(overrides: Partial<MoneyOperation> = {}): MoneyOperatio
     linkedInvoiceId: overrides.linkedInvoiceId ?? null,
     linkedInvoiceNumber: overrides.linkedInvoiceNumber ?? null,
     linkedInvoiceDate: overrides.linkedInvoiceDate ?? null,
+    linkedContractId: overrides.linkedContractId ?? null,
+    linkedContractNumber: overrides.linkedContractNumber ?? null,
     matchStatus: overrides.matchStatus ?? 'None',
     matchedAt: overrides.matchedAt ?? null,
     matchComment: overrides.matchComment ?? null,
@@ -643,6 +645,20 @@ describe('MoneyOperations integration', () => {
 
     expect(await screen.findByText('Ответственный')).toBeTruthy();
     expect(await screen.findByText('Анна Иванова')).toBeTruthy();
+  });
+
+  it('renders linked contract number in the money journal table', async () => {
+    operations = [
+      createOperation({
+        linkedContractId: 44,
+        linkedContractNumber: 'ДОГ-44/26',
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByText('Договор')).toBeTruthy();
+    expect(await screen.findByText('ДОГ-44/26')).toBeTruthy();
   });
 
   it('labels icon-only journal controls', async () => {
