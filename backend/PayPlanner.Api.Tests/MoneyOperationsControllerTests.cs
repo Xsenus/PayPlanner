@@ -768,6 +768,110 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task MoneyJournal_SearchFindsResponsibleContractAndStatementFile()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = "Manager",
+            Description = "Responsible role",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var responsible = new User
+        {
+            Email = "anna.search@example.test",
+            PasswordHash = "hash",
+            FullName = "Анна Поискова",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var invoice = new Invoice
+        {
+            Number = "INV-SEARCH",
+            Date = new DateTime(2026, 4, 10),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var contract = new Contract
+        {
+            Number = "ДОГ-77/26",
+            Title = "Абонентское обслуживание",
+            Date = new DateTime(2026, 4, 1),
+            Status = ContractStatus.Concluded,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var batch = new BankStatementImportBatch
+        {
+            FileName = "statement-june.csv",
+            FileHash = "hash-search",
+            FileSize = 512,
+            Status = BankStatementImportBatchStatus.Applied,
+            RowsRead = 1,
+            CreatedRows = 1,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.AddRange(role, responsible, invoice, contract, batch);
+        await db.SaveChangesAsync();
+
+        var payment = new Payment
+        {
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            InvoiceId = invoice.Id,
+            ContractId = contract.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 12_000m,
+            PaidAmount = 12_000m,
+            Date = new DateTime(2026, 4, 15),
+            PlannedDate = new DateTime(2026, 4, 15),
+            PaidDate = new DateTime(2026, 4, 15),
+            CounterpartyName = "ООО Ромашка",
+            CreatedAt = DateTime.UtcNow,
+        };
+        payment.Responsibles.Add(new PaymentResponsible { UserId = responsible.Id });
+        var linkedOperation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 12_000m,
+            Date = new DateTime(2026, 4, 16),
+            LinkedInvoiceId = invoice.Id,
+            MatchStatus = MoneyOperationMatchStatus.Matched,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var importedOperation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Expense,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 800m,
+            Date = new DateTime(2026, 4, 17),
+            BankStatementImportBatchId = batch.Id,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.AddRange(payment, linkedOperation, importedOperation);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var byResponsible = await SearchMoneyJournalAsync(controller, "анна");
+        Assert.Equal(2, byResponsible.Total);
+        Assert.All(byResponsible.Items, item => Assert.Equal("Анна Поискова", item.ResponsibleName));
+
+        var byContract = await SearchMoneyJournalAsync(controller, "ДОГ-77");
+        Assert.Equal(2, byContract.Total);
+        Assert.All(byContract.Items, item => Assert.Equal("ДОГ-77/26", item.LinkedContractNumber));
+
+        var byStatementFile = await SearchMoneyJournalAsync(controller, "statement-june.csv");
+        var importedItem = Assert.Single(byStatementFile.Items);
+        Assert.Equal(importedOperation.Id, importedItem.Id);
+        Assert.Equal("statement-june.csv", importedItem.AttachmentSummary);
+    }
+
+    [Fact]
     public async Task MoneyJournal_FiltersByAccountAndCalculatesOpeningBalance()
     {
         await using var db = await CreateContextAsync();
@@ -3831,6 +3935,29 @@ public class MoneyOperationsControllerTests
             search: null,
             page: 1,
             pageSize: 25);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        return Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+    }
+
+    private static async Task<MoneyOperationsPageResponse> SearchMoneyJournalAsync(
+        MoneyOperationsController controller,
+        string search)
+    {
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: null,
+            accountName: null,
+            categoryName: null,
+            linkedInvoiceId: null,
+            search: search,
+            page: 1,
+            pageSize: 25,
+            ct: CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         return Assert.IsType<MoneyOperationsPageResponse>(ok.Value);

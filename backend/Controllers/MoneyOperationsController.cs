@@ -753,15 +753,37 @@ public class MoneyOperationsController : ControllerBase
             var term = search.Trim();
             var titleTerm = ToTitleSearchTerm(term);
             query = query.Where(operation =>
+                (operation.AccountName ?? string.Empty).Contains(term) ||
                 (operation.CounterpartyName ?? string.Empty).Contains(term) ||
                 (operation.Purpose ?? string.Empty).Contains(term) ||
+                (operation.PaidInvoiceNumber ?? string.Empty).Contains(term) ||
                 (operation.CategoryName ?? string.Empty).Contains(term) ||
                 (operation.IncomeType != null && operation.IncomeType.Name.Contains(term)) ||
+                (operation.LinkedInvoice != null && operation.LinkedInvoice.Number.Contains(term)) ||
+                (operation.BankStatementImportBatch != null && operation.BankStatementImportBatch.FileName.Contains(term)) ||
+                (operation.LinkedInvoice != null && operation.LinkedInvoice.Payments.Any(payment =>
+                    (payment.Contract != null &&
+                        ((payment.Contract.Number ?? string.Empty).Contains(term) ||
+                         (payment.Contract.Title ?? string.Empty).Contains(term))) ||
+                    payment.Responsibles.Any(link =>
+                        (link.User.FullName ?? string.Empty).Contains(term) ||
+                        link.User.Email.Contains(term)))) ||
                 (titleTerm != term &&
-                    ((operation.CounterpartyName ?? string.Empty).Contains(titleTerm) ||
+                    ((operation.AccountName ?? string.Empty).Contains(titleTerm) ||
+                     (operation.CounterpartyName ?? string.Empty).Contains(titleTerm) ||
                      (operation.Purpose ?? string.Empty).Contains(titleTerm) ||
+                     (operation.PaidInvoiceNumber ?? string.Empty).Contains(titleTerm) ||
                      (operation.CategoryName ?? string.Empty).Contains(titleTerm) ||
-                     (operation.IncomeType != null && operation.IncomeType.Name.Contains(titleTerm)))));
+                     (operation.IncomeType != null && operation.IncomeType.Name.Contains(titleTerm)) ||
+                     (operation.LinkedInvoice != null && operation.LinkedInvoice.Number.Contains(titleTerm)) ||
+                     (operation.BankStatementImportBatch != null && operation.BankStatementImportBatch.FileName.Contains(titleTerm)) ||
+                     (operation.LinkedInvoice != null && operation.LinkedInvoice.Payments.Any(payment =>
+                         (payment.Contract != null &&
+                             ((payment.Contract.Number ?? string.Empty).Contains(titleTerm) ||
+                              (payment.Contract.Title ?? string.Empty).Contains(titleTerm))) ||
+                         payment.Responsibles.Any(link =>
+                             (link.User.FullName ?? string.Empty).Contains(titleTerm) ||
+                             link.User.Email.Contains(titleTerm)))))));
         }
 
         return query;
@@ -900,11 +922,25 @@ public class MoneyOperationsController : ControllerBase
                 (payment.Description ?? string.Empty).Contains(term) ||
                 (payment.Account ?? string.Empty).Contains(term) ||
                 (payment.IncomeType != null && payment.IncomeType.Name.Contains(term)) ||
+                (payment.Invoice != null && payment.Invoice.Number.Contains(term)) ||
+                (payment.Contract != null &&
+                    ((payment.Contract.Number ?? string.Empty).Contains(term) ||
+                     (payment.Contract.Title ?? string.Empty).Contains(term))) ||
+                payment.Responsibles.Any(link =>
+                    (link.User.FullName ?? string.Empty).Contains(term) ||
+                    link.User.Email.Contains(term)) ||
                 (titleTerm != term &&
                     ((payment.CounterpartyName ?? string.Empty).Contains(titleTerm) ||
                      (payment.Description ?? string.Empty).Contains(titleTerm) ||
                      (payment.Account ?? string.Empty).Contains(titleTerm) ||
-                     (payment.IncomeType != null && payment.IncomeType.Name.Contains(titleTerm)))));
+                     (payment.IncomeType != null && payment.IncomeType.Name.Contains(titleTerm)) ||
+                     (payment.Invoice != null && payment.Invoice.Number.Contains(titleTerm)) ||
+                     (payment.Contract != null &&
+                         ((payment.Contract.Number ?? string.Empty).Contains(titleTerm) ||
+                          (payment.Contract.Title ?? string.Empty).Contains(titleTerm))) ||
+                     payment.Responsibles.Any(link =>
+                         (link.User.FullName ?? string.Empty).Contains(titleTerm) ||
+                         link.User.Email.Contains(titleTerm)))));
         }
 
         return query;
