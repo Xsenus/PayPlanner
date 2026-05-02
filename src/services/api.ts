@@ -2397,6 +2397,28 @@ export class ApiService {
     return this.request<MoneyOperationDailyBalance[]>(`/money-operations/daily-balances${q}`);
   }
 
+  async getMoneyBalanceReconciliationResults(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+    accountName?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<MoneyBalanceReconciliationResult[]>(`/money-operations/balance-reconciliation${q}`);
+  }
+
+  async runMoneyBalanceReconciliation(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+    accountName?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<MoneyBalanceReconciliationRunResult>(`/money-operations/balance-reconciliation/run${q}`, {
+      method: 'POST',
+    });
+  }
+
   async getMoneyOperation(id: number) {
     return this.request<MoneyOperation>(`/money-operations/${id}`);
   }
@@ -2724,6 +2746,8 @@ import type {
   MoneyOperationDirection,
   MoneyOperationSource,
   MoneyOperationAccountSummary,
+  MoneyBalanceReconciliationResult,
+  MoneyBalanceReconciliationRunResult,
   MoneyOperationDailyBalance,
   MoneyOperationInvoiceCandidate,
   MoneyOperationsSummary,

@@ -49,6 +49,7 @@ import type {
   MoneyOperation,
   MoneyOperationAccountSummary,
   MoneyOperationAccountingType,
+  MoneyBalanceReconciliationResult,
   MoneyOperationDailyBalance,
   MoneyOperationDirection,
   MoneyOperationInvoiceCandidate,
@@ -1870,6 +1871,8 @@ export function MoneyOperations({
   const [categoryDictionaryOptions, setCategoryDictionaryOptions] = useState<MoneyOperationCategoryOption[]>([]);
   const [accountSummaries, setAccountSummaries] = useState<MoneyOperationAccountSummary[]>([]);
   const [dailyBalances, setDailyBalances] = useState<MoneyOperationDailyBalance[]>([]);
+  const [balanceReconciliationResults, setBalanceReconciliationResults] = useState<MoneyBalanceReconciliationResult[]>([]);
+  const [balanceReconciliationRunning, setBalanceReconciliationRunning] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingOperation, setEditingOperation] = useState<MoneyOperation | null>(null);
@@ -2030,6 +2033,27 @@ export function MoneyOperations({
     () => (accountName ? dailyBalances.filter((item) => item.accountName === accountName) : dailyBalances),
     [accountName, dailyBalances],
   );
+  const visibleBalanceReconciliationResults = useMemo(
+    () => (accountName ? balanceReconciliationResults.filter((item) => item.accountName === accountName) : balanceReconciliationResults),
+    [accountName, balanceReconciliationResults],
+  );
+  const balanceReconciliationByKey = useMemo(
+    () =>
+      new Map(
+        visibleBalanceReconciliationResults.map((item) => [
+          `${item.source}-${item.accountName}-${toDateInputValue(item.date)}`,
+          item,
+        ]),
+      ),
+    [visibleBalanceReconciliationResults],
+  );
+  const latestBalanceReconciliation = useMemo(
+    () =>
+      visibleBalanceReconciliationResults
+        .slice()
+        .sort((left, right) => new Date(right.checkedAt).getTime() - new Date(left.checkedAt).getTime())[0] ?? null,
+    [visibleBalanceReconciliationResults],
+  );
   const selectedMoneyAccount = useMemo(
     () => (moneyAccountId === '' ? null : moneyAccounts.find((account) => account.id === moneyAccountId) ?? null),
     [moneyAccountId, moneyAccounts],
@@ -2111,6 +2135,7 @@ export function MoneyOperations({
       setMoneyAccounts([]);
       setAccountSummaries([]);
       setDailyBalances([]);
+      setBalanceReconciliationResults([]);
       return;
     }
 
@@ -2121,12 +2146,14 @@ export function MoneyOperations({
     Promise.all([
       apiService.getMoneyOperationAccountSummaries({ from, to, source }),
       apiService.getMoneyOperationDailyBalances({ from, to, source }),
+      apiService.getMoneyBalanceReconciliationResults({ from, to, source }),
       apiService.getMoneyAccounts({ source, activeOnly: true }),
     ])
-      .then(([accounts, balances, moneyAccountItems]) => {
+      .then(([accounts, balances, reconciliationResults, moneyAccountItems]) => {
         if (!cancelled) {
           setAccountSummaries(accounts);
           setDailyBalances(balances);
+          setBalanceReconciliationResults(reconciliationResults);
           setMoneyAccounts(moneyAccountItems);
         }
       })
@@ -2134,6 +2161,7 @@ export function MoneyOperations({
         if (!cancelled) {
           setAccountSummaries([]);
           setDailyBalances([]);
+          setBalanceReconciliationResults([]);
           setMoneyAccounts([]);
         }
       });
@@ -2290,6 +2318,32 @@ export function MoneyOperations({
       toast.error(message, 'Выписка банка');
     } finally {
       setBankAutoImportRunning(false);
+    }
+  };
+
+  const handleRunBalanceReconciliation = async () => {
+    if (source === 'Total') {
+      return;
+    }
+
+    setBalanceReconciliationRunning(true);
+    try {
+      const result = await apiService.runMoneyBalanceReconciliation({
+        from,
+        to,
+        source,
+        accountName: accountName || undefined,
+      });
+      setBalanceReconciliationResults(result.items);
+      toast.success(
+        `Сверка сохранена: создано ${result.created}, обновлено ${result.updated}, замечаний ${result.issueCount}.`,
+        'Сверка остатков',
+      );
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось запустить сверку остатков.');
+      toast.error(message, 'Сверка остатков');
+    } finally {
+      setBalanceReconciliationRunning(false);
     }
   };
 
@@ -3667,14 +3721,31 @@ export function MoneyOperations({
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div>
               <div className="text-sm font-semibold text-slate-800">Дневная сверка остатков</div>
-              <div className="mt-1 text-xs text-slate-500">Начало дня + приход - расход = конец дня</div>
+              <div className="mt-1 text-xs text-slate-500">
+                Начало дня + приход - расход = конец дня
+                {latestBalanceReconciliation && (
+                  <span className="ml-2 text-slate-400">
+                    · сохранено {formatDate(latestBalanceReconciliation.checkedAt)}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="text-xs text-slate-500">
-              {accountName || SOURCE_LABELS[source]} · {formatDate(from)} - {formatDate(to)}
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <div className="text-xs text-slate-500">
+                {accountName || SOURCE_LABELS[source]} · {formatDate(from)} - {formatDate(to)}
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleRunBalanceReconciliation()}
+                disabled={balanceReconciliationRunning}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                <CheckCircle2 className={`h-4 w-4 ${balanceReconciliationRunning ? 'animate-pulse' : ''}`} />
+                {balanceReconciliationRunning ? 'Сверка...' : 'Запустить сверку'}
+              </button>
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-sm">
+            <table className="w-full min-w-[960px] text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
                   <th className="px-4 py-2 text-left font-medium">День</th>
@@ -3684,33 +3755,49 @@ export function MoneyOperations({
                   <th className="px-4 py-2 text-right font-medium">Расход</th>
                   <th className="px-4 py-2 text-right font-medium">Конец</th>
                   <th className="px-4 py-2 text-right font-medium">Сверка</th>
+                  <th className="px-4 py-2 text-right font-medium">Сохранено</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {visibleDailyBalances.slice(0, 12).map((item) => (
-                  <tr key={`${item.source}-${item.accountName}-${item.date}`} className="hover:bg-slate-50">
-                    <td className="px-4 py-2 text-slate-700">{formatDate(item.date)}</td>
-                    <td className="px-4 py-2 text-slate-700">{item.accountName}</td>
-                    <td className="px-4 py-2 text-right text-amber-600">{formatMoney(item.openingBalance)} ₽</td>
-                    <td className="px-4 py-2 text-right text-emerald-600">
-                      {formatMoney(item.income)} ₽
-                      <div className="text-[11px] text-slate-400">{item.incomeCount}</div>
-                    </td>
-                    <td className="px-4 py-2 text-right text-rose-600">
-                      {formatMoney(item.expense)} ₽
-                      <div className="text-[11px] text-slate-400">{item.expenseCount}</div>
-                    </td>
-                    <td className="px-4 py-2 text-right font-medium text-amber-600">{formatMoney(item.closingBalance)} ₽</td>
-                    <td className="px-4 py-2 text-right">
-                      <span
-                        className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
-                          item.isBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                        }`}>
-                        {item.isBalanced ? 'Сходится' : 'Расхождение'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {visibleDailyBalances.slice(0, 12).map((item) => {
+                  const savedResult = balanceReconciliationByKey.get(
+                    `${item.source}-${item.accountName}-${toDateInputValue(item.date)}`,
+                  );
+
+                  return (
+                    <tr key={`${item.source}-${item.accountName}-${item.date}`} className="hover:bg-slate-50">
+                      <td className="px-4 py-2 text-slate-700">{formatDate(item.date)}</td>
+                      <td className="px-4 py-2 text-slate-700">{item.accountName}</td>
+                      <td className="px-4 py-2 text-right text-amber-600">{formatMoney(item.openingBalance)} ₽</td>
+                      <td className="px-4 py-2 text-right text-emerald-600">
+                        {formatMoney(item.income)} ₽
+                        <div className="text-[11px] text-slate-400">{item.incomeCount}</div>
+                      </td>
+                      <td className="px-4 py-2 text-right text-rose-600">
+                        {formatMoney(item.expense)} ₽
+                        <div className="text-[11px] text-slate-400">{item.expenseCount}</div>
+                      </td>
+                      <td className="px-4 py-2 text-right font-medium text-amber-600">{formatMoney(item.closingBalance)} ₽</td>
+                      <td className="px-4 py-2 text-right">
+                        <span
+                          className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
+                            item.isBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                          }`}>
+                          {item.isBalanced ? 'Сходится' : 'Расхождение'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {savedResult ? (
+                          <span className="inline-flex rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+                            {formatDate(savedResult.checkedAt)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">Нет</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

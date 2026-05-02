@@ -2358,6 +2358,72 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("MoneyAccounts");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.MoneyBalanceReconciliationResult", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AccountName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CheckedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("ClosingBalance")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<decimal>("Expense")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("ExpenseCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("Income")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("IncomeCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsBalanced")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("IssueCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("OpeningBalance")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CheckedAt")
+                        .HasDatabaseName("IX_MoneyBalanceReconciliationResults_CheckedAt");
+
+                    b.HasIndex("Date")
+                        .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Date");
+
+                    b.HasIndex("Source", "Date")
+                        .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Source_Date");
+
+                    b.HasIndex("Source", "AccountName", "Date")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Source_Account_Date");
+
+                    b.ToTable("MoneyBalanceReconciliationResults");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.MoneyOperation", b =>
                 {
                     b.Property<int>("Id")

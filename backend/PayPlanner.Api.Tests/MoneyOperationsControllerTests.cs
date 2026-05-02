@@ -1189,6 +1189,108 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task RunBalanceReconciliation_PersistsAndUpdatesDailyResults()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Main bank",
+                Amount = 1_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 4, 30),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Main bank",
+                Amount = 500m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 5, 1),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Main bank",
+                Amount = 200m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 5, 1),
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId: 7);
+        var firstAction = await controller.RunBalanceReconciliation(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 1),
+            source: MoneyOperationSource.Bank,
+            accountName: "Main bank");
+
+        var firstOk = Assert.IsType<OkObjectResult>(firstAction.Result);
+        var firstResult = Assert.IsType<MoneyBalanceReconciliationRunResultDto>(firstOk.Value);
+        Assert.Equal(1, firstResult.Created);
+        Assert.Equal(0, firstResult.Updated);
+        Assert.Equal(0, firstResult.IssueCount);
+
+        var saved = Assert.Single(await db.MoneyBalanceReconciliationResults.ToListAsync());
+        Assert.Equal(new DateTime(2026, 5, 1), saved.Date);
+        Assert.Equal(MoneyOperationSource.Bank, saved.Source);
+        Assert.Equal("Main bank", saved.AccountName);
+        Assert.Equal(1_000m, saved.OpeningBalance);
+        Assert.Equal(500m, saved.Income);
+        Assert.Equal(200m, saved.Expense);
+        Assert.Equal(1_300m, saved.ClosingBalance);
+        Assert.Equal(7, saved.CheckedByUserId);
+
+        db.MoneyOperations.Add(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = "Main bank",
+            Amount = 100m,
+            Currency = "RUB",
+            Date = new DateTime(2026, 5, 1),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var secondAction = await controller.RunBalanceReconciliation(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 1),
+            source: MoneyOperationSource.Bank,
+            accountName: "Main bank");
+
+        var secondOk = Assert.IsType<OkObjectResult>(secondAction.Result);
+        var secondResult = Assert.IsType<MoneyBalanceReconciliationRunResultDto>(secondOk.Value);
+        Assert.Equal(0, secondResult.Created);
+        Assert.Equal(1, secondResult.Updated);
+        var updated = Assert.Single(await db.MoneyBalanceReconciliationResults.ToListAsync());
+        Assert.Equal(600m, updated.Income);
+        Assert.Equal(1_400m, updated.ClosingBalance);
+
+        var listAction = await controller.GetBalanceReconciliationResults(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 1),
+            source: MoneyOperationSource.Bank,
+            accountName: "Main bank");
+        var listOk = Assert.IsType<OkObjectResult>(listAction.Result);
+        var rows = Assert.IsAssignableFrom<IReadOnlyList<MoneyBalanceReconciliationResultDto>>(listOk.Value);
+        var row = Assert.Single(rows);
+        Assert.Equal(updated.Id, row.Id);
+        Assert.Equal(1_400m, row.ClosingBalance);
+    }
+
+    [Fact]
     public async Task MoneyJournal_FiltersByCategoryName()
     {
         await using var db = await CreateContextAsync();

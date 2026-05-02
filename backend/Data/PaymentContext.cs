@@ -134,6 +134,7 @@ public class PaymentContext : DbContext
     public DbSet<CashOrder> CashOrders => Set<CashOrder>();
     public DbSet<BankStatementImportBatch> BankStatementImportBatches => Set<BankStatementImportBatch>();
     public DbSet<BankStatementImportRow> BankStatementImportRows => Set<BankStatementImportRow>();
+    public DbSet<MoneyBalanceReconciliationResult> MoneyBalanceReconciliationResults => Set<MoneyBalanceReconciliationResult>();
 
     /// <summary>
     /// Выполняет конфигурацию сущностей, связей и индексов.
@@ -800,6 +801,24 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.MatchStatus).HasDatabaseName("IX_MoneyOperations_MatchStatus");
             entity.HasIndex(e => e.BankStatementImportBatchId).HasDatabaseName("IX_MoneyOperations_BankStatementImportBatchId");
             entity.HasIndex(e => new { e.Source, e.Date }).HasDatabaseName("IX_MoneyOperations_Source_Date");
+        });
+
+        modelBuilder.Entity<MoneyBalanceReconciliationResult>(entity =>
+        {
+            entity.Property(e => e.Date).HasColumnType("date");
+            entity.Property(e => e.Source).HasConversion<string>();
+            entity.Property(e => e.AccountName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.OpeningBalance).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Income).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Expense).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ClosingBalance).HasColumnType("decimal(18,2)");
+
+            entity.HasIndex(e => e.Date).HasDatabaseName("IX_MoneyBalanceReconciliationResults_Date");
+            entity.HasIndex(e => e.CheckedAt).HasDatabaseName("IX_MoneyBalanceReconciliationResults_CheckedAt");
+            entity.HasIndex(e => new { e.Source, e.Date }).HasDatabaseName("IX_MoneyBalanceReconciliationResults_Source_Date");
+            entity.HasIndex(e => new { e.Source, e.AccountName, e.Date })
+                .IsUnique()
+                .HasDatabaseName("IX_MoneyBalanceReconciliationResults_Source_Account_Date");
         });
 
         modelBuilder.Entity<BankStatementImportBatch>(entity =>

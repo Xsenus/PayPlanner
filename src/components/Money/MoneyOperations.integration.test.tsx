@@ -28,6 +28,7 @@ const {
   getMoneyOperationAccountsMock,
   getMoneyOperationAccountSummariesMock,
   getMoneyOperationDailyBalancesMock,
+  getMoneyBalanceReconciliationResultsMock,
   getMoneyOperationInvoiceCandidatesMock,
   getMoneyOperationMock,
   getMoneyOperationsPagedMock,
@@ -38,6 +39,7 @@ const {
   exportMoneyOperationsPdfMock,
   importBankStatementMock,
   postCashOrderMock,
+  runMoneyBalanceReconciliationMock,
   runBankStatementAutoImportMock,
   reprocessBankStatementImportMock,
   rollbackBankStatementImportMock,
@@ -69,6 +71,7 @@ const {
   getMoneyOperationAccountsMock: vi.fn(),
   getMoneyOperationAccountSummariesMock: vi.fn(),
   getMoneyOperationDailyBalancesMock: vi.fn(),
+  getMoneyBalanceReconciliationResultsMock: vi.fn(),
   getMoneyOperationInvoiceCandidatesMock: vi.fn(),
   getMoneyOperationMock: vi.fn(),
   getMoneyOperationsPagedMock: vi.fn(),
@@ -79,6 +82,7 @@ const {
   exportMoneyOperationsPdfMock: vi.fn(),
   importBankStatementMock: vi.fn(),
   postCashOrderMock: vi.fn(),
+  runMoneyBalanceReconciliationMock: vi.fn(),
   runBankStatementAutoImportMock: vi.fn(),
   reprocessBankStatementImportMock: vi.fn(),
   rollbackBankStatementImportMock: vi.fn(),
@@ -148,6 +152,7 @@ vi.mock('../../services/api', () => ({
     getMoneyOperationAccounts: getMoneyOperationAccountsMock,
     getMoneyOperationAccountSummaries: getMoneyOperationAccountSummariesMock,
     getMoneyOperationDailyBalances: getMoneyOperationDailyBalancesMock,
+    getMoneyBalanceReconciliationResults: getMoneyBalanceReconciliationResultsMock,
     getMoneyOperationInvoiceCandidates: getMoneyOperationInvoiceCandidatesMock,
     getMoneyOperation: getMoneyOperationMock,
     getMoneyOperationsPaged: getMoneyOperationsPagedMock,
@@ -158,6 +163,7 @@ vi.mock('../../services/api', () => ({
     exportMoneyOperationsPdf: exportMoneyOperationsPdfMock,
     importBankStatement: importBankStatementMock,
     postCashOrder: postCashOrderMock,
+    runMoneyBalanceReconciliation: runMoneyBalanceReconciliationMock,
     runBankStatementAutoImport: runBankStatementAutoImportMock,
     reprocessBankStatementImport: reprocessBankStatementImportMock,
     rollbackBankStatementImport: rollbackBankStatementImportMock,
@@ -292,6 +298,7 @@ describe('MoneyOperations integration', () => {
     getMoneyOperationAccountsMock.mockReset();
     getMoneyOperationAccountSummariesMock.mockReset();
     getMoneyOperationDailyBalancesMock.mockReset();
+    getMoneyBalanceReconciliationResultsMock.mockReset();
     getMoneyOperationInvoiceCandidatesMock.mockReset();
     getMoneyOperationMock.mockReset();
     getMoneyOperationsPagedMock.mockReset();
@@ -302,6 +309,7 @@ describe('MoneyOperations integration', () => {
     exportMoneyOperationsPdfMock.mockReset();
     importBankStatementMock.mockReset();
     postCashOrderMock.mockReset();
+    runMoneyBalanceReconciliationMock.mockReset();
     runBankStatementAutoImportMock.mockReset();
     reprocessBankStatementImportMock.mockReset();
     rollbackBankStatementImportMock.mockReset();
@@ -404,6 +412,7 @@ describe('MoneyOperations integration', () => {
       });
     });
     getMoneyOperationDailyBalancesMock.mockResolvedValue([]);
+    getMoneyBalanceReconciliationResultsMock.mockResolvedValue([]);
     getMoneyOperationInvoiceCandidatesMock.mockResolvedValue([]);
 
     getMoneyOperationsPagedMock.mockImplementation(
@@ -756,6 +765,64 @@ describe('MoneyOperations integration', () => {
     );
   });
 
+  it('runs and stores daily balance reconciliation rows', async () => {
+    const user = userEvent.setup();
+    operations = [createOperation({ accountName: 'Основной банк', amount: 500 })];
+    getMoneyOperationDailyBalancesMock.mockResolvedValueOnce([
+      {
+        date: '2026-05-01',
+        accountName: 'Основной банк',
+        source: 'Bank',
+        openingBalance: 1000,
+        income: 500,
+        expense: 0,
+        closingBalance: 1500,
+        incomeCount: 1,
+        expenseCount: 0,
+        isBalanced: true,
+      },
+    ]);
+    runMoneyBalanceReconciliationMock.mockResolvedValueOnce({
+      checkedAt: '2026-05-02T10:00:00Z',
+      created: 1,
+      updated: 0,
+      issueCount: 0,
+      items: [
+        {
+          id: 7,
+          date: '2026-05-01',
+          accountName: 'Основной банк',
+          source: 'Bank',
+          openingBalance: 1000,
+          income: 500,
+          expense: 0,
+          closingBalance: 1500,
+          incomeCount: 1,
+          expenseCount: 0,
+          isBalanced: true,
+          issueCount: 0,
+          checkedAt: '2026-05-02T10:00:00Z',
+          checkedByUserId: 7,
+        },
+      ],
+    });
+
+    render(<MoneyOperations source="Bank" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Запустить сверку' }));
+
+    await waitFor(() =>
+      expect(runMoneyBalanceReconciliationMock).toHaveBeenCalledWith(
+        expect.objectContaining({ source: 'Bank', from: '2026-01-01', to: '2026-12-31' }),
+      ),
+    );
+    expect(await screen.findByText('02.05.2026')).toBeTruthy();
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      'Сверка сохранена: создано 1, обновлено 0, замечаний 0.',
+      'Сверка остатков',
+    );
+  });
+
   it('labels icon-only journal controls', async () => {
     const user = userEvent.setup();
 
@@ -916,7 +983,11 @@ describe('MoneyOperations integration', () => {
     await user.clear(screen.getByLabelText(/^Назначение$/));
     await user.type(screen.getByLabelText(/^Назначение$/), 'Оплата по договору');
 
-    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    const modalSaveButton = screen
+      .getAllByRole('button', { name: 'Сохранить' })
+      .find((button) => button.className.includes('bg-blue-600'));
+    expect(modalSaveButton).toBeTruthy();
+    await user.click(modalSaveButton as HTMLElement);
 
     await waitFor(() => expect(createMoneyOperationMock).toHaveBeenCalledTimes(1));
     expect(createMoneyOperationMock).toHaveBeenCalledWith(

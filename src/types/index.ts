@@ -652,6 +652,31 @@ export interface MoneyOperationDailyBalance {
   isBalanced: boolean;
 }
 
+export interface MoneyBalanceReconciliationResult {
+  id: number;
+  date: string;
+  accountName: string;
+  source: MoneyOperationSource;
+  openingBalance: number;
+  income: number;
+  expense: number;
+  closingBalance: number;
+  incomeCount: number;
+  expenseCount: number;
+  isBalanced: boolean;
+  issueCount: number;
+  checkedAt: string;
+  checkedByUserId?: number | null;
+}
+
+export interface MoneyBalanceReconciliationRunResult {
+  checkedAt: string;
+  created: number;
+  updated: number;
+  issueCount: number;
+  items: MoneyBalanceReconciliationResult[];
+}
+
 export interface MoneyOperationInvoiceCandidate {
   invoiceId: number;
   paymentId: number;

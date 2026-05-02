@@ -517,102 +517,249 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? accountName,
         CancellationToken ct = default)
     {
-        var balances = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
+        var balances = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildDailyBalanceRowsAsync(from, to, source, accountName, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(balances);
+    }
+
+    [HttpGet("balance-reconciliation")]
+    public async Task<ActionResult<IReadOnlyList<MoneyBalanceReconciliationResultDto>>> GetBalanceReconciliationResults(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
+        CancellationToken ct = default)
+    {
+        var results = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
-            var openingQuery = from.HasValue
-                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null)
-                    .Where(item => item.AccountName != null && item.AccountName != "")
-                : null;
-
-            var openingBalances = new Dictionary<(MoneyOperationSource Source, string AccountName), decimal>();
-            if (openingQuery is not null)
+            var query = _db.MoneyBalanceReconciliationResults.AsNoTracking().AsQueryable();
+            if (from.HasValue)
             {
-                var openingRows = await openingQuery
-                    .GroupBy(item => new { item.Source, item.AccountName })
-                    .Select(group => new MoneyOperationDailyBalanceOpeningQueryRow
-                    {
-                        Source = group.Key.Source,
-                        AccountName = group.Key.AccountName!,
-                        Balance =
-                            group.Where(item => item.Direction == MoneyOperationDirection.Income.ToString()).Sum(item => item.Amount) -
-                            group.Where(item => item.Direction == MoneyOperationDirection.Expense.ToString()).Sum(item => item.Amount),
-                    })
-                    .ToListAsync(cancellationToken);
-
-                openingBalances = openingRows
-                    .Select(row => new
-                    {
-                        Source = ParseEnum<MoneyOperationSource>(row.Source),
-                        row.AccountName,
-                        row.Balance,
-                    })
-                    .ToDictionary(row => (row.Source, row.AccountName), row => row.Balance);
+                query = query.Where(item => item.Date >= from.Value.Date);
             }
 
-            var movementRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null)
-                .Where(item => item.AccountName != null && item.AccountName != "")
-                .GroupBy(item => new { item.Source, item.AccountName, Date = item.Date.Date })
-                .Select(group => new MoneyOperationDailyBalanceQueryRow
+            if (to.HasValue)
+            {
+                query = query.Where(item => item.Date <= to.Value.Date);
+            }
+
+            if (source.HasValue)
+            {
+                query = query.Where(item => item.Source == source.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(accountName))
+            {
+                var normalizedAccountName = accountName.Trim();
+                query = query.Where(item => item.AccountName == normalizedAccountName);
+            }
+
+            var rows = await query
+                .OrderBy(item => item.Date)
+                .ThenBy(item => item.AccountName)
+                .ThenBy(item => item.Source)
+                .ToListAsync(cancellationToken);
+
+            return rows.Select(MapBalanceReconciliationResult).ToList();
+        }, _logger, ct);
+
+        return Ok(results);
+    }
+
+    [HttpPost("balance-reconciliation/run")]
+    public async Task<ActionResult<MoneyBalanceReconciliationRunResultDto>> RunBalanceReconciliation(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
+        CancellationToken ct = default)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
+        {
+            var balances = await BuildDailyBalanceRowsAsync(from, to, source, accountName, cancellationToken);
+            var keys = balances
+                .Select(item => new { item.Source, item.AccountName, Date = item.Date.Date })
+                .ToList();
+            var keyDates = keys.Select(key => key.Date).Distinct().ToList();
+            var existingRows = keys.Count == 0
+                ? new List<MoneyBalanceReconciliationResult>()
+                : await _db.MoneyBalanceReconciliationResults
+                    .Where(item => keyDates.Contains(item.Date))
+                    .ToListAsync(cancellationToken);
+            var existingByKey = existingRows
+                .Where(item => keys.Any(key =>
+                    key.Source == item.Source &&
+                    key.AccountName == item.AccountName &&
+                    key.Date == item.Date.Date))
+                .ToDictionary(item => (item.Source, item.AccountName, item.Date.Date));
+            var checkedAt = DateTime.UtcNow;
+            var checkedByUserId = GetCurrentUserId();
+            var created = 0;
+            var updated = 0;
+
+            foreach (var balance in balances)
+            {
+                var key = (balance.Source, balance.AccountName, balance.Date.Date);
+                if (!existingByKey.TryGetValue(key, out var row))
                 {
-                    Date = group.Key.Date,
+                    row = new MoneyBalanceReconciliationResult
+                    {
+                        Date = balance.Date.Date,
+                        Source = balance.Source,
+                        AccountName = balance.AccountName,
+                    };
+                    _db.MoneyBalanceReconciliationResults.Add(row);
+                    created++;
+                }
+                else
+                {
+                    updated++;
+                }
+
+                row.OpeningBalance = balance.OpeningBalance;
+                row.Income = balance.Income;
+                row.Expense = balance.Expense;
+                row.ClosingBalance = balance.ClosingBalance;
+                row.IncomeCount = balance.IncomeCount;
+                row.ExpenseCount = balance.ExpenseCount;
+                row.IsBalanced = balance.IsBalanced;
+                row.IssueCount = balance.IsBalanced ? 0 : 1;
+                row.CheckedAt = checkedAt;
+                row.CheckedByUserId = checkedByUserId;
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+            var storedItems = balances.Count == 0
+                ? new List<MoneyBalanceReconciliationResult>()
+                : await _db.MoneyBalanceReconciliationResults
+                    .AsNoTracking()
+                    .Where(item => keyDates.Contains(item.Date))
+                    .ToListAsync(cancellationToken);
+            var itemDtos = storedItems
+                .Where(item => keys.Any(key =>
+                    key.Source == item.Source &&
+                    key.AccountName == item.AccountName &&
+                    key.Date == item.Date.Date))
+                .OrderBy(item => item.Date)
+                .ThenBy(item => item.AccountName)
+                .ThenBy(item => item.Source)
+                .Select(MapBalanceReconciliationResult)
+                .ToList();
+
+            return new MoneyBalanceReconciliationRunResultDto
+            {
+                CheckedAt = checkedAt,
+                Created = created,
+                Updated = updated,
+                IssueCount = itemDtos.Sum(item => item.IssueCount),
+                Items = itemDtos,
+            };
+        }, _logger, ct);
+
+        return Ok(result);
+    }
+
+    private async Task<List<MoneyOperationDailyBalanceDto>> BuildDailyBalanceRowsAsync(
+        DateTime? from,
+        DateTime? to,
+        MoneyOperationSource? source,
+        string? accountName,
+        CancellationToken cancellationToken)
+    {
+        var openingQuery = from.HasValue
+            ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null)
+                .Where(item => item.AccountName != null && item.AccountName != "")
+            : null;
+
+        var openingBalances = new Dictionary<(MoneyOperationSource Source, string AccountName), decimal>();
+        if (openingQuery is not null)
+        {
+            var openingRows = await openingQuery
+                .GroupBy(item => new { item.Source, item.AccountName })
+                .Select(group => new MoneyOperationDailyBalanceOpeningQueryRow
+                {
                     Source = group.Key.Source,
                     AccountName = group.Key.AccountName!,
-                    Income = group
-                        .Where(item => item.Direction == MoneyOperationDirection.Income.ToString())
-                        .Sum(item => item.Amount),
-                    Expense = group
-                        .Where(item => item.Direction == MoneyOperationDirection.Expense.ToString())
-                        .Sum(item => item.Amount),
-                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income.ToString()),
-                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense.ToString()),
+                    Balance =
+                        group.Where(item => item.Direction == MoneyOperationDirection.Income.ToString()).Sum(item => item.Amount) -
+                        group.Where(item => item.Direction == MoneyOperationDirection.Expense.ToString()).Sum(item => item.Amount),
                 })
                 .ToListAsync(cancellationToken);
 
-            return movementRows
+            openingBalances = openingRows
                 .Select(row => new
                 {
-                    Row = row,
                     Source = ParseEnum<MoneyOperationSource>(row.Source),
+                    row.AccountName,
+                    row.Balance,
                 })
-                .GroupBy(item => new { item.Source, item.Row.AccountName })
-                .OrderBy(group => group.Key.AccountName)
-                .ThenBy(group => group.Key.Source)
-                .SelectMany(group =>
-                {
-                    var runningBalance = openingBalances.TryGetValue((group.Key.Source, group.Key.AccountName), out var openingBalance)
-                        ? openingBalance
-                        : 0m;
+                .ToDictionary(row => (row.Source, row.AccountName), row => row.Balance);
+        }
 
-                    return group
-                        .OrderBy(item => item.Row.Date)
-                        .Select(item =>
+        var movementRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null)
+            .Where(item => item.AccountName != null && item.AccountName != "")
+            .GroupBy(item => new { item.Source, item.AccountName, Date = item.Date.Date })
+            .Select(group => new MoneyOperationDailyBalanceQueryRow
+            {
+                Date = group.Key.Date,
+                Source = group.Key.Source,
+                AccountName = group.Key.AccountName!,
+                Income = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income.ToString())
+                    .Sum(item => item.Amount),
+                Expense = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense.ToString())
+                    .Sum(item => item.Amount),
+                IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income.ToString()),
+                ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense.ToString()),
+            })
+            .ToListAsync(cancellationToken);
+
+        return movementRows
+            .Select(row => new
+            {
+                Row = row,
+                Source = ParseEnum<MoneyOperationSource>(row.Source),
+            })
+            .GroupBy(item => new { item.Source, item.Row.AccountName })
+            .OrderBy(group => group.Key.AccountName)
+            .ThenBy(group => group.Key.Source)
+            .SelectMany(group =>
+            {
+                var runningBalance = openingBalances.TryGetValue((group.Key.Source, group.Key.AccountName), out var openingBalance)
+                    ? openingBalance
+                    : 0m;
+
+                return group
+                    .OrderBy(item => item.Row.Date)
+                    .Select(item =>
+                    {
+                        var row = item.Row;
+                        var closingBalance = runningBalance + row.Income - row.Expense;
+                        var result = new MoneyOperationDailyBalanceDto
                         {
-                            var row = item.Row;
-                            var closingBalance = runningBalance + row.Income - row.Expense;
-                            var result = new MoneyOperationDailyBalanceDto
-                            {
-                                Date = row.Date,
-                                Source = item.Source,
-                                AccountName = row.AccountName,
-                                OpeningBalance = runningBalance,
-                                Income = row.Income,
-                                Expense = row.Expense,
-                                ClosingBalance = closingBalance,
-                                IncomeCount = row.IncomeCount,
-                                ExpenseCount = row.ExpenseCount,
-                                IsBalanced = closingBalance == runningBalance + row.Income - row.Expense,
-                            };
-                            runningBalance = closingBalance;
-                            return result;
-                        });
-                })
-                .OrderBy(row => row.Date)
-                .ThenBy(row => row.AccountName)
-                .ThenBy(row => row.Source)
-                .ToList();
-        }, _logger, ct);
-
-        return Ok(balances);
+                            Date = row.Date,
+                            Source = item.Source,
+                            AccountName = row.AccountName,
+                            OpeningBalance = runningBalance,
+                            Income = row.Income,
+                            Expense = row.Expense,
+                            ClosingBalance = closingBalance,
+                            IncomeCount = row.IncomeCount,
+                            ExpenseCount = row.ExpenseCount,
+                            IsBalanced = closingBalance == runningBalance + row.Income - row.Expense,
+                        };
+                        runningBalance = closingBalance;
+                        return result;
+                    });
+            })
+            .OrderBy(row => row.Date)
+            .ThenBy(row => row.AccountName)
+            .ThenBy(row => row.Source)
+            .ToList();
     }
 
     private IQueryable<MoneyOperationQueryRow> BuildMoneyOperationsQuery(
@@ -2176,6 +2323,25 @@ public class MoneyOperationsController : ControllerBase
             CanCreateCashOrder = row.CanCreateCashOrder,
         };
     }
+
+    private static MoneyBalanceReconciliationResultDto MapBalanceReconciliationResult(MoneyBalanceReconciliationResult row)
+        => new()
+        {
+            Id = row.Id,
+            Date = row.Date,
+            Source = row.Source,
+            AccountName = row.AccountName,
+            OpeningBalance = row.OpeningBalance,
+            Income = row.Income,
+            Expense = row.Expense,
+            ClosingBalance = row.ClosingBalance,
+            IncomeCount = row.IncomeCount,
+            ExpenseCount = row.ExpenseCount,
+            IsBalanced = row.IsBalanced,
+            IssueCount = row.IssueCount,
+            CheckedAt = row.CheckedAt,
+            CheckedByUserId = row.CheckedByUserId,
+        };
 
     private static MoneyOperationJournalStatus ResolveJournalStatus(
         MoneyOperationSource source,

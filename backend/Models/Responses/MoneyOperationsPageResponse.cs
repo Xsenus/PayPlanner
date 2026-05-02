@@ -86,6 +86,34 @@ public sealed class MoneyOperationDailyBalanceDto
     public bool IsBalanced { get; init; } = true;
 }
 
+public sealed class MoneyBalanceReconciliationResultDto
+{
+    public int Id { get; init; }
+    public DateTime Date { get; init; }
+    public string AccountName { get; init; } = string.Empty;
+    public MoneyOperationSource Source { get; init; }
+    public decimal OpeningBalance { get; init; }
+    public decimal Income { get; init; }
+    public decimal Expense { get; init; }
+    public decimal ClosingBalance { get; init; }
+    public int IncomeCount { get; init; }
+    public int ExpenseCount { get; init; }
+    public bool IsBalanced { get; init; } = true;
+    public int IssueCount { get; init; }
+    public DateTime CheckedAt { get; init; }
+    public int? CheckedByUserId { get; init; }
+}
+
+public sealed class MoneyBalanceReconciliationRunResultDto
+{
+    public DateTime CheckedAt { get; init; }
+    public int Created { get; init; }
+    public int Updated { get; init; }
+    public int IssueCount { get; init; }
+    public IReadOnlyList<MoneyBalanceReconciliationResultDto> Items { get; init; } =
+        Array.Empty<MoneyBalanceReconciliationResultDto>();
+}
+
 public sealed class MoneyOperationInvoiceCandidateDto
 {
     public int InvoiceId { get; init; }
