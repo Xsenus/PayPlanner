@@ -111,6 +111,7 @@ else
 
 builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
+builder.Services.AddHostedService<MoneyBalanceReconciliationSchedulerService>();
 builder.Services.AddHostedService<UserActivityRetentionService>();
 
 builder.Services.AddCors(options =>

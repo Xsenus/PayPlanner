@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
@@ -1288,6 +1290,44 @@ public class MoneyOperationsControllerTests
         var row = Assert.Single(rows);
         Assert.Equal(updated.Id, row.Id);
         Assert.Equal(1_400m, row.ClosingBalance);
+    }
+
+    [Fact]
+    public async Task MoneyBalanceReconciliationSchedulerService_RunsDailyReconciliationForDate()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.Add(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = "Main bank",
+            Amount = 750m,
+            Currency = "RUB",
+            Date = new DateTime(2026, 5, 1),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(db);
+        services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
+        await using var provider = services.BuildServiceProvider();
+        var scheduler = new MoneyBalanceReconciliationSchedulerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<MoneyBalanceReconciliationSchedulerService>.Instance);
+
+        var result = await scheduler.RunForDateAsync(new DateTime(2026, 5, 1), CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(1, result.Created);
+        var saved = Assert.Single(await db.MoneyBalanceReconciliationResults.ToListAsync());
+        Assert.Equal(new DateTime(2026, 5, 1), saved.Date);
+        Assert.Equal(MoneyOperationSource.Bank, saved.Source);
+        Assert.Equal("Main bank", saved.AccountName);
+        Assert.Equal(750m, saved.Income);
+        Assert.Equal(750m, saved.ClosingBalance);
+        Assert.Null(saved.CheckedByUserId);
     }
 
     [Fact]
