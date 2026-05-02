@@ -492,6 +492,7 @@ export type MoneyOperationDirection = 'Income' | 'Expense' | 'Transfer';
 export type MoneyOperationSource = 'Bank' | 'Cash' | 'Card' | 'EMoney';
 export type MoneyOperationAccountingType = 'Fact' | 'Plan';
 export type MoneyOperationMatchStatus = 'None' | 'ClarificationRequired' | 'Matched' | 'Ignored';
+export type MoneyOperationJournalStatus = 'Posted' | 'Processing' | 'Error';
 export type CashOrderStatus = 'Draft' | 'Posted' | 'Cancelled';
 export type CashOrderType = 'Incoming' | 'Outgoing';
 
@@ -513,6 +514,7 @@ export interface MoneyOperation {
   source: MoneyOperationSource;
   direction: MoneyOperationDirection;
   accountingType: MoneyOperationAccountingType;
+  journalStatus?: MoneyOperationJournalStatus;
   moneyAccountId?: number | null;
   moneyAccountName?: string | null;
   moneyAccount?: MoneyAccount | null;

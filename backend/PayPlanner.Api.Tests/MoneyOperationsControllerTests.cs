@@ -151,6 +151,79 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task GetPaged_ReturnsComputedJournalStatuses()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Amount = 10_000m,
+                Date = new DateTime(2026, 5, 1),
+                MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Amount = 5_000m,
+                Date = new DateTime(2026, 5, 2),
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                Amount = 2_000m,
+                Date = new DateTime(2026, 5, 3),
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Cash,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Plan,
+                Amount = 1_000m,
+                Date = new DateTime(2026, 5, 4),
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 31),
+            source: null,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: null,
+            accountName: null,
+            categoryName: null,
+            linkedInvoiceId: null,
+            search: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+        var statuses = page.Items.ToDictionary(item => item.Amount, item => item.JournalStatus);
+        Assert.Equal(MoneyOperationJournalStatus.Error, statuses[10_000m]);
+        Assert.Equal(MoneyOperationJournalStatus.Processing, statuses[5_000m]);
+        Assert.Equal(MoneyOperationJournalStatus.Posted, statuses[2_000m]);
+        Assert.Equal(MoneyOperationJournalStatus.Processing, statuses[1_000m]);
+    }
+
+    [Fact]
     public async Task CreateMoneyOperation_LinksIncomeTypeWithoutDuplicatingCategoryName()
     {
         await using var db = await CreateContextAsync();

@@ -50,6 +50,7 @@ import type {
   MoneyOperationAccountingType,
   MoneyOperationDirection,
   MoneyOperationInvoiceCandidate,
+  MoneyOperationJournalStatus,
   MoneyOperationSource,
   CashBookSummary,
   CashOrder,
@@ -109,10 +110,17 @@ const MONEY_ACCOUNTING_FILTER_LABELS: Record<MoneyOperationAccountingType, strin
   Plan: 'План',
 };
 
+const MONEY_JOURNAL_STATUS_LABELS: Record<MoneyOperationJournalStatus, string> = {
+  Posted: 'Проведено',
+  Processing: 'В обработке',
+  Error: 'Ошибка',
+};
+
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 const MONEY_OPERATION_COLUMNS = [
   { key: 'source', label: 'Источник', defaultVisible: false, defaultWidth: 120 },
+  { key: 'journalStatus', label: 'Статус', defaultVisible: true, defaultWidth: 150 },
   { key: 'date', label: 'Дата', defaultVisible: true, defaultWidth: 120 },
   { key: 'recognitionDate', label: 'Дата признания', defaultVisible: true, defaultWidth: 150 },
   { key: 'income', label: 'Приход', defaultVisible: true, defaultWidth: 130 },
@@ -138,6 +146,7 @@ const DEFAULT_FORM: MoneyOperation = {
   source: 'Bank',
   direction: 'Income',
   accountingType: 'Fact',
+  journalStatus: 'Processing',
   moneyAccountId: null,
   moneyAccountName: null,
   moneyAccount: null,
@@ -332,6 +341,40 @@ function renderMatchStatusBadge(
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">
       Не сверено
+    </span>
+  );
+}
+
+function renderJournalStatusBadge(item: MoneyOperation) {
+  const status = item.journalStatus ?? 'Posted';
+  const label = MONEY_JOURNAL_STATUS_LABELS[status];
+
+  if (status === 'Error') {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700"
+        title={item.matchComment ?? 'Операция требует проверки'}>
+        <AlertTriangle className="h-3.5 w-3.5" />
+        {label}
+      </span>
+    );
+  }
+
+  if (status === 'Processing') {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700"
+        title={item.matchComment ?? undefined}>
+        <HelpCircle className="h-3.5 w-3.5" />
+        {label}
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+      <CheckCircle2 className="h-3.5 w-3.5" />
+      {label}
     </span>
   );
 }
@@ -2432,6 +2475,8 @@ export function MoneyOperations({
         return formatDate(item.date);
       case 'source':
         return SOURCE_LABELS[item.source];
+      case 'journalStatus':
+        return renderJournalStatusBadge(item);
       case 'recognitionDate':
         return item.recognitionDate ? formatDate(item.recognitionDate) : '—';
       case 'income':

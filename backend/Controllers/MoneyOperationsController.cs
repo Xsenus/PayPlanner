@@ -1684,12 +1684,21 @@ public class MoneyOperationsController : ControllerBase
                     : char.ToUpperInvariant(part[0]) + part[1..]));
 
     private static MoneyOperationListItemDto MapMoneyOperationRow(MoneyOperationQueryRow row)
-        => new()
+    {
+        var source = ParseEnum<MoneyOperationSource>(row.Source);
+        var direction = ParseEnum<MoneyOperationDirection>(row.Direction);
+        var accountingType = ParseEnum<MoneyOperationAccountingType>(row.AccountingType);
+        var matchStatus = string.IsNullOrWhiteSpace(row.MatchStatus)
+            ? MoneyOperationMatchStatus.None
+            : ParseEnum<MoneyOperationMatchStatus>(row.MatchStatus);
+
+        return new()
         {
             Id = row.Id,
-            Source = ParseEnum<MoneyOperationSource>(row.Source),
-            Direction = ParseEnum<MoneyOperationDirection>(row.Direction),
-            AccountingType = ParseEnum<MoneyOperationAccountingType>(row.AccountingType),
+            Source = source,
+            Direction = direction,
+            AccountingType = accountingType,
+            JournalStatus = ResolveJournalStatus(source, direction, accountingType, matchStatus, row.IsReadonly),
             MoneyAccountId = row.MoneyAccountId,
             MoneyAccountName = row.MoneyAccountName,
             AccountName = row.AccountName,
@@ -1713,9 +1722,7 @@ public class MoneyOperationsController : ControllerBase
             LinkedInvoiceId = row.LinkedInvoiceId,
             LinkedInvoiceNumber = row.LinkedInvoiceNumber,
             LinkedInvoiceDate = row.LinkedInvoiceDate,
-            MatchStatus = string.IsNullOrWhiteSpace(row.MatchStatus)
-                ? MoneyOperationMatchStatus.None
-                : ParseEnum<MoneyOperationMatchStatus>(row.MatchStatus),
+            MatchStatus = matchStatus,
             MatchedAt = row.MatchedAt,
             MatchComment = row.MatchComment,
             CreatedAt = row.CreatedAt,
@@ -1729,6 +1736,35 @@ public class MoneyOperationsController : ControllerBase
                 : ParseEnum<CashOrderStatus>(row.CashOrderStatus),
             CanCreateCashOrder = row.CanCreateCashOrder,
         };
+    }
+
+    private static MoneyOperationJournalStatus ResolveJournalStatus(
+        MoneyOperationSource source,
+        MoneyOperationDirection direction,
+        MoneyOperationAccountingType accountingType,
+        MoneyOperationMatchStatus matchStatus,
+        bool isReadonly)
+    {
+        if (matchStatus == MoneyOperationMatchStatus.ClarificationRequired)
+        {
+            return MoneyOperationJournalStatus.Error;
+        }
+
+        if (accountingType == MoneyOperationAccountingType.Plan)
+        {
+            return MoneyOperationJournalStatus.Processing;
+        }
+
+        if (!isReadonly &&
+            source == MoneyOperationSource.Bank &&
+            direction == MoneyOperationDirection.Income &&
+            matchStatus == MoneyOperationMatchStatus.None)
+        {
+            return MoneyOperationJournalStatus.Processing;
+        }
+
+        return MoneyOperationJournalStatus.Posted;
+    }
 
     private static MoneyOperationSourceSummaryDto MapSourceSummaryRow(MoneyOperationSourceSummaryQueryRow row)
         => new()
