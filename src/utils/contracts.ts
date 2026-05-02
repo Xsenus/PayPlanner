@@ -2,6 +2,16 @@ import type { Contract, ContractBillingMode } from '../types';
 
 export type ContractExecutionState = 'actual' | 'pending' | 'in_progress' | 'completed' | 'overrun';
 
+export type ContractReconciliationKind = 'invoices' | 'acts';
+
+export type ContractReconciliationWarning = {
+  kind: ContractReconciliationKind;
+  label: string;
+  amount: number;
+  difference: number;
+  percent: number;
+};
+
 export function getContractBillingModeLabel(mode: ContractBillingMode): string {
   return mode === 'Actual' ? 'Оплата по факту' : 'Фиксированная сумма';
 }
@@ -57,4 +67,42 @@ export function getContractExecutionMetrics(contract: Pick<Contract, 'billingMod
   }
 
   return { state: 'overrun', label: 'Превышен', percent, delta };
+}
+
+export function getContractReconciliationWarnings(
+  contract: Pick<Contract, 'billingMode' | 'amount' | 'invoiceAmountTotal' | 'actAmountTotal'>,
+  thresholdPercent = 5,
+): ContractReconciliationWarning[] {
+  if (contract.billingMode !== 'Fixed' || !contract.amount || contract.amount <= 0) {
+    return [];
+  }
+
+  const target = contract.amount;
+  return [
+    buildReconciliationWarning('invoices', 'счетов', contract.invoiceAmountTotal ?? 0, target, thresholdPercent),
+    buildReconciliationWarning('acts', 'актов', contract.actAmountTotal ?? 0, target, thresholdPercent),
+  ].filter((warning): warning is ContractReconciliationWarning => warning !== null);
+}
+
+function buildReconciliationWarning(
+  kind: ContractReconciliationKind,
+  entityLabel: string,
+  amount: number,
+  target: number,
+  thresholdPercent: number,
+): ContractReconciliationWarning | null {
+  const difference = amount - target;
+  const percent = Math.round((Math.abs(difference) / target) * 1000) / 10;
+  if (percent <= thresholdPercent) {
+    return null;
+  }
+
+  const direction = difference > 0 ? 'выше' : 'ниже';
+  return {
+    kind,
+    label: `Сумма ${entityLabel} ${direction} суммы договора на ${percent}%`,
+    amount,
+    difference,
+    percent,
+  };
 }

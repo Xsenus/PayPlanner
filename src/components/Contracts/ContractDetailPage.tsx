@@ -1,11 +1,16 @@
-import { ArrowLeft, Ban, Check, FileX, GripVertical, Loader2, Pencil, Plus, Save, Search, Send, Settings2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Ban, Check, FileX, GripVertical, Loader2, Pencil, Plus, Save, Search, Send, Settings2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
 import type { Act, Client, Contract, ContractClient, ContractInput, Invoice, Payment } from '../../types';
-import { getContractBillingModeLabel, getContractEffectiveAmount, getContractExecutionMetrics } from '../../utils/contracts';
+import {
+  getContractBillingModeLabel,
+  getContractEffectiveAmount,
+  getContractExecutionMetrics,
+  getContractReconciliationWarnings,
+} from '../../utils/contracts';
 import { fromInputToApiDate, toDateInputValue, toRuDate } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { useToast } from '../../hooks/useToast';
@@ -747,6 +752,12 @@ export function ContractDetailPage({
     amount: null,
     invoiceAmountTotal: 0,
   } as Contract);
+  const reconciliationWarnings = getContractReconciliationWarnings(contract ?? {
+    billingMode: 'Fixed',
+    amount: null,
+    invoiceAmountTotal: 0,
+    actAmountTotal: 0,
+  } as Contract);
   const isTerminated = contract?.status === 'Terminated';
   const isCancelled = contract?.status === 'Cancelled';
   const workflowDisabled = workflowSaving || editMode || isTerminated || isCancelled;
@@ -1047,6 +1058,19 @@ export function ContractDetailPage({
           </div>
         </div>
       </div>
+
+      {reconciliationWarnings.length > 0 ? (
+        <div className="mb-4 flex gap-3 rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="space-y-1">
+            {reconciliationWarnings.map((warning) => (
+              <div key={warning.kind}>
+                {warning.label}: {formatAmount(warning.amount)} · разница {formatAmount(warning.difference)}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mb-3 flex gap-2">
         {(Object.keys(tabLabels) as Tab[]).map((tab) => (
