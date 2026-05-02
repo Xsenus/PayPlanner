@@ -559,6 +559,9 @@ public class PaymentContext : DbContext
             entity.Property(e => e.InvoiceWorkflowStatus).HasMaxLength(32).HasDefaultValue(InvoiceWorkflowStatus.Draft).IsRequired();
             entity.Property(e => e.InvoiceSentForSigningAt);
             entity.Property(e => e.InvoiceSignedAt);
+            entity.Property(e => e.InvoiceCancelledAt);
+            entity.Property(e => e.InvoiceCancelledByUserId);
+            entity.Property(e => e.InvoiceCancelledReason).HasMaxLength(1000);
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.CounterpartyName).HasMaxLength(200);
             entity.Property(e => e.ClientCaseReference).HasMaxLength(300);

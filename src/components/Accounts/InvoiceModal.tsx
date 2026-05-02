@@ -2642,8 +2642,30 @@ export function InvoiceModal({
         return;
       }
 
-      if ((action === 'paid' || action === 'cancel') && invoice?.id) {
-        const nextStatus: PaymentStatus = action === 'paid' ? 'Completed' : 'Cancelled';
+      if (action === 'cancel') {
+        if (!invoice?.id) {
+          throw new Error('Сначала сохраните счёт, затем можно аннулировать его.');
+        }
+
+        const reason = window.prompt('Укажите причину аннулирования счёта');
+        if (!reason?.trim()) {
+          toast.error('Для аннулирования счёта нужна причина.');
+          return;
+        }
+
+        const updated = await apiService.cancelInvoice(invoice.id, reason.trim());
+        setForm((prev) => ({
+          ...prev,
+          status: updated.status,
+          workflowStatus: updated.workflowStatus ?? prev.workflowStatus,
+        }));
+        await onRefreshRequested?.();
+        toast.success('Счёт аннулирован.', 'Счёт обновлён');
+        return;
+      }
+
+      if (action === 'paid' && invoice?.id) {
+        const nextStatus: PaymentStatus = 'Completed';
         const payload = buildInvoicePayload({ statusOverride: nextStatus });
         await apiService.updateInvoice(invoice.id, payload);
         setForm((prev) => ({ ...prev, status: nextStatus }));
@@ -2659,10 +2681,7 @@ export function InvoiceModal({
             : payment
         )));
         await onRefreshRequested?.();
-        toast.success(
-          action === 'paid' ? 'Статус счета обновлен: оплачен.' : 'Статус счета обновлен: отменен.',
-          'Счет обновлен',
-        );
+        toast.success('Статус счета обновлен: оплачен.', 'Счет обновлен');
         return;
       }
 

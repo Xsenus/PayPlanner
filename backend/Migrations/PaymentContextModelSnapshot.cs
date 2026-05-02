@@ -2789,6 +2789,16 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("IncomeTypeId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("InvoiceCancelledAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("InvoiceCancelledByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("InvoiceCancelledReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("INTEGER");
 

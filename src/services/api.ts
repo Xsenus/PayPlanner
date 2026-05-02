@@ -1268,6 +1268,13 @@ export class ApiService {
     return this.request<Invoice>(`/invoices/${id}/mark-signed`, { method: 'POST' });
   }
 
+  async cancelInvoice(id: number, reason: string) {
+    return this.request<Invoice>(`/invoices/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
   async deleteInvoice(id: number) {
     return this.request<void>(`/invoices/${id}`, { method: 'DELETE' });
   }

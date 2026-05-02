@@ -1098,6 +1098,9 @@ export interface Invoice {
   workflowStatus?: InvoiceWorkflowStatus;
   sentForSigningAt?: string | null;
   signedAt?: string | null;
+  cancelledAt?: string | null;
+  cancelledByUserId?: number | null;
+  cancelledReason?: string | null;
   isPaid: boolean;
   paidDate?: string | null;
   clientId?: number | null;

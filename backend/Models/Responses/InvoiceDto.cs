@@ -17,6 +17,9 @@ public class InvoiceDto
     public string WorkflowStatus { get; set; } = InvoiceWorkflowStatus.Draft;
     public DateTime? SentForSigningAt { get; set; }
     public DateTime? SignedAt { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public int? CancelledByUserId { get; set; }
+    public string? CancelledReason { get; set; }
     public bool IsPaid { get; set; }
     public DateTime? PaidDate { get; set; }
     public int? ClientId { get; set; }

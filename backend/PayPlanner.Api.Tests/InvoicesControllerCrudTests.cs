@@ -298,6 +298,86 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Cancel_StoresReasonAndCancelsGeneratedInstallments()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Cancel");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-CANCEL-1", clientId, new DateTime(2026, 4, 20), 12_000m);
+        request.InstallmentPlan = CreateInstallmentPlanRequest(
+            total: 12_000m,
+            startDate: new DateTime(2026, 4, 20),
+            new DateTime(2026, 5, 20),
+            new DateTime(2026, 6, 20));
+
+        var createAction = await controller.Create(request, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var cancelAction = await controller.Cancel(
+            createdDto.Id,
+            new CancelInvoiceRequest { Reason = "Клиент отказался от услуги" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(cancelAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(PaymentStatus.Cancelled, dto.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Cancelled, dto.WorkflowStatus);
+        Assert.NotNull(dto.CancelledAt);
+        Assert.Equal(actorUserId, dto.CancelledByUserId);
+        Assert.Equal("Клиент отказался от услуги", dto.CancelledReason);
+
+        db.ChangeTracker.Clear();
+        var storedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(PaymentStatus.Cancelled, storedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Cancelled, storedParent.InvoiceWorkflowStatus);
+        Assert.NotNull(storedParent.InvoiceCancelledAt);
+        Assert.Equal(actorUserId, storedParent.InvoiceCancelledByUserId);
+        Assert.Equal("Клиент отказался от услуги", storedParent.InvoiceCancelledReason);
+        Assert.Contains("Счёт аннулирован", storedParent.SystemNotes, StringComparison.Ordinal);
+
+        var installments = await LoadInstallmentPaymentsAsync(db, storedParent.InvoiceId!.Value, storedParent.Id);
+        Assert.Equal(2, installments.Count);
+        Assert.All(installments, installment =>
+        {
+            Assert.Equal(PaymentStatus.Cancelled, installment.Status);
+            Assert.False(installment.IsPaid);
+            Assert.Equal(0m, installment.PaidAmount);
+            Assert.Contains("Платёж рассрочки аннулирован", installment.SystemNotes, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public async Task Cancel_RejectsInvoiceWithReceivedMoney()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Paid Cancel");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-CANCEL-PAID", clientId, new DateTime(2026, 4, 20), 12_000m);
+        request.Status = PaymentStatus.Completed;
+        request.PaidDate = new DateTime(2026, 4, 21);
+
+        var createAction = await controller.Create(request, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var cancelAction = await controller.Cancel(
+            createdDto.Id,
+            new CancelInvoiceRequest { Reason = "Ошибка в счёте" },
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(cancelAction.Result);
+        var message = Assert.IsType<string>(badRequest.Value);
+        Assert.Contains("полученной оплатой", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Create_ExpenseInvoice_UsesExpenseClientAsCaseOwner()
     {
         await using var db = await CreateContextAsync();

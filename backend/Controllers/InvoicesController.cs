@@ -346,6 +346,77 @@ public class InvoicesController : ControllerBase
         return Ok(dto);
     }
 
+    [HttpPost("{id:int}/cancel")]
+    public async Task<ActionResult<InvoiceDto>> Cancel(int id, [FromBody] CancelInvoiceRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var reason = Normalize(request.Reason);
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return BadRequest("Cancellation reason is required.");
+        }
+
+        var payment = await _db.Payments
+            .Include(p => p.Invoice)
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        if (payment.DocumentKind != DocumentKind.Invoice)
+        {
+            return BadRequest("Only invoice documents can be cancelled through this endpoint.");
+        }
+
+        var invoiceEntityId = payment.InvoiceId ?? payment.Invoice?.Id;
+        if (!invoiceEntityId.HasValue || invoiceEntityId.Value <= 0)
+        {
+            return BadRequest("Invoice aggregate was not found.");
+        }
+
+        if (HasReceivedMoney(payment))
+        {
+            return BadRequest("Нельзя аннулировать счёт с уже полученной оплатой без сценария возврата или зачёта.");
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        await LockInvoiceAggregateAsync(invoiceEntityId.Value, ct);
+
+        var installmentCancelError = await CancelGeneratedInstallmentPaymentsAsync(invoiceEntityId.Value, payment.Id, reason, ct);
+        if (installmentCancelError is not null)
+        {
+            return installmentCancelError;
+        }
+
+        var now = DateTime.UtcNow;
+        var actor = User.GetDisplayName();
+        var actorId = GetUserId(User);
+
+        payment.Status = PaymentStatus.Cancelled;
+        payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.Cancelled;
+        payment.InvoiceCancelledAt ??= now;
+        payment.InvoiceCancelledByUserId ??= actorId;
+        payment.InvoiceCancelledReason = reason;
+        payment.PaidAmount = 0m;
+        payment.IsPaid = false;
+        payment.PaidDate = null;
+        payment.LastPaymentDate = null;
+
+        PaymentDomainService.AppendSystemNote(payment, $"Счёт аннулирован. Причина: {reason}", now, actor);
+
+        await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
+        ApplyPersistedPaymentState(dto, payment);
+        return Ok(dto);
+    }
+
     [HttpPost]
     public async Task<ActionResult<InvoiceDto>> Create([FromBody] UpsertInvoiceRequest request, CancellationToken ct)
     {
@@ -2613,6 +2684,9 @@ public class InvoicesController : ControllerBase
         WorkflowStatus = x.Payment.InvoiceWorkflowStatus,
         SentForSigningAt = x.Payment.InvoiceSentForSigningAt,
         SignedAt = x.Payment.InvoiceSignedAt,
+        CancelledAt = x.Payment.InvoiceCancelledAt,
+        CancelledByUserId = x.Payment.InvoiceCancelledByUserId,
+        CancelledReason = x.Payment.InvoiceCancelledReason,
         IsPaid = x.Payment.IsPaid,
         PaidDate = x.Payment.PaidDate,
         ClientId = x.Payment.ClientId,
@@ -2701,6 +2775,9 @@ public class InvoicesController : ControllerBase
             WorkflowStatus = raw.WorkflowStatus,
             SentForSigningAt = raw.SentForSigningAt,
             SignedAt = raw.SignedAt,
+            CancelledAt = raw.CancelledAt,
+            CancelledByUserId = raw.CancelledByUserId,
+            CancelledReason = raw.CancelledReason,
             IsPaid = raw.IsPaid,
             PaidDate = raw.PaidDate,
             ClientId = raw.ClientId,
@@ -2765,6 +2842,9 @@ public class InvoicesController : ControllerBase
         dto.WorkflowStatus = payment.InvoiceWorkflowStatus;
         dto.SentForSigningAt = payment.InvoiceSentForSigningAt;
         dto.SignedAt = payment.InvoiceSignedAt;
+        dto.CancelledAt = payment.InvoiceCancelledAt;
+        dto.CancelledByUserId = payment.InvoiceCancelledByUserId;
+        dto.CancelledReason = payment.InvoiceCancelledReason;
         dto.IsPaid = payment.IsPaid;
         dto.PaidDate = payment.PaidDate;
         dto.PaidAmount = ResolvePaidAmount(payment);
@@ -3190,6 +3270,54 @@ public class InvoicesController : ControllerBase
 
         return null;
     }
+
+    private async Task<ActionResult?> CancelGeneratedInstallmentPaymentsAsync(
+        int invoiceEntityId,
+        int representativePaymentId,
+        string reason,
+        CancellationToken ct)
+    {
+        var generatedPayments = await _db.Payments
+            .Where(payment =>
+                payment.InvoiceId == invoiceEntityId
+                && payment.Id != representativePaymentId
+                && payment.SystemNotes != null
+                && payment.SystemNotes.Contains(InstallmentPaymentMarker))
+            .OrderBy(payment => payment.Date)
+            .ThenBy(payment => payment.Id)
+            .ToListAsync(ct);
+
+        var now = DateTime.UtcNow;
+        var actor = User.GetDisplayName();
+        foreach (var payment in generatedPayments)
+        {
+            if (payment.Status == PaymentStatus.Cancelled)
+            {
+                continue;
+            }
+
+            if (HasReceivedMoney(payment))
+            {
+                return BadRequest("Нельзя аннулировать счёт: по одному из платежей рассрочки уже есть оплата.");
+            }
+
+            payment.Status = PaymentStatus.Cancelled;
+            payment.PaidAmount = 0m;
+            payment.IsPaid = false;
+            payment.PaidDate = null;
+            payment.LastPaymentDate = null;
+            PaymentDomainService.AppendSystemNote(payment, $"Платёж рассрочки аннулирован вместе со счётом. Причина: {reason}", now, actor);
+        }
+
+        return null;
+    }
+
+    private static bool HasReceivedMoney(Payment payment)
+        => payment.PaidAmount > 0m
+           || payment.IsPaid
+           || payment.PaidDate.HasValue
+           || payment.LastPaymentDate.HasValue
+           || payment.Status is PaymentStatus.Completed or PaymentStatus.Processing;
 
     private static bool ShouldReplaceInstallmentPlan(UpsertInvoiceRequest request)
     {
@@ -4904,6 +5032,9 @@ public class InvoicesController : ControllerBase
         public string WorkflowStatus { get; init; } = InvoiceWorkflowStatus.Draft;
         public DateTime? SentForSigningAt { get; init; }
         public DateTime? SignedAt { get; init; }
+        public DateTime? CancelledAt { get; init; }
+        public int? CancelledByUserId { get; init; }
+        public string? CancelledReason { get; init; }
         public bool IsPaid { get; init; }
         public DateTime? PaidDate { get; init; }
         public int? ClientId { get; init; }

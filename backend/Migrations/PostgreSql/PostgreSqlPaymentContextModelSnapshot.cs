@@ -2860,6 +2860,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("IncomeTypeId")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("InvoiceCancelledAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("InvoiceCancelledByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("InvoiceCancelledReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("integer");
 

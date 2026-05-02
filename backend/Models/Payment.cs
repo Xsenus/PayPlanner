@@ -65,6 +65,12 @@ namespace PayPlanner.Api.Models
 
         public DateTime? InvoiceSignedAt { get; set; }
 
+        public DateTime? InvoiceCancelledAt { get; set; }
+
+        public int? InvoiceCancelledByUserId { get; set; }
+
+        public string? InvoiceCancelledReason { get; set; }
+
         /// <summary>
         /// Внешний ключ на дело клиента, к которому относится платеж.
         /// </summary>
