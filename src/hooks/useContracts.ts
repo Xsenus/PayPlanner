@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { Contract, ContractInput } from '../types';
+import type { Contract, ContractInput, ContractStatus } from '../types';
 import { extractDisplayErrorMessage } from '../utils/errorUtils';
 
 export type ContractsSortKey = 'date' | 'number' | 'amount' | 'createdAt';
@@ -9,6 +9,7 @@ export interface ContractsFilters {
   from?: string;
   to?: string;
   clientId?: number;
+  status?: ContractStatus;
   search?: string;
   sortBy?: ContractsSortKey;
   sortDir?: 'asc' | 'desc';

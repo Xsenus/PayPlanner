@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Search, X } from 'lucide-react';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
-import type { Contract, ContractBillingMode, ContractClient, ContractInput } from '../../types';
+import type { Contract, ContractBillingMode, ContractClient, ContractInput, ContractStatus } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -24,6 +24,7 @@ type FormState = {
   title: string;
   date: string;
   billingMode: ContractBillingMode;
+  status: ContractStatus;
   isOpenEnded: boolean;
   amount: string;
   description: string;
@@ -38,6 +39,7 @@ function normalizeContractToForm(contract: Contract | null): FormState {
       title: '',
       date: today,
       billingMode: 'Fixed',
+      status: 'Draft',
       isOpenEnded: false,
       amount: '',
       description: '',
@@ -50,6 +52,7 @@ function normalizeContractToForm(contract: Contract | null): FormState {
     title: contract.title ?? '',
     date: toDateInputValue(contract.date) || toDateInputValue(new Date()),
     billingMode: contract.billingMode ?? 'Fixed',
+    status: contract.status ?? 'Draft',
     isOpenEnded: contract.isOpenEnded ?? false,
     amount:
       contract.billingMode !== 'Actual' && contract.amount !== undefined && contract.amount !== null
@@ -280,6 +283,7 @@ export function ContractModal({
       title: form.title.trim() ? form.title.trim() : undefined,
       date: fromInputToApiDate(form.date) ?? form.date,
       billingMode: form.billingMode,
+      status: form.status,
       isOpenEnded: form.isOpenEnded,
       description: form.description.trim() ? form.description.trim() : undefined,
       amount: form.billingMode === 'Fixed' ? amountValue : undefined,
@@ -384,6 +388,20 @@ export function ContractModal({
               >
                 <option value="Fixed">Фиксированная сумма</option>
                 <option value="Actual">Оплата по факту</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Workflow</span>
+              <select
+                value={form.status}
+                onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value as ContractStatus }))}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              >
+                <option value="Draft">Черновик</option>
+                <option value="OnSigning">На подписании</option>
+                <option value="Concluded">Заключен</option>
+                <option value="Terminated">Расторгнут</option>
+                <option value="Cancelled">Отменен</option>
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">

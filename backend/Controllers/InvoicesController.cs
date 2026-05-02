@@ -72,7 +72,8 @@ public class InvoicesController : ControllerBase
         [FromQuery] string? clientRole = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] string? workflowStatus = null)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
@@ -80,6 +81,12 @@ public class InvoicesController : ControllerBase
         if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
         {
             return Unauthorized();
+        }
+
+        var normalizedWorkflowStatus = NormalizeInvoiceWorkflowStatusOrNull(workflowStatus);
+        if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
+        {
+            return BadRequest("Unknown invoice workflow status.");
         }
 
         if (status.HasValue)
@@ -94,6 +101,7 @@ public class InvoicesController : ControllerBase
                 effectiveResponsibleId,
                 search,
                 type,
+                normalizedWorkflowStatus,
                 clientRole,
                 includeMetadata: true,
                 ct);
@@ -133,6 +141,11 @@ public class InvoicesController : ControllerBase
             clientRole,
             ParseIntList(clientIds));
 
+        if (normalizedWorkflowStatus is not null)
+        {
+            query = query.Where(x => x.Payment.InvoiceWorkflowStatus == normalizedWorkflowStatus);
+        }
+
         var total = await query.CountAsync(ct);
         var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
         if (page > totalPages)
@@ -165,12 +178,19 @@ public class InvoicesController : ControllerBase
         [FromQuery] string? search,
         [FromQuery] PaymentType? type,
         [FromQuery] string? clientRole = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] string? workflowStatus = null)
     {
         var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId);
         if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
         {
             return Unauthorized();
+        }
+
+        var normalizedWorkflowStatus = NormalizeInvoiceWorkflowStatusOrNull(workflowStatus);
+        if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
+        {
+            return BadRequest("Unknown invoice workflow status.");
         }
 
         var today = DateTime.UtcNow.Date;
@@ -184,6 +204,7 @@ public class InvoicesController : ControllerBase
             effectiveResponsibleId,
             search,
             type,
+            normalizedWorkflowStatus,
             clientRole,
             includeMetadata: false,
             ct);
@@ -304,6 +325,12 @@ public class InvoicesController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        var workflowStatus = ResolveInvoiceWorkflowStatus(request);
+        if (workflowStatus is null)
+        {
+            return BadRequest("Unknown invoice workflow status.");
+        }
+
         var clientExists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == request.ClientId, ct);
         if (!clientExists)
         {
@@ -381,6 +408,7 @@ public class InvoicesController : ControllerBase
             Date = resolvedDueDate,
             Amount = request.Amount,
             Status = request.Status,
+            InvoiceWorkflowStatus = workflowStatus,
             Type = request.Type,
             Description = Normalize(request.Description) ?? string.Empty,
             IsNotForAccounting = request.IsNotForAccounting,
@@ -454,6 +482,12 @@ public class InvoicesController : ControllerBase
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
+        }
+
+        var workflowStatus = ResolveInvoiceWorkflowStatus(request);
+        if (workflowStatus is null)
+        {
+            return BadRequest("Unknown invoice workflow status.");
         }
 
         var payment = await _db.Payments
@@ -572,6 +606,7 @@ public class InvoicesController : ControllerBase
         payment.Date = resolvedDueDate;
         payment.Amount = request.Amount;
         payment.Status = request.Status;
+        payment.InvoiceWorkflowStatus = workflowStatus;
         payment.Type = request.Type;
         payment.Description = Normalize(request.Description) ?? string.Empty;
         payment.IsNotForAccounting = request.IsNotForAccounting;
@@ -673,6 +708,7 @@ public class InvoicesController : ControllerBase
                 Id = candidate.Id,
                 DocumentKind = candidate.DocumentKind,
                 SystemNotes = candidate.SystemNotes,
+                InvoiceWorkflowStatus = candidate.InvoiceWorkflowStatus,
             })
             .ToListAsync(ct);
 
@@ -698,6 +734,7 @@ public class InvoicesController : ControllerBase
 
         if (Math.Abs(payment.Amount - request.Amount) > 0.01m
             || payment.Status != request.Status
+            || payment.InvoiceWorkflowStatus != (ResolveInvoiceWorkflowStatus(request) ?? payment.InvoiceWorkflowStatus)
             || payment.Type != request.Type
             || payment.ClientId != request.ClientId
             || payment.ExpenseClientId != resolvedExpenseClientId
@@ -722,6 +759,7 @@ public class InvoicesController : ControllerBase
             LegacyAccountDate = payment.LegacyAccountDate,
             Invoice = payment.Invoice,
             Amount = payment.Amount,
+            InvoiceWorkflowStatus = payment.InvoiceWorkflowStatus,
             ClientId = payment.ClientId,
             ExpenseClientId = payment.ExpenseClientId,
             ContractId = payment.ContractId,
@@ -2077,6 +2115,19 @@ public class InvoicesController : ControllerBase
         PaymentDomainService.Normalize(payment);
     }
 
+    private static string? NormalizeInvoiceWorkflowStatusOrNull(string? value)
+        => InvoiceWorkflowStatus.Normalize(value);
+
+    private static string? ResolveInvoiceWorkflowStatus(UpsertInvoiceRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.WorkflowStatus))
+        {
+            return InvoiceWorkflowStatus.Normalize(request.WorkflowStatus);
+        }
+
+        return InvoiceWorkflowStatus.FromPaymentStatus(request.Status, 0m, request.Amount);
+    }
+
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static string? BuildLegacyGroupKey(
@@ -2527,6 +2578,7 @@ public class InvoicesController : ControllerBase
         PaidAmount = x.Payment.PaidAmount,
         Type = x.Payment.Type,
         Status = x.Payment.Status,
+        WorkflowStatus = x.Payment.InvoiceWorkflowStatus,
         IsPaid = x.Payment.IsPaid,
         PaidDate = x.Payment.PaidDate,
         ClientId = x.Payment.ClientId,
@@ -2572,6 +2624,7 @@ public class InvoicesController : ControllerBase
         ActNumber = x.Act != null ? x.Act.Number : null,
         ActTitle = x.Act != null ? x.Act.Title : null,
         ActStatus = x.Act != null ? x.Act.Status : null,
+        ActWorkflowStatus = x.Act != null ? x.Act.WorkflowStatus : null,
         ResponsibleId = x.Act != null ? x.Act.ResponsibleId : null,
         ResponsibleName = x.Act != null && x.Act.Responsible != null
             ? (string.IsNullOrWhiteSpace(x.Act.Responsible.FullName)
@@ -2611,6 +2664,7 @@ public class InvoicesController : ControllerBase
             OutstandingAmount = ResolveOutstandingAmount(raw.Amount, raw.PaidAmount, raw.Status),
             Type = raw.Type,
             Status = raw.Status,
+            WorkflowStatus = raw.WorkflowStatus,
             IsPaid = raw.IsPaid,
             PaidDate = raw.PaidDate,
             ClientId = raw.ClientId,
@@ -2634,6 +2688,7 @@ public class InvoicesController : ControllerBase
             ActNumber = raw.ActNumber,
             ActTitle = raw.ActTitle,
             ActStatus = raw.ActStatus,
+            ActWorkflowStatus = raw.ActWorkflowStatus,
             ResponsibleId = raw.ResponsibleId,
             ResponsibleName = raw.ResponsibleName,
             CounterpartyInn = raw.CounterpartyInn,
@@ -2671,6 +2726,7 @@ public class InvoicesController : ControllerBase
     private static void ApplyPersistedPaymentState(InvoiceDto dto, Payment payment)
     {
         dto.Status = payment.Status;
+        dto.WorkflowStatus = payment.InvoiceWorkflowStatus;
         dto.IsPaid = payment.IsPaid;
         dto.PaidDate = payment.PaidDate;
         dto.PaidAmount = ResolvePaidAmount(payment);
@@ -2687,12 +2743,17 @@ public class InvoicesController : ControllerBase
         int? responsibleId,
         string? search,
         PaymentType? type,
+        string? workflowStatus,
         string? clientRole,
         bool includeMetadata,
         CancellationToken ct)
     {
         var query = BuildInvoiceQuery();
         query = ApplyFilters(query, from, to, null, clientId, contractId, caseId, responsibleId, search, type, clientRole, clientIds);
+        if (!string.IsNullOrWhiteSpace(workflowStatus))
+        {
+            query = query.Where(x => x.Payment.InvoiceWorkflowStatus == workflowStatus);
+        }
 
         var rawItems = await query
             .Select(ProjectionRaw)
@@ -3393,6 +3454,7 @@ public class InvoicesController : ControllerBase
                     Amount = a.Amount,
                     CreationMode = a.CreationMode,
                     Status = a.Status,
+                    WorkflowStatus = a.WorkflowStatus,
                     ClientId = a.ClientId,
                     ClientName = a.Client != null ? a.Client.Name : null,
                     ResponsibleId = a.ResponsibleId,
@@ -4140,6 +4202,7 @@ public class InvoicesController : ControllerBase
             RescheduleCount = representative.RescheduleCount,
             ServiceId = representative.ServiceId,
             Status = representative.Status,
+            InvoiceWorkflowStatus = representative.InvoiceWorkflowStatus,
             SystemNotes = representative.SystemNotes,
             Type = representative.Type,
         };
@@ -4792,6 +4855,7 @@ public class InvoicesController : ControllerBase
         public decimal PaidAmount { get; init; }
         public PaymentType Type { get; init; }
         public PaymentStatus Status { get; init; }
+        public string WorkflowStatus { get; init; } = InvoiceWorkflowStatus.Draft;
         public bool IsPaid { get; init; }
         public DateTime? PaidDate { get; init; }
         public int? ClientId { get; init; }
@@ -4815,6 +4879,7 @@ public class InvoicesController : ControllerBase
         public string? ActNumber { get; init; }
         public string? ActTitle { get; init; }
         public ActStatus? ActStatus { get; init; }
+        public string? ActWorkflowStatus { get; init; }
         public int? ResponsibleId { get; init; }
         public string? ResponsibleName { get; init; }
         public string? CounterpartyInn { get; init; }

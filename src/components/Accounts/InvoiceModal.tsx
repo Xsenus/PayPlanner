@@ -14,6 +14,7 @@ import type {
   InvoiceInput,
   InstallmentPlanInput,
   InvoiceLineItem,
+  InvoiceWorkflowStatus,
   MoneyOperation,
   Payment,
   PaymentKind,
@@ -53,6 +54,7 @@ type FormState = {
   amount: string;
   type: PaymentKind;
   status: PaymentStatus;
+  workflowStatus: InvoiceWorkflowStatus;
   clientId: string;
   expenseClientId: string;
   contractId: string;
@@ -243,6 +245,7 @@ function normalizeInvoiceToForm(
       amount: '',
       type: resolvedType,
       status: 'Pending',
+      workflowStatus: 'Draft',
       clientId: defaultClientId ? String(defaultClientId) : '',
       expenseClientId: resolvedType === 'Expense' && defaultExpenseClientId ? String(defaultExpenseClientId) : '',
       contractId: '',
@@ -262,6 +265,7 @@ function normalizeInvoiceToForm(
     amount: invoice.amount !== undefined && invoice.amount !== null ? String(invoice.amount) : '',
     type: invoice.type ?? resolvedType,
     status: invoice.status ?? 'Pending',
+    workflowStatus: invoice.workflowStatus ?? 'Draft',
     clientId: invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
     expenseClientId: invoice.expenseClientId
       ? String(invoice.expenseClientId)
@@ -572,6 +576,23 @@ function invoiceStatusLabel(status: PaymentStatus): string {
     case 'Pending':
     default:
       return 'Не оплачен';
+  }
+}
+
+function deriveInvoiceWorkflowStatus(status: PaymentStatus, amount: number): InvoiceWorkflowStatus {
+  void amount;
+  switch (status) {
+    case 'Completed':
+      return 'Paid';
+    case 'Processing':
+      return 'PartiallyPaid';
+    case 'Overdue':
+      return 'Overdue';
+    case 'Cancelled':
+      return 'Cancelled';
+    case 'Pending':
+    default:
+      return 'Draft';
   }
 }
 
@@ -2101,6 +2122,7 @@ export function InvoiceModal({
       amount: safeAmount,
       type: form.type,
       status: statusOverride ?? form.status,
+      workflowStatus: statusOverride ? deriveInvoiceWorkflowStatus(statusOverride, safeAmount) : form.workflowStatus,
       clientId: Number(form.clientId),
       expenseClientId: form.type === 'Expense' && form.expenseClientId ? Number(form.expenseClientId) : null,
       contractId: form.contractId ? Number(form.contractId) : undefined,
@@ -3570,6 +3592,23 @@ export function InvoiceModal({
                                   <option value="Overdue">{t('invoiceOverdueBadge') ?? t('overdue') ?? 'Просрочен'}</option>
                                   <option value="Processing">{t('processingStatus') ?? 'В обработке'}</option>
                                   <option value="Cancelled">{t('cancelledStatus') ?? 'Отменён'}</option>
+                                </select>
+                              </label>
+
+                              <label className="flex flex-col gap-1 text-sm">
+                                <span className="flex min-h-7 items-center font-medium text-slate-700">Workflow</span>
+                                <select
+                                  value={form.workflowStatus}
+                                  onChange={handleChange('workflowStatus')}
+                                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                >
+                                  <option value="Draft">Черновик</option>
+                                  <option value="OnSigning">На подписании</option>
+                                  <option value="SignedByClient">Подписан клиентом</option>
+                                  <option value="Paid">Оплачен</option>
+                                  <option value="PartiallyPaid">Частично оплачен</option>
+                                  <option value="Overdue">Просрочен</option>
+                                  <option value="Cancelled">Отменен</option>
                                 </select>
                               </label>
 

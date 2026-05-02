@@ -59,6 +59,8 @@ namespace PayPlanner.Api.Models
 
         public ICollection<CashOrder> CashOrders { get; set; } = new List<CashOrder>();
 
+        public string InvoiceWorkflowStatus { get; set; } = PayPlanner.Api.Models.InvoiceWorkflowStatus.Draft;
+
         /// <summary>
         /// Внешний ключ на дело клиента, к которому относится платеж.
         /// </summary>

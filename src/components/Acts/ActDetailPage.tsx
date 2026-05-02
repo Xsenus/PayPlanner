@@ -104,6 +104,7 @@ function buildActPayload(act: Act, overrides?: Partial<ActInput>): ActInput {
     contractId: act.contractId ?? null,
     counterpartyInn: act.counterpartyInn ?? null,
     status: act.status,
+    workflowStatus: act.workflowStatus ?? 'Draft',
     clientId: act.clientId ?? null,
     responsibleId: act.responsibleId ?? null,
     comment: act.comment ?? null,

@@ -32,6 +32,9 @@ public class UpsertActRequest
     [Required]
     public ActStatus Status { get; set; } = ActStatus.Created;
 
+    [MaxLength(32)]
+    public string? WorkflowStatus { get; set; }
+
     public int? ClientId { get; set; }
 
     public int? ContractId { get; set; }

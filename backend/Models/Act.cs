@@ -13,6 +13,7 @@ public class Act
     public Payment? Invoice { get; set; }
     public string? CounterpartyInn { get; set; }
     public ActStatus Status { get; set; } = ActStatus.Created;
+    public string WorkflowStatus { get; set; } = ActWorkflowStatus.Draft;
     public int? ClientId { get; set; }
     public Client? Client { get; set; }
     public int? ResponsibleId { get; set; }

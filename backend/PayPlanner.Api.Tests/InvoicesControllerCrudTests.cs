@@ -96,6 +96,7 @@ public class InvoicesControllerCrudTests
         Assert.Equal(18_000m, dto.Amount);
         Assert.Equal(PaymentType.Income, dto.Type);
         Assert.Equal(PaymentStatus.Completed, dto.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Paid, dto.WorkflowStatus);
         Assert.True(dto.IsPaid);
         Assert.Equal(new DateTime(2026, 4, 16), dto.PaidDate);
         Assert.Equal(clientId, dto.ClientId);
@@ -120,6 +121,7 @@ public class InvoicesControllerCrudTests
         Assert.Equal(new DateTime(2026, 6, 15), storedParent.Date);
         Assert.Equal(18_000m, storedParent.Amount);
         Assert.Equal(PaymentStatus.Completed, storedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Paid, storedParent.InvoiceWorkflowStatus);
         Assert.Equal(18_000m, storedParent.PaidAmount);
         Assert.Equal(new DateTime(2026, 4, 16), storedParent.PaidDate);
         Assert.Equal("CASE-REF-501", storedParent.ClientCaseReference);
@@ -208,6 +210,51 @@ public class InvoicesControllerCrudTests
             .Select(item => item.UserId)
             .ToListAsync();
         Assert.Equal(new[] { responsibleId1, responsibleId2, responsibleId1, responsibleId2 }, installmentResponsibleIds);
+    }
+
+    [Fact]
+    public async Task Get_FiltersByWorkflowStatus()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Workflow");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var paidRequest = CreateRequest("INV-WF-PAID", clientId, new DateTime(2026, 4, 15), 10_000m);
+        paidRequest.Status = PaymentStatus.Completed;
+        paidRequest.PaidDate = new DateTime(2026, 4, 16);
+        await controller.Create(paidRequest, CancellationToken.None);
+
+        var signingRequest = CreateRequest("INV-WF-SIGN", clientId, new DateTime(2026, 4, 16), 8_000m);
+        signingRequest.WorkflowStatus = InvoiceWorkflowStatus.OnSigning;
+        await controller.Create(signingRequest, CancellationToken.None);
+
+        var action = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            clientRole: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            workflowStatus: InvoiceWorkflowStatus.Paid);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var items = GetAnonymousProperty<List<InvoiceDto>>(ok.Value, "items");
+        var item = Assert.Single(items);
+        Assert.Equal("INV-WF-PAID", item.Number);
+        Assert.Equal(InvoiceWorkflowStatus.Paid, item.WorkflowStatus);
     }
 
     [Fact]

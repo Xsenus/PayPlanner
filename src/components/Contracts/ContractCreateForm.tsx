@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
-import type { ContractBillingMode, ContractClient, ContractInput } from '../../types';
+import type { ContractBillingMode, ContractClient, ContractInput, ContractStatus } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
@@ -12,6 +12,7 @@ type FormState = {
   title: string;
   date: string;
   billingMode: ContractBillingMode;
+  status: ContractStatus;
   isOpenEnded: boolean;
   amount: string;
   description: string;
@@ -30,6 +31,7 @@ function getDefaultFormState(): FormState {
     title: '',
     date: toDateInputValue(new Date()),
     billingMode: 'Fixed',
+    status: 'Draft',
     isOpenEnded: false,
     amount: '',
     description: '',
@@ -157,6 +159,7 @@ export function ContractCreateForm({ onSubmit, submitting, errorMessage }: Contr
       title: form.title.trim() ? form.title.trim() : undefined,
       date: fromInputToApiDate(form.date) ?? form.date,
       billingMode: form.billingMode,
+      status: form.status,
       isOpenEnded: form.isOpenEnded,
       description: form.description.trim() ? form.description.trim() : undefined,
       amount: form.billingMode === 'Fixed' ? amountValue : undefined,

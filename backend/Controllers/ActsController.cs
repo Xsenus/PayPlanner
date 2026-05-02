@@ -62,14 +62,26 @@ public class ActsController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default,
-        [FromQuery] bool includeLineItems = false)
+        [FromQuery] bool includeLineItems = false,
+        [FromQuery] string? workflowStatus = null)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
 
+        var normalizedWorkflowStatus = NormalizeActWorkflowStatusOrNull(workflowStatus);
+        if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
+        {
+            return ValidationError(nameof(workflowStatus), "Unknown act workflow status.");
+        }
+
         var query = _db.Acts.AsNoTracking()
             .ApplyActFilters(from, to, status, type, clientId, responsibleId, search)
             .ApplyActSort(sortBy, sortDir);
+
+        if (normalizedWorkflowStatus is not null)
+        {
+            query = query.Where(act => act.WorkflowStatus == normalizedWorkflowStatus);
+        }
 
         var clientIdList = ParseIntList(clientIds);
         if (clientIdList.Count > 0)
@@ -132,10 +144,22 @@ public class ActsController : ControllerBase
         [FromQuery] int? clientId,
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] string? workflowStatus = null)
     {
+        var normalizedWorkflowStatus = NormalizeActWorkflowStatusOrNull(workflowStatus);
+        if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
+        {
+            return ValidationError(nameof(workflowStatus), "Unknown act workflow status.");
+        }
+
         var query = _db.Acts.AsNoTracking()
             .ApplyActFilters(from, to, status, type, clientId, responsibleId, search);
+
+        if (normalizedWorkflowStatus is not null)
+        {
+            query = query.Where(act => act.WorkflowStatus == normalizedWorkflowStatus);
+        }
 
         var groups = await query
             .GroupBy(a => a.Status)
@@ -213,6 +237,12 @@ public class ActsController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        var workflowStatus = ResolveActWorkflowStatus(request);
+        if (workflowStatus is null)
+        {
+            return ValidationError(nameof(request.WorkflowStatus), "Unknown act workflow status.");
+        }
+
         Payment? invoice = null;
         if (request.InvoiceId.HasValue)
         {
@@ -237,6 +267,7 @@ public class ActsController : ControllerBase
             InvoiceId = request.InvoiceId,
             CounterpartyInn = Normalize(request.CounterpartyInn),
             Status = request.Status,
+            WorkflowStatus = workflowStatus,
             ClientId = request.ClientId,
             ResponsibleId = request.ResponsibleId ?? User.GetUserId(),
             Comment = Normalize(request.Comment),
@@ -265,6 +296,12 @@ public class ActsController : ControllerBase
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
+        }
+
+        var workflowStatus = ResolveActWorkflowStatus(request);
+        if (workflowStatus is null)
+        {
+            return ValidationError(nameof(request.WorkflowStatus), "Unknown act workflow status.");
         }
 
         var act = await _db.Acts
@@ -297,6 +334,7 @@ public class ActsController : ControllerBase
         act.InvoiceId = request.InvoiceId;
         act.CounterpartyInn = Normalize(request.CounterpartyInn);
         act.Status = request.Status;
+        act.WorkflowStatus = workflowStatus;
         act.ClientId = request.ClientId;
         act.ResponsibleId = request.ResponsibleId;
         act.Comment = Normalize(request.Comment);
@@ -528,6 +566,7 @@ public class ActsController : ControllerBase
         ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
         CounterpartyInn = act.CounterpartyInn,
         Status = act.Status,
+        WorkflowStatus = act.WorkflowStatus,
         ClientId = act.ClientId,
         ClientName = act.Client != null ? act.Client.Name : null,
         ResponsibleId = act.ResponsibleId,
@@ -934,6 +973,19 @@ public class ActsController : ControllerBase
         return ValidationProblem(ModelState);
     }
 
+    private static string? NormalizeActWorkflowStatusOrNull(string? value)
+        => ActWorkflowStatus.Normalize(value);
+
+    private static string? ResolveActWorkflowStatus(UpsertActRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.WorkflowStatus))
+        {
+            return ActWorkflowStatus.Normalize(request.WorkflowStatus);
+        }
+
+        return ActWorkflowStatus.FromActStatus(request.Status);
+    }
+
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -954,6 +1006,7 @@ public class ActsController : ControllerBase
             ContractId = act.Invoice?.ContractId,
             CounterpartyInn = act.CounterpartyInn,
             Status = act.Status,
+            WorkflowStatus = act.WorkflowStatus,
             ClientId = act.ClientId,
             ClientName = act.Client?.Name,
             ResponsibleId = act.ResponsibleId,

@@ -40,6 +40,8 @@ public class Contract
 
     public string BillingMode { get; set; } = ContractBillingMode.Fixed;
 
+    public string Status { get; set; } = ContractStatus.Draft;
+
     public bool IsOpenEnded { get; set; }
 
     /// <summary>
@@ -56,6 +58,16 @@ public class Contract
     /// Дата расторжения договора.
     /// </summary>
     public DateTime? TerminationDate { get; set; }
+
+    public string? TerminationReason { get; set; }
+
+    public string? TerminationTerms { get; set; }
+
+    public string? TerminationFinancialTerms { get; set; }
+
+    public DateTime? CancelledAt { get; set; }
+
+    public string? CancelledReason { get; set; }
 
     /// <summary>
     /// Дата и время создания записи.

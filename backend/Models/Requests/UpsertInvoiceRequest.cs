@@ -23,6 +23,9 @@ public class UpsertInvoiceRequest
     [Required]
     public PaymentStatus Status { get; set; } = PaymentStatus.Pending;
 
+    [MaxLength(32)]
+    public string? WorkflowStatus { get; set; }
+
     public DateTime? PaidDate { get; set; }
 
     [Required]

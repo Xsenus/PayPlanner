@@ -59,15 +59,67 @@ public class ContractsControllerTests
         var created = Assert.IsType<CreatedResult>(actionResult.Result);
         var dto = Assert.IsType<ContractDto>(created.Value);
         Assert.Equal(ContractBillingMode.Actual, dto.BillingMode);
+        Assert.Equal(ContractStatus.Draft, dto.Status);
         Assert.True(dto.IsOpenEnded);
         Assert.Null(dto.Amount);
         Assert.Null(dto.ValidUntil);
 
         var contract = await db.Contracts.AsNoTracking().SingleAsync();
         Assert.Equal(ContractBillingMode.Actual, contract.BillingMode);
+        Assert.Equal(ContractStatus.Draft, contract.Status);
         Assert.True(contract.IsOpenEnded);
         Assert.Null(contract.Amount);
         Assert.Null(contract.ValidUntil);
+    }
+
+    [Fact]
+    public async Task Get_FiltersByContractStatus()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-WF-CONCLUDED",
+                Date = new DateTime(2026, 4, 14),
+                BillingMode = ContractBillingMode.Fixed,
+                Status = ContractStatus.Concluded,
+                Amount = 10_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+
+        await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-WF-DRAFT",
+                Date = new DateTime(2026, 4, 15),
+                BillingMode = ContractBillingMode.Fixed,
+                Status = ContractStatus.Draft,
+                Amount = 8_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+
+        var actionResult = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            search: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            status: ContractStatus.Concluded);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var items = GetAnonymousProperty<IEnumerable<ContractDto>>(ok.Value!, "items").ToList();
+        var item = Assert.Single(items);
+        Assert.Equal("CT-WF-CONCLUDED", item.Number);
+        Assert.Equal(ContractStatus.Concluded, item.Status);
     }
 
     [Fact]

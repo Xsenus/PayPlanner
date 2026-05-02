@@ -773,9 +773,13 @@ public class ActsControllerTests
         Assert.Equal("MAN-200", dto.InvoiceNumber);
         Assert.Equal("1234567890", dto.CounterpartyInn);
         Assert.Equal(ActStatus.Transferred, dto.Status);
+        Assert.Equal(ActWorkflowStatus.OnSigning, dto.WorkflowStatus);
         Assert.Equal(client.Id, dto.ClientId);
         Assert.Equal("Услуги без привязки к счёту", dto.Comment);
         Assert.Empty(dto.LineItems);
+
+        var storedAct = await db.Acts.AsNoTracking().SingleAsync(act => act.Id == dto.Id);
+        Assert.Equal(ActWorkflowStatus.OnSigning, storedAct.WorkflowStatus);
     }
 
     [Fact]

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { Invoice, InvoiceClientRole, InvoiceInput, InvoiceSummary, PaymentKind, PaymentStatus } from '../types';
+import type { Invoice, InvoiceClientRole, InvoiceInput, InvoiceSummary, InvoiceWorkflowStatus, PaymentKind, PaymentStatus } from '../types';
 import { extractDisplayErrorMessage } from '../utils/errorUtils';
 
 export type InvoicesSortKey =
@@ -18,6 +18,7 @@ export interface InvoicesFilters {
   from?: string;
   to?: string;
   status?: PaymentStatus;
+  workflowStatus?: InvoiceWorkflowStatus;
   clientId?: number;
   clientRole?: InvoiceClientRole;
   responsibleId?: number;

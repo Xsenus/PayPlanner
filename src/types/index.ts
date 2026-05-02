@@ -1,4 +1,12 @@
 export type PaymentStatus = 'Pending' | 'Completed' | 'Overdue' | 'Cancelled' | 'Processing';
+export type InvoiceWorkflowStatus =
+  | 'Draft'
+  | 'OnSigning'
+  | 'SignedByClient'
+  | 'Paid'
+  | 'PartiallyPaid'
+  | 'Overdue'
+  | 'Cancelled';
 
 export type AddressType = 'Registration' | 'Actual' | 'Legal' | 'Other';
 
@@ -814,6 +822,7 @@ export interface PaymentStatusEntity {
 }
 
 export type ActStatus = 'Created' | 'Transferred' | 'Signed' | 'Terminated';
+export type ActWorkflowStatus = 'Draft' | 'OnSigning' | 'Signed' | 'Cancelled';
 export type ActCreationMode = 'Manual' | 'Full' | 'Partial';
 export type DocumentKind = 'Invoice' | 'Accrual' | 'Payment';
 
@@ -841,6 +850,7 @@ export interface Act {
   contractId?: number | null;
   counterpartyInn?: string | null;
   status: ActStatus;
+  workflowStatus?: ActWorkflowStatus;
   clientId?: number | null;
   clientName?: string | null;
   responsibleId?: number | null;
@@ -872,6 +882,7 @@ export interface ActInput {
   contractId?: number | null;
   counterpartyInn?: string | null;
   status: ActStatus;
+  workflowStatus?: ActWorkflowStatus;
   clientId?: number | null;
   responsibleId?: number | null;
   comment?: string | null;
@@ -907,6 +918,7 @@ export interface ContractClient {
 }
 
 export type ContractBillingMode = 'Fixed' | 'Actual';
+export type ContractStatus = 'Draft' | 'OnSigning' | 'Concluded' | 'Terminated' | 'Cancelled';
 
 export interface Contract {
   id: number;
@@ -916,10 +928,16 @@ export interface Contract {
   startDate?: string | null;
   description?: string | null;
   billingMode: ContractBillingMode;
+  status?: ContractStatus;
   isOpenEnded: boolean;
   amount?: number | null;
   validUntil?: string | null;
   terminationDate?: string | null;
+  terminationReason?: string | null;
+  terminationTerms?: string | null;
+  terminationFinancialTerms?: string | null;
+  cancelledAt?: string | null;
+  cancelledReason?: string | null;
   createdAt: string;
   updatedAt?: string | null;
   auditCreatedByUserId?: number | null;
@@ -948,10 +966,16 @@ export interface ContractInput {
   startDate?: string | null;
   description?: string | null;
   billingMode: ContractBillingMode;
+  status?: ContractStatus;
   isOpenEnded: boolean;
   amount?: number | null;
   validUntil?: string | null;
   terminationDate?: string | null;
+  terminationReason?: string | null;
+  terminationTerms?: string | null;
+  terminationFinancialTerms?: string | null;
+  cancelledAt?: string | null;
+  cancelledReason?: string | null;
   clients: Array<{ clientId: number; comment?: string | null }>;
   actIds?: number[];
   invoiceIds?: number[];
@@ -1047,6 +1071,7 @@ export interface InvoiceActLink {
   amount: number;
   creationMode?: ActCreationMode;
   status: ActStatus;
+  workflowStatus?: ActWorkflowStatus;
   clientId?: number | null;
   clientName?: string | null;
   responsibleId?: number | null;
@@ -1066,6 +1091,7 @@ export interface Invoice {
   outstandingAmount?: number | null;
   type: 'Income' | 'Expense';
   status: PaymentStatus;
+  workflowStatus?: InvoiceWorkflowStatus;
   isPaid: boolean;
   paidDate?: string | null;
   clientId?: number | null;
@@ -1092,6 +1118,7 @@ export interface Invoice {
   actNumber?: string | null;
   actTitle?: string | null;
   actStatus?: ActStatus | null;
+  actWorkflowStatus?: ActWorkflowStatus | null;
   actIds?: number[];
   acts?: InvoiceActLink[];
   responsibleId?: number | null;
@@ -1134,6 +1161,7 @@ export interface InvoiceInput {
   amount: number;
   type: 'Income' | 'Expense';
   status: PaymentStatus;
+  workflowStatus?: InvoiceWorkflowStatus;
   clientId: number;
   expenseClientId?: number | null;
   contractId?: number | null;

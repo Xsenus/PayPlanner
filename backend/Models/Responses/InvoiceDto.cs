@@ -14,6 +14,7 @@ public class InvoiceDto
     public decimal OutstandingAmount { get; set; }
     public PaymentType Type { get; set; }
     public PaymentStatus Status { get; set; }
+    public string WorkflowStatus { get; set; } = InvoiceWorkflowStatus.Draft;
     public bool IsPaid { get; set; }
     public DateTime? PaidDate { get; set; }
     public int? ClientId { get; set; }
@@ -39,6 +40,7 @@ public class InvoiceDto
     public string? ActNumber { get; set; }
     public string? ActTitle { get; set; }
     public ActStatus? ActStatus { get; set; }
+    public string? ActWorkflowStatus { get; set; }
     public List<int> ActIds { get; set; } = new();
     public List<InvoiceActDto> Acts { get; set; } = new();
     public string? ResponsibleName { get; set; }
@@ -81,6 +83,7 @@ public class InvoiceActDto
     public decimal Amount { get; set; }
     public string CreationMode { get; set; } = ActCreationMode.Manual;
     public ActStatus Status { get; set; }
+    public string WorkflowStatus { get; set; } = ActWorkflowStatus.Draft;
     public int? ClientId { get; set; }
     public string? ClientName { get; set; }
     public int? ResponsibleId { get; set; }

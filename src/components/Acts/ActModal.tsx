@@ -8,6 +8,7 @@ import type {
   ActLineItem,
   ActResponsible,
   ActStatus,
+  ActWorkflowStatus,
   Client,
   Invoice,
   InvoiceLineItem,
@@ -52,6 +53,7 @@ type FormState = {
   invoiceId: string;
   counterpartyInn: string;
   status: ActStatus;
+  workflowStatus: ActWorkflowStatus;
   clientId: string;
   responsibleId: string;
   comment: string;
@@ -327,6 +329,7 @@ function normalizeActToForm(
       invoiceId: initialInvoiceId,
       counterpartyInn: initialValues?.counterpartyInn ?? '',
       status: (initialValues?.status as ActStatus) ?? 'Created',
+      workflowStatus: (initialValues?.workflowStatus as ActWorkflowStatus) ?? 'Draft',
       clientId: initialValues?.clientId
         ? String(initialValues.clientId)
         : defaultClientId
@@ -351,6 +354,7 @@ function normalizeActToForm(
     invoiceId: act.invoiceId ? String(act.invoiceId) : '',
     counterpartyInn: act.counterpartyInn ?? '',
     status: act.status,
+    workflowStatus: act.workflowStatus ?? 'Draft',
     clientId: act.clientId ? String(act.clientId) : defaultClientId ? String(defaultClientId) : '',
     responsibleId: act.responsibleId
       ? String(act.responsibleId)
@@ -1241,6 +1245,7 @@ export function ActModal({
       invoiceId: linkedInvoiceId ?? undefined,
       counterpartyInn: undefined,
       status: form.status,
+      workflowStatus: form.workflowStatus,
       clientId: form.clientId ? Number(form.clientId) : undefined,
       responsibleId: form.responsibleId ? Number(form.responsibleId) : undefined,
       comment: form.comment.trim() ? form.comment.trim() : undefined,
@@ -1351,6 +1356,20 @@ export function ActModal({
                         {option.label}
                       </option>
                     ))}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">Workflow</span>
+                  <select
+                    value={form.workflowStatus}
+                    onChange={handleChange('workflowStatus')}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  >
+                    <option value="Draft">Черновик</option>
+                    <option value="OnSigning">На подписании</option>
+                    <option value="Signed">Подписан</option>
+                    <option value="Cancelled">Отменен</option>
                   </select>
                 </label>
 

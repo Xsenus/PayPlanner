@@ -12,10 +12,16 @@ public class ContractDto
     public DateTime? StartDate { get; set; }
     public string? Description { get; set; }
     public string BillingMode { get; set; } = ContractBillingMode.Fixed;
+    public string Status { get; set; } = ContractStatus.Draft;
     public bool IsOpenEnded { get; set; }
     public decimal? Amount { get; set; }
     public DateTime? ValidUntil { get; set; }
     public DateTime? TerminationDate { get; set; }
+    public string? TerminationReason { get; set; }
+    public string? TerminationTerms { get; set; }
+    public string? TerminationFinancialTerms { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public string? CancelledReason { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public int? AuditCreatedByUserId { get; set; }

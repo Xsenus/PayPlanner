@@ -107,6 +107,13 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("WorkflowStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Draft");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ClientId")
@@ -135,6 +142,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("UpdatedAt")
                         .HasDatabaseName("IX_Act_UpdatedAt_Audit");
+
+                    b.HasIndex("WorkflowStatus")
+                        .HasDatabaseName("IX_Acts_WorkflowStatus");
 
                     b.ToTable("Acts");
                 });
@@ -1183,6 +1193,13 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT")
                         .HasDefaultValue("Fixed");
 
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("date");
+
+                    b.Property<string>("CancelledReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
@@ -1230,7 +1247,26 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("StartDate")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Draft");
+
                     b.Property<DateTime?>("TerminationDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("TerminationFinancialTerms")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TerminationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TerminationTerms")
+                        .HasMaxLength(2000)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Title")
@@ -1263,6 +1299,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Contracts_Number");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_Contracts_Status");
 
                     b.HasIndex("UpdatedAt")
                         .HasDatabaseName("IX_Contract_UpdatedAt_Audit");
@@ -2741,6 +2780,13 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("InvoiceWorkflowStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Draft");
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -2856,6 +2902,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("InvoiceId")
                         .HasDatabaseName("IX_Payments_InvoiceId");
+
+                    b.HasIndex("InvoiceWorkflowStatus")
+                        .HasDatabaseName("IX_Payments_InvoiceWorkflowStatus");
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_Payment_IsDeleted");

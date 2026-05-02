@@ -4,7 +4,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
-import type { ContractBillingMode, ContractClient, ContractInput } from '../../types';
+import type { ContractBillingMode, ContractClient, ContractInput, ContractStatus } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
@@ -20,6 +20,7 @@ type FormState = {
   date: string;
   startDate: string;
   billingMode: ContractBillingMode;
+  status: ContractStatus;
   isOpenEnded: boolean;
   amount: string;
   description: string;
@@ -35,6 +36,7 @@ const createInitialForm = (): FormState => {
     date: today,
     startDate: today,
     billingMode: 'Fixed',
+    status: 'Draft',
     isOpenEnded: false,
     amount: '',
     description: '',
@@ -225,6 +227,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
       date: fromInputToApiDate(form.date) ?? form.date,
       startDate: form.startDate ? fromInputToApiDate(form.startDate) : undefined,
       billingMode: form.billingMode,
+      status: form.status,
       isOpenEnded: form.isOpenEnded,
       amount: form.billingMode === 'Fixed' ? amountValue : undefined,
       description: form.description.trim() || undefined,

@@ -755,6 +755,7 @@ export class ApiService {
     from?: string;
     to?: string;
     status?: ActStatus;
+    workflowStatus?: ActWorkflowStatus;
     type?: PaymentKind;
     clientId?: number;
     contractId?: number;
@@ -779,6 +780,7 @@ export class ApiService {
     from?: string;
     to?: string;
     status?: ActStatus;
+    workflowStatus?: ActWorkflowStatus;
     type?: PaymentKind;
     clientId?: number;
     responsibleId?: number;
@@ -813,6 +815,7 @@ export class ApiService {
     from?: string;
     to?: string;
     clientId?: number;
+    status?: ContractStatus;
     search?: string;
     sortBy?: ContractsSortKey;
     sortDir?: SortDir;
@@ -1132,6 +1135,7 @@ export class ApiService {
     from?: string;
     to?: string;
     status?: PaymentStatus;
+    workflowStatus?: InvoiceWorkflowStatus;
     clientId?: number;
     clientIds?: string;
     clientRole?: InvoiceClientRole;
@@ -1161,6 +1165,7 @@ export class ApiService {
     from?: string;
     to?: string;
     status?: PaymentStatus;
+    workflowStatus?: InvoiceWorkflowStatus;
     clientId?: number;
     clientRole?: InvoiceClientRole;
     caseId?: number;
@@ -2467,9 +2472,11 @@ import type {
   ActInput,
   ActResponsible,
   ActStatus,
+  ActWorkflowStatus,
   ActsSummary,
   Contract,
   ContractInput,
+  ContractStatus,
   ClientRole,
   Payment,
   PaymentKind,
@@ -2477,6 +2484,7 @@ import type {
   Invoice,
   InvoiceClientRole,
   InvoiceInput,
+  InvoiceWorkflowStatus,
   InvoiceSummary,
   PaymentStatus,
   Client,

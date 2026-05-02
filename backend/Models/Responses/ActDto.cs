@@ -17,6 +17,7 @@ public class ActDto
     public int? ContractId { get; set; }
     public string? CounterpartyInn { get; set; }
     public ActStatus Status { get; set; }
+    public string WorkflowStatus { get; set; } = ActWorkflowStatus.Draft;
     public int? ClientId { get; set; }
     public string? ClientName { get; set; }
     public int? ResponsibleId { get; set; }

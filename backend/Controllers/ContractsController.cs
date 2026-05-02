@@ -37,13 +37,19 @@ public class ContractsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId,
         [FromQuery] string? search, [FromQuery] string? sortBy, [FromQuery] string? sortDir, [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20, CancellationToken ct = default)
+        [FromQuery] int pageSize = 20, CancellationToken ct = default, [FromQuery] string? status = null)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
-        var query = ApplySort(ApplyFilters(BuildContractsListCountQuery(), from, to, clientId, search), sortBy, sortDir);
+        var normalizedStatus = NormalizeContractStatusOrNull(status);
+        if (!string.IsNullOrWhiteSpace(status) && normalizedStatus is null)
+        {
+            return ValidationError(nameof(status), "Unknown contract status.");
+        }
+
+        var query = ApplySort(ApplyFilters(BuildContractsListCountQuery(), from, to, clientId, normalizedStatus, search), sortBy, sortDir);
         var total = await query.CountAsync(ct);
-        var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(), from, to, clientId, search), sortBy, sortDir)
+        var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(), from, to, clientId, normalizedStatus, search), sortBy, sortDir)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
@@ -120,6 +126,11 @@ public class ContractsController : ControllerBase
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
         var normalized = await ValidateAndNormalizePayload(request, null, ct);
         if (normalized.Error is not null) return normalized.Error;
+        var status = NormalizeContractStatusOrNull(request.Status) ?? ContractStatus.Draft;
+        if (!string.IsNullOrWhiteSpace(request.Status) && !ContractStatus.IsValid(request.Status))
+        {
+            return ValidationError(nameof(request.Status), "Unknown contract status.");
+        }
 
         var contract = new Contract
         {
@@ -127,12 +138,18 @@ public class ContractsController : ControllerBase
             Title = Normalize(request.Title),
             Description = Normalize(request.Description),
             BillingMode = normalized.BillingMode!,
+            Status = status,
             IsOpenEnded = normalized.IsOpenEnded,
             Amount = normalized.Amount,
             Date = request.Date.Date,
             StartDate = request.StartDate?.Date,
             ValidUntil = normalized.ValidUntil,
             TerminationDate = request.TerminationDate?.Date,
+            TerminationReason = Normalize(request.TerminationReason),
+            TerminationTerms = Normalize(request.TerminationTerms),
+            TerminationFinancialTerms = Normalize(request.TerminationFinancialTerms),
+            CancelledAt = request.CancelledAt?.Date,
+            CancelledReason = Normalize(request.CancelledReason),
             CreatedAt = DateTime.UtcNow,
         };
 
@@ -160,17 +177,28 @@ public class ContractsController : ControllerBase
 
         var normalized = await ValidateAndNormalizePayload(request, id, ct);
         if (normalized.Error is not null) return normalized.Error;
+        var status = NormalizeContractStatusOrNull(request.Status) ?? contract.Status;
+        if (!string.IsNullOrWhiteSpace(request.Status) && !ContractStatus.IsValid(request.Status))
+        {
+            return ValidationError(nameof(request.Status), "Unknown contract status.");
+        }
 
         contract.Number = normalized.Number!;
         contract.Title = Normalize(request.Title);
         contract.Description = Normalize(request.Description);
         contract.BillingMode = normalized.BillingMode!;
+        contract.Status = status;
         contract.IsOpenEnded = normalized.IsOpenEnded;
         contract.Amount = normalized.Amount;
         contract.Date = request.Date.Date;
         contract.StartDate = request.StartDate?.Date;
         contract.ValidUntil = normalized.ValidUntil;
         contract.TerminationDate = request.TerminationDate?.Date;
+        contract.TerminationReason = Normalize(request.TerminationReason);
+        contract.TerminationTerms = Normalize(request.TerminationTerms);
+        contract.TerminationFinancialTerms = Normalize(request.TerminationFinancialTerms);
+        contract.CancelledAt = request.CancelledAt?.Date;
+        contract.CancelledReason = Normalize(request.CancelledReason);
         contract.UpdatedAt = DateTime.UtcNow;
 
         SyncClientLinks(contract, normalized.Clients);
@@ -207,12 +235,18 @@ public class ContractsController : ControllerBase
         Title = contract.Title,
         Description = contract.Description,
         BillingMode = contract.BillingMode,
+        Status = contract.Status,
         IsOpenEnded = contract.IsOpenEnded,
         Amount = contract.Amount,
         Date = contract.Date,
         StartDate = contract.StartDate,
         ValidUntil = contract.ValidUntil,
         TerminationDate = contract.TerminationDate,
+        TerminationReason = contract.TerminationReason,
+        TerminationTerms = contract.TerminationTerms,
+        TerminationFinancialTerms = contract.TerminationFinancialTerms,
+        CancelledAt = contract.CancelledAt,
+        CancelledReason = contract.CancelledReason,
         CreatedAt = contract.CreatedAt,
         UpdatedAt = contract.UpdatedAt,
         AuditCreatedByUserId = EF.Property<int?>(contract, "CreatedByUserId"),
@@ -299,12 +333,18 @@ public class ContractsController : ControllerBase
             Title = contract.Title,
             Description = contract.Description,
             BillingMode = contract.BillingMode,
+            Status = contract.Status,
             IsOpenEnded = contract.IsOpenEnded,
             Amount = contract.Amount,
             Date = contract.Date,
             StartDate = contract.StartDate,
             ValidUntil = contract.ValidUntil,
             TerminationDate = contract.TerminationDate,
+            TerminationReason = contract.TerminationReason,
+            TerminationTerms = contract.TerminationTerms,
+            TerminationFinancialTerms = contract.TerminationFinancialTerms,
+            CancelledAt = contract.CancelledAt,
+            CancelledReason = contract.CancelledReason,
             CreatedAt = contract.CreatedAt,
             UpdatedAt = contract.UpdatedAt,
             AuditCreatedByUserId = entry.Property<int?>("CreatedByUserId").CurrentValue,
@@ -680,11 +720,12 @@ public class ContractsController : ControllerBase
         }
     }
 
-    private static IQueryable<Contract> ApplyFilters(IQueryable<Contract> query, DateTime? from, DateTime? to, int? clientId, string? search)
+    private static IQueryable<Contract> ApplyFilters(IQueryable<Contract> query, DateTime? from, DateTime? to, int? clientId, string? status, string? search)
     {
         if (from.HasValue) query = query.Where(c => c.Date >= from.Value.Date);
         if (to.HasValue) query = query.Where(c => c.Date <= to.Value.Date);
         if (clientId.HasValue) query = query.Where(c => c.ClientContracts.Any(link => link.ClientId == clientId.Value));
+        if (!string.IsNullOrWhiteSpace(status)) query = query.Where(c => c.Status == status);
         if (!string.IsNullOrWhiteSpace(search))
         {
             var rawTerm = search.Trim();
@@ -739,6 +780,9 @@ public class ContractsController : ControllerBase
         ModelState.AddModelError(field, message);
         return ValidationProblem(ModelState);
     }
+
+    private static string? NormalizeContractStatusOrNull(string? value)
+        => ContractStatus.Normalize(value);
 
     private static List<int> NormalizeIds(IEnumerable<int>? ids) => ids?.Where(x => x > 0).Distinct().ToList() ?? [];
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

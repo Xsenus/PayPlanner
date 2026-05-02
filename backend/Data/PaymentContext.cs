@@ -236,6 +236,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Comment).HasMaxLength(1000);
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.WorkflowStatus).HasMaxLength(32).HasDefaultValue(ActWorkflowStatus.Draft).IsRequired();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.Date).HasColumnType("date");
 
@@ -261,6 +262,7 @@ public class PaymentContext : DbContext
 
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Acts_Date");
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_Acts_Status");
+            entity.HasIndex(e => e.WorkflowStatus).HasDatabaseName("IX_Acts_WorkflowStatus");
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_Acts_ClientId");
             entity.HasIndex(e => e.ResponsibleId).HasDatabaseName("IX_Acts_ResponsibleId");
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Acts_Number");
@@ -290,10 +292,17 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Title).HasMaxLength(200);
             entity.Property(e => e.Description).HasMaxLength(2000);
             entity.Property(e => e.BillingMode).HasMaxLength(32).HasDefaultValue(ContractBillingMode.Fixed).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue(ContractStatus.Draft).IsRequired();
             entity.Property(e => e.IsOpenEnded).HasDefaultValue(false);
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Date).HasColumnType("date");
             entity.Property(e => e.ValidUntil).HasColumnType("date");
+            entity.Property(e => e.TerminationDate).HasColumnType("date");
+            entity.Property(e => e.TerminationReason).HasMaxLength(1000);
+            entity.Property(e => e.TerminationTerms).HasMaxLength(2000);
+            entity.Property(e => e.TerminationFinancialTerms).HasMaxLength(2000);
+            entity.Property(e => e.CancelledAt).HasColumnType("date");
+            entity.Property(e => e.CancelledReason).HasMaxLength(1000);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasMany(e => e.Clients)
@@ -317,6 +326,7 @@ public class PaymentContext : DbContext
 
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Contracts_Number");
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Contracts_Date");
+            entity.HasIndex(e => e.Status).HasDatabaseName("IX_Contracts_Status");
             entity.HasMany(e => e.ContractActs)
                   .WithOne(x => x.Contract)
                   .HasForeignKey(x => x.ContractId)
@@ -542,6 +552,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Type).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.DocumentKind).HasConversion<string>();
+            entity.Property(e => e.InvoiceWorkflowStatus).HasMaxLength(32).HasDefaultValue(InvoiceWorkflowStatus.Draft).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.CounterpartyName).HasMaxLength(200);
             entity.Property(e => e.ClientCaseReference).HasMaxLength(300);
@@ -647,6 +658,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ContractId).HasDatabaseName("IX_Payments_ContractId");
             entity.HasIndex(e => e.ExpenseClientId).HasDatabaseName("IX_Payments_ExpenseClientId");
             entity.HasIndex(e => e.DocumentKind).HasDatabaseName("IX_Payments_DocumentKind");
+            entity.HasIndex(e => e.InvoiceWorkflowStatus).HasDatabaseName("IX_Payments_InvoiceWorkflowStatus");
             entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_Payments_InvoiceId");
             entity.HasIndex(e => new { e.ClientId, e.Date }).HasDatabaseName("IX_Payments_ClientId_Date");
             entity.HasIndex(e => new { e.ExpenseClientId, e.Date }).HasDatabaseName("IX_Payments_ExpenseClientId_Date");

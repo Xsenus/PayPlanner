@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { Act, ActInput, ActStatus, ActsSummary, PaymentKind } from '../types';
+import type { Act, ActInput, ActStatus, ActWorkflowStatus, ActsSummary, PaymentKind } from '../types';
 import { normalizeActArray, normalizeActsSummary } from '../utils/acts';
 import { extractDisplayErrorMessage } from '../utils/errorUtils';
 
@@ -19,6 +19,7 @@ export interface ActsFilters {
   from?: string;
   to?: string;
   status?: ActStatus;
+  workflowStatus?: ActWorkflowStatus;
   type?: PaymentKind;
   clientId?: number;
   responsibleId?: number;
