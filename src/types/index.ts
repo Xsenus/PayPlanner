@@ -854,6 +854,9 @@ export interface Act {
   workflowStatus?: ActWorkflowStatus;
   sentForSigningAt?: string | null;
   signedAt?: string | null;
+  cancelledAt?: string | null;
+  cancelledByUserId?: number | null;
+  cancelledReason?: string | null;
   clientId?: number | null;
   clientName?: string | null;
   responsibleId?: number | null;

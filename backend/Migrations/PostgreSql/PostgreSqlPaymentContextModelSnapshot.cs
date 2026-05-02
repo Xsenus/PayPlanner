@@ -33,6 +33,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CancelledByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CancelledReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<int?>("ClientId")
                         .HasColumnType("integer");
 

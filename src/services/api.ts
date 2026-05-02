@@ -814,6 +814,13 @@ export class ApiService {
     return this.request<Act>(`/acts/${id}/mark-signed`, { method: 'POST' });
   }
 
+  async cancelAct(id: number, reason: string) {
+    return this.request<Act>(`/acts/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
   async deleteAct(id: number) {
     return this.request<void>(`/acts/${id}`, { method: 'DELETE' });
   }

@@ -239,6 +239,9 @@ public class PaymentContext : DbContext
             entity.Property(e => e.WorkflowStatus).HasMaxLength(32).HasDefaultValue(ActWorkflowStatus.Draft).IsRequired();
             entity.Property(e => e.SentForSigningAt);
             entity.Property(e => e.SignedAt);
+            entity.Property(e => e.CancelledAt);
+            entity.Property(e => e.CancelledByUserId);
+            entity.Property(e => e.CancelledReason).HasMaxLength(1000);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.Date).HasColumnType("date");
 

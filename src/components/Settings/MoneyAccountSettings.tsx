@@ -170,9 +170,11 @@ export function MoneyAccountSettings() {
       setError(null);
       setMessage(null);
 
-      editingAccount
-        ? await apiService.updateMoneyAccount(editingAccount.id, payload)
-        : await apiService.createMoneyAccount(payload);
+      if (editingAccount) {
+        await apiService.updateMoneyAccount(editingAccount.id, payload);
+      } else {
+        await apiService.createMoneyAccount(payload);
+      }
       await loadAccounts();
 
       const successMessage = editingAccount ? 'Денежный счет обновлен.' : 'Денежный счет добавлен.';

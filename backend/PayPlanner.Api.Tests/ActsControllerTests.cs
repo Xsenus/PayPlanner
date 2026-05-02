@@ -110,6 +110,73 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task Cancel_StoresReasonAndUpdatesWorkflowStatus()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var actor = await CreateUserAsync(db, "Администратор", "admin@example.com", isActive: true, isApproved: true);
+        var act = await CreateManualActAsync(db, client.Id, "ACT-CANCEL-1", 7_500m, ActStatus.Signed);
+        act.WorkflowStatus = ActWorkflowStatus.Signed;
+        act.Comment = "Исходный комментарий";
+        await db.SaveChangesAsync();
+
+        var controller = new ActsController(db, new NoopFormRequirementsService())
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, actor.Id.ToString()),
+                    ], "TestAuth")),
+                },
+            },
+        };
+
+        var action = await controller.Cancel(
+            act.Id,
+            new CancelActRequest { Reason = "Клиент отказался подписывать акт" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var dto = Assert.IsType<ActDto>(ok.Value);
+        Assert.Equal(ActStatus.Terminated, dto.Status);
+        Assert.Equal(ActWorkflowStatus.Cancelled, dto.WorkflowStatus);
+        Assert.NotNull(dto.CancelledAt);
+        Assert.Equal(actor.Id, dto.CancelledByUserId);
+        Assert.Equal("Клиент отказался подписывать акт", dto.CancelledReason);
+        Assert.Contains("Клиент отказался подписывать акт", dto.Comment, StringComparison.Ordinal);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Acts.AsNoTracking().SingleAsync(item => item.Id == act.Id);
+        Assert.Equal(ActStatus.Terminated, stored.Status);
+        Assert.Equal(ActWorkflowStatus.Cancelled, stored.WorkflowStatus);
+        Assert.NotNull(stored.CancelledAt);
+        Assert.Equal(actor.Id, stored.CancelledByUserId);
+        Assert.Equal("Клиент отказался подписывать акт", stored.CancelledReason);
+        Assert.Contains("Акт аннулирован", stored.Comment, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cancel_RejectsEmptyReason()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var act = await CreateManualActAsync(db, client.Id, "ACT-CANCEL-EMPTY", 7_500m, ActStatus.Created);
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var action = await controller.Cancel(
+            act.Id,
+            new CancelActRequest { Reason = "   " },
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        var message = Assert.IsType<string>(badRequest.Value);
+        Assert.Contains("reason", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Create_FullAct_UsesAllRemainingInvoiceLineItems()
     {
         await using var db = await CreateContextAsync();

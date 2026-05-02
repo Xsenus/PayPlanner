@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, ChevronDown, Download, Link2, List, Loader2, Pencil, Printer, Send, Trash2, UserRound } from 'lucide-react';
+import { ArrowLeft, Ban, Check, ChevronDown, Download, Link2, List, Loader2, Pencil, Printer, Send, Trash2, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -22,7 +22,7 @@ interface ActDetailPageProps {
 }
 
 type DocumentFormat = 'word' | 'pdf';
-type PageAction = 'send' | 'transferred' | 'signed' | 'delete';
+type PageAction = 'send' | 'transferred' | 'signed' | 'cancel' | 'delete';
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -90,36 +90,6 @@ function getDocumentActionErrorMessage(error: unknown, fallback: string) {
   }
 
   return message;
-}
-
-function buildActPayload(act: Act, overrides?: Partial<ActInput>): ActInput {
-  const base: ActInput = {
-    number: act.number ?? '',
-    title: act.title ?? null,
-    date: toDateInputValue(act.date) || '',
-    amount: Number(act.amount ?? 0),
-    creationMode: act.creationMode,
-    invoiceNumber: act.invoiceNumber ?? null,
-    invoiceId: act.invoiceId ?? null,
-    contractId: act.contractId ?? null,
-    counterpartyInn: act.counterpartyInn ?? null,
-    status: act.status,
-    workflowStatus: act.workflowStatus ?? 'Draft',
-    clientId: act.clientId ?? null,
-    responsibleId: act.responsibleId ?? null,
-    comment: act.comment ?? null,
-    lineItems: (act.lineItems ?? [])
-      .filter((item) => Boolean(item?.sourceKey))
-      .map((item) => ({
-        sourceKey: item.sourceKey,
-        quantity: Number(item.quantity ?? 0),
-      })),
-  };
-
-  return {
-    ...base,
-    ...overrides,
-  };
 }
 
 function resolveCounterpartyLabel(type?: PaymentKind | null): string {
@@ -286,7 +256,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       className: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     },
     Terminated: {
-      label: t('actStatusTerminated') ?? 'Расторгнуто',
+      label: t('actStatusTerminated') ?? 'Аннулирован',
       className: 'bg-rose-100 text-rose-700 border border-rose-200',
     },
   };
@@ -454,6 +424,32 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     }
   }, [act, confirm, onBack, toast]);
 
+  const handleCancelAct = useCallback(async () => {
+    if (!act) return;
+
+    const reason = window.prompt('Укажите причину аннулирования акта');
+    if (!reason?.trim()) {
+      toast.error('Для аннулирования акта нужна причина.');
+      return;
+    }
+
+    setPageActionLoading('cancel');
+    try {
+      const updated = normalizeAct(await apiService.cancelAct(act.id, reason.trim()));
+      if (!updated) {
+        throw new Error('Не удалось прочитать аннулированный акт.');
+      }
+
+      setAct(updated);
+      setError(null);
+      toast.success('Акт аннулирован.');
+    } catch (cancelError) {
+      setError(extractDisplayErrorMessage(cancelError, 'Не удалось аннулировать акт.'));
+    } finally {
+      setPageActionLoading(null);
+    }
+  }, [act, toast]);
+
   const handleSend = useCallback(async () => {
     if (!act) return;
 
@@ -490,6 +486,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
 
   const transferredDisabled = !canEdit || act?.status === 'Transferred' || act?.status === 'Signed' || act?.status === 'Terminated';
   const signedDisabled = !canEdit || act?.status === 'Signed' || act?.status === 'Terminated';
+  const cancelDisabled = !canEdit || act?.status === 'Terminated';
 
   if (act && editorOpen) {
     return (
@@ -685,6 +682,9 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                     <p><span className="text-slate-500">Режим:</span> {creationModeLabel}</p>
                     <p><span className="text-slate-500">Дата акта:</span> {formatDate(act.date)}</p>
                     <p><span className="text-slate-500">Ответственный:</span> {selectedResponsibleLabel}</p>
+                    {act.cancelledAt || act.cancelledReason ? (
+                      <p><span className="text-slate-500">Аннулирование:</span> {[formatDate(act.cancelledAt), act.cancelledReason?.trim()].filter(Boolean).join(' · ')}</p>
+                    ) : null}
                     <p><span className="text-slate-500">Комментарий:</span> {act.comment?.trim() || '—'}</p>
                     <p><span className="text-slate-500">Позиции:</span> {lineItems.length}</p>
                   </div>
@@ -848,6 +848,20 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             >
               {pageActionLoading === 'signed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Подписан
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleCancelAct()}
+              disabled={cancelDisabled || pageActionLoading === 'cancel'}
+              className={`inline-flex items-center justify-center gap-2 rounded border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                act.status === 'Terminated'
+                  ? 'border-rose-200 bg-rose-50 text-rose-700'
+                  : 'border-slate-200 text-slate-700 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700'
+              }`}
+            >
+              {pageActionLoading === 'cancel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+              Аннулировать
             </button>
 
             {canDelete ? (

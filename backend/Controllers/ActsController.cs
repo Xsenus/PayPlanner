@@ -171,6 +171,39 @@ public class ActsController : ControllerBase
         return Ok(Map(act));
     }
 
+    [HttpPost("{id:int}/cancel")]
+    public async Task<ActionResult<ActDto>> Cancel(int id, [FromBody] CancelActRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var reason = Normalize(request.Reason);
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return BadRequest("Cancellation reason is required.");
+        }
+
+        var act = await LoadActForWorkflowAsync(id, ct);
+        if (act is null)
+        {
+            return NotFound();
+        }
+
+        var now = DateTime.UtcNow;
+        act.Status = ActStatus.Terminated;
+        act.WorkflowStatus = ActWorkflowStatus.Cancelled;
+        act.CancelledAt ??= now;
+        act.CancelledByUserId ??= User.GetUserId();
+        act.CancelledReason = reason;
+        act.Comment = AppendCancellationComment(act.Comment, reason, now);
+        act.UpdatedAt = now;
+
+        await _db.SaveChangesAsync(ct);
+        return Ok(Map(act));
+    }
+
     [HttpGet("summary")]
     public async Task<IActionResult> GetSummary(
         [FromQuery] DateTime? from,
@@ -558,6 +591,9 @@ public class ActsController : ControllerBase
         WorkflowStatus = act.WorkflowStatus,
         SentForSigningAt = act.SentForSigningAt,
         SignedAt = act.SignedAt,
+        CancelledAt = act.CancelledAt,
+        CancelledByUserId = act.CancelledByUserId,
+        CancelledReason = act.CancelledReason,
         ClientId = act.ClientId,
         ClientName = act.Client != null ? act.Client.Name : null,
         ResponsibleId = act.ResponsibleId,
@@ -608,6 +644,9 @@ public class ActsController : ControllerBase
         WorkflowStatus = act.WorkflowStatus,
         SentForSigningAt = act.SentForSigningAt,
         SignedAt = act.SignedAt,
+        CancelledAt = act.CancelledAt,
+        CancelledByUserId = act.CancelledByUserId,
+        CancelledReason = act.CancelledReason,
         ClientId = act.ClientId,
         ClientName = act.Client != null ? act.Client.Name : null,
         ResponsibleId = act.ResponsibleId,
@@ -1038,6 +1077,14 @@ public class ActsController : ControllerBase
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    private static string AppendCancellationComment(string? comment, string reason, DateTime now)
+    {
+        var note = $"Акт аннулирован {now:dd.MM.yyyy HH:mm}. Причина: {reason}";
+        return string.IsNullOrWhiteSpace(comment)
+            ? note
+            : $"{comment.Trim()}{Environment.NewLine}{note}";
+    }
+
     private ActDto Map(Act act)
     {
         var audit = _db.ReadAuditSnapshot(act);
@@ -1058,6 +1105,9 @@ public class ActsController : ControllerBase
             WorkflowStatus = act.WorkflowStatus,
             SentForSigningAt = act.SentForSigningAt,
             SignedAt = act.SignedAt,
+            CancelledAt = act.CancelledAt,
+            CancelledByUserId = act.CancelledByUserId,
+            CancelledReason = act.CancelledReason,
             ClientId = act.ClientId,
             ClientName = act.Client?.Name,
             ResponsibleId = act.ResponsibleId,

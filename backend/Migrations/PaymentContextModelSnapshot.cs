@@ -26,6 +26,16 @@ namespace PayPlanner.Api.Migrations
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CancelledByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CancelledReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("ClientId")
                         .HasColumnType("INTEGER");
 
