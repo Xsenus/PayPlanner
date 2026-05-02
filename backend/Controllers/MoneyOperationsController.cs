@@ -2244,6 +2244,14 @@ public class MoneyOperationsController : ControllerBase
             .AsNoTracking()
             .Where(account => account.Source == MoneyOperationSource.Bank && account.IsActive)
             .ToDictionaryAsync(account => account.Name, StringComparer.OrdinalIgnoreCase, ct);
+        var incomeTypeCandidates = await _db.IncomeTypes
+            .AsNoTracking()
+            .Where(incomeType => incomeType.IsActive)
+            .Select(incomeType => new BankStatementIncomeTypeCandidate(
+                incomeType.Id,
+                incomeType.Name,
+                incomeType.PaymentType))
+            .ToListAsync(ct);
         var invoiceNumbersFromStatement = items
             .SelectMany(item => ExtractInvoiceNumberTokens(item.Purpose))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -2328,6 +2336,7 @@ public class MoneyOperationsController : ControllerBase
                 continue;
             }
 
+            var incomeTypeMatch = ResolveBankStatementIncomeType(item, incomeTypeCandidates);
             var operation = new MoneyOperation
             {
                 Source = MoneyOperationSource.Bank,
@@ -2335,7 +2344,10 @@ public class MoneyOperationsController : ControllerBase
                 AccountingType = MoneyOperationAccountingType.Fact,
                 AccountName = item.AccountName,
                 CounterpartyName = item.CounterpartyName,
-                CategoryName = item.Direction == MoneyOperationDirection.Income ? "Поступление по выписке" : "Списание по выписке",
+                IncomeTypeId = incomeTypeMatch?.Id,
+                CategoryName = incomeTypeMatch is null
+                    ? item.Direction == MoneyOperationDirection.Income ? "Поступление по выписке" : "Списание по выписке"
+                    : null,
                 Amount = item.Amount,
                 Currency = "RUB",
                 PaymentOrderNumber = item.DocumentNumber,
@@ -2774,6 +2786,64 @@ public class MoneyOperationsController : ControllerBase
         return $"Автоматически сверено со счётом {candidate.InvoiceNumber} по сумме и клиенту из выписки.";
     }
 
+    private static BankStatementIncomeTypeCandidate? ResolveBankStatementIncomeType(
+        BankStatementImportItem item,
+        IReadOnlyCollection<BankStatementIncomeTypeCandidate> candidates)
+    {
+        var paymentType = item.Direction == MoneyOperationDirection.Income
+            ? PaymentType.Income
+            : PaymentType.Expense;
+        var haystack = NormalizeNameForMatch(string.Join(' ', new[] { item.Purpose, item.CounterpartyName }
+            .Where(value => !string.IsNullOrWhiteSpace(value))));
+        if (haystack.Length < 3)
+        {
+            return null;
+        }
+
+        var matches = candidates
+            .Where(candidate => candidate.PaymentType == paymentType)
+            .Select(candidate => new
+            {
+                Candidate = candidate,
+                Score = ScoreBankStatementIncomeType(candidate.Name, haystack),
+            })
+            .Where(match => match.Score > 0)
+            .OrderByDescending(match => match.Score)
+            .ThenBy(match => match.Candidate.Name)
+            .ToList();
+
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        return matches.Count == 1 || matches[0].Score > matches[1].Score
+            ? matches[0].Candidate
+            : null;
+    }
+
+    private static int ScoreBankStatementIncomeType(string name, string haystack)
+    {
+        var normalizedName = NormalizeNameForMatch(name);
+        if (normalizedName.Length < 3)
+        {
+            return 0;
+        }
+
+        if (haystack.Contains(normalizedName, StringComparison.Ordinal))
+        {
+            return 1000 + normalizedName.Length;
+        }
+
+        var words = normalizedName
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(word => word.Length >= 3)
+            .ToArray();
+        return words.Length > 1 && words.All(word => haystack.Contains(word, StringComparison.Ordinal))
+            ? 500 + words.Sum(word => word.Length)
+            : 0;
+    }
+
     private static IEnumerable<string> ExtractInvoiceNumberTokens(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -3046,6 +3116,11 @@ public class MoneyOperationsController : ControllerBase
     {
         public decimal OutstandingAmount => CalculateOutstandingAmount(Amount, PaidAmount, Status);
     }
+
+    private sealed record BankStatementIncomeTypeCandidate(
+        int Id,
+        string Name,
+        PaymentType PaymentType);
 
     private sealed record InvoiceLinkValidationResult(Invoice? Invoice, string? Error);
 

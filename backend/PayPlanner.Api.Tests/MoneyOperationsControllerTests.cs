@@ -3545,6 +3545,59 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task ImportBankStatement_AutoDetectsIncomeTypeFromPurpose()
+    {
+        await using var db = await CreateContextAsync();
+        var incomeType = new IncomeType
+        {
+            Name = "Юридические услуги",
+            PaymentType = PaymentType.Income,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var expenseType = new IncomeType
+        {
+            Name = "Банковская комиссия",
+            PaymentType = PaymentType.Expense,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.IncomeTypes.AddRange(incomeType, expenseType);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Поступило;Списано;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;;ООО Ромашка;Оплата за юридические услуги по договору;401\n" +
+                "30.04.2026;;1200;Банк;Банковская комиссия за обслуживание счета;402\n",
+                "statement.csv"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        Assert.Equal(2, result.Created);
+
+        var operations = await db.MoneyOperations.OrderBy(item => item.Date).ToListAsync();
+        Assert.Collection(
+            operations,
+            income =>
+            {
+                Assert.Equal(incomeType.Id, income.IncomeTypeId);
+                Assert.Null(income.CategoryName);
+            },
+            expense =>
+            {
+                Assert.Equal(expenseType.Id, expense.IncomeTypeId);
+                Assert.Null(expense.CategoryName);
+            });
+
+        var page = await GetMoneyPageAsync(controller, MoneyOperationSource.Bank);
+        Assert.Contains(page.Items, item => item.CategoryName == "Юридические услуги");
+        Assert.Contains(page.Items, item => item.CategoryName == "Банковская комиссия");
+    }
+
+    [Fact]
     public async Task MoneyAccount_CreateOperation_BindsAccountAndFiltersById()
     {
         await using var db = await CreateContextAsync();
