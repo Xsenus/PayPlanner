@@ -570,6 +570,65 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task ExportExcel_ReturnsFilteredJournalWorkbook()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Main bank",
+                CounterpartyName = "Bank Client LLC",
+                Amount = 10_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 5, 1),
+                Purpose = "Invoice payment",
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Cash,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Cash desk",
+                CounterpartyName = "Cash Supplier",
+                Amount = 500m,
+                Date = new DateTime(2026, 5, 1),
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ExportExcel(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 31),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: null,
+            accountName: null,
+            categoryName: null,
+            linkedInvoiceId: null,
+            search: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(action);
+        Assert.Equal("application/vnd.ms-excel; charset=utf-8", file.ContentType);
+        Assert.StartsWith("money-operations-", file.FileDownloadName);
+        Assert.EndsWith(".xls", file.FileDownloadName);
+        var workbook = Encoding.UTF8.GetString(file.FileContents);
+        Assert.Contains("Excel.Sheet", workbook);
+        Assert.Contains("Money journal", workbook);
+        Assert.Contains("Bank Client LLC", workbook);
+        Assert.Contains("""ss:Type="Number">10000.00""", workbook);
+        Assert.DoesNotContain("Cash Supplier", workbook);
+    }
+
+    [Fact]
     public async Task CreateMoneyOperation_LinksIncomeTypeWithoutDuplicatingCategoryName()
     {
         await using var db = await CreateContextAsync();

@@ -2300,6 +2300,40 @@ export class ApiService {
     };
   }
 
+  async exportMoneyOperationsExcel(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+    direction?: MoneyOperationDirection;
+    accountingType?: MoneyOperationAccountingType;
+    moneyAccountId?: number;
+    accountName?: string;
+    categoryName?: string;
+    linkedInvoiceId?: number;
+    search?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/money-operations/export.xls${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} at ${API_BASE_URL}/money-operations/export.xls ${text ? `- ${text}` : ''}`,
+      );
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName:
+        parseContentDispositionFileName(response.headers.get('content-disposition')) ??
+        'money-operations.xls',
+    };
+  }
+
   async getMoneyOperationsPrintHtml(params?: {
     from?: string;
     to?: string;

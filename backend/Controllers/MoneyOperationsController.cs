@@ -287,6 +287,40 @@ public class MoneyOperationsController : ControllerBase
         return File(bytes, "text/csv; charset=utf-8", $"money-operations-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv");
     }
 
+    [HttpGet("export.xls")]
+    public async Task<IActionResult> ExportExcel(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        [FromQuery] MoneyOperationDirection? direction,
+        [FromQuery] MoneyOperationAccountingType? accountingType,
+        [FromQuery] int? moneyAccountId = null,
+        [FromQuery] string? accountName = null,
+        [FromQuery] string? categoryName = null,
+        [FromQuery] int? linkedInvoiceId = null,
+        [FromQuery] string? search = null,
+        CancellationToken ct = default)
+    {
+        var xml = await SqliteRetryHelper.ExecuteAsync(
+            async cancellationToken =>
+            {
+                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
+                    .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
+                    .OrderByDescending(item => item.Date)
+                    .ThenByDescending(item => item.Id)
+                    .ToListAsync(cancellationToken);
+
+                return BuildMoneyOperationsExcelXml(rows.Select(MapMoneyOperationRow));
+            },
+            _logger,
+            ct);
+
+        return File(
+            Encoding.UTF8.GetBytes(xml),
+            "application/vnd.ms-excel; charset=utf-8",
+            $"money-operations-{DateTime.UtcNow:yyyyMMdd-HHmmss}.xls");
+    }
+
     [HttpGet("print")]
     public async Task<IActionResult> Print(
         [FromQuery] DateTime? from,
@@ -2245,6 +2279,88 @@ public class MoneyOperationsController : ControllerBase
         return text.IndexOfAny([';', '"', '\r', '\n']) >= 0
             ? $"\"{text}\""
             : text;
+    }
+
+    private static string BuildMoneyOperationsExcelXml(IEnumerable<MoneyOperationListItemDto> items)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
+        builder.AppendLine("""<?mso-application progid="Excel.Sheet"?>""");
+        builder.AppendLine("""
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+          xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <Worksheet ss:Name="Money journal">
+    <Table>
+""");
+        AppendExcelRow(builder, new[]
+        {
+            "Дата",
+            "Источник",
+            "Статус",
+            "Движение",
+            "Учет",
+            "Счет",
+            "Контрагент",
+            "Ответственный",
+            "Сумма",
+            "Валюта",
+            "Назначение",
+            "Платежное поручение",
+            "Статья",
+            "Связанный счет",
+            "Договор",
+            "Статус сверки",
+            "Комментарий сверки",
+            "Вложения",
+        }, header: true);
+
+        foreach (var item in items)
+        {
+            AppendExcelRow(builder, new[]
+            {
+                item.Date.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU")),
+                GetMoneyOperationSourceLabel(item.Source),
+                GetJournalStatusLabel(item.JournalStatus),
+                GetMoneyOperationDirectionLabel(item.Direction),
+                GetMoneyOperationAccountingTypeLabel(item.AccountingType),
+                item.AccountName ?? item.MoneyAccountName ?? string.Empty,
+                item.CounterpartyName ?? string.Empty,
+                item.ResponsibleName ?? string.Empty,
+                item.Amount.ToString("0.00", CultureInfo.InvariantCulture),
+                item.Currency ?? string.Empty,
+                item.Purpose ?? string.Empty,
+                item.PaymentOrderNumber ?? string.Empty,
+                item.CategoryName ?? string.Empty,
+                item.LinkedInvoiceNumber ?? item.PaidInvoiceNumber ?? string.Empty,
+                item.LinkedContractNumber ?? string.Empty,
+                GetMoneyOperationMatchStatusLabel(item.MatchStatus),
+                item.MatchComment ?? string.Empty,
+                item.AttachmentSummary ?? string.Empty,
+            });
+        }
+
+        builder.AppendLine("""
+    </Table>
+  </Worksheet>
+</Workbook>
+""");
+        return builder.ToString();
+    }
+
+    private static void AppendExcelRow(StringBuilder builder, IReadOnlyList<string> values, bool header = false)
+    {
+        builder.AppendLine("      <Row>");
+        foreach (var value in values)
+        {
+            var type = !header && decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out _)
+                ? "Number"
+                : "String";
+            builder.Append("        <Cell><Data ss:Type=\"").Append(type).Append("\">");
+            builder.Append(WebUtility.HtmlEncode(value));
+            builder.AppendLine("</Data></Cell>");
+        }
+
+        builder.AppendLine("      </Row>");
     }
 
     private static string GetMoneyOperationSourceLabel(MoneyOperationSource source)

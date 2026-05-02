@@ -34,6 +34,7 @@ const {
   getMoneyOperationsPrintHtmlMock,
   getUserSettingMock,
   exportMoneyOperationsCsvMock,
+  exportMoneyOperationsExcelMock,
   exportMoneyOperationsPdfMock,
   importBankStatementMock,
   postCashOrderMock,
@@ -74,6 +75,7 @@ const {
   getMoneyOperationsPrintHtmlMock: vi.fn(),
   getUserSettingMock: vi.fn(),
   exportMoneyOperationsCsvMock: vi.fn(),
+  exportMoneyOperationsExcelMock: vi.fn(),
   exportMoneyOperationsPdfMock: vi.fn(),
   importBankStatementMock: vi.fn(),
   postCashOrderMock: vi.fn(),
@@ -152,6 +154,7 @@ vi.mock('../../services/api', () => ({
     getMoneyOperationsPrintHtml: getMoneyOperationsPrintHtmlMock,
     getUserSetting: getUserSettingMock,
     exportMoneyOperationsCsv: exportMoneyOperationsCsvMock,
+    exportMoneyOperationsExcel: exportMoneyOperationsExcelMock,
     exportMoneyOperationsPdf: exportMoneyOperationsPdfMock,
     importBankStatement: importBankStatementMock,
     postCashOrder: postCashOrderMock,
@@ -295,6 +298,7 @@ describe('MoneyOperations integration', () => {
     getMoneyOperationsPrintHtmlMock.mockReset();
     getUserSettingMock.mockReset();
     exportMoneyOperationsCsvMock.mockReset();
+    exportMoneyOperationsExcelMock.mockReset();
     exportMoneyOperationsPdfMock.mockReset();
     importBankStatementMock.mockReset();
     postCashOrderMock.mockReset();
@@ -479,6 +483,10 @@ describe('MoneyOperations integration', () => {
     exportMoneyOperationsPdfMock.mockResolvedValue({
       blob: new Blob(['%PDF-money-journal%'], { type: 'application/pdf' }),
       fileName: 'money-operations.pdf',
+    });
+    exportMoneyOperationsExcelMock.mockResolvedValue({
+      blob: new Blob(['<Workbook />'], { type: 'application/vnd.ms-excel' }),
+      fileName: 'money-operations.xls',
     });
     getBankStatementImportsMock.mockResolvedValue({
       items: [],
@@ -817,6 +825,27 @@ describe('MoneyOperations integration', () => {
     );
     expect(URL.createObjectURL).toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith('Журнал экспортирован в PDF.', 'Журнал денег');
+  }, 15000);
+
+  it('exports the filtered money journal Excel file from the side panel', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Bank" />);
+
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalled());
+    await user.click(screen.getByRole('button', { name: 'Excel' }));
+
+    await waitFor(() =>
+      expect(exportMoneyOperationsExcelMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: '2026-01-01',
+          to: '2026-12-31',
+          source: 'Bank',
+        }),
+      ),
+    );
+    expect(URL.createObjectURL).toHaveBeenCalled();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Журнал экспортирован в Excel.', 'Журнал денег');
   }, 15000);
 
   it('applies the money journal search immediately from the find button', async () => {
