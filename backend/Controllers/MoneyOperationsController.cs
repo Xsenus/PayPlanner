@@ -6,6 +6,7 @@ using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using System.Globalization;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -273,6 +274,40 @@ public class MoneyOperationsController : ControllerBase
         Buffer.BlockCopy(content, 0, bytes, preamble.Length, content.Length);
 
         return File(bytes, "text/csv; charset=utf-8", $"money-operations-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv");
+    }
+
+    [HttpGet("print")]
+    public async Task<IActionResult> Print(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        [FromQuery] MoneyOperationDirection? direction,
+        [FromQuery] MoneyOperationAccountingType? accountingType,
+        [FromQuery] int? moneyAccountId = null,
+        [FromQuery] string? accountName = null,
+        [FromQuery] string? categoryName = null,
+        [FromQuery] int? linkedInvoiceId = null,
+        [FromQuery] string? search = null,
+        CancellationToken ct = default)
+    {
+        var items = await SqliteRetryHelper.ExecuteAsync(
+            async cancellationToken =>
+            {
+                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
+                    .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
+                    .OrderByDescending(item => item.Date)
+                    .ThenByDescending(item => item.Id)
+                    .ToListAsync(cancellationToken);
+
+                return rows.Select(MapMoneyOperationRow).ToList();
+            },
+            _logger,
+            ct);
+
+        return Content(
+            BuildMoneyOperationsPrintHtml(items, from, to, source),
+            "text/html; charset=utf-8",
+            Encoding.UTF8);
     }
 
     [HttpGet("accounts")]
@@ -1918,6 +1953,130 @@ public class MoneyOperationsController : ControllerBase
             MoneyOperationMatchStatus.None => "Не сверено",
             _ => matchStatus.ToString(),
         };
+
+    private static string BuildMoneyOperationsPrintHtml(
+        IReadOnlyCollection<MoneyOperationListItemDto> items,
+        DateTime? from,
+        DateTime? to,
+        MoneyOperationSource? source)
+    {
+        var ru = CultureInfo.GetCultureInfo("ru-RU");
+        var fromText = from?.Date.ToString("dd.MM.yyyy", ru) ?? "не задано";
+        var toText = to?.Date.ToString("dd.MM.yyyy", ru) ?? "не задано";
+        var sourceText = source.HasValue ? GetMoneyOperationSourceLabel(source.Value) : "Все источники";
+        var factItems = items.Where(item => item.AccountingType == MoneyOperationAccountingType.Fact).ToList();
+        var income = factItems
+            .Where(item => item.Direction == MoneyOperationDirection.Income)
+            .Sum(item => item.Amount);
+        var expense = factItems
+            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+            .Sum(item => item.Amount);
+
+        var rows = new StringBuilder();
+        foreach (var item in items)
+        {
+            rows.AppendLine($"""
+              <tr>
+                <td>{item.Date.ToString("dd.MM.yyyy", ru)}</td>
+                <td>{Html(GetMoneyOperationSourceLabel(item.Source))}</td>
+                <td>{Html(GetJournalStatusLabel(item.JournalStatus))}</td>
+                <td>{Html(GetMoneyOperationDirectionLabel(item.Direction))}</td>
+                <td>{Html(GetMoneyOperationAccountingTypeLabel(item.AccountingType))}</td>
+                <td>{Html(item.AccountName ?? item.MoneyAccountName ?? "-")}</td>
+                <td>{Html(item.CounterpartyName ?? "-")}</td>
+                <td class="num">{Html(item.Amount.ToString("N2", ru))}</td>
+                <td>{Html(item.Currency ?? "-")}</td>
+                <td>{Html(item.Purpose ?? "-")}</td>
+                <td>{Html(item.PaymentOrderNumber ?? "-")}</td>
+                <td>{Html(item.LinkedInvoiceNumber ?? item.PaidInvoiceNumber ?? "-")}</td>
+                <td>{Html(GetMoneyOperationMatchStatusLabel(item.MatchStatus))}</td>
+              </tr>
+            """);
+        }
+
+        var emptyRow = items.Count == 0
+            ? """<tr><td colspan="13" class="empty">Операции не найдены</td></tr>"""
+            : string.Empty;
+
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Денежный журнал {{Html(fromText)}} - {{Html(toText)}}</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      color: #111827;
+      background: #fff;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .document { max-width: 1180px; margin: 0 auto; }
+    header { margin-bottom: 18px; }
+    .eyebrow { color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 4px 0 6px; font-size: 24px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 12px; color: #475569; font-size: 12px; }
+    .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+    .summary div { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
+    .label { color: #64748b; font-size: 11px; text-transform: uppercase; }
+    .value { margin-top: 4px; font-size: 16px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 11px; vertical-align: top; }
+    th { background: #f1f5f9; color: #334155; text-align: left; }
+    .num { text-align: right; white-space: nowrap; }
+    .empty { padding: 24px; text-align: center; color: #64748b; }
+  </style>
+</head>
+<body>
+  <main class="document">
+    <header>
+      <div class="eyebrow">PayPlanner</div>
+      <h1>Денежный журнал</h1>
+      <div class="meta">
+        <span>Период: {{Html(fromText)}} - {{Html(toText)}}</span>
+        <span>Источник: {{Html(sourceText)}}</span>
+        <span>Операций: {{items.Count}}</span>
+      </div>
+    </header>
+    <section class="summary">
+      <div><div class="label">Приход, факт</div><div class="value">{{Html(income.ToString("N2", ru))}}</div></div>
+      <div><div class="label">Расход, факт</div><div class="value">{{Html(expense.ToString("N2", ru))}}</div></div>
+      <div><div class="label">Итого</div><div class="value">{{Html((income - expense).ToString("N2", ru))}}</div></div>
+    </section>
+    <table>
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Источник</th>
+          <th>Статус</th>
+          <th>Движение</th>
+          <th>Учет</th>
+          <th>Счет</th>
+          <th>Контрагент</th>
+          <th>Сумма</th>
+          <th>Валюта</th>
+          <th>Назначение</th>
+          <th>П/п</th>
+          <th>Счет</th>
+          <th>Сверка</th>
+        </tr>
+      </thead>
+      <tbody>
+{{rows}}{{emptyRow}}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
+""";
+    }
+
+    private static string Html(string value)
+        => WebUtility.HtmlEncode(value);
 
     private static MoneyOperationSourceSummaryDto MapSourceSummaryRow(MoneyOperationSourceSummaryQueryRow row)
         => new()

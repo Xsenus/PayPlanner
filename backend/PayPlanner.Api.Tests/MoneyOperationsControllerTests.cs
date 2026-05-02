@@ -290,6 +290,63 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task Print_ReturnsFilteredJournalHtmlWithEscapedRowsAndTotals()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной банк",
+                CounterpartyName = "<ООО Ромашка>",
+                Amount = 10_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 5, 1),
+                Purpose = "Оплата по счету",
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Cash,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Касса",
+                CounterpartyName = "Поставщик",
+                Amount = 500m,
+                Date = new DateTime(2026, 5, 1),
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Print(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 31),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: null,
+            accountName: null,
+            categoryName: null,
+            linkedInvoiceId: null,
+            search: null,
+            ct: CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(action);
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("<h1>Денежный журнал</h1>", content.Content);
+        Assert.Contains("Источник: Банк", content.Content);
+        Assert.Contains("В обработке", content.Content);
+        Assert.Contains("&lt;ООО Ромашка&gt;", content.Content);
+        Assert.DoesNotContain("<ООО Ромашка>", content.Content);
+        Assert.DoesNotContain("Поставщик", content.Content);
+    }
+
+    [Fact]
     public async Task CreateMoneyOperation_LinksIncomeTypeWithoutDuplicatingCategoryName()
     {
         await using var db = await CreateContextAsync();

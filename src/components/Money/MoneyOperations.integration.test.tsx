@@ -30,6 +30,8 @@ const {
   getMoneyOperationInvoiceCandidatesMock,
   getMoneyOperationMock,
   getMoneyOperationsPagedMock,
+  getMoneyOperationsPrintHtmlMock,
+  exportMoneyOperationsCsvMock,
   importBankStatementMock,
   postCashOrderMock,
   reprocessBankStatementImportMock,
@@ -63,6 +65,8 @@ const {
   getMoneyOperationInvoiceCandidatesMock: vi.fn(),
   getMoneyOperationMock: vi.fn(),
   getMoneyOperationsPagedMock: vi.fn(),
+  getMoneyOperationsPrintHtmlMock: vi.fn(),
+  exportMoneyOperationsCsvMock: vi.fn(),
   importBankStatementMock: vi.fn(),
   postCashOrderMock: vi.fn(),
   reprocessBankStatementImportMock: vi.fn(),
@@ -134,6 +138,8 @@ vi.mock('../../services/api', () => ({
     getMoneyOperationInvoiceCandidates: getMoneyOperationInvoiceCandidatesMock,
     getMoneyOperation: getMoneyOperationMock,
     getMoneyOperationsPaged: getMoneyOperationsPagedMock,
+    getMoneyOperationsPrintHtml: getMoneyOperationsPrintHtmlMock,
+    exportMoneyOperationsCsv: exportMoneyOperationsCsvMock,
     importBankStatement: importBankStatementMock,
     postCashOrder: postCashOrderMock,
     reprocessBankStatementImport: reprocessBankStatementImportMock,
@@ -264,6 +270,8 @@ describe('MoneyOperations integration', () => {
     getMoneyOperationInvoiceCandidatesMock.mockReset();
     getMoneyOperationMock.mockReset();
     getMoneyOperationsPagedMock.mockReset();
+    getMoneyOperationsPrintHtmlMock.mockReset();
+    exportMoneyOperationsCsvMock.mockReset();
     importBankStatementMock.mockReset();
     postCashOrderMock.mockReset();
     reprocessBankStatementImportMock.mockReset();
@@ -430,6 +438,11 @@ describe('MoneyOperations integration', () => {
     });
     getCashBookPrintHtmlMock.mockResolvedValue('<html><body>Кассовая книга</body></html>');
     getCashOrderRegisterPrintHtmlMock.mockResolvedValue('<html><body>Журнал регистрации</body></html>');
+    getMoneyOperationsPrintHtmlMock.mockResolvedValue('<html><body>Денежный журнал</body></html>');
+    exportMoneyOperationsCsvMock.mockResolvedValue({
+      blob: new Blob(['Дата;Источник'], { type: 'text/csv;charset=utf-8' }),
+      fileName: 'money-operations.csv',
+    });
     getBankStatementImportsMock.mockResolvedValue({
       items: [],
       total: 0,
@@ -643,6 +656,27 @@ describe('MoneyOperations integration', () => {
     await user.click(screen.getByRole('button', { name: 'Обновить' }));
 
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(2));
+  }, 15000);
+
+  it('opens the filtered money journal print form from the side panel', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('button', { name: 'Печать' }));
+
+    await waitFor(() =>
+      expect(getMoneyOperationsPrintHtmlMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: '2026-01-01',
+          to: '2026-12-31',
+          source: 'Bank',
+        }),
+      ),
+    );
+    expect(URL.createObjectURL).toHaveBeenCalled();
+    expect(window.open).toHaveBeenCalledWith('blob:cash-order', '_blank', 'noopener,noreferrer');
   }, 15000);
 
   it('applies the money journal search immediately from the find button', async () => {

@@ -2266,6 +2266,22 @@ export class ApiService {
     };
   }
 
+  async getMoneyOperationsPrintHtml(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+    direction?: MoneyOperationDirection;
+    accountingType?: MoneyOperationAccountingType;
+    moneyAccountId?: number;
+    accountName?: string;
+    categoryName?: string;
+    linkedInvoiceId?: number;
+    search?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<string>(`/money-operations/print${q}`);
+  }
+
   async getMoneyOperationAccounts(params?: { source?: MoneyOperationSource }) {
     const q = buildQuery(params ?? {});
     return this.request<string[]>(`/money-operations/accounts${q}`);

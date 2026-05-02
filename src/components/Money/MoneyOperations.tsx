@@ -1836,6 +1836,7 @@ export function MoneyOperations({
   const [cashOrderSaving, setCashOrderSaving] = useState(false);
   const [bankStatementImporting, setBankStatementImporting] = useState(false);
   const [moneyOperationsExporting, setMoneyOperationsExporting] = useState(false);
+  const [moneyOperationsPrinting, setMoneyOperationsPrinting] = useState(false);
   const [bankStatementImportResult, setBankStatementImportResult] = useState<{
     batchId?: number | null;
     rowsRead: number;
@@ -2211,6 +2212,32 @@ export function MoneyOperations({
       toast.error(message, 'Журнал денег');
     } finally {
       setMoneyOperationsExporting(false);
+    }
+  };
+
+  const handlePrintJournal = async () => {
+    setMoneyOperationsPrinting(true);
+    try {
+      const html = await apiService.getMoneyOperationsPrintHtml({
+        from,
+        to,
+        source: apiSource,
+        direction: directionFilter === 'all' ? undefined : directionFilter,
+        accountingType: accountingTypeFilter === 'all' ? undefined : accountingTypeFilter,
+        moneyAccountId: moneyAccountId === '' ? undefined : moneyAccountId,
+        accountName: accountName || undefined,
+        categoryName: categoryName.trim() || undefined,
+        search: effectiveSearch,
+      });
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось открыть печатную форму журнала.');
+      toast.error(message, 'Журнал денег');
+    } finally {
+      setMoneyOperationsPrinting(false);
     }
   };
 
@@ -3317,6 +3344,14 @@ export function MoneyOperations({
             className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
             <Download className={`h-4 w-4 ${moneyOperationsExporting ? 'animate-pulse' : ''}`} />
             {moneyOperationsExporting ? 'Экспорт...' : 'CSV'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handlePrintJournal()}
+            disabled={moneyOperationsPrinting}
+            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+            <Printer className={`h-4 w-4 ${moneyOperationsPrinting ? 'animate-pulse' : ''}`} />
+            {moneyOperationsPrinting ? 'Печать...' : 'Печать'}
           </button>
         </div>
       </div>
