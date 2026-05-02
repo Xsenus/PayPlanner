@@ -506,6 +506,70 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task ExportPdf_ReturnsFilteredJournalPdfFile()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Main bank",
+                CounterpartyName = "Bank Client LLC",
+                Amount = 10_000m,
+                Currency = "RUB",
+                Date = new DateTime(2026, 5, 1),
+                Purpose = "РћРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ",
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Cash,
+                Direction = MoneyOperationDirection.Expense,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Cash desk",
+                CounterpartyName = "Cash Supplier",
+                Amount = 500m,
+                Date = new DateTime(2026, 5, 1),
+                MatchStatus = MoneyOperationMatchStatus.None,
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+        var controller = new MoneyOperationsController(
+            db,
+            NullLogger<MoneyOperationsController>.Instance,
+            new FakeMoneyJournalPdfService(
+                "%PDF-money-journal%"u8.ToArray(),
+                html =>
+                {
+                    Assert.Contains("Денежный журнал", html);
+                    Assert.Contains("Bank Client LLC", html);
+                    Assert.DoesNotContain("Cash Supplier", html);
+                }));
+
+        var action = await controller.ExportPdf(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 31),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: null,
+            accountName: null,
+            categoryName: null,
+            linkedInvoiceId: null,
+            search: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(action);
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.Equal("%PDF-money-journal%"u8.ToArray(), file.FileContents);
+        Assert.StartsWith("money-operations-", file.FileDownloadName);
+        Assert.EndsWith(".pdf", file.FileDownloadName);
+    }
+
+    [Fact]
     public async Task CreateMoneyOperation_LinksIncomeTypeWithoutDuplicatingCategoryName()
     {
         await using var db = await CreateContextAsync();
@@ -4199,6 +4263,24 @@ public class MoneyOperationsControllerTests
         Assert.Contains("font-family: Arial, \"DejaVu Sans\", sans-serif;", html);
         Assert.Contains("-webkit-print-color-adjust: exact !important;", html);
         Assert.Contains("print-color-adjust: exact !important;", html);
+    }
+
+    private sealed class FakeMoneyJournalPdfService : IInvoiceDocumentPdfService
+    {
+        private readonly byte[] _bytes;
+        private readonly Action<string> _assertHtml;
+
+        public FakeMoneyJournalPdfService(byte[] bytes, Action<string> assertHtml)
+        {
+            _bytes = bytes;
+            _assertHtml = assertHtml;
+        }
+
+        public Task<byte[]> RenderAsync(string html, CancellationToken ct = default)
+        {
+            _assertHtml(html);
+            return Task.FromResult(_bytes);
+        }
     }
 
     private sealed class FakeInvoiceDocumentPdfService : IInvoiceDocumentPdfService

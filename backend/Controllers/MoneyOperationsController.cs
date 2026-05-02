@@ -5,6 +5,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.Invoices;
 using System.Globalization;
 using System.Net;
 using System.Security.Claims;
@@ -41,12 +42,17 @@ public class MoneyOperationsController : ControllerBase
 
     private readonly PaymentContext _db;
     private readonly ILogger<MoneyOperationsController> _logger;
+    private readonly IInvoiceDocumentPdfService? _pdfService;
     private static readonly JsonSerializerOptions BankStatementAutoImportJsonOptions = new(JsonSerializerDefaults.Web);
 
-    public MoneyOperationsController(PaymentContext db, ILogger<MoneyOperationsController> logger)
+    public MoneyOperationsController(
+        PaymentContext db,
+        ILogger<MoneyOperationsController> logger,
+        IInvoiceDocumentPdfService? pdfService = null)
     {
         _db = db;
         _logger = logger;
+        _pdfService = pdfService;
     }
 
     [HttpGet]
@@ -313,6 +319,45 @@ public class MoneyOperationsController : ControllerBase
             BuildMoneyOperationsPrintHtml(items, from, to, source),
             "text/html; charset=utf-8",
             Encoding.UTF8);
+    }
+
+    [HttpGet("export.pdf")]
+    public async Task<IActionResult> ExportPdf(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        [FromQuery] MoneyOperationDirection? direction,
+        [FromQuery] MoneyOperationAccountingType? accountingType,
+        [FromQuery] int? moneyAccountId = null,
+        [FromQuery] string? accountName = null,
+        [FromQuery] string? categoryName = null,
+        [FromQuery] int? linkedInvoiceId = null,
+        [FromQuery] string? search = null,
+        CancellationToken ct = default)
+    {
+        var items = await SqliteRetryHelper.ExecuteAsync(
+            async cancellationToken =>
+            {
+                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
+                    .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
+                    .OrderByDescending(item => item.Date)
+                    .ThenByDescending(item => item.Id)
+                    .ToListAsync(cancellationToken);
+
+                return rows.Select(MapMoneyOperationRow).ToList();
+            },
+            _logger,
+            ct);
+
+        try
+        {
+            var pdfBytes = await RenderPdfAsync(BuildMoneyOperationsPrintHtml(items, from, to, source), ct);
+            return File(pdfBytes, "application/pdf", $"money-operations-{DateTime.UtcNow:yyyyMMdd-HHmmss}.pdf");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
+        }
     }
 
     [HttpGet("accounts")]
@@ -2373,6 +2418,17 @@ public class MoneyOperationsController : ControllerBase
 </body>
 </html>
 """;
+    }
+
+    private Task<byte[]> RenderPdfAsync(string documentHtml, CancellationToken ct)
+    {
+        if (_pdfService is null)
+        {
+            throw new InvalidOperationException(
+                "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения.");
+        }
+
+        return _pdfService.RenderAsync(documentHtml, ct);
     }
 
     private static string Html(string value)

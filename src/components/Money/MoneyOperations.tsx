@@ -1884,6 +1884,7 @@ export function MoneyOperations({
   const [cashOrderSaving, setCashOrderSaving] = useState(false);
   const [bankStatementImporting, setBankStatementImporting] = useState(false);
   const [moneyOperationsExporting, setMoneyOperationsExporting] = useState(false);
+  const [moneyOperationsPdfExporting, setMoneyOperationsPdfExporting] = useState(false);
   const [moneyOperationsPrinting, setMoneyOperationsPrinting] = useState(false);
   const [bankStatementImportResult, setBankStatementImportResult] = useState<{
     batchId?: number | null;
@@ -2356,6 +2357,37 @@ export function MoneyOperations({
       toast.error(message, 'Журнал денег');
     } finally {
       setMoneyOperationsExporting(false);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    setMoneyOperationsPdfExporting(true);
+    try {
+      const { blob, fileName } = await apiService.exportMoneyOperationsPdf({
+        from,
+        to,
+        source: apiSource,
+        direction: directionFilter === 'all' ? undefined : directionFilter,
+        accountingType: accountingTypeFilter === 'all' ? undefined : accountingTypeFilter,
+        moneyAccountId: moneyAccountId === '' ? undefined : moneyAccountId,
+        accountName: accountName || undefined,
+        categoryName: categoryName.trim() || undefined,
+        search: effectiveSearch,
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName || 'money-operations.pdf';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      toast.success('Журнал экспортирован в PDF.', 'Журнал денег');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось экспортировать журнал в PDF.');
+      toast.error(message, 'Журнал денег');
+    } finally {
+      setMoneyOperationsPdfExporting(false);
     }
   };
 
@@ -3570,6 +3602,14 @@ export function MoneyOperations({
             className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
             <Download className={`h-4 w-4 ${moneyOperationsExporting ? 'animate-pulse' : ''}`} />
             {moneyOperationsExporting ? 'Экспорт...' : 'CSV'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExportPdf()}
+            disabled={moneyOperationsPdfExporting}
+            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+            <Download className={`h-4 w-4 ${moneyOperationsPdfExporting ? 'animate-pulse' : ''}`} />
+            {moneyOperationsPdfExporting ? 'PDF...' : 'PDF'}
           </button>
           <button
             type="button"
