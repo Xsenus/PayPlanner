@@ -571,6 +571,70 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Cancel_PaidCashInvoiceWithRefundAction_CreatesExpenseOperationAndCashOrder()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Refund");
+        var cashSourceId = await CreatePaymentSourceAsync(db, "Касса");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var request = CreateRequest("INV-CANCEL-REFUND", clientId, new DateTime(2026, 4, 20), 12_000m);
+        request.Status = PaymentStatus.Completed;
+        request.PaidDate = new DateTime(2026, 4, 21);
+        request.PaymentSourceId = cashSourceId;
+
+        var createAction = await controller.Create(request, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var cancelAction = await controller.Cancel(
+            createdDto.Id,
+            new CancelInvoiceRequest
+            {
+                Reason = "Возврат клиенту",
+                ReceivedMoneyAction = InvoiceCancellationMoneyAction.Refund,
+                RefundDate = new DateTime(2026, 4, 25),
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(cancelAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(PaymentStatus.Cancelled, dto.Status);
+
+        db.ChangeTracker.Clear();
+        var storedPayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(PaymentStatus.Cancelled, storedPayment.Status);
+        Assert.Equal(0m, storedPayment.PaidAmount);
+        Assert.Contains("возвращена клиенту", storedPayment.SystemNotes, StringComparison.OrdinalIgnoreCase);
+
+        var operation = await db.MoneyOperations.AsNoTracking().SingleAsync();
+        Assert.Equal(MoneyOperationSource.Cash, operation.Source);
+        Assert.Equal(MoneyOperationDirection.Expense, operation.Direction);
+        Assert.Equal(MoneyOperationAccountingType.Fact, operation.AccountingType);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, operation.MatchStatus);
+        Assert.Equal(12_000m, operation.Amount);
+        Assert.Equal(new DateTime(2026, 4, 25), operation.Date);
+        Assert.Equal(storedPayment.InvoiceId, operation.LinkedInvoiceId);
+        Assert.Equal("Возврат клиенту", operation.CategoryName);
+        Assert.Contains("Возврат клиенту", operation.Purpose, StringComparison.Ordinal);
+
+        var cashOrder = await db.CashOrders.AsNoTracking().SingleAsync();
+        Assert.Equal(CashOrderType.Outgoing, cashOrder.Type);
+        Assert.Equal(CashOrderStatus.Posted, cashOrder.Status);
+        Assert.Equal(12_000m, cashOrder.Amount);
+        Assert.Equal(operation.Id, cashOrder.MoneyOperationId);
+        Assert.Equal(storedPayment.InvoiceId, cashOrder.InvoiceId);
+        Assert.Equal(clientId, cashOrder.ClientId);
+        Assert.StartsWith("РКО-2026-", cashOrder.Number, StringComparison.Ordinal);
+
+        var balance = await ClientBalanceService.GetBalanceAsync(db, clientId);
+        Assert.Equal(0m, balance);
+    }
+
+    [Fact]
     public async Task Create_ExpenseInvoice_UsesExpenseClientAsCaseOwner()
     {
         await using var db = await CreateContextAsync();

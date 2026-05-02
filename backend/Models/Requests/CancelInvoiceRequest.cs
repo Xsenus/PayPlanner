@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Models.Requests;
 
@@ -19,4 +20,8 @@ public class CancelInvoiceRequest
     public InvoiceCancellationMoneyAction ReceivedMoneyAction { get; set; } = InvoiceCancellationMoneyAction.Reject;
 
     public int? TargetPaymentId { get; set; }
+
+    public MoneyOperationSource? RefundSource { get; set; }
+
+    public DateTime? RefundDate { get; set; }
 }

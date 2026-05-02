@@ -2657,21 +2657,23 @@ export function InvoiceModal({
           Number(invoice.paidAmount ?? 0) > 0 ||
           invoice.status === 'Completed' ||
           invoice.status === 'Processing';
-        let receivedMoneyAction: 'Reject' | 'LeaveAsAdvance' | 'Reallocate' = 'Reject';
+        let receivedMoneyAction: 'Reject' | 'LeaveAsAdvance' | 'Refund' | 'Reallocate' = 'Reject';
         let targetPaymentId: number | null = null;
         if (hasReceivedMoney) {
           const targetInvoiceInput = window.prompt(
-            'По счёту уже есть оплата. Укажите ID счёта для зачёта или оставьте пустым, чтобы перенести сумму в аванс клиента.',
+            'По счёту уже есть оплата. Укажите ID счёта для зачёта, слово "возврат" для возврата денег или оставьте пустым для аванса клиента.',
           );
           if (targetInvoiceInput === null) {
             return;
           }
 
           const normalizedTargetInvoiceInput = targetInvoiceInput.trim();
-          if (normalizedTargetInvoiceInput) {
+          if (/^(возврат|refund|return)$/i.test(normalizedTargetInvoiceInput)) {
+            receivedMoneyAction = 'Refund';
+          } else if (normalizedTargetInvoiceInput) {
             const parsedTargetPaymentId = Number(normalizedTargetInvoiceInput);
             if (!Number.isInteger(parsedTargetPaymentId) || parsedTargetPaymentId <= 0) {
-              toast.error('ID счёта для зачёта должен быть положительным числом.');
+              toast.error('Укажите положительный ID счёта для зачёта, слово "возврат" или оставьте поле пустым.');
               return;
             }
             receivedMoneyAction = 'Reallocate';

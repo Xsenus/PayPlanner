@@ -362,6 +362,8 @@ public class InvoicesController : ControllerBase
 
         var payment = await _db.Payments
             .Include(p => p.Invoice)
+            .Include(p => p.Client)
+            .Include(p => p.PaymentSource)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
         {
@@ -392,17 +394,11 @@ public class InvoicesController : ControllerBase
 
         if (hasReceivedMoney)
         {
-            if (request.ReceivedMoneyAction == InvoiceCancellationMoneyAction.Refund)
+            if (request.ReceivedMoneyAction is not InvoiceCancellationMoneyAction.LeaveAsAdvance
+                and not InvoiceCancellationMoneyAction.Reallocate
+                and not InvoiceCancellationMoneyAction.Refund)
             {
-                return BadRequest("Возврат денег при аннулировании счёта будет добавлен отдельным сценарием через кассу/банк.");
-            }
-
-            if (request.ReceivedMoneyAction != InvoiceCancellationMoneyAction.LeaveAsAdvance)
-            {
-                if (request.ReceivedMoneyAction != InvoiceCancellationMoneyAction.Reallocate)
-                {
-                    return BadRequest("Нельзя аннулировать счёт с уже полученной оплатой без сценария возврата, зачёта или переноса в аванс.");
-                }
+                return BadRequest("Нельзя аннулировать счёт с уже полученной оплатой без сценария возврата, зачёта или переноса в аванс.");
             }
 
             if (payment.Type != PaymentType.Income || !payment.ClientId.HasValue || payment.ClientId.Value <= 0)
@@ -478,7 +474,7 @@ public class InvoicesController : ControllerBase
         var actor = User.GetDisplayName();
         var actorId = GetUserId(User);
 
-        if (hasReceivedMoney)
+        if (hasReceivedMoney && request.ReceivedMoneyAction is InvoiceCancellationMoneyAction.LeaveAsAdvance or InvoiceCancellationMoneyAction.Reallocate)
         {
             await ClientBalanceService.UpsertCancelledInvoiceAdvanceAsync(
                 _db,
@@ -487,6 +483,20 @@ public class InvoicesController : ControllerBase
                 reason,
                 now,
                 HttpContext,
+                ct);
+        }
+
+        MoneyOperation? refundOperation = null;
+        if (hasReceivedMoney && request.ReceivedMoneyAction == InvoiceCancellationMoneyAction.Refund)
+        {
+            refundOperation = await CreateInvoiceRefundOperationAsync(
+                payment,
+                paymentsToCancel,
+                invoiceEntityId.Value,
+                receivedAmount,
+                reason,
+                request,
+                now,
                 ct);
         }
 
@@ -526,7 +536,9 @@ public class InvoicesController : ControllerBase
         payment.PaidDate = null;
         payment.LastPaymentDate = null;
 
-        var advanceNote = hasReceivedMoney && reallocatedAmount > 0m
+        var advanceNote = refundOperation is not null
+            ? $" Полученная оплата возвращена клиенту денежной операцией #{refundOperation.Id}: {receivedAmount:N2}."
+            : hasReceivedMoney && reallocatedAmount > 0m
             ? $" Полученная оплата зачтена на счёт #{reallocationTarget!.Id}: {reallocatedAmount:N2}. Остаток в авансе: {Math.Max(receivedAmount - reallocatedAmount, 0m):N2}."
             : hasReceivedMoney
                 ? $" Полученная оплата перенесена в аванс клиента: {receivedAmount:N2}."
@@ -3400,6 +3412,7 @@ public class InvoicesController : ControllerBase
         int representativePaymentId,
         CancellationToken ct)
         => _db.Payments
+            .Include(payment => payment.PaymentSource)
             .Where(payment =>
                 payment.InvoiceId == invoiceEntityId
                 && payment.Id != representativePaymentId
@@ -3437,6 +3450,111 @@ public class InvoicesController : ControllerBase
         }
 
         return null;
+    }
+
+    private async Task<MoneyOperation> CreateInvoiceRefundOperationAsync(
+        Payment payment,
+        IReadOnlyCollection<Payment> paymentsToCancel,
+        int invoiceEntityId,
+        decimal amount,
+        string reason,
+        CancelInvoiceRequest request,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var sourcePayment = paymentsToCancel.FirstOrDefault(HasReceivedMoney) ?? payment;
+        var refundDate = (request.RefundDate ?? now).Date;
+        var refundSource = request.RefundSource ?? ResolveMoneyOperationSource(sourcePayment.PaymentSource?.Name);
+        var counterpartyName = payment.Client?.Name ?? payment.CounterpartyName;
+        var invoiceNumber = string.IsNullOrWhiteSpace(payment.Account) ? payment.Invoice?.Number : payment.Account;
+        var purpose = $"Возврат оплаты по аннулированному счёту №{invoiceNumber}. Причина: {reason}";
+
+        var operation = new MoneyOperation
+        {
+            Source = refundSource,
+            Direction = MoneyOperationDirection.Expense,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = sourcePayment.PaymentSource?.Name,
+            CounterpartyName = counterpartyName,
+            CategoryName = "Возврат клиенту",
+            Amount = amount,
+            Currency = "RUB",
+            Date = refundDate,
+            RecognitionDate = refundDate,
+            Purpose = purpose,
+            PaidInvoiceNumber = invoiceNumber,
+            PaidAmount = amount,
+            PaidAccountName = invoiceNumber,
+            LinkedInvoiceId = invoiceEntityId,
+            MatchStatus = MoneyOperationMatchStatus.Matched,
+            MatchedAt = now,
+            MatchComment = "Возврат оплаты при аннулировании счёта.",
+            CreatedAt = now,
+        };
+
+        _db.MoneyOperations.Add(operation);
+        await _db.SaveChangesAsync(ct);
+
+        if (refundSource == MoneyOperationSource.Cash)
+        {
+            _db.CashOrders.Add(new CashOrder
+            {
+                Number = await GenerateCashOrderNumberAsync(CashOrderType.Outgoing, refundDate, ct),
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Posted,
+                Date = refundDate,
+                Amount = amount,
+                Currency = "RUB",
+                ClientId = payment.ClientId,
+                MoneyOperationId = operation.Id,
+                InvoiceId = invoiceEntityId,
+                Account = sourcePayment.PaymentSource?.Name,
+                ReceiverName = counterpartyName,
+                Basis = purpose,
+                Comment = reason,
+                CreatedAt = now,
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return operation;
+    }
+
+    private static MoneyOperationSource ResolveMoneyOperationSource(string? sourceName)
+    {
+        if (ContainsPaymentSourceToken(sourceName, "кас") ||
+            ContainsPaymentSourceToken(sourceName, "налич"))
+        {
+            return MoneyOperationSource.Cash;
+        }
+
+        if (ContainsPaymentSourceToken(sourceName, "карт") ||
+            ContainsPaymentSourceToken(sourceName, "card"))
+        {
+            return MoneyOperationSource.Card;
+        }
+
+        if (ContainsPaymentSourceToken(sourceName, "e-money") ||
+            ContainsPaymentSourceToken(sourceName, "emoney") ||
+            ContainsPaymentSourceToken(sourceName, "электрон") ||
+            ContainsPaymentSourceToken(sourceName, "yoomoney") ||
+            ContainsPaymentSourceToken(sourceName, "яндекс"))
+        {
+            return MoneyOperationSource.EMoney;
+        }
+
+        return MoneyOperationSource.Bank;
+    }
+
+    private static bool ContainsPaymentSourceToken(string? sourceName, string token)
+        => sourceName?.Contains(token, StringComparison.OrdinalIgnoreCase) == true;
+
+    private async Task<string> GenerateCashOrderNumberAsync(CashOrderType type, DateTime date, CancellationToken ct)
+    {
+        var prefix = type == CashOrderType.Incoming ? "ПКО" : "РКО";
+        var yearPrefix = $"{prefix}-{date:yyyy}-";
+        var count = await _db.CashOrders.CountAsync(order => order.Number.StartsWith(yearPrefix), ct);
+        return $"{yearPrefix}{count + 1:0000}";
     }
 
     private static bool HasReceivedMoney(Payment payment)
