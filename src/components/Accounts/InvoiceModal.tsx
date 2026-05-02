@@ -2657,18 +2657,31 @@ export function InvoiceModal({
           Number(invoice.paidAmount ?? 0) > 0 ||
           invoice.status === 'Completed' ||
           invoice.status === 'Processing';
-        let receivedMoneyAction: 'Reject' | 'LeaveAsAdvance' = 'Reject';
+        let receivedMoneyAction: 'Reject' | 'LeaveAsAdvance' | 'Reallocate' = 'Reject';
+        let targetPaymentId: number | null = null;
         if (hasReceivedMoney) {
-          const leaveAsAdvance = window.confirm(
-            'По счёту уже есть оплата. Перенести полученную сумму в аванс клиента?',
+          const targetInvoiceInput = window.prompt(
+            'По счёту уже есть оплата. Укажите ID счёта для зачёта или оставьте пустым, чтобы перенести сумму в аванс клиента.',
           );
-          if (!leaveAsAdvance) {
+          if (targetInvoiceInput === null) {
             return;
           }
-          receivedMoneyAction = 'LeaveAsAdvance';
+
+          const normalizedTargetInvoiceInput = targetInvoiceInput.trim();
+          if (normalizedTargetInvoiceInput) {
+            const parsedTargetPaymentId = Number(normalizedTargetInvoiceInput);
+            if (!Number.isInteger(parsedTargetPaymentId) || parsedTargetPaymentId <= 0) {
+              toast.error('ID счёта для зачёта должен быть положительным числом.');
+              return;
+            }
+            receivedMoneyAction = 'Reallocate';
+            targetPaymentId = parsedTargetPaymentId;
+          } else {
+            receivedMoneyAction = 'LeaveAsAdvance';
+          }
         }
 
-        const updated = await apiService.cancelInvoice(invoice.id, reason.trim(), receivedMoneyAction);
+        const updated = await apiService.cancelInvoice(invoice.id, reason.trim(), receivedMoneyAction, targetPaymentId);
         setForm((prev) => ({
           ...prev,
           status: updated.status,

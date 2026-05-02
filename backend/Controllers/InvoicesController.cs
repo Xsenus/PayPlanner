@@ -397,24 +397,70 @@ public class InvoicesController : ControllerBase
                 return BadRequest("Возврат денег при аннулировании счёта будет добавлен отдельным сценарием через кассу/банк.");
             }
 
-            if (request.ReceivedMoneyAction == InvoiceCancellationMoneyAction.Reallocate)
-            {
-                return BadRequest("Перенос оплаты на другой счёт будет добавлен отдельным сценарием зачёта.");
-            }
-
             if (request.ReceivedMoneyAction != InvoiceCancellationMoneyAction.LeaveAsAdvance)
             {
-                return BadRequest("Нельзя аннулировать счёт с уже полученной оплатой без сценария возврата, зачёта или переноса в аванс.");
+                if (request.ReceivedMoneyAction != InvoiceCancellationMoneyAction.Reallocate)
+                {
+                    return BadRequest("Нельзя аннулировать счёт с уже полученной оплатой без сценария возврата, зачёта или переноса в аванс.");
+                }
             }
 
             if (payment.Type != PaymentType.Income || !payment.ClientId.HasValue || payment.ClientId.Value <= 0)
             {
-                return BadRequest("Перенести оплату в аванс можно только по входящему счёту с указанным клиентом.");
+                return BadRequest("Обработать оплату можно только по входящему счёту с указанным клиентом.");
             }
 
             if (receivedAmount <= 0m)
             {
                 return BadRequest("По счёту отмечена оплата, но сумма полученных денег не определена.");
+            }
+        }
+
+        Payment? reallocationTarget = null;
+        if (hasReceivedMoney && request.ReceivedMoneyAction == InvoiceCancellationMoneyAction.Reallocate)
+        {
+            if (!request.TargetPaymentId.HasValue || request.TargetPaymentId.Value <= 0)
+            {
+                return BadRequest("Для зачёта оплаты укажите целевой счёт.");
+            }
+
+            if (request.TargetPaymentId.Value == payment.Id)
+            {
+                return BadRequest("Нельзя зачесть оплату на тот же счёт, который аннулируется.");
+            }
+
+            reallocationTarget = await _db.Payments
+                .FirstOrDefaultAsync(item => item.Id == request.TargetPaymentId.Value, ct);
+            if (reallocationTarget is null)
+            {
+                return BadRequest("Целевой счёт для зачёта не найден.");
+            }
+
+            if (reallocationTarget.DocumentKind != DocumentKind.Invoice || reallocationTarget.Type != PaymentType.Income)
+            {
+                return BadRequest("Зачесть оплату можно только на другой входящий счёт.");
+            }
+
+            if (reallocationTarget.ClientId != payment.ClientId)
+            {
+                return BadRequest("Зачесть оплату можно только на счёт того же клиента.");
+            }
+
+            if (reallocationTarget.Status == PaymentStatus.Cancelled)
+            {
+                return BadRequest("Нельзя зачесть оплату на аннулированный счёт.");
+            }
+
+            var targetInvoiceEntityId = reallocationTarget.InvoiceId;
+            if (targetInvoiceEntityId.HasValue && targetInvoiceEntityId.Value > 0)
+            {
+                await LockInvoiceAggregateAsync(targetInvoiceEntityId.Value, ct);
+            }
+
+            var targetOutstandingAmount = ResolveOutstandingAmount(reallocationTarget);
+            if (targetOutstandingAmount <= 0m)
+            {
+                return BadRequest("По целевому счёту нет остатка для зачёта.");
             }
         }
 
@@ -444,6 +490,32 @@ public class InvoicesController : ControllerBase
                 ct);
         }
 
+        decimal reallocatedAmount = 0m;
+        if (reallocationTarget is not null && payment.ClientId.HasValue)
+        {
+            await _db.SaveChangesAsync(ct);
+            var reallocationResult = await ClientBalanceService.ApplyCreditAsync(
+                _db,
+                payment.ClientId.Value,
+                reallocationTarget.Id,
+                receivedAmount,
+                now,
+                HttpContext,
+                ct);
+
+            if (!reallocationResult.Success)
+            {
+                return BadRequest(reallocationResult.Error ?? "Не удалось зачесть оплату на целевой счёт.");
+            }
+
+            reallocatedAmount = reallocationResult.AppliedAmount;
+            PaymentDomainService.AppendSystemNote(
+                payment,
+                $"Оплата зачтена на счёт #{reallocationTarget.Id}: {reallocatedAmount:N2}",
+                now,
+                actor);
+        }
+
         payment.Status = PaymentStatus.Cancelled;
         payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.Cancelled;
         payment.InvoiceCancelledAt ??= now;
@@ -454,9 +526,11 @@ public class InvoicesController : ControllerBase
         payment.PaidDate = null;
         payment.LastPaymentDate = null;
 
-        var advanceNote = hasReceivedMoney
-            ? $" Полученная оплата перенесена в аванс клиента: {receivedAmount:N2}."
-            : string.Empty;
+        var advanceNote = hasReceivedMoney && reallocatedAmount > 0m
+            ? $" Полученная оплата зачтена на счёт #{reallocationTarget!.Id}: {reallocatedAmount:N2}. Остаток в авансе: {Math.Max(receivedAmount - reallocatedAmount, 0m):N2}."
+            : hasReceivedMoney
+                ? $" Полученная оплата перенесена в аванс клиента: {receivedAmount:N2}."
+                : string.Empty;
         PaymentDomainService.AppendSystemNote(payment, $"Счёт аннулирован. Причина: {reason}{advanceNote}", now, actor);
 
         await _db.SaveChangesAsync(ct);

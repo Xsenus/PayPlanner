@@ -17,4 +17,6 @@ public class CancelInvoiceRequest
     public string Reason { get; set; } = string.Empty;
 
     public InvoiceCancellationMoneyAction ReceivedMoneyAction { get; set; } = InvoiceCancellationMoneyAction.Reject;
+
+    public int? TargetPaymentId { get; set; }
 }

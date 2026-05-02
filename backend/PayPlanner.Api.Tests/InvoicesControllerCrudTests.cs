@@ -500,6 +500,77 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Cancel_PaidInvoiceWithReallocateAction_AppliesCreditToTargetInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Reallocate");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var sourceRequest = CreateRequest("INV-CANCEL-REALLOC-SRC", clientId, new DateTime(2026, 4, 20), 12_000m);
+        sourceRequest.Status = PaymentStatus.Completed;
+        sourceRequest.PaidDate = new DateTime(2026, 4, 21);
+        var sourceAction = await controller.Create(sourceRequest, CancellationToken.None);
+        var sourceCreated = Assert.IsType<CreatedResult>(sourceAction.Result);
+        var sourceDto = Assert.IsType<InvoiceDto>(sourceCreated.Value);
+
+        var targetAction = await controller.Create(
+            CreateRequest("INV-CANCEL-REALLOC-DST", clientId, new DateTime(2026, 4, 22), 12_000m),
+            CancellationToken.None);
+        var targetCreated = Assert.IsType<CreatedResult>(targetAction.Result);
+        var targetDto = Assert.IsType<InvoiceDto>(targetCreated.Value);
+
+        var cancelAction = await controller.Cancel(
+            sourceDto.Id,
+            new CancelInvoiceRequest
+            {
+                Reason = "Перевыставили счёт",
+                ReceivedMoneyAction = InvoiceCancellationMoneyAction.Reallocate,
+                TargetPaymentId = targetDto.Id,
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(cancelAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(PaymentStatus.Cancelled, dto.Status);
+
+        db.ChangeTracker.Clear();
+        var storedSource = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == sourceDto.Id);
+        var storedTarget = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == targetDto.Id);
+        Assert.Equal(PaymentStatus.Cancelled, storedSource.Status);
+        Assert.Equal(0m, storedSource.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, storedTarget.Status);
+        Assert.Equal(12_000m, storedTarget.PaidAmount);
+        Assert.Contains($"счёт #{targetDto.Id}", storedSource.SystemNotes, StringComparison.OrdinalIgnoreCase);
+
+        var balanceTransactions = await db.ClientBalanceTransactions
+            .AsNoTracking()
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Collection(
+            balanceTransactions,
+            credit =>
+            {
+                Assert.Equal(ClientBalanceTransactionType.AdvanceFromCancelledInvoice, credit.Type);
+                Assert.Equal(ClientBalanceDirection.Credit, credit.Direction);
+                Assert.Equal(12_000m, credit.Amount);
+                Assert.Equal(sourceDto.Id, credit.PaymentId);
+            },
+            debit =>
+            {
+                Assert.Equal(ClientBalanceTransactionType.CreditApplied, debit.Type);
+                Assert.Equal(ClientBalanceDirection.Debit, debit.Direction);
+                Assert.Equal(12_000m, debit.Amount);
+                Assert.Equal(targetDto.Id, debit.PaymentId);
+            });
+
+        var balance = await ClientBalanceService.GetBalanceAsync(db, clientId);
+        Assert.Equal(0m, balance);
+    }
+
+    [Fact]
     public async Task Create_ExpenseInvoice_UsesExpenseClientAsCaseOwner()
     {
         await using var db = await CreateContextAsync();

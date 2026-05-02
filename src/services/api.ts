@@ -1272,10 +1272,11 @@ export class ApiService {
     id: number,
     reason: string,
     receivedMoneyAction: 'Reject' | 'LeaveAsAdvance' | 'Refund' | 'Reallocate' = 'Reject',
+    targetPaymentId?: number | null,
   ) {
     return this.request<Invoice>(`/invoices/${id}/cancel`, {
       method: 'POST',
-      body: JSON.stringify({ reason, receivedMoneyAction }),
+      body: JSON.stringify({ reason, receivedMoneyAction, targetPaymentId }),
     });
   }
 
