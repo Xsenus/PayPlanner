@@ -97,6 +97,61 @@ public class ContractsController : ControllerBase
         return Ok(dto);
     }
 
+    [HttpPost("{id:int}/terminate")]
+    public async Task<ActionResult<ContractDto>> Terminate(int id, [FromBody] TerminateContractRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return ValidationProblem(ModelState);
+        if (request.TerminationDate == default) return ValidationError(nameof(request.TerminationDate), "Дата расторжения обязательна.");
+
+        var terms = Normalize(request.Terms);
+        if (terms is null) return ValidationError(nameof(request.Terms), "Условия расторжения обязательны.");
+
+        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (contract is null) return NotFound();
+        if (string.Equals(contract.Status, ContractStatus.Cancelled, StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Аннулированный договор нельзя расторгнуть.");
+        }
+
+        contract.Status = ContractStatus.Terminated;
+        contract.TerminationDate = request.TerminationDate.Date;
+        contract.TerminationReason = Normalize(request.Reason);
+        contract.TerminationTerms = terms;
+        contract.TerminationFinancialTerms = Normalize(request.FinancialTerms);
+        contract.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+
+        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        return Ok(dto);
+    }
+
+    [HttpPost("{id:int}/cancel")]
+    public async Task<ActionResult<ContractDto>> Cancel(int id, [FromBody] CancelContractRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return ValidationProblem(ModelState);
+        var reason = Normalize(request.Reason);
+        if (reason is null) return ValidationError(nameof(request.Reason), "Причина аннулирования обязательна.");
+
+        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (contract is null) return NotFound();
+        if (!string.Equals(contract.Status, ContractStatus.Draft, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(contract.Status, ContractStatus.OnSigning, StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Аннулирование доступно только для черновиков и договоров на подписании.");
+        }
+
+        contract.Status = ContractStatus.Cancelled;
+        contract.CancelledAt ??= DateTime.UtcNow.Date;
+        contract.CancelledReason = reason;
+        contract.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+
+        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        return Ok(dto);
+    }
+
     [HttpGet("numbering-settings")]
     public async Task<ActionResult<ContractNumberingSettingsDto>> GetNumberingSettings(CancellationToken ct)
         => Ok(await GetContractNumberingSettingsAsync(ct));

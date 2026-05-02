@@ -898,6 +898,26 @@ export class ApiService {
     return this.request<Contract>(`/contracts/${id}/mark-concluded`, { method: 'POST' });
   }
 
+  async terminateContract(
+    id: number,
+    terminationDate: string,
+    terms: string,
+    reason?: string | null,
+    financialTerms?: string | null,
+  ) {
+    return this.request<Contract>(`/contracts/${id}/terminate`, {
+      method: 'POST',
+      body: JSON.stringify({ terminationDate, terms, reason, financialTerms }),
+    });
+  }
+
+  async cancelContract(id: number, reason: string) {
+    return this.request<Contract>(`/contracts/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
   async deleteContract(id: number) {
     return this.request<void>(`/contracts/${id}`, { method: 'DELETE' });
   }

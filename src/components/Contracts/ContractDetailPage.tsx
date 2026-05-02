@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, GripVertical, Loader2, Pencil, Plus, Save, Search, Send, Settings2, X } from 'lucide-react';
+import { ArrowLeft, Ban, Check, FileX, GripVertical, Loader2, Pencil, Plus, Save, Search, Send, Settings2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -117,7 +117,7 @@ const contractStatusLabels: Record<NonNullable<Contract['status']>, string> = {
   OnSigning: 'На подписании',
   Concluded: 'Заключён',
   Terminated: 'Расторгнут',
-  Cancelled: 'Отменён',
+  Cancelled: 'Аннулирован',
 };
 
 function parseAmountInput(value: string): number | null | undefined {
@@ -664,23 +664,72 @@ export function ContractDetailPage({
     });
   };
 
-  const runWorkflowAction = async (action: 'sendToSigning' | 'markConcluded') => {
+  const runWorkflowAction = async (action: 'sendToSigning' | 'markConcluded' | 'terminate' | 'cancel') => {
     if (!contract || workflowSaving) return;
+
+    let terminatePayload:
+      | { terminationDate: string; terms: string; reason?: string | null; financialTerms?: string | null }
+      | null = null;
+    let cancelReason: string | null = null;
+
+    if (action === 'terminate') {
+      const terminationDate = window.prompt('Дата расторжения договора (ГГГГ-ММ-ДД)', new Date().toISOString().slice(0, 10))?.trim();
+      if (!terminationDate) return;
+
+      const terms = window.prompt('Укажите условия расторжения договора')?.trim();
+      if (!terms) {
+        toast.error('Условия расторжения обязательны.', 'Договоры');
+        return;
+      }
+
+      terminatePayload = {
+        terminationDate,
+        terms,
+        reason: window.prompt('Причина расторжения договора (необязательно)')?.trim() || null,
+        financialTerms: window.prompt('Финансовые условия (необязательно)')?.trim() || null,
+      };
+    }
+
+    if (action === 'cancel') {
+      const reason = window.prompt('Укажите причину аннулирования договора')?.trim();
+      if (!reason) {
+        toast.error('Причина аннулирования обязательна.', 'Договоры');
+        return;
+      }
+
+      cancelReason = reason;
+    }
 
     setWorkflowSaving(true);
     try {
-      const updatedContract = action === 'sendToSigning'
-        ? await apiService.sendContractToSigning(contract.id)
-        : await apiService.markContractConcluded(contract.id);
+      let updatedContract: Contract;
+      let successMessage: string;
+
+      if (action === 'sendToSigning') {
+        updatedContract = await apiService.sendContractToSigning(contract.id);
+        successMessage = 'Договор отправлен на подписание.';
+      } else if (action === 'markConcluded') {
+        updatedContract = await apiService.markContractConcluded(contract.id);
+        successMessage = 'Договор отмечен заключённым.';
+      } else if (action === 'terminate' && terminatePayload) {
+        updatedContract = await apiService.terminateContract(
+          contract.id,
+          terminatePayload.terminationDate,
+          terminatePayload.terms,
+          terminatePayload.reason,
+          terminatePayload.financialTerms,
+        );
+        successMessage = 'Договор расторгнут.';
+      } else if (action === 'cancel' && cancelReason) {
+        updatedContract = await apiService.cancelContract(contract.id, cancelReason);
+        successMessage = 'Договор аннулирован.';
+      } else {
+        return;
+      }
 
       setContract(updatedContract);
       setAmountInput(formatAmountInput(updatedContract.billingMode === 'Fixed' ? updatedContract.amount : null));
-      toast.success(
-        action === 'sendToSigning'
-          ? 'Договор отправлен на подписание.'
-          : 'Договор отмечен заключённым.',
-        'Workflow договора обновлён',
-      );
+      toast.success(successMessage, 'Workflow договора обновлён');
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось обновить workflow договора'), 'Договоры');
     } finally {
@@ -698,6 +747,11 @@ export function ContractDetailPage({
     amount: null,
     invoiceAmountTotal: 0,
   } as Contract);
+  const isTerminated = contract?.status === 'Terminated';
+  const isCancelled = contract?.status === 'Cancelled';
+  const workflowDisabled = workflowSaving || editMode || isTerminated || isCancelled;
+  const terminateDisabled = workflowSaving || editMode || isTerminated || isCancelled;
+  const cancelDisabled = workflowSaving || editMode || (contract?.status !== 'Draft' && contract?.status !== 'OnSigning');
 
   if (loading || !contract) {
     return (
@@ -719,7 +773,7 @@ export function ContractDetailPage({
           <button
             type="button"
             onClick={() => void runWorkflowAction('sendToSigning')}
-            disabled={workflowSaving || editMode}
+            disabled={workflowDisabled}
             className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
           >
             {workflowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -728,11 +782,29 @@ export function ContractDetailPage({
           <button
             type="button"
             onClick={() => void runWorkflowAction('markConcluded')}
-            disabled={workflowSaving || editMode}
+            disabled={workflowDisabled}
             className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
           >
             {workflowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
             Заключён
+          </button>
+          <button
+            type="button"
+            onClick={() => void runWorkflowAction('terminate')}
+            disabled={terminateDisabled}
+            className="inline-flex items-center gap-2 rounded border border-orange-200 px-3 py-2 text-sm text-orange-700 disabled:opacity-60"
+          >
+            {workflowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileX className="h-4 w-4" />}
+            Расторгнуть
+          </button>
+          <button
+            type="button"
+            onClick={() => void runWorkflowAction('cancel')}
+            disabled={cancelDisabled}
+            className="inline-flex items-center gap-2 rounded border border-rose-200 px-3 py-2 text-sm text-rose-700 disabled:opacity-60"
+          >
+            {workflowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+            Аннулировать
           </button>
           {!editMode ? (
             <button
@@ -968,6 +1040,10 @@ export function ContractDetailPage({
           <div className="mt-1 text-xs text-slate-500">
             Подписание: {formatDate(contract.sentForSigningAt)}
             {contract.concludedAt ? ` · заключён ${formatDate(contract.concludedAt)}` : ''}
+            {contract.terminationDate ? ` · расторгнут ${formatDate(contract.terminationDate)}` : ''}
+            {contract.cancelledAt ? ` · аннулирован ${formatDate(contract.cancelledAt)}` : ''}
+            {contract.terminationTerms ? ` · ${contract.terminationTerms}` : ''}
+            {contract.cancelledReason ? ` · ${contract.cancelledReason}` : ''}
           </div>
         </div>
       </div>

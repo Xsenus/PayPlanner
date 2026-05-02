@@ -166,6 +166,121 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task Terminate_StoresTermsAndUpdatesStatus()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-TERM-1",
+                Date = new DateTime(2026, 4, 21),
+                BillingMode = ContractBillingMode.Fixed,
+                Status = ContractStatus.Concluded,
+                Amount = 30_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var actionResult = await controller.Terminate(
+            createdDto.Id,
+            new TerminateContractRequest
+            {
+                TerminationDate = new DateTime(2026, 5, 2),
+                Reason = "Соглашение сторон",
+                Terms = "Услуги прекращаются с даты расторжения",
+                FinancialTerms = "Без взаимных штрафов",
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(ContractStatus.Terminated, dto.Status);
+        Assert.Equal(new DateTime(2026, 5, 2), dto.TerminationDate);
+        Assert.Equal("Соглашение сторон", dto.TerminationReason);
+        Assert.Equal("Услуги прекращаются с даты расторжения", dto.TerminationTerms);
+        Assert.Equal("Без взаимных штрафов", dto.TerminationFinancialTerms);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Contracts.AsNoTracking().SingleAsync(contract => contract.Id == createdDto.Id);
+        Assert.Equal(ContractStatus.Terminated, stored.Status);
+        Assert.Equal(new DateTime(2026, 5, 2), stored.TerminationDate);
+        Assert.Equal("Услуги прекращаются с даты расторжения", stored.TerminationTerms);
+    }
+
+    [Fact]
+    public async Task Cancel_AllowsDraftAndStoresReason()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-CANCEL-1",
+                Date = new DateTime(2026, 4, 22),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 12_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var actionResult = await controller.Cancel(
+            createdDto.Id,
+            new CancelContractRequest { Reason = "Ошибочно созданный договор" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(ContractStatus.Cancelled, dto.Status);
+        Assert.NotNull(dto.CancelledAt);
+        Assert.Equal("Ошибочно созданный договор", dto.CancelledReason);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Contracts.AsNoTracking().SingleAsync(contract => contract.Id == createdDto.Id);
+        Assert.Equal(ContractStatus.Cancelled, stored.Status);
+        Assert.NotNull(stored.CancelledAt);
+        Assert.Equal("Ошибочно созданный договор", stored.CancelledReason);
+    }
+
+    [Fact]
+    public async Task Cancel_RejectsConcludedContract()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-CANCEL-2",
+                Date = new DateTime(2026, 4, 23),
+                BillingMode = ContractBillingMode.Fixed,
+                Status = ContractStatus.Concluded,
+                Amount = 12_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var actionResult = await controller.Cancel(
+            createdDto.Id,
+            new CancelContractRequest { Reason = "Нельзя аннулировать заключённый договор" },
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult.Result);
+        Assert.Contains("черновиков", Assert.IsType<string>(badRequest.Value));
+    }
+
+    [Fact]
     public async Task Update_ClearsAmountAndValidUntil_WhenSwitchingToActualOpenEndedContract()
     {
         await using var db = await CreateContextAsync();
