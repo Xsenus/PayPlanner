@@ -2375,6 +2375,12 @@ export class ApiService {
     });
   }
 
+  async runBankStatementAutoImport() {
+    return this.request<BankStatementAutoImportRunResult>('/money-operations/bank-statement/auto-import/run', {
+      method: 'POST',
+    });
+  }
+
   async getBankStatementImports(params?: { page?: number; pageSize?: number }) {
     const q = buildQuery(params ?? {});
     return this.request<PagedResult<BankStatementImportBatch>>(`/money-operations/bank-statement/imports${q}`);
@@ -2636,6 +2642,7 @@ import type {
   SummaryStats,
   PeriodKey,
   SummaryStatus,
+  BankStatementAutoImportRunResult,
   BankStatementImportResult,
   CashBookSummary,
   CashOrder,

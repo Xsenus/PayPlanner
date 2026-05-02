@@ -10,6 +10,7 @@ using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
 using System.Reflection;
+using System.Security.Claims;
 using System.Text;
 using Xunit;
 
@@ -2533,6 +2534,79 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task BankStatementAutoImportRun_ImportsFilesFromConfiguredFolder()
+    {
+        var folderPath = Path.Combine(Path.GetTempPath(), $"payplanner-auto-import-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folderPath);
+        try
+        {
+            await using var db = await CreateContextAsync();
+            var role = new Role
+            {
+                Name = "Auto import role",
+                Description = "Role for auto import test",
+                CreatedAt = DateTime.UtcNow,
+            };
+            var user = new User
+            {
+                Email = "auto-import@example.test",
+                PasswordHash = "hash",
+                FullName = "Auto Import User",
+                Role = role,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.UserSettings.Add(new UserSetting
+            {
+                User = user,
+                Key = "money.bankStatement.autoImport",
+                Value = $$"""
+                {"enabled":true,"folderPath":"{{folderPath.Replace("\\", "\\\\")}}","fileMask":"*.csv","lastCheckedAt":null}
+                """,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+
+            await File.WriteAllTextAsync(
+                Path.Combine(folderPath, "statement.csv"),
+                "Дата;Сумма;Счёт;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Main bank;Client;Invoice 33;101\n",
+                Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(folderPath, "ignore.pdf"), "ignored", Encoding.UTF8);
+
+            var controller = CreateController(db, user.Id);
+
+            var action = await controller.RunBankStatementAutoImport(CancellationToken.None);
+
+            var ok = Assert.IsType<OkObjectResult>(action.Result);
+            var result = Assert.IsType<BankStatementAutoImportRunResultDto>(ok.Value);
+            Assert.True(result.Enabled);
+            Assert.Equal(1, result.FilesFound);
+            Assert.Equal(1, result.FilesImported);
+            Assert.Equal(1, result.RowsRead);
+            Assert.Equal(1, result.Created);
+            Assert.Empty(result.Errors);
+            var file = Assert.Single(result.Files);
+            Assert.Equal("statement.csv", file.FileName);
+            Assert.NotNull(file.BatchId);
+
+            var operation = await db.MoneyOperations.SingleAsync();
+            Assert.Equal(MoneyOperationSource.Bank, operation.Source);
+            Assert.Equal("Main bank", operation.AccountName);
+            Assert.Equal(25_000m, operation.Amount);
+
+            var savedSetting = await db.UserSettings.SingleAsync(item =>
+                item.UserId == user.Id && item.Key == "money.bankStatement.autoImport");
+            Assert.Contains("lastCheckedAt", savedSetting.Value);
+        }
+        finally
+        {
+            Directory.Delete(folderPath, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RollbackBankStatementImport_RemovesCreatedOperationsAndMarksRows()
     {
         await using var db = await CreateContextAsync();
@@ -4030,9 +4104,24 @@ public class MoneyOperationsControllerTests
         return db;
     }
 
-    private static MoneyOperationsController CreateController(PaymentContext db)
+    private static MoneyOperationsController CreateController(PaymentContext db, int? userId = null)
     {
-        return new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance);
+        var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance);
+        if (userId.HasValue)
+        {
+            controller.ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()),
+                    ], "TestAuth")),
+                },
+            };
+        }
+
+        return controller;
     }
 
     private static async Task<MoneyOperationsPageResponse> GetMoneyPageAsync(

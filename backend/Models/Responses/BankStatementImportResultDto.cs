@@ -12,6 +12,31 @@ public sealed class BankStatementImportResultDto
     public List<BankStatementImportCreatedOperationDto> Operations { get; set; } = new();
 }
 
+public sealed class BankStatementAutoImportRunResultDto
+{
+    public bool Enabled { get; init; }
+    public string? FolderPath { get; init; }
+    public string FileMask { get; init; } = string.Empty;
+    public DateTime CheckedAt { get; init; }
+    public int FilesFound { get; set; }
+    public int FilesImported { get; set; }
+    public int RowsRead { get; set; }
+    public int Created { get; set; }
+    public int Skipped { get; set; }
+    public List<string> Errors { get; init; } = new();
+    public List<BankStatementAutoImportFileResultDto> Files { get; init; } = new();
+}
+
+public sealed class BankStatementAutoImportFileResultDto
+{
+    public string FileName { get; init; } = string.Empty;
+    public int? BatchId { get; init; }
+    public int RowsRead { get; init; }
+    public int Created { get; init; }
+    public int Skipped { get; init; }
+    public IReadOnlyList<string> Errors { get; init; } = Array.Empty<string>();
+}
+
 public class BankStatementImportBatchListItemDto
 {
     public int Id { get; init; }

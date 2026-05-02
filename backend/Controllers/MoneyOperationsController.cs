@@ -7,8 +7,10 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using System.Globalization;
 using System.Net;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace PayPlanner.Api.Controllers;
@@ -19,6 +21,8 @@ namespace PayPlanner.Api.Controllers;
 public class MoneyOperationsController : ControllerBase
 {
     private const long MaxStatementFileSizeBytes = 10L * 1024L * 1024L;
+    private const int MaxAutoImportStatementFiles = 20;
+    private const string BankStatementAutoImportSettingKey = "money.bankStatement.autoImport";
     private const string CashSourceToken = "\u043A\u0430\u0441";
     private const string CashSourceTitleToken = "\u041A\u0430\u0441";
     private const string CashSourceAlternativeToken = "\u043D\u0430\u043B\u0438\u0447";
@@ -37,6 +41,7 @@ public class MoneyOperationsController : ControllerBase
 
     private readonly PaymentContext _db;
     private readonly ILogger<MoneyOperationsController> _logger;
+    private static readonly JsonSerializerOptions BankStatementAutoImportJsonOptions = new(JsonSerializerDefaults.Web);
 
     public MoneyOperationsController(PaymentContext db, ILogger<MoneyOperationsController> logger)
     {
@@ -1376,8 +1381,7 @@ public class MoneyOperationsController : ControllerBase
             return BadRequest("Файл выписки слишком большой.");
         }
 
-        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-        if (extension is not ".csv" and not ".txt" and not ".tsv" and not ".1c")
+        if (!IsSupportedStatementFileName(file.FileName))
         {
             return BadRequest("Поддерживаются файлы CSV, TSV, TXT и 1C ClientBankExchange.");
         }
@@ -1479,6 +1483,106 @@ public class MoneyOperationsController : ControllerBase
         }
 
         return Ok(await ImportBankStatementItemsAsync(importItems, result, file.FileName, statementBytes.Length, fileHash, ct));
+    }
+
+    [HttpPost("bank-statement/auto-import/run")]
+    public async Task<ActionResult<BankStatementAutoImportRunResultDto>> RunBankStatementAutoImport(CancellationToken ct)
+    {
+        var userId = GetCurrentUserId();
+        if (userId is null)
+        {
+            return Unauthorized();
+        }
+
+        var settings = await GetBankStatementAutoImportSettingsAsync(userId.Value, ct);
+        var checkedAt = DateTime.UtcNow;
+        var runResult = new BankStatementAutoImportRunResultDto
+        {
+            Enabled = settings.Enabled,
+            FolderPath = settings.FolderPath,
+            FileMask = settings.FileMask,
+            CheckedAt = checkedAt,
+        };
+
+        if (!settings.Enabled)
+        {
+            runResult.Errors.Add("Автоподгрузка выписок выключена.");
+            return Ok(runResult);
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.FolderPath))
+        {
+            return BadRequest("Укажите папку для автоподгрузки выписок.");
+        }
+
+        if (!Directory.Exists(settings.FolderPath))
+        {
+            return BadRequest("Папка для автоподгрузки выписок не найдена.");
+        }
+
+        var files = EnumerateBankStatementAutoImportFiles(settings.FolderPath, settings.FileMask)
+            .Take(MaxAutoImportStatementFiles)
+            .ToList();
+        runResult.FilesFound = files.Count;
+
+        foreach (var filePath in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            var fileName = Path.GetFileName(filePath);
+            var fileInfo = new FileInfo(filePath);
+
+            if (!IsSupportedStatementFileName(fileName))
+            {
+                AddSkippedAutoImportFile(runResult, fileName, "Формат файла не поддерживается.");
+                continue;
+            }
+
+            if (fileInfo.Length <= 0 || fileInfo.Length > MaxStatementFileSizeBytes)
+            {
+                AddSkippedAutoImportFile(runResult, fileName, "Файл пустой или превышает допустимый размер.");
+                continue;
+            }
+
+            try
+            {
+                await using var stream = System.IO.File.OpenRead(filePath);
+                var formFile = new FormFile(stream, 0, stream.Length, "file", fileName);
+                var action = await ImportBankStatement(formFile, ct);
+
+                if (action.Result is OkObjectResult { Value: BankStatementImportResultDto importResult })
+                {
+                    runResult.FilesImported++;
+                    runResult.RowsRead += importResult.RowsRead;
+                    runResult.Created += importResult.Created;
+                    runResult.Skipped += importResult.Skipped;
+                    runResult.Errors.AddRange(importResult.Errors.Select(error => $"{fileName}: {error}"));
+                    runResult.Files.Add(new BankStatementAutoImportFileResultDto
+                    {
+                        FileName = fileName,
+                        BatchId = importResult.BatchId,
+                        RowsRead = importResult.RowsRead,
+                        Created = importResult.Created,
+                        Skipped = importResult.Skipped,
+                        Errors = importResult.Errors,
+                    });
+                    continue;
+                }
+
+                var message = action.Result is ObjectResult objectResult && objectResult.Value is not null
+                    ? objectResult.Value.ToString() ?? "Не удалось импортировать файл."
+                    : "Не удалось импортировать файл.";
+                AddSkippedAutoImportFile(runResult, fileName, message);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                AddSkippedAutoImportFile(runResult, fileName, ex.Message);
+            }
+        }
+
+        settings.LastCheckedAt = checkedAt;
+        await SaveBankStatementAutoImportSettingsAsync(userId.Value, settings, ct);
+
+        return Ok(runResult);
     }
 
     [HttpGet("bank-statement/imports")]
@@ -2574,6 +2678,97 @@ public class MoneyOperationsController : ControllerBase
         return result;
     }
 
+    private async Task<BankStatementAutoImportSettings> GetBankStatementAutoImportSettingsAsync(int userId, CancellationToken ct)
+    {
+        var value = await _db.UserSettings
+            .AsNoTracking()
+            .Where(setting => setting.UserId == userId && setting.Key == BankStatementAutoImportSettingKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(ct);
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return new BankStatementAutoImportSettings();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<BankStatementAutoImportSettings>(value, BankStatementAutoImportJsonOptions)
+                   ?? new BankStatementAutoImportSettings();
+        }
+        catch (JsonException)
+        {
+            return new BankStatementAutoImportSettings();
+        }
+    }
+
+    private async Task SaveBankStatementAutoImportSettingsAsync(
+        int userId,
+        BankStatementAutoImportSettings settings,
+        CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var setting = await _db.UserSettings
+            .FirstOrDefaultAsync(item => item.UserId == userId && item.Key == BankStatementAutoImportSettingKey, ct);
+        var value = JsonSerializer.Serialize(settings, BankStatementAutoImportJsonOptions);
+
+        if (setting is null)
+        {
+            _db.UserSettings.Add(new UserSetting
+            {
+                UserId = userId,
+                Key = BankStatementAutoImportSettingKey,
+                Value = value,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+        else
+        {
+            setting.Value = value;
+            setting.UpdatedAt = now;
+        }
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private static IReadOnlyList<string> EnumerateBankStatementAutoImportFiles(string folderPath, string fileMask)
+    {
+        var masks = (string.IsNullOrWhiteSpace(fileMask) ? "*.csv;*.txt;*.tsv;*.1c" : fileMask)
+            .Split(new[] { ';', ',', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return masks
+            .SelectMany(mask => Directory.EnumerateFiles(folderPath, mask, SearchOption.TopDirectoryOnly))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => System.IO.File.GetLastWriteTimeUtc(path))
+            .ThenBy(Path.GetFileName)
+            .ToList();
+    }
+
+    private static bool IsSupportedStatementFileName(string fileName)
+    {
+        var extension = Path.GetExtension(fileName).ToLowerInvariant();
+        return extension is ".csv" or ".txt" or ".tsv" or ".1c";
+    }
+
+    private static void AddSkippedAutoImportFile(
+        BankStatementAutoImportRunResultDto runResult,
+        string fileName,
+        string message)
+    {
+        runResult.Skipped++;
+        runResult.Errors.Add($"{fileName}: {message}");
+        runResult.Files.Add(new BankStatementAutoImportFileResultDto
+        {
+            FileName = fileName,
+            Skipped = 1,
+            Errors = new[] { message },
+        });
+    }
+
+    private int? GetCurrentUserId()
+        => int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
+
     private static BankStatementImportRow CreateImportRow(
         BankStatementImportBatch batch,
         BankStatementImportItem item,
@@ -3263,6 +3458,14 @@ public class MoneyOperationsController : ControllerBase
         int Id,
         string Name,
         PaymentType PaymentType);
+
+    private sealed class BankStatementAutoImportSettings
+    {
+        public bool Enabled { get; set; }
+        public string? FolderPath { get; set; }
+        public string FileMask { get; set; } = "*.csv;*.txt;*.1c";
+        public DateTime? LastCheckedAt { get; set; }
+    }
 
     private sealed record InvoiceLinkValidationResult(Invoice? Invoice, string? Error);
 

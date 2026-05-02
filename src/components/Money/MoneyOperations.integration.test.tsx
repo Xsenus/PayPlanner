@@ -36,6 +36,7 @@ const {
   exportMoneyOperationsCsvMock,
   importBankStatementMock,
   postCashOrderMock,
+  runBankStatementAutoImportMock,
   reprocessBankStatementImportMock,
   rollbackBankStatementImportMock,
   toastErrorMock,
@@ -74,6 +75,7 @@ const {
   exportMoneyOperationsCsvMock: vi.fn(),
   importBankStatementMock: vi.fn(),
   postCashOrderMock: vi.fn(),
+  runBankStatementAutoImportMock: vi.fn(),
   reprocessBankStatementImportMock: vi.fn(),
   rollbackBankStatementImportMock: vi.fn(),
   toastErrorMock: vi.fn(),
@@ -150,6 +152,7 @@ vi.mock('../../services/api', () => ({
     exportMoneyOperationsCsv: exportMoneyOperationsCsvMock,
     importBankStatement: importBankStatementMock,
     postCashOrder: postCashOrderMock,
+    runBankStatementAutoImport: runBankStatementAutoImportMock,
     reprocessBankStatementImport: reprocessBankStatementImportMock,
     rollbackBankStatementImport: rollbackBankStatementImportMock,
     updateCashOrder: updateCashOrderMock,
@@ -291,6 +294,7 @@ describe('MoneyOperations integration', () => {
     exportMoneyOperationsCsvMock.mockReset();
     importBankStatementMock.mockReset();
     postCashOrderMock.mockReset();
+    runBankStatementAutoImportMock.mockReset();
     reprocessBankStatementImportMock.mockReset();
     rollbackBankStatementImportMock.mockReset();
     toastErrorMock.mockReset();
@@ -582,6 +586,19 @@ describe('MoneyOperations integration', () => {
       skipped: 0,
       errors: [],
       operations: [],
+    });
+    runBankStatementAutoImportMock.mockResolvedValue({
+      enabled: true,
+      folderPath: 'C:\\BankStatements',
+      fileMask: '*.csv',
+      checkedAt: '2026-04-21T08:00:00Z',
+      filesFound: 0,
+      filesImported: 0,
+      rowsRead: 0,
+      created: 0,
+      skipped: 0,
+      errors: [],
+      files: [],
     });
 
     createMoneyOperationMock.mockImplementation(async (payload: MoneyOperation) => {
@@ -2040,6 +2057,34 @@ describe('MoneyOperations integration', () => {
         lastCheckedAt: null,
       }),
     );
+
+    runBankStatementAutoImportMock.mockResolvedValueOnce({
+      enabled: true,
+      folderPath: 'C:\\BankStatements',
+      fileMask: '*.csv;*.1c',
+      checkedAt: '2026-04-21T09:00:00Z',
+      filesFound: 1,
+      filesImported: 1,
+      rowsRead: 1,
+      created: 1,
+      skipped: 0,
+      errors: [],
+      files: [
+        {
+          fileName: 'statement.csv',
+          batchId: 7,
+          rowsRead: 1,
+          created: 1,
+          skipped: 0,
+          errors: [],
+        },
+      ],
+    });
+    await user.click(screen.getByRole('button', { name: 'Проверить' }));
+
+    await waitFor(() => expect(runBankStatementAutoImportMock).toHaveBeenCalled());
+    expect(await screen.findByText(/Проверено файлов: 1/)).toBeTruthy();
+    expect(await screen.findByText('statement.csv: +1 / 0')).toBeTruthy();
   }, 15000);
 
   it('shows bank import journal details and rolls back an import batch', async () => {

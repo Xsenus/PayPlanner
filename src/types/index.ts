@@ -697,6 +697,29 @@ export interface BankStatementImportResult {
   operations: BankStatementImportCreatedOperation[];
 }
 
+export interface BankStatementAutoImportFileResult {
+  fileName: string;
+  batchId?: number | null;
+  rowsRead: number;
+  created: number;
+  skipped: number;
+  errors: string[];
+}
+
+export interface BankStatementAutoImportRunResult {
+  enabled: boolean;
+  folderPath?: string | null;
+  fileMask: string;
+  checkedAt: string;
+  filesFound: number;
+  filesImported: number;
+  rowsRead: number;
+  created: number;
+  skipped: number;
+  errors: string[];
+  files: BankStatementAutoImportFileResult[];
+}
+
 export interface BankStatementImportBatch {
   id: number;
   fileName: string;

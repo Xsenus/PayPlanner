@@ -43,6 +43,7 @@ import { TableSelectCheckbox } from '../ui/TableSelectCheckbox';
 import type {
   BankStatementImportBatch,
   BankStatementImportBatchDetail,
+  BankStatementAutoImportRunResult,
   BankStatementImportCreatedOperation,
   MoneyAccount,
   MoneyOperation,
@@ -1905,6 +1906,8 @@ export function MoneyOperations({
   );
   const [bankAutoImportLoading, setBankAutoImportLoading] = useState(false);
   const [bankAutoImportSaving, setBankAutoImportSaving] = useState(false);
+  const [bankAutoImportRunning, setBankAutoImportRunning] = useState(false);
+  const [bankAutoImportRunResult, setBankAutoImportRunResult] = useState<BankStatementAutoImportRunResult | null>(null);
   const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentYear = new Date().getFullYear();
@@ -2261,6 +2264,31 @@ export function MoneyOperations({
 
   const updateBankAutoImportSettings = (patch: Partial<BankStatementAutoImportSettings>) => {
     setBankAutoImportSettings((current) => ({ ...current, ...patch }));
+  };
+
+  const handleRunBankAutoImport = async () => {
+    setBankAutoImportRunning(true);
+    try {
+      const result = await apiService.runBankStatementAutoImport();
+      setBankAutoImportRunResult(result);
+      setBankAutoImportSettings((current) => ({
+        ...current,
+        lastCheckedAt: result.checkedAt,
+      }));
+      setBankImportsRefreshKey((value) => value + 1);
+      if (result.created > 0) {
+        await reload();
+      }
+      toast.success(
+        `Проверено файлов: ${result.filesFound}. Создано операций: ${result.created}. Пропущено: ${result.skipped}.`,
+        'Выписка банка',
+      );
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось запустить автоподгрузку выписок.');
+      toast.error(message, 'Выписка банка');
+    } finally {
+      setBankAutoImportRunning(false);
+    }
   };
 
   const totalRows = useMemo(() => {
@@ -3247,7 +3275,7 @@ export function MoneyOperations({
 
       {source === 'Bank' && bankAutoImportSettings.enabled && (
         <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3">
-          <div className="grid gap-3 md:grid-cols-[1fr_220px_auto]">
+          <div className="grid gap-3 md:grid-cols-[1fr_220px_auto_auto]">
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Папка выписок
               <input
@@ -3275,12 +3303,39 @@ export function MoneyOperations({
                 {bankAutoImportSaving ? 'Сохранение...' : 'Сохранить'}
               </button>
             </div>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => void handleRunBankAutoImport()}
+                disabled={bankAutoImportLoading || bankAutoImportSaving || bankAutoImportRunning}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60">
+                <RefreshCw className={`h-4 w-4 ${bankAutoImportRunning ? 'animate-spin' : ''}`} />
+                {bankAutoImportRunning ? 'Проверяем...' : 'Проверить'}
+              </button>
+            </div>
           </div>
           <div className="mt-2 text-xs text-blue-700">
             {bankAutoImportSettings.lastCheckedAt
               ? `Последняя проверка: ${formatDate(bankAutoImportSettings.lastCheckedAt)}`
               : 'Ожидает первой проверки.'}
           </div>
+          {bankAutoImportRunResult && (
+            <div className="mt-3 rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs text-slate-600">
+              <div className="font-medium text-slate-800">
+                Проверено файлов: {bankAutoImportRunResult.filesFound}. Создано операций: {bankAutoImportRunResult.created}.
+                Пропущено: {bankAutoImportRunResult.skipped}.
+              </div>
+              {bankAutoImportRunResult.files.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {bankAutoImportRunResult.files.slice(0, 4).map((file) => (
+                    <span key={`${file.fileName}-${file.batchId ?? 'skip'}`} className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">
+                      {file.fileName}: +{file.created} / {file.skipped}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
