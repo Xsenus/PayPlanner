@@ -32,6 +32,7 @@ const {
   getMoneyOperationMock,
   getMoneyOperationsPagedMock,
   getMoneyOperationsPrintHtmlMock,
+  getUserSettingMock,
   exportMoneyOperationsCsvMock,
   importBankStatementMock,
   postCashOrderMock,
@@ -41,6 +42,7 @@ const {
   toastSuccessMock,
   updateCashOrderMock,
   updateMoneyOperationMock,
+  upsertUserSettingMock,
 } = vi.hoisted(() => ({
   createCashOrderMock: vi.fn(),
   createCashOrderFromPaymentMock: vi.fn(),
@@ -68,6 +70,7 @@ const {
   getMoneyOperationMock: vi.fn(),
   getMoneyOperationsPagedMock: vi.fn(),
   getMoneyOperationsPrintHtmlMock: vi.fn(),
+  getUserSettingMock: vi.fn(),
   exportMoneyOperationsCsvMock: vi.fn(),
   importBankStatementMock: vi.fn(),
   postCashOrderMock: vi.fn(),
@@ -77,6 +80,7 @@ const {
   toastSuccessMock: vi.fn(),
   updateCashOrderMock: vi.fn(),
   updateMoneyOperationMock: vi.fn(),
+  upsertUserSettingMock: vi.fn(),
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -142,6 +146,7 @@ vi.mock('../../services/api', () => ({
     getMoneyOperation: getMoneyOperationMock,
     getMoneyOperationsPaged: getMoneyOperationsPagedMock,
     getMoneyOperationsPrintHtml: getMoneyOperationsPrintHtmlMock,
+    getUserSetting: getUserSettingMock,
     exportMoneyOperationsCsv: exportMoneyOperationsCsvMock,
     importBankStatement: importBankStatementMock,
     postCashOrder: postCashOrderMock,
@@ -149,6 +154,7 @@ vi.mock('../../services/api', () => ({
     rollbackBankStatementImport: rollbackBankStatementImportMock,
     updateCashOrder: updateCashOrderMock,
     updateMoneyOperation: updateMoneyOperationMock,
+    upsertUserSetting: upsertUserSettingMock,
   },
 }));
 
@@ -281,6 +287,7 @@ describe('MoneyOperations integration', () => {
     getMoneyOperationMock.mockReset();
     getMoneyOperationsPagedMock.mockReset();
     getMoneyOperationsPrintHtmlMock.mockReset();
+    getUserSettingMock.mockReset();
     exportMoneyOperationsCsvMock.mockReset();
     importBankStatementMock.mockReset();
     postCashOrderMock.mockReset();
@@ -290,6 +297,7 @@ describe('MoneyOperations integration', () => {
     toastSuccessMock.mockReset();
     updateCashOrderMock.mockReset();
     updateMoneyOperationMock.mockReset();
+    upsertUserSettingMock.mockReset();
     window.localStorage.clear();
     if (!URL.createObjectURL) {
       Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(), configurable: true });
@@ -450,6 +458,12 @@ describe('MoneyOperations integration', () => {
     getCashBookPrintHtmlMock.mockResolvedValue('<html><body>Кассовая книга</body></html>');
     getCashOrderRegisterPrintHtmlMock.mockResolvedValue('<html><body>Журнал регистрации</body></html>');
     getMoneyOperationsPrintHtmlMock.mockResolvedValue('<html><body>Денежный журнал</body></html>');
+    getUserSettingMock.mockRejectedValue(new Error('not found'));
+    upsertUserSettingMock.mockImplementation(async (key: string, value: string) => ({
+      key,
+      value,
+      updatedAt: '2026-04-21T08:00:00Z',
+    }));
     exportMoneyOperationsCsvMock.mockResolvedValue({
       blob: new Blob(['Дата;Источник'], { type: 'text/csv;charset=utf-8' }),
       fileName: 'money-operations.csv',
@@ -1991,16 +2005,41 @@ describe('MoneyOperations integration', () => {
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(2));
   }, 15000);
 
-  it('shows bank statement auto import as a planned disabled feature', async () => {
+  it('loads and saves bank statement auto import settings', async () => {
+    const user = userEvent.setup();
+    getUserSettingMock.mockResolvedValueOnce({
+      key: 'money.bankStatement.autoImport',
+      value: JSON.stringify({
+        enabled: true,
+        folderPath: 'C:\\BankStatements',
+        fileMask: '*.csv',
+        lastCheckedAt: null,
+      }),
+      updatedAt: '2026-04-21T08:00:00Z',
+    });
+
     render(<MoneyOperations source="Bank" />);
 
     const importJournalButton = await screen.findByRole('button', { name: 'Открыть журнал импортов выписки' });
     expect(importJournalButton.textContent).toContain('Журнал импортов');
     const switcher = await screen.findByRole<HTMLInputElement>('switch', { name: /Автоподгрузка/ });
-    expect(switcher.checked).toBe(false);
-    expect(switcher.disabled).toBe(true);
-    expect(await screen.findByText('Скоро')).toBeTruthy();
-    expect(window.localStorage.getItem('pp.bank_statement_auto_import_enabled')).toBeNull();
+    await waitFor(() => expect(switcher.checked).toBe(true));
+    expect(screen.getByDisplayValue('C:\\BankStatements')).toBeTruthy();
+    const maskInput = screen.getByDisplayValue('*.csv');
+    await user.clear(maskInput);
+    await user.type(maskInput, '*.csv;*.1c');
+    await user.click(screen.getAllByRole('button', { name: 'Сохранить' })[0]);
+
+    await waitFor(() => expect(upsertUserSettingMock).toHaveBeenCalled());
+    expect(upsertUserSettingMock).toHaveBeenCalledWith(
+      'money.bankStatement.autoImport',
+      JSON.stringify({
+        enabled: true,
+        folderPath: 'C:\\BankStatements',
+        fileMask: '*.csv;*.1c',
+        lastCheckedAt: null,
+      }),
+    );
   }, 15000);
 
   it('shows bank import journal details and rolls back an import batch', async () => {

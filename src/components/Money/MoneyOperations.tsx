@@ -64,6 +64,22 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 type MoneyTab = MoneyOperationSource | 'Total';
 
+type BankStatementAutoImportSettings = {
+  enabled: boolean;
+  folderPath: string;
+  fileMask: string;
+  lastCheckedAt?: string | null;
+};
+
+const BANK_STATEMENT_AUTO_IMPORT_SETTING_KEY = 'money.bankStatement.autoImport';
+
+const DEFAULT_BANK_STATEMENT_AUTO_IMPORT_SETTINGS: BankStatementAutoImportSettings = {
+  enabled: false,
+  folderPath: '',
+  fileMask: '*.csv;*.txt;*.1c',
+  lastCheckedAt: null,
+};
+
 const SOURCE_LABELS: Record<MoneyTab, string> = {
   Bank: 'Банк',
   Cash: 'Касса',
@@ -440,6 +456,32 @@ function getOperationOriginBadge(item: MoneyOperation) {
   }
 
   return null;
+}
+
+function parseBankStatementAutoImportSettings(value?: string | null): BankStatementAutoImportSettings {
+  if (!value) return DEFAULT_BANK_STATEMENT_AUTO_IMPORT_SETTINGS;
+
+  try {
+    const parsed = JSON.parse(value) as Partial<BankStatementAutoImportSettings>;
+
+    return {
+      enabled: Boolean(parsed.enabled),
+      folderPath: typeof parsed.folderPath === 'string' ? parsed.folderPath : '',
+      fileMask: typeof parsed.fileMask === 'string' && parsed.fileMask.trim() ? parsed.fileMask : '*.csv;*.txt;*.1c',
+      lastCheckedAt: typeof parsed.lastCheckedAt === 'string' ? parsed.lastCheckedAt : null,
+    };
+  } catch {
+    return DEFAULT_BANK_STATEMENT_AUTO_IMPORT_SETTINGS;
+  }
+}
+
+function serializeBankStatementAutoImportSettings(settings: BankStatementAutoImportSettings) {
+  return JSON.stringify({
+    enabled: settings.enabled,
+    folderPath: settings.folderPath.trim(),
+    fileMask: settings.fileMask.trim() || '*.csv;*.txt;*.1c',
+    lastCheckedAt: settings.lastCheckedAt ?? null,
+  });
 }
 
 function getBankImportStatusLabel(status: string) {
@@ -1858,6 +1900,11 @@ export function MoneyOperations({
   const [bankImportDetailsLoading, setBankImportDetailsLoading] = useState(false);
   const [bankImportRollbackLoading, setBankImportRollbackLoading] = useState(false);
   const [bankImportReprocessLoading, setBankImportReprocessLoading] = useState(false);
+  const [bankAutoImportSettings, setBankAutoImportSettings] = useState<BankStatementAutoImportSettings>(
+    DEFAULT_BANK_STATEMENT_AUTO_IMPORT_SETTINGS,
+  );
+  const [bankAutoImportLoading, setBankAutoImportLoading] = useState(false);
+  const [bankAutoImportSaving, setBankAutoImportSaving] = useState(false);
   const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentYear = new Date().getFullYear();
@@ -2159,6 +2206,62 @@ export function MoneyOperations({
       cancelled = true;
     };
   }, [bankImportsRefreshKey, showBankImportsJournal, source, toast]);
+
+  useEffect(() => {
+    if (source !== 'Bank') {
+      setBankAutoImportSettings(DEFAULT_BANK_STATEMENT_AUTO_IMPORT_SETTINGS);
+      return;
+    }
+
+    let cancelled = false;
+    setBankAutoImportLoading(true);
+
+    apiService
+      .getUserSetting(BANK_STATEMENT_AUTO_IMPORT_SETTING_KEY)
+      .then((setting) => {
+        if (!cancelled) {
+          setBankAutoImportSettings(parseBankStatementAutoImportSettings(setting.value));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBankAutoImportSettings(DEFAULT_BANK_STATEMENT_AUTO_IMPORT_SETTINGS);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBankAutoImportLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  const saveBankAutoImportSettings = async (nextSettings = bankAutoImportSettings) => {
+    setBankAutoImportSaving(true);
+    try {
+      const normalizedSettings = parseBankStatementAutoImportSettings(
+        serializeBankStatementAutoImportSettings(nextSettings),
+      );
+      const setting = await apiService.upsertUserSetting(
+        BANK_STATEMENT_AUTO_IMPORT_SETTING_KEY,
+        serializeBankStatementAutoImportSettings(normalizedSettings),
+      );
+      setBankAutoImportSettings(parseBankStatementAutoImportSettings(setting.value));
+      toast.success('Настройки автоподгрузки выписки сохранены.', 'Выписка банка');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось сохранить настройки автоподгрузки выписки.');
+      toast.error(message, 'Выписка банка');
+    } finally {
+      setBankAutoImportSaving(false);
+    }
+  };
+
+  const updateBankAutoImportSettings = (patch: Partial<BankStatementAutoImportSettings>) => {
+    setBankAutoImportSettings((current) => ({ ...current, ...patch }));
+  };
 
   const totalRows = useMemo(() => {
     const bySource = new Map(summary.bySource.map((row) => [row.source, row]));
@@ -3108,22 +3211,26 @@ export function MoneyOperations({
                 <UploadCloud className="h-4 w-4" />
                 {bankStatementImporting ? 'Загружаем...' : 'Загрузить выписку'}
               </button>
-              <label
-                className="inline-flex cursor-not-allowed items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500"
-                title="Автоматическая загрузка банковской выписки пока не подключена">
-                <input
-                  type="checkbox"
-                  role="switch"
-                  checked={false}
-                  disabled
-                  readOnly
-                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span className="font-medium">Автоподгрузка</span>
-                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                  Скоро
-                </span>
-              </label>
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={bankAutoImportSettings.enabled}
+                    disabled={bankAutoImportLoading || bankAutoImportSaving}
+                    onChange={(event) => updateBankAutoImportSettings({ enabled: event.target.checked })}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="font-medium">Автоподгрузка</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void saveBankAutoImportSettings()}
+                  disabled={bankAutoImportLoading || bankAutoImportSaving}
+                  className="rounded-md border border-blue-200 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  {bankAutoImportSaving ? 'Сохранение...' : 'Сохранить'}
+                </button>
+              </div>
               <button
                 type="button"
                 aria-label={showBankImportsJournal ? 'Скрыть журнал импортов выписки' : 'Открыть журнал импортов выписки'}
@@ -3137,6 +3244,45 @@ export function MoneyOperations({
           )}
         </div>
       </div>
+
+      {source === 'Bank' && bankAutoImportSettings.enabled && (
+        <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3">
+          <div className="grid gap-3 md:grid-cols-[1fr_220px_auto]">
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Папка выписок
+              <input
+                value={bankAutoImportSettings.folderPath}
+                onChange={(event) => updateBankAutoImportSettings({ folderPath: event.target.value })}
+                placeholder="C:\\BankStatements"
+                className="rounded-lg border border-blue-100 bg-white px-3 py-2"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Маска файлов
+              <input
+                value={bankAutoImportSettings.fileMask}
+                onChange={(event) => updateBankAutoImportSettings({ fileMask: event.target.value })}
+                placeholder="*.csv;*.txt;*.1c"
+                className="rounded-lg border border-blue-100 bg-white px-3 py-2"
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => void saveBankAutoImportSettings()}
+                disabled={bankAutoImportLoading || bankAutoImportSaving}
+                className="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
+                {bankAutoImportSaving ? 'Сохранение...' : 'Сохранить'}
+              </button>
+            </div>
+          </div>
+          <div className="mt-2 text-xs text-blue-700">
+            {bankAutoImportSettings.lastCheckedAt
+              ? `Последняя проверка: ${formatDate(bankAutoImportSettings.lastCheckedAt)}`
+              : 'Ожидает первой проверки.'}
+          </div>
+        </div>
+      )}
 
       {source === 'Bank' && bankStatementImportResult && (
         <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
