@@ -546,6 +546,8 @@ export interface MoneyOperation {
   matchStatus?: MoneyOperationMatchStatus;
   matchedAt?: string | null;
   matchComment?: string | null;
+  attachmentCount?: number;
+  attachmentSummary?: string | null;
   createdAt: string;
   updatedAt?: string | null;
   isReadonly?: boolean;

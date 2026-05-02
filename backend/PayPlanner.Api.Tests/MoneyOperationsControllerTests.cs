@@ -327,6 +327,57 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task GetPaged_ReturnsAttachmentSummaryForImportedStatementOperation()
+    {
+        await using var db = await CreateContextAsync();
+        var batch = new BankStatementImportBatch
+        {
+            FileName = "statement-may.csv",
+            FileHash = "hash-may",
+            FileSize = 128,
+            Status = BankStatementImportBatchStatus.Applied,
+            RowsRead = 1,
+            CreatedRows = 1,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 7_000m,
+            Date = new DateTime(2026, 5, 8),
+            BankStatementImportBatch = batch,
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.GetPaged(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 31),
+            source: MoneyOperationSource.Bank,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: null,
+            accountName: null,
+            categoryName: null,
+            linkedInvoiceId: null,
+            search: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
+        var row = Assert.Single(page.Items);
+        Assert.Equal(1, row.AttachmentCount);
+        Assert.Equal("statement-may.csv", row.AttachmentSummary);
+    }
+
+    [Fact]
     public async Task ExportCsv_ReturnsFilteredJournalRowsWithRussianLabels()
     {
         await using var db = await CreateContextAsync();
@@ -386,7 +437,7 @@ public class MoneyOperationsControllerTests
         var csv = Encoding.UTF8.GetString(file.FileContents[preamble.Length..]);
 
         Assert.Contains("Дата;Источник;Статус;Движение;Учет;Счет;Контрагент;Ответственный;Сумма;Валюта", csv);
-        Assert.Contains("Связанный счет;Договор;Статус сверки", csv);
+        Assert.Contains("Связанный счет;Договор;Статус сверки;Комментарий сверки;Вложения", csv);
         Assert.Contains("Банк;В обработке;Приход;Факт;Основной банк;ООО Ромашка;;10000.00;RUB", csv);
         Assert.Contains("\"Оплата по счету; май\"", csv);
         Assert.Contains("Не сверено", csv);
@@ -446,6 +497,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Источник: Банк", content.Content);
         Assert.Contains("<th>Ответственный</th>", content.Content);
         Assert.Contains("<th>Договор</th>", content.Content);
+        Assert.Contains("<th>Вложения</th>", content.Content);
         Assert.Contains("В обработке", content.Content);
         Assert.Contains("&lt;ООО Ромашка&gt;", content.Content);
         Assert.DoesNotContain("<ООО Ромашка>", content.Content);

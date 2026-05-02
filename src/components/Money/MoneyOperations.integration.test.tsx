@@ -94,9 +94,9 @@ vi.mock('../../hooks/useToast', () => ({
 
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
   usePersistedTableSettings: () => ({
-    columnOrder: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'categoryName', 'purpose'],
-    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'categoryName', 'purpose'],
-    visibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'categoryName', 'purpose'],
+    columnOrder: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'attachmentSummary', 'categoryName', 'purpose'],
+    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'attachmentSummary', 'categoryName', 'purpose'],
+    visibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'attachmentSummary', 'categoryName', 'purpose'],
     pageSize: 25,
     setPageSize: vi.fn(),
     draggingColumn: null,
@@ -231,6 +231,8 @@ function createOperation(overrides: Partial<MoneyOperation> = {}): MoneyOperatio
     matchStatus: overrides.matchStatus ?? 'None',
     matchedAt: overrides.matchedAt ?? null,
     matchComment: overrides.matchComment ?? null,
+    attachmentCount: overrides.attachmentCount ?? 0,
+    attachmentSummary: overrides.attachmentSummary ?? null,
     createdAt: overrides.createdAt ?? '2026-04-20T08:00:00Z',
     updatedAt: overrides.updatedAt ?? null,
     isReadonly: overrides.isReadonly ?? false,
@@ -659,6 +661,20 @@ describe('MoneyOperations integration', () => {
 
     expect(await screen.findByText('Договор')).toBeTruthy();
     expect(await screen.findByText('ДОГ-44/26')).toBeTruthy();
+  });
+
+  it('renders attachment summary in the money journal table', async () => {
+    operations = [
+      createOperation({
+        attachmentCount: 1,
+        attachmentSummary: 'statement-may.csv',
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByText('Вложения')).toBeTruthy();
+    expect(await screen.findByText('statement-may.csv')).toBeTruthy();
   });
 
   it('labels icon-only journal controls', async () => {

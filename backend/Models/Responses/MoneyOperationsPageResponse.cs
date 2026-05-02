@@ -39,6 +39,8 @@ public sealed class MoneyOperationListItemDto
     public MoneyOperationMatchStatus MatchStatus { get; init; }
     public DateTime? MatchedAt { get; init; }
     public string? MatchComment { get; init; }
+    public int AttachmentCount { get; init; }
+    public string? AttachmentSummary { get; init; }
     public DateTime CreatedAt { get; init; }
     public DateTime? UpdatedAt { get; init; }
     public bool IsReadonly { get; init; }

@@ -519,6 +519,8 @@ public class MoneyOperationsController : ControllerBase
                             : nameof(MoneyOperationMatchStatus.None),
                 MatchedAt = operation.MatchedAt,
                 MatchComment = operation.MatchComment,
+                AttachmentCount = operation.BankStatementImportBatchId.HasValue ? 1 : null,
+                AttachmentSummary = operation.BankStatementImportBatch != null ? operation.BankStatementImportBatch.FileName : null,
                 CreatedAt = operation.CreatedAt,
                 UpdatedAt = operation.UpdatedAt,
                 IsReadonly = false,
@@ -644,6 +646,8 @@ public class MoneyOperationsController : ControllerBase
                     : nameof(MoneyOperationMatchStatus.None),
                 MatchedAt = payment.LastPaymentDate ?? payment.PaidDate,
                 MatchComment = null,
+                AttachmentCount = null,
+                AttachmentSummary = null,
                 CreatedAt = payment.CreatedAt,
                 UpdatedAt = null,
                 IsReadonly = true,
@@ -1833,6 +1837,8 @@ public class MoneyOperationsController : ControllerBase
             MatchStatus = matchStatus,
             MatchedAt = row.MatchedAt,
             MatchComment = row.MatchComment,
+            AttachmentCount = row.AttachmentCount ?? 0,
+            AttachmentSummary = row.AttachmentSummary,
             CreatedAt = row.CreatedAt,
             UpdatedAt = row.UpdatedAt,
             IsReadonly = row.IsReadonly,
@@ -1896,6 +1902,7 @@ public class MoneyOperationsController : ControllerBase
             "Договор",
             "Статус сверки",
             "Комментарий сверки",
+            "Вложения",
         });
 
         foreach (var item in items)
@@ -1919,6 +1926,7 @@ public class MoneyOperationsController : ControllerBase
                 item.LinkedContractNumber ?? string.Empty,
                 GetMoneyOperationMatchStatusLabel(item.MatchStatus),
                 item.MatchComment ?? string.Empty,
+                item.AttachmentSummary ?? string.Empty,
             });
         }
 
@@ -2032,12 +2040,13 @@ public class MoneyOperationsController : ControllerBase
                 <td>{Html(item.LinkedInvoiceNumber ?? item.PaidInvoiceNumber ?? "-")}</td>
                 <td>{Html(item.LinkedContractNumber ?? "-")}</td>
                 <td>{Html(GetMoneyOperationMatchStatusLabel(item.MatchStatus))}</td>
+                <td>{Html(item.AttachmentSummary ?? "-")}</td>
               </tr>
             """);
         }
 
         var emptyRow = items.Count == 0
-            ? """<tr><td colspan="15" class="empty">Операции не найдены</td></tr>"""
+            ? """<tr><td colspan="16" class="empty">Операции не найдены</td></tr>"""
             : string.Empty;
 
         return $$"""
@@ -2107,6 +2116,7 @@ public class MoneyOperationsController : ControllerBase
           <th>Счет</th>
           <th>Договор</th>
           <th>Сверка</th>
+          <th>Вложения</th>
         </tr>
       </thead>
       <tbody>
@@ -3110,6 +3120,8 @@ public class MoneyOperationsController : ControllerBase
         public string? MatchStatus { get; init; }
         public DateTime? MatchedAt { get; init; }
         public string? MatchComment { get; init; }
+        public int? AttachmentCount { get; init; }
+        public string? AttachmentSummary { get; init; }
         public DateTime CreatedAt { get; init; }
         public DateTime? UpdatedAt { get; init; }
         public bool IsReadonly { get; init; }

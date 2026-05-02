@@ -138,6 +138,7 @@ const MONEY_OPERATION_COLUMNS = [
   { key: 'linkedContractNumber', label: 'Договор', defaultVisible: true, defaultWidth: 160 },
   { key: 'categoryName', label: 'Статья', defaultVisible: true, defaultWidth: 160 },
   { key: 'matchStatus', label: 'Сверка', defaultVisible: true, defaultWidth: 180 },
+  { key: 'attachmentSummary', label: 'Вложения', defaultVisible: true, defaultWidth: 180 },
   { key: 'cashOrder', label: 'Кассовый ордер', defaultVisible: true, defaultWidth: 190 },
 ] as const;
 
@@ -2607,6 +2608,14 @@ export function MoneyOperations({
         return item.linkedContractNumber ?? '—';
       case 'matchStatus':
         return renderMatchStatusBadge(item, onOpenInvoice, handleEdit);
+      case 'attachmentSummary':
+        return item.attachmentSummary ? (
+          <div className="line-clamp-2 text-slate-700" title={item.attachmentSummary}>
+            {item.attachmentSummary}
+          </div>
+        ) : (
+          '—'
+        );
       case 'categoryName':
         return item.categoryName ?? '—';
       case 'cashOrder':
