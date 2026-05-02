@@ -159,7 +159,65 @@ public static class ClientBalanceService
         return (true, null, applied);
     }
 
+    public static async Task UpsertCancelledInvoiceAdvanceAsync(
+        PaymentContext db,
+        Payment payment,
+        decimal requestedAmount,
+        string reason,
+        DateTime utcNow,
+        HttpContext? httpContext,
+        CancellationToken ct = default)
+    {
+        if (!payment.ClientId.HasValue || payment.ClientId.Value <= 0 || payment.Type != PaymentType.Income)
+        {
+            return;
+        }
+
+        var amount = NormalizeAmount(requestedAmount);
+        if (amount <= AmountEpsilon)
+        {
+            return;
+        }
+
+        var externalKey = BuildCancelledInvoiceAdvanceKey(payment.Id);
+        var existing = await db.ClientBalanceTransactions
+            .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
+
+        var actor = httpContext?.User.GetDisplayName();
+        var actorUserId = httpContext?.User.GetUserId();
+        var description = $"Аванс по аннулированному счёту №{payment.Account}. Причина: {reason}";
+
+        if (existing is null)
+        {
+            db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+            {
+                ClientId = payment.ClientId.Value,
+                InvoiceId = payment.InvoiceId,
+                PaymentId = payment.Id,
+                Amount = amount,
+                Type = ClientBalanceTransactionType.AdvanceFromCancelledInvoice,
+                Direction = ClientBalanceDirection.Credit,
+                Description = description,
+                ExternalKey = externalKey,
+                CreatedAt = utcNow,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = actor,
+            });
+            return;
+        }
+
+        existing.ClientId = payment.ClientId.Value;
+        existing.InvoiceId = payment.InvoiceId;
+        existing.PaymentId = payment.Id;
+        existing.Amount = amount;
+        existing.Type = ClientBalanceTransactionType.AdvanceFromCancelledInvoice;
+        existing.Direction = ClientBalanceDirection.Credit;
+        existing.Description = description;
+    }
+
     public static string BuildPaymentOverpaymentKey(int paymentId) => $"payment-overpayment:{paymentId}";
+
+    public static string BuildCancelledInvoiceAdvanceKey(int paymentId) => $"invoice-cancellation-advance:{paymentId}";
 
     private static decimal NormalizeAmount(decimal value)
         => Math.Round(value, 2, MidpointRounding.AwayFromZero);

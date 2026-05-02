@@ -734,7 +734,8 @@ export type ClientBalanceTransactionType =
   | 'Overpayment'
   | 'CreditApplied'
   | 'ManualAdjustment'
-  | 'Refund';
+  | 'Refund'
+  | 'AdvanceFromCancelledInvoice';
 
 export type ClientBalanceDirection = 'Credit' | 'Debit';
 

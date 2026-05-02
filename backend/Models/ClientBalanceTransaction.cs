@@ -7,7 +7,8 @@ public enum ClientBalanceTransactionType
     Overpayment,
     CreditApplied,
     ManualAdjustment,
-    Refund
+    Refund,
+    AdvanceFromCancelledInvoice
 }
 
 public enum ClientBalanceDirection

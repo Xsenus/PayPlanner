@@ -378,6 +378,128 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Cancel_PaidInvoiceWithAdvanceAction_CreatesClientBalanceCredit()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Paid Advance");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-CANCEL-ADV", clientId, new DateTime(2026, 4, 20), 12_000m);
+        request.Status = PaymentStatus.Completed;
+        request.PaidDate = new DateTime(2026, 4, 21);
+
+        var createAction = await controller.Create(request, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var cancelAction = await controller.Cancel(
+            createdDto.Id,
+            new CancelInvoiceRequest
+            {
+                Reason = "Ошибочный счёт",
+                ReceivedMoneyAction = InvoiceCancellationMoneyAction.LeaveAsAdvance,
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(cancelAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(PaymentStatus.Cancelled, dto.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Cancelled, dto.WorkflowStatus);
+        Assert.Equal(0m, dto.PaidAmount);
+
+        db.ChangeTracker.Clear();
+        var storedPayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(PaymentStatus.Cancelled, storedPayment.Status);
+        Assert.Equal(0m, storedPayment.PaidAmount);
+        Assert.False(storedPayment.IsPaid);
+        Assert.Null(storedPayment.PaidDate);
+        Assert.Null(storedPayment.LastPaymentDate);
+        Assert.Contains("аванс клиента", storedPayment.SystemNotes, StringComparison.OrdinalIgnoreCase);
+
+        var balanceTransaction = await db.ClientBalanceTransactions.AsNoTracking().SingleAsync();
+        Assert.Equal(clientId, balanceTransaction.ClientId);
+        Assert.Equal(storedPayment.InvoiceId, balanceTransaction.InvoiceId);
+        Assert.Equal(createdDto.Id, balanceTransaction.PaymentId);
+        Assert.Equal(12_000m, balanceTransaction.Amount);
+        Assert.Equal(ClientBalanceTransactionType.AdvanceFromCancelledInvoice, balanceTransaction.Type);
+        Assert.Equal(ClientBalanceDirection.Credit, balanceTransaction.Direction);
+        Assert.Equal(ClientBalanceService.BuildCancelledInvoiceAdvanceKey(createdDto.Id), balanceTransaction.ExternalKey);
+        Assert.Contains("Ошибочный счёт", balanceTransaction.Description, StringComparison.Ordinal);
+
+        var balance = await ClientBalanceService.GetBalanceAsync(db, clientId);
+        Assert.Equal(12_000m, balance);
+    }
+
+    [Fact]
+    public async Task Cancel_InstallmentInvoiceWithPaidGeneratedPayment_TransfersPaidAmountToAdvance()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Installment Advance");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-CANCEL-INST-ADV", clientId, new DateTime(2026, 4, 20), 12_000m);
+        request.InstallmentPlan = CreateInstallmentPlanRequest(
+            total: 12_000m,
+            startDate: new DateTime(2026, 4, 20),
+            new DateTime(2026, 5, 20),
+            new DateTime(2026, 6, 20));
+
+        var createAction = await controller.Create(request, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var storedParent = await db.Payments.SingleAsync(payment => payment.Id == createdDto.Id);
+        var generatedPayment = await db.Payments
+            .Where(payment =>
+                payment.InvoiceId == storedParent.InvoiceId
+                && payment.Id != storedParent.Id
+                && payment.SystemNotes != null
+                && payment.SystemNotes.Contains(InstallmentPaymentMarker))
+            .OrderBy(payment => payment.Id)
+            .FirstAsync();
+        generatedPayment.Status = PaymentStatus.Completed;
+        generatedPayment.PaidAmount = generatedPayment.Amount;
+        generatedPayment.IsPaid = true;
+        generatedPayment.PaidDate = new DateTime(2026, 5, 21);
+        generatedPayment.LastPaymentDate = new DateTime(2026, 5, 21);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var cancelAction = await controller.Cancel(
+            createdDto.Id,
+            new CancelInvoiceRequest
+            {
+                Reason = "Отмена рассрочки",
+                ReceivedMoneyAction = InvoiceCancellationMoneyAction.LeaveAsAdvance,
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(cancelAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(PaymentStatus.Cancelled, dto.Status);
+
+        db.ChangeTracker.Clear();
+        var installments = await LoadInstallmentPaymentsAsync(db, storedParent.InvoiceId!.Value, storedParent.Id);
+        Assert.All(installments, installment =>
+        {
+            Assert.Equal(PaymentStatus.Cancelled, installment.Status);
+            Assert.False(installment.IsPaid);
+            Assert.Equal(0m, installment.PaidAmount);
+        });
+
+        var balanceTransaction = await db.ClientBalanceTransactions.AsNoTracking().SingleAsync();
+        Assert.Equal(generatedPayment.Amount, balanceTransaction.Amount);
+        Assert.Equal(ClientBalanceTransactionType.AdvanceFromCancelledInvoice, balanceTransaction.Type);
+
+        var balance = await ClientBalanceService.GetBalanceAsync(db, clientId);
+        Assert.Equal(generatedPayment.Amount, balance);
+    }
+
+    [Fact]
     public async Task Create_ExpenseInvoice_UsesExpenseClientAsCaseOwner()
     {
         await using var db = await CreateContextAsync();

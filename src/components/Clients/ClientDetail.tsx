@@ -239,6 +239,7 @@ const CLIENT_BALANCE_TRANSACTION_LABELS: Record<
   CreditApplied: "Зачет",
   ManualAdjustment: "Корректировка",
   Refund: "Возврат",
+  AdvanceFromCancelledInvoice: "Аванс по аннулированному счёту",
 };
 
 const PAYMENT_TABLE_COLUMNS: Array<{

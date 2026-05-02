@@ -1268,10 +1268,14 @@ export class ApiService {
     return this.request<Invoice>(`/invoices/${id}/mark-signed`, { method: 'POST' });
   }
 
-  async cancelInvoice(id: number, reason: string) {
+  async cancelInvoice(
+    id: number,
+    reason: string,
+    receivedMoneyAction: 'Reject' | 'LeaveAsAdvance' | 'Refund' | 'Reallocate' = 'Reject',
+  ) {
     return this.request<Invoice>(`/invoices/${id}/cancel`, {
       method: 'POST',
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ reason, receivedMoneyAction }),
     });
   }
 

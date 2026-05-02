@@ -379,15 +379,50 @@ public class InvoicesController : ControllerBase
             return BadRequest("Invoice aggregate was not found.");
         }
 
-        if (HasReceivedMoney(payment))
-        {
-            return BadRequest("Нельзя аннулировать счёт с уже полученной оплатой без сценария возврата или зачёта.");
-        }
-
         await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         await LockInvoiceAggregateAsync(invoiceEntityId.Value, ct);
 
-        var installmentCancelError = await CancelGeneratedInstallmentPaymentsAsync(invoiceEntityId.Value, payment.Id, reason, ct);
+        var generatedPayments = await LoadGeneratedInstallmentPaymentsAsync(invoiceEntityId.Value, payment.Id, ct);
+        var paymentsToCancel = generatedPayments
+            .Where(item => item.Status != PaymentStatus.Cancelled)
+            .Prepend(payment)
+            .ToList();
+        var receivedAmount = NormalizeMoneyAmount(paymentsToCancel.Sum(ResolvePaidAmount));
+        var hasReceivedMoney = paymentsToCancel.Any(HasReceivedMoney);
+
+        if (hasReceivedMoney)
+        {
+            if (request.ReceivedMoneyAction == InvoiceCancellationMoneyAction.Refund)
+            {
+                return BadRequest("Возврат денег при аннулировании счёта будет добавлен отдельным сценарием через кассу/банк.");
+            }
+
+            if (request.ReceivedMoneyAction == InvoiceCancellationMoneyAction.Reallocate)
+            {
+                return BadRequest("Перенос оплаты на другой счёт будет добавлен отдельным сценарием зачёта.");
+            }
+
+            if (request.ReceivedMoneyAction != InvoiceCancellationMoneyAction.LeaveAsAdvance)
+            {
+                return BadRequest("Нельзя аннулировать счёт с уже полученной оплатой без сценария возврата, зачёта или переноса в аванс.");
+            }
+
+            if (payment.Type != PaymentType.Income || !payment.ClientId.HasValue || payment.ClientId.Value <= 0)
+            {
+                return BadRequest("Перенести оплату в аванс можно только по входящему счёту с указанным клиентом.");
+            }
+
+            if (receivedAmount <= 0m)
+            {
+                return BadRequest("По счёту отмечена оплата, но сумма полученных денег не определена.");
+            }
+        }
+
+        var installmentCancelError = CancelGeneratedInstallmentPayments(
+            generatedPayments,
+            reason,
+            allowReceivedMoney: hasReceivedMoney,
+            now: DateTime.UtcNow);
         if (installmentCancelError is not null)
         {
             return installmentCancelError;
@@ -396,6 +431,18 @@ public class InvoicesController : ControllerBase
         var now = DateTime.UtcNow;
         var actor = User.GetDisplayName();
         var actorId = GetUserId(User);
+
+        if (hasReceivedMoney)
+        {
+            await ClientBalanceService.UpsertCancelledInvoiceAdvanceAsync(
+                _db,
+                payment,
+                receivedAmount,
+                reason,
+                now,
+                HttpContext,
+                ct);
+        }
 
         payment.Status = PaymentStatus.Cancelled;
         payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.Cancelled;
@@ -407,7 +454,10 @@ public class InvoicesController : ControllerBase
         payment.PaidDate = null;
         payment.LastPaymentDate = null;
 
-        PaymentDomainService.AppendSystemNote(payment, $"Счёт аннулирован. Причина: {reason}", now, actor);
+        var advanceNote = hasReceivedMoney
+            ? $" Полученная оплата перенесена в аванс клиента: {receivedAmount:N2}."
+            : string.Empty;
+        PaymentDomainService.AppendSystemNote(payment, $"Счёт аннулирован. Причина: {reason}{advanceNote}", now, actor);
 
         await _db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -3271,13 +3321,11 @@ public class InvoicesController : ControllerBase
         return null;
     }
 
-    private async Task<ActionResult?> CancelGeneratedInstallmentPaymentsAsync(
+    private Task<List<Payment>> LoadGeneratedInstallmentPaymentsAsync(
         int invoiceEntityId,
         int representativePaymentId,
-        string reason,
         CancellationToken ct)
-    {
-        var generatedPayments = await _db.Payments
+        => _db.Payments
             .Where(payment =>
                 payment.InvoiceId == invoiceEntityId
                 && payment.Id != representativePaymentId
@@ -3287,7 +3335,12 @@ public class InvoicesController : ControllerBase
             .ThenBy(payment => payment.Id)
             .ToListAsync(ct);
 
-        var now = DateTime.UtcNow;
+    private ActionResult? CancelGeneratedInstallmentPayments(
+        IReadOnlyCollection<Payment> generatedPayments,
+        string reason,
+        bool allowReceivedMoney,
+        DateTime now)
+    {
         var actor = User.GetDisplayName();
         foreach (var payment in generatedPayments)
         {
@@ -3296,7 +3349,7 @@ public class InvoicesController : ControllerBase
                 continue;
             }
 
-            if (HasReceivedMoney(payment))
+            if (!allowReceivedMoney && HasReceivedMoney(payment))
             {
                 return BadRequest("Нельзя аннулировать счёт: по одному из платежей рассрочки уже есть оплата.");
             }

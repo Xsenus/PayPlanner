@@ -2653,7 +2653,22 @@ export function InvoiceModal({
           return;
         }
 
-        const updated = await apiService.cancelInvoice(invoice.id, reason.trim());
+        const hasReceivedMoney =
+          Number(invoice.paidAmount ?? 0) > 0 ||
+          invoice.status === 'Completed' ||
+          invoice.status === 'Processing';
+        let receivedMoneyAction: 'Reject' | 'LeaveAsAdvance' = 'Reject';
+        if (hasReceivedMoney) {
+          const leaveAsAdvance = window.confirm(
+            'По счёту уже есть оплата. Перенести полученную сумму в аванс клиента?',
+          );
+          if (!leaveAsAdvance) {
+            return;
+          }
+          receivedMoneyAction = 'LeaveAsAdvance';
+        }
+
+        const updated = await apiService.cancelInvoice(invoice.id, reason.trim(), receivedMoneyAction);
         setForm((prev) => ({
           ...prev,
           status: updated.status,
