@@ -292,6 +292,59 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task Directions_GroupsFactOperationsByDirectionName()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 9_000m, new DateTime(2026, 5, 1), "Основной банк", directionName: "Консалтинг"),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 2), "Касса", directionName: " консалтинг "),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 4_000m, new DateTime(2026, 5, 3), "Основной банк", directionName: "Поддержка"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 4), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 4), "Основной банк", directionName: "Консалтинг"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", directionName: "Консалтинг"));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Directions(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<DirectionReportDto>(ok.Value);
+        Assert.Equal(13_000m, report.IncomeTotal);
+        Assert.Equal(3_000m, report.ExpenseTotal);
+        Assert.Equal(10_000m, report.NetTotal);
+
+        Assert.Collection(
+            report.Directions,
+            item =>
+            {
+                Assert.Equal("Консалтинг", item.DirectionName);
+                Assert.Equal(9_000m, item.Income);
+                Assert.Equal(2_000m, item.Expense);
+                Assert.Equal(7_000m, item.NetTotal);
+                Assert.Equal(11_000m, item.TotalAmount);
+                Assert.Equal(68.8m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("Поддержка", item.DirectionName);
+                Assert.Equal(4_000m, item.Income);
+                Assert.Equal(0m, item.Expense);
+                Assert.Equal(25.0m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("Без направления", item.DirectionName);
+                Assert.Equal(0m, item.Income);
+                Assert.Equal(1_000m, item.Expense);
+                Assert.Equal(6.3m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -302,7 +355,8 @@ public class ReportsControllerTests
         int? incomeTypeId = null,
         string? categoryName = null,
         string? counterpartyName = null,
-        string? projectName = null)
+        string? projectName = null,
+        string? directionName = null)
         => new()
         {
             Source = source,
@@ -313,6 +367,7 @@ public class ReportsControllerTests
             IncomeTypeId = incomeTypeId,
             CategoryName = categoryName,
             ProjectName = projectName,
+            DirectionName = directionName,
             Amount = amount,
             Date = date,
             Currency = "RUB",

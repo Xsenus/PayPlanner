@@ -218,4 +218,43 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('source=Bank');
   });
+
+  it('loads direction report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      source: 'Bank',
+      incomeTotal: 9000,
+      expenseTotal: 2000,
+      netTotal: 7000,
+      directions: [{
+        directionName: 'Консалтинг',
+        income: 9000,
+        expense: 2000,
+        netTotal: 7000,
+        totalAmount: 11000,
+        incomeCount: 1,
+        expenseCount: 1,
+        share: 100,
+      }],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getDirectionReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+      source: 'Bank',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/directions?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('source=Bank');
+  });
 });

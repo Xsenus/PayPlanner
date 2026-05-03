@@ -2200,6 +2200,15 @@ export class ApiService {
     return this.request<ProjectReport>(`/reports/projects${q}`);
   }
 
+  async getDirectionReport(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<DirectionReport>(`/reports/directions${q}`);
+  }
+
   /** Упрощённый вызов: сводка по клиенту. */
   async getClientSummaryStats(
     clientId: number,
@@ -2810,6 +2819,7 @@ import type {
   MoneyCategoryReport,
   CounterpartyReport,
   ProjectReport,
+  DirectionReport,
   MoneyOperationAccountSummary,
   MoneyBalanceReconciliationResult,
   MoneyBalanceReconciliationRunResult,

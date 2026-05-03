@@ -119,6 +119,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("directions")]
+    public async Task<ActionResult<DirectionReportDto>> Directions(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildDirectionReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -547,6 +570,82 @@ public class ReportsController : ControllerBase
         => string.IsNullOrWhiteSpace(projectName)
             ? "Без проекта"
             : projectName.Trim();
+
+    private async Task<DirectionReportDto> BuildDirectionReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var rows = await BuildFactQuery(from, to, source, null)
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                item.DirectionName,
+            })
+            .ToListAsync(ct);
+
+        var incomeTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Income)
+            .Sum(item => item.Amount);
+        var expenseTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+            .Sum(item => item.Amount);
+        var turnoverTotal = incomeTotal + expenseTotal;
+
+        var directions = rows
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                DirectionName = ResolveDirectionName(item.DirectionName),
+            })
+            .GroupBy(item => item.DirectionName, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var income = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.Amount);
+                var expense = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.Amount);
+                var totalAmount = income + expense;
+
+                return new DirectionReportItemDto
+                {
+                    DirectionName = group.First().DirectionName,
+                    Income = income,
+                    Expense = expense,
+                    NetTotal = income - expense,
+                    TotalAmount = totalAmount,
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    Share = turnoverTotal > 0m
+                        ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderByDescending(item => item.TotalAmount)
+            .ThenBy(item => item.DirectionName)
+            .ToList();
+
+        return new DirectionReportDto
+        {
+            From = from,
+            To = to,
+            Source = source,
+            IncomeTotal = incomeTotal,
+            ExpenseTotal = expenseTotal,
+            NetTotal = incomeTotal - expenseTotal,
+            Directions = directions,
+        };
+    }
+
+    private static string ResolveDirectionName(string? directionName)
+        => string.IsNullOrWhiteSpace(directionName)
+            ? "Без направления"
+            : directionName.Trim();
 
     private sealed class CashFlowAccountQueryRow
     {

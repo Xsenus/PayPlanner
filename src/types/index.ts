@@ -830,6 +830,27 @@ export interface ProjectReport {
   projects: ProjectReportItem[];
 }
 
+export interface DirectionReportItem {
+  directionName: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  totalAmount: number;
+  incomeCount: number;
+  expenseCount: number;
+  share: number;
+}
+
+export interface DirectionReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  directions: DirectionReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;
