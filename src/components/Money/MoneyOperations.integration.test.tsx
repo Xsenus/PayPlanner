@@ -816,11 +816,53 @@ describe('MoneyOperations integration', () => {
         expect.objectContaining({ source: 'Bank', from: '2026-01-01', to: '2026-12-31' }),
       ),
     );
-    expect(await screen.findByText('02.05.2026')).toBeTruthy();
+    expect(await screen.findByText('Актуально')).toBeTruthy();
+    expect(screen.getByTitle('Сохранено 02.05.2026')).toBeTruthy();
     expect(toastSuccessMock).toHaveBeenCalledWith(
       'Сверка сохранена: создано 1, обновлено 0, замечаний 0.',
       'Сверка остатков',
     );
+  });
+
+  it('highlights stale saved daily balance reconciliation rows', async () => {
+    operations = [createOperation({ accountName: 'Основной банк', amount: 500 })];
+    getMoneyOperationDailyBalancesMock.mockResolvedValueOnce([
+      {
+        date: '2026-05-01',
+        accountName: 'Основной банк',
+        source: 'Bank',
+        openingBalance: 1000,
+        income: 500,
+        expense: 0,
+        closingBalance: 1500,
+        incomeCount: 1,
+        expenseCount: 0,
+        isBalanced: true,
+      },
+    ]);
+    getMoneyBalanceReconciliationResultsMock.mockResolvedValueOnce([
+      {
+        id: 7,
+        date: '2026-05-01',
+        accountName: 'Основной банк',
+        source: 'Bank',
+        openingBalance: 1000,
+        income: 400,
+        expense: 0,
+        closingBalance: 1400,
+        incomeCount: 1,
+        expenseCount: 0,
+        isBalanced: true,
+        issueCount: 0,
+        checkedAt: '2026-05-02T10:00:00Z',
+        checkedByUserId: 7,
+      },
+    ]);
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByText('Изменилось')).toBeTruthy();
+    expect(screen.getByTitle('Сохранено 02.05.2026. Изменение сумм: 200,00 ₽')).toBeTruthy();
   });
 
   it('labels icon-only journal controls', async () => {

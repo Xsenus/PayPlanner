@@ -406,6 +406,10 @@ function isAppliedToInvoice(item: MoneyOperation) {
 }
 
 type BalanceCheckSource = Pick<MoneyOperationsSummary | MoneyOperationAccountSummary, 'startBalance' | 'income' | 'expense' | 'endBalance'>;
+type DailyBalanceCheckSource = Pick<
+  MoneyOperationDailyBalance,
+  'openingBalance' | 'income' | 'expense' | 'closingBalance' | 'incomeCount' | 'expenseCount' | 'isBalanced'
+>;
 
 function getBalanceCheck(source: BalanceCheckSource) {
   const expectedEndBalance = Math.round((source.startBalance + source.income - source.expense) * 100) / 100;
@@ -429,6 +433,59 @@ function renderBalanceCheckBadge(source: BalanceCheckSource) {
       title={`Расчетный остаток: ${formatMoney(check.expectedEndBalance)} ₽`}>
       <span>{check.isBalanced ? 'Сверка сходится' : `Расхождение: ${formatMoney(check.difference)} ₽`}</span>
     </div>
+  );
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function getSavedBalanceDrift(current: DailyBalanceCheckSource, saved?: MoneyBalanceReconciliationResult | null) {
+  if (!saved) {
+    return null;
+  }
+
+  const amountDifference =
+    Math.abs(roundMoney(current.openingBalance - saved.openingBalance)) +
+    Math.abs(roundMoney(current.income - saved.income)) +
+    Math.abs(roundMoney(current.expense - saved.expense)) +
+    Math.abs(roundMoney(current.closingBalance - saved.closingBalance));
+  const countDifference =
+    current.incomeCount !== saved.incomeCount ||
+    current.expenseCount !== saved.expenseCount ||
+    current.isBalanced !== saved.isBalanced;
+
+  return {
+    isActual: amountDifference < 0.01 && !countDifference && saved.issueCount === 0,
+    amountDifference: roundMoney(amountDifference),
+  };
+}
+
+function renderSavedBalanceReconciliationBadge(
+  current: DailyBalanceCheckSource,
+  saved?: MoneyBalanceReconciliationResult | null,
+) {
+  if (!saved) {
+    return <span className="text-xs text-slate-400">Нет</span>;
+  }
+
+  const drift = getSavedBalanceDrift(current, saved);
+  if (!drift?.isActual) {
+    return (
+      <span
+        className="inline-flex rounded-full bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700"
+        title={`Сохранено ${formatDate(saved.checkedAt)}. Изменение сумм: ${formatMoney(drift?.amountDifference ?? 0)} ₽`}>
+        Изменилось
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="inline-flex rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700"
+      title={`Сохранено ${formatDate(saved.checkedAt)}`}>
+      Актуально
+    </span>
   );
 }
 
@@ -3787,13 +3844,7 @@ export function MoneyOperations({
                         </span>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        {savedResult ? (
-                          <span className="inline-flex rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
-                            {formatDate(savedResult.checkedAt)}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-400">Нет</span>
-                        )}
+                        {renderSavedBalanceReconciliationBadge(item, savedResult)}
                       </td>
                     </tr>
                   );
