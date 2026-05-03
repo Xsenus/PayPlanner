@@ -397,6 +397,67 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task Vat_GroupsFactOperationsByVatRate()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 12_000m, new DateTime(2026, 5, 1), "Основной банк", vatRate: 20m, vatAmount: 2_000m),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 5_500m, new DateTime(2026, 5, 2), "Основной банк", vatRate: 10m, vatAmount: 500m),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 6_000m, new DateTime(2026, 5, 3), "Основной банк", vatRate: 20m, vatAmount: 1_000m),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 4), "Касса"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", vatRate: 20m, vatAmount: 16_666.50m),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 6), "Основной банк", vatRate: 20m, vatAmount: 8_333.33m));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Vat(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<VatReportDto>(ok.Value);
+        Assert.Equal(17_500m, report.IncomeAmountTotal);
+        Assert.Equal(2_500m, report.IncomeVatTotal);
+        Assert.Equal(9_000m, report.ExpenseAmountTotal);
+        Assert.Equal(1_000m, report.ExpenseVatTotal);
+        Assert.Equal(1_500m, report.VatBalance);
+
+        Assert.Collection(
+            report.Rates,
+            item =>
+            {
+                Assert.Equal(20m, item.VatRate);
+                Assert.Equal("20%", item.VatRateLabel);
+                Assert.Equal(10_000m, item.IncomeBase);
+                Assert.Equal(2_000m, item.IncomeVat);
+                Assert.Equal(12_000m, item.IncomeGross);
+                Assert.Equal(5_000m, item.ExpenseBase);
+                Assert.Equal(1_000m, item.ExpenseVat);
+                Assert.Equal(6_000m, item.ExpenseGross);
+                Assert.Equal(1_000m, item.NetVat);
+            },
+            item =>
+            {
+                Assert.Equal(10m, item.VatRate);
+                Assert.Equal("10%", item.VatRateLabel);
+                Assert.Equal(5_000m, item.IncomeBase);
+                Assert.Equal(500m, item.IncomeVat);
+                Assert.Equal(5_500m, item.IncomeGross);
+                Assert.Equal(500m, item.NetVat);
+            },
+            item =>
+            {
+                Assert.Null(item.VatRate);
+                Assert.Equal("Без НДС", item.VatRateLabel);
+                Assert.Equal(3_000m, item.ExpenseBase);
+                Assert.Equal(0m, item.ExpenseVat);
+                Assert.Equal(-0m, item.NetVat);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -409,7 +470,9 @@ public class ReportsControllerTests
         string? counterpartyName = null,
         string? projectName = null,
         string? directionName = null,
-        string? salesPointName = null)
+        string? salesPointName = null,
+        decimal? vatRate = null,
+        decimal? vatAmount = null)
         => new()
         {
             Source = source,
@@ -422,6 +485,8 @@ public class ReportsControllerTests
             ProjectName = projectName,
             DirectionName = directionName,
             SalesPointName = salesPointName,
+            VatRate = vatRate,
+            VatAmount = vatAmount,
             Amount = amount,
             Date = date,
             Currency = "RUB",

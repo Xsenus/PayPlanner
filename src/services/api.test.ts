@@ -296,4 +296,48 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('source=Bank');
   });
+
+  it('loads VAT report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      source: 'Bank',
+      incomeAmountTotal: 12000,
+      incomeVatTotal: 2000,
+      expenseAmountTotal: 6000,
+      expenseVatTotal: 1000,
+      vatBalance: 1000,
+      rates: [{
+        vatRate: 20,
+        vatRateLabel: '20%',
+        incomeBase: 10000,
+        incomeVat: 2000,
+        incomeGross: 12000,
+        expenseBase: 5000,
+        expenseVat: 1000,
+        expenseGross: 6000,
+        netVat: 1000,
+        incomeCount: 1,
+        expenseCount: 1,
+      }],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getVatReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+      source: 'Bank',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/vat?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('source=Bank');
+  });
 });

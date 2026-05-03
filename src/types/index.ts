@@ -872,6 +872,32 @@ export interface SalesPointReport {
   salesPoints: SalesPointReportItem[];
 }
 
+export interface VatReportItem {
+  vatRate?: number | null;
+  vatRateLabel: string;
+  incomeBase: number;
+  incomeVat: number;
+  incomeGross: number;
+  expenseBase: number;
+  expenseVat: number;
+  expenseGross: number;
+  netVat: number;
+  incomeCount: number;
+  expenseCount: number;
+}
+
+export interface VatReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeAmountTotal: number;
+  incomeVatTotal: number;
+  expenseAmountTotal: number;
+  expenseVatTotal: number;
+  vatBalance: number;
+  rates: VatReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

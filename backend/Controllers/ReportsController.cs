@@ -165,6 +165,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("vat")]
+    public async Task<ActionResult<VatReportDto>> Vat(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildVatReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -745,6 +768,84 @@ public class ReportsController : ControllerBase
         => string.IsNullOrWhiteSpace(salesPointName)
             ? "Без точки продаж"
             : salesPointName.Trim();
+
+    private async Task<VatReportDto> BuildVatReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var rows = await BuildFactQuery(from, to, source, null)
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                item.VatRate,
+                item.VatAmount,
+            })
+            .ToListAsync(ct);
+
+        var incomeRows = rows.Where(item => item.Direction == MoneyOperationDirection.Income).ToList();
+        var expenseRows = rows.Where(item => item.Direction == MoneyOperationDirection.Expense).ToList();
+
+        var incomeVatTotal = incomeRows.Sum(item => item.VatAmount ?? 0m);
+        var expenseVatTotal = expenseRows.Sum(item => item.VatAmount ?? 0m);
+
+        var rates = rows
+            .GroupBy(item => NormalizeVatRate(item.VatRate))
+            .Select(group =>
+            {
+                var incomeGross = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.Amount);
+                var incomeVat = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.VatAmount ?? 0m);
+                var expenseGross = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.Amount);
+                var expenseVat = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.VatAmount ?? 0m);
+
+                return new VatReportItemDto
+                {
+                    VatRate = group.Key,
+                    VatRateLabel = FormatVatRateLabel(group.Key),
+                    IncomeBase = incomeGross - incomeVat,
+                    IncomeVat = incomeVat,
+                    IncomeGross = incomeGross,
+                    ExpenseBase = expenseGross - expenseVat,
+                    ExpenseVat = expenseVat,
+                    ExpenseGross = expenseGross,
+                    NetVat = incomeVat - expenseVat,
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                };
+            })
+            .OrderBy(item => item.VatRate.HasValue ? 0 : 1)
+            .ThenByDescending(item => item.VatRate)
+            .ToList();
+
+        return new VatReportDto
+        {
+            From = from,
+            To = to,
+            Source = source,
+            IncomeAmountTotal = incomeRows.Sum(item => item.Amount),
+            IncomeVatTotal = incomeVatTotal,
+            ExpenseAmountTotal = expenseRows.Sum(item => item.Amount),
+            ExpenseVatTotal = expenseVatTotal,
+            VatBalance = incomeVatTotal - expenseVatTotal,
+            Rates = rates,
+        };
+    }
+
+    private static decimal? NormalizeVatRate(decimal? vatRate)
+        => vatRate.HasValue ? Math.Round(vatRate.Value, 2, MidpointRounding.AwayFromZero) : null;
+
+    private static string FormatVatRateLabel(decimal? vatRate)
+        => vatRate.HasValue ? $"{vatRate.Value:0.##}%" : "Без НДС";
 
     private sealed class CashFlowAccountQueryRow
     {

@@ -9,8 +9,9 @@ import {
   Compass,
   FolderKanban,
   Handshake,
-  Store,
+  Percent,
   RefreshCcw,
+  Store,
   TrendingDown,
   TrendingUp,
   Wallet,
@@ -24,9 +25,10 @@ import { useCounterpartyReport } from '../../hooks/useCounterpartyReport';
 import { useProjectReport } from '../../hooks/useProjectReport';
 import { useDirectionReport } from '../../hooks/useDirectionReport';
 import { useSalesPointReport } from '../../hooks/useSalesPointReport';
+import { useVatReport } from '../../hooks/useVatReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { CashBookSummary, CashFlowReport, CounterpartyReport, DirectionReport, MoneyCategoryReport, MoneyOperationSource, ProjectReport, SalesPointReport } from '../../types';
+import type { CashBookSummary, CashFlowReport, CounterpartyReport, DirectionReport, MoneyCategoryReport, MoneyOperationSource, ProjectReport, SalesPointReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -1320,6 +1322,153 @@ function SalesPointReportSection({
   );
 }
 
+function VatReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: VatReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const rows = report?.rates ?? [];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-teal-100 bg-teal-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-teal-700">
+            <Percent className="h-3.5 w-3.5" />
+            НДС
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по НДС</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Сводка фактических операций по ставкам НДС: начисленный налог с поступлений, входящий НДС по расходам и итог к уплате или возмещению.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по НДС...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по НДС</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-5">
+            <MetricCard
+              title="Поступления с НДС"
+              value={formatCurrency(report.incomeAmountTotal)}
+              icon={TrendingUp}
+              tone="income"
+              subtitle={`НДС начислен: ${formatCurrency(report.incomeVatTotal)}`}
+            />
+            <MetricCard
+              title="Расходы с НДС"
+              value={formatCurrency(report.expenseAmountTotal)}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle={`Входящий НДС: ${formatCurrency(report.expenseVatTotal)}`}
+            />
+            <MetricCard
+              title="Баланс НДС"
+              value={formatCurrency(report.vatBalance)}
+              icon={Percent}
+              tone={report.vatBalance >= 0 ? 'profit' : 'rate'}
+              subtitle={report.vatBalance >= 0 ? 'К уплате по операциям' : 'К возмещению по операциям'}
+            />
+            <MetricCard
+              title="База доходов"
+              value={formatCurrency(report.incomeAmountTotal - report.incomeVatTotal)}
+              icon={Wallet}
+              tone="income"
+              subtitle="Сумма без НДС"
+            />
+            <MetricCard
+              title="База расходов"
+              value={formatCurrency(report.expenseAmountTotal - report.expenseVatTotal)}
+              icon={Banknote}
+              tone="expense"
+              subtitle="Сумма без НДС"
+            />
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-950">Ставки НДС</h3>
+                <p className="mt-1 text-sm text-slate-500">Разделение базы и налога по каждой ставке.</p>
+              </div>
+              <div className="text-sm text-slate-500">{rows.length} ставок</div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {rows.length > 0 ? rows.map((row) => (
+                <div key={row.vatRateLabel} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <div className="text-lg font-semibold text-slate-950">{row.vatRateLabel}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {row.incomeCount + row.expenseCount} операций
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-slate-500">Баланс НДС</div>
+                      <div className="font-semibold text-slate-950">{formatCurrency(row.netVat)}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+                    <div className="rounded-2xl bg-emerald-50 px-4 py-3">
+                      <div className="text-xs text-emerald-700">Поступления</div>
+                      <div className="mt-1 font-semibold text-emerald-800">{formatCurrency(row.incomeGross)}</div>
+                      <div className="mt-1 text-xs text-emerald-700">
+                        база {formatCurrency(row.incomeBase)} · НДС {formatCurrency(row.incomeVat)}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-rose-50 px-4 py-3">
+                      <div className="text-xs text-rose-700">Расходы</div>
+                      <div className="mt-1 font-semibold text-rose-800">{formatCurrency(row.expenseGross)}</div>
+                      <div className="mt-1 text-xs text-rose-700">
+                        база {formatCurrency(row.expenseBase)} · НДС {formatCurrency(row.expenseVat)}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-teal-50 px-4 py-3">
+                      <div className="text-xs text-teal-700">Налоговый итог</div>
+                      <div className="mt-1 font-semibold text-teal-800">{formatCurrency(row.netVat)}</div>
+                      <div className="mt-1 text-xs text-teal-700">
+                        начислено минус входящий НДС
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )) : (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+                  Нет операций с НДС за период.
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Reports() {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
@@ -1387,6 +1536,12 @@ export function Reports() {
     error: salesPointReportError,
     reload: reloadSalesPointReport,
   } = useSalesPointReport(cashFlowDates);
+  const {
+    report: vatReport,
+    loading: vatReportLoading,
+    error: vatReportError,
+    reload: reloadVatReport,
+  } = useVatReport(cashFlowDates);
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
@@ -1755,6 +1910,13 @@ export function Reports() {
               loading={salesPointReportLoading}
               error={salesPointReportError}
               onReload={reloadSalesPointReport}
+            />
+
+            <VatReportSection
+              report={vatReport}
+              loading={vatReportLoading}
+              error={vatReportError}
+              onReload={reloadVatReport}
             />
           </>
         )}
