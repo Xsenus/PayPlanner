@@ -345,6 +345,58 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task SalesPoints_GroupsFactOperationsBySalesPointName()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 8_000m, new DateTime(2026, 5, 1), "Основной банк", salesPointName: "Офис"),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_500m, new DateTime(2026, 5, 2), "Касса", salesPointName: " офис "),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_500m, new DateTime(2026, 5, 3), "Основной банк", salesPointName: "Онлайн"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 4), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", salesPointName: "Офис"));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.SalesPoints(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<SalesPointReportDto>(ok.Value);
+        Assert.Equal(11_500m, report.IncomeTotal);
+        Assert.Equal(2_500m, report.ExpenseTotal);
+        Assert.Equal(9_000m, report.NetTotal);
+
+        Assert.Collection(
+            report.SalesPoints,
+            item =>
+            {
+                Assert.Equal("Офис", item.SalesPointName);
+                Assert.Equal(8_000m, item.Income);
+                Assert.Equal(1_500m, item.Expense);
+                Assert.Equal(6_500m, item.NetTotal);
+                Assert.Equal(9_500m, item.TotalAmount);
+                Assert.Equal(67.9m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("Онлайн", item.SalesPointName);
+                Assert.Equal(3_500m, item.Income);
+                Assert.Equal(0m, item.Expense);
+                Assert.Equal(25.0m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("Без точки продаж", item.SalesPointName);
+                Assert.Equal(0m, item.Income);
+                Assert.Equal(1_000m, item.Expense);
+                Assert.Equal(7.1m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -356,7 +408,8 @@ public class ReportsControllerTests
         string? categoryName = null,
         string? counterpartyName = null,
         string? projectName = null,
-        string? directionName = null)
+        string? directionName = null,
+        string? salesPointName = null)
         => new()
         {
             Source = source,
@@ -368,6 +421,7 @@ public class ReportsControllerTests
             CategoryName = categoryName,
             ProjectName = projectName,
             DirectionName = directionName,
+            SalesPointName = salesPointName,
             Amount = amount,
             Date = date,
             Currency = "RUB",
