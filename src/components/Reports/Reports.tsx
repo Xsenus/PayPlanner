@@ -6,6 +6,7 @@ import {
   CalendarRange,
   CheckCircle2,
   Clock3,
+  Handshake,
   RefreshCcw,
   TrendingDown,
   TrendingUp,
@@ -16,9 +17,10 @@ import { usePeriodStats } from '../../hooks/usePeriodStats';
 import { useCashFlowReport } from '../../hooks/useCashFlowReport';
 import { useCashReport } from '../../hooks/useCashReport';
 import { useMoneyCategoryReport } from '../../hooks/useMoneyCategoryReport';
+import { useCounterpartyReport } from '../../hooks/useCounterpartyReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { CashBookSummary, CashFlowReport, MoneyCategoryReport, MoneyOperationSource } from '../../types';
+import type { CashBookSummary, CashFlowReport, CounterpartyReport, MoneyCategoryReport, MoneyOperationSource } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -793,6 +795,144 @@ function CategoryReportSection({
   );
 }
 
+function CounterpartyReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: CounterpartyReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const rows = (report?.counterparties ?? []).slice(0, 10);
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-cyan-700">
+            <Handshake className="h-3.5 w-3.5" />
+            Контрагенты
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по контрагентам</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Сводка фактических поступлений и списаний по каждому контрагенту с долей в общем обороте периода.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по контрагентам...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по контрагентам</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Поступило"
+              value={formatCurrency(report.incomeTotal)}
+              icon={TrendingUp}
+              tone="income"
+              subtitle="По всем контрагентам"
+            />
+            <MetricCard
+              title="Списано"
+              value={formatCurrency(report.expenseTotal)}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle="По всем контрагентам"
+            />
+            <MetricCard
+              title="Итог"
+              value={formatCurrency(report.netTotal)}
+              icon={ArrowUpRight}
+              tone="profit"
+              subtitle={report.netTotal >= 0 ? 'Положительный денежный итог' : 'Отрицательный денежный итог'}
+            />
+            <MetricCard
+              title="Контрагентов"
+              value={String(report.counterparties.length)}
+              icon={Handshake}
+              tone="rate"
+              subtitle="С фактическим движением денег"
+            />
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-950">Крупнейшие контрагенты</h3>
+                <p className="mt-1 text-sm text-slate-500">Сортировка по суммарному обороту: поступления плюс списания.</p>
+              </div>
+              <div className="text-sm text-slate-500">Топ {rows.length}</div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {rows.length > 0 ? rows.map((row) => (
+                <div key={row.counterpartyName} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-slate-950">{row.counterpartyName}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {row.incomeCount + row.expenseCount} операций · {row.share}% оборота
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-slate-500">Оборот</div>
+                      <div className="font-semibold text-slate-950">{formatCurrency(row.totalAmount)}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="rounded-xl bg-emerald-50 px-3 py-2">
+                      <div className="text-xs text-emerald-700">Поступило</div>
+                      <div className="font-semibold text-emerald-800">{formatCurrency(row.income)}</div>
+                    </div>
+                    <div className="rounded-xl bg-rose-50 px-3 py-2">
+                      <div className="text-xs text-rose-700">Списано</div>
+                      <div className="font-semibold text-rose-800">{formatCurrency(row.expense)}</div>
+                    </div>
+                    <div className="rounded-xl bg-sky-50 px-3 py-2">
+                      <div className="text-xs text-sky-700">Итог</div>
+                      <div className="font-semibold text-sky-800">{formatCurrency(row.netTotal)}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full bg-cyan-500"
+                      style={{ width: `${Math.max(row.share, row.totalAmount > 0 ? 5 : 0)}%` }}
+                    />
+                  </div>
+                </div>
+              )) : (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+                  Нет операций по контрагентам за период.
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Reports() {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
@@ -836,6 +976,12 @@ export function Reports() {
     error: categoryReportError,
     reload: reloadCategoryReport,
   } = useMoneyCategoryReport(cashFlowDates);
+  const {
+    report: counterpartyReport,
+    loading: counterpartyReportLoading,
+    error: counterpartyReportError,
+    reload: reloadCounterpartyReport,
+  } = useCounterpartyReport(cashFlowDates);
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
@@ -1176,6 +1322,13 @@ export function Reports() {
               loading={categoryReportLoading}
               error={categoryReportError}
               onReload={reloadCategoryReport}
+            />
+
+            <CounterpartyReportSection
+              report={counterpartyReport}
+              loading={counterpartyReportLoading}
+              error={counterpartyReportError}
+              onReload={reloadCounterpartyReport}
             />
           </>
         )}

@@ -185,6 +185,61 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task Counterparties_GroupsFactOperationsByCounterparty()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 10_000m, new DateTime(2026, 5, 1), "Основной банк", counterpartyName: "ООО Ромашка"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 5_000m, new DateTime(2026, 5, 2), "Основной банк", counterpartyName: "  ооо ромашка  "),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 3), "Основной банк", counterpartyName: "ООО Ромашка"),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 4_000m, new DateTime(2026, 5, 4), "Касса", counterpartyName: "ИП Петров"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 4_000m, new DateTime(2026, 5, 5), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 6), "Основной банк", counterpartyName: "ООО Ромашка"));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Counterparties(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CounterpartyReportDto>(ok.Value);
+        Assert.Equal(19_000m, report.IncomeTotal);
+        Assert.Equal(6_000m, report.ExpenseTotal);
+        Assert.Equal(13_000m, report.NetTotal);
+
+        Assert.Collection(
+            report.Counterparties,
+            item =>
+            {
+                Assert.Equal("ООО Ромашка", item.CounterpartyName);
+                Assert.Equal(15_000m, item.Income);
+                Assert.Equal(2_000m, item.Expense);
+                Assert.Equal(13_000m, item.NetTotal);
+                Assert.Equal(17_000m, item.TotalAmount);
+                Assert.Equal(2, item.IncomeCount);
+                Assert.Equal(1, item.ExpenseCount);
+                Assert.Equal(68.0m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("Без контрагента", item.CounterpartyName);
+                Assert.Equal(4_000m, item.Income);
+                Assert.Equal(0m, item.Expense);
+                Assert.Equal(16.0m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("ИП Петров", item.CounterpartyName);
+                Assert.Equal(0m, item.Income);
+                Assert.Equal(4_000m, item.Expense);
+                Assert.Equal(16.0m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -193,13 +248,15 @@ public class ReportsControllerTests
         DateTime date,
         string accountName,
         int? incomeTypeId = null,
-        string? categoryName = null)
+        string? categoryName = null,
+        string? counterpartyName = null)
         => new()
         {
             Source = source,
             Direction = direction,
             AccountingType = accountingType,
             AccountName = accountName,
+            CounterpartyName = counterpartyName,
             IncomeTypeId = incomeTypeId,
             CategoryName = categoryName,
             Amount = amount,

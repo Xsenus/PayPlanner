@@ -788,6 +788,27 @@ export interface MoneyCategoryReport {
   expense: MoneyCategoryReportItem[];
 }
 
+export interface CounterpartyReportItem {
+  counterpartyName: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  totalAmount: number;
+  incomeCount: number;
+  expenseCount: number;
+  share: number;
+}
+
+export interface CounterpartyReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  counterparties: CounterpartyReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;
