@@ -96,6 +96,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("projects")]
+    public async Task<ActionResult<ProjectReportDto>> Projects(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildProjectReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -448,6 +471,82 @@ public class ReportsController : ControllerBase
         => string.IsNullOrWhiteSpace(counterpartyName)
             ? "Без контрагента"
             : counterpartyName.Trim();
+
+    private async Task<ProjectReportDto> BuildProjectReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var rows = await BuildFactQuery(from, to, source, null)
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                item.ProjectName,
+            })
+            .ToListAsync(ct);
+
+        var incomeTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Income)
+            .Sum(item => item.Amount);
+        var expenseTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+            .Sum(item => item.Amount);
+        var turnoverTotal = incomeTotal + expenseTotal;
+
+        var projects = rows
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                ProjectName = ResolveProjectName(item.ProjectName),
+            })
+            .GroupBy(item => item.ProjectName, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var income = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.Amount);
+                var expense = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.Amount);
+                var totalAmount = income + expense;
+
+                return new ProjectReportItemDto
+                {
+                    ProjectName = group.First().ProjectName,
+                    Income = income,
+                    Expense = expense,
+                    NetTotal = income - expense,
+                    TotalAmount = totalAmount,
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    Share = turnoverTotal > 0m
+                        ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderByDescending(item => item.TotalAmount)
+            .ThenBy(item => item.ProjectName)
+            .ToList();
+
+        return new ProjectReportDto
+        {
+            From = from,
+            To = to,
+            Source = source,
+            IncomeTotal = incomeTotal,
+            ExpenseTotal = expenseTotal,
+            NetTotal = incomeTotal - expenseTotal,
+            Projects = projects,
+        };
+    }
+
+    private static string ResolveProjectName(string? projectName)
+        => string.IsNullOrWhiteSpace(projectName)
+            ? "Без проекта"
+            : projectName.Trim();
 
     private sealed class CashFlowAccountQueryRow
     {

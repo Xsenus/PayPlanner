@@ -809,6 +809,27 @@ export interface CounterpartyReport {
   counterparties: CounterpartyReportItem[];
 }
 
+export interface ProjectReportItem {
+  projectName: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  totalAmount: number;
+  incomeCount: number;
+  expenseCount: number;
+  share: number;
+}
+
+export interface ProjectReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  projects: ProjectReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;
