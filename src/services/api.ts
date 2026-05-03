@@ -2263,6 +2263,15 @@ export class ApiService {
     return this.request<PaidAccountReport>(`/reports/paid-accounts${q}`);
   }
 
+  async getPaidInvoiceReport(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<PaidInvoiceReport>(`/reports/paid-invoices${q}`);
+  }
+
   /** Упрощённый вызов: сводка по клиенту. */
   async getClientSummaryStats(
     clientId: number,
@@ -2880,6 +2889,7 @@ import type {
   AdvanceReport,
   PaymentPriorityReport,
   PaidAccountReport,
+  PaidInvoiceReport,
   MoneyOperationAccountSummary,
   MoneyBalanceReconciliationResult,
   MoneyBalanceReconciliationRunResult,

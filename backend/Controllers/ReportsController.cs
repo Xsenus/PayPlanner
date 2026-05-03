@@ -280,6 +280,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("paid-invoices")]
+    public async Task<ActionResult<PaidInvoiceReportDto>> PaidInvoices(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildPaidInvoiceReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -1266,6 +1289,86 @@ public class ReportsController : ControllerBase
         => string.IsNullOrWhiteSpace(paidAccountName)
             ? "Без счета оплаты"
             : paidAccountName.Trim();
+
+    private async Task<PaidInvoiceReportDto> BuildPaidInvoiceReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var rows = await BuildFactQuery(from, to, source, null)
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                item.PaidInvoiceNumber,
+                item.PaidAmount,
+            })
+            .ToListAsync(ct);
+
+        var incomeTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Income)
+            .Sum(item => item.Amount);
+        var expenseTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+            .Sum(item => item.Amount);
+        var turnoverTotal = incomeTotal + expenseTotal;
+
+        var invoices = rows
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                PaidAmount = item.PaidAmount ?? item.Amount,
+                PaidInvoiceNumber = ResolvePaidInvoiceNumber(item.PaidInvoiceNumber),
+            })
+            .GroupBy(item => item.PaidInvoiceNumber, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var income = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.Amount);
+                var expense = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.Amount);
+                var operationTotal = income + expense;
+
+                return new PaidInvoiceReportItemDto
+                {
+                    PaidInvoiceNumber = group.First().PaidInvoiceNumber,
+                    Income = income,
+                    Expense = expense,
+                    NetTotal = income - expense,
+                    OperationTotal = operationTotal,
+                    PaidAmountTotal = group.Sum(item => item.PaidAmount),
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    Share = turnoverTotal > 0m
+                        ? Math.Round(operationTotal / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderByDescending(item => item.PaidAmountTotal)
+            .ThenBy(item => item.PaidInvoiceNumber)
+            .ToList();
+
+        return new PaidInvoiceReportDto
+        {
+            From = from,
+            To = to,
+            Source = source,
+            IncomeTotal = incomeTotal,
+            ExpenseTotal = expenseTotal,
+            NetTotal = incomeTotal - expenseTotal,
+            PaidAmountTotal = invoices.Sum(item => item.PaidAmountTotal),
+            Invoices = invoices,
+        };
+    }
+
+    private static string ResolvePaidInvoiceNumber(string? paidInvoiceNumber)
+        => string.IsNullOrWhiteSpace(paidInvoiceNumber)
+            ? "Без номера счета"
+            : paidInvoiceNumber.Trim();
 
     private sealed class CashFlowAccountQueryRow
     {

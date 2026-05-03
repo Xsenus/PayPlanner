@@ -33,9 +33,10 @@ import { usePlanFactReport } from '../../hooks/usePlanFactReport';
 import { useAdvanceReport } from '../../hooks/useAdvanceReport';
 import { usePaymentPriorityReport } from '../../hooks/usePaymentPriorityReport';
 import { usePaidAccountReport } from '../../hooks/usePaidAccountReport';
+import { usePaidInvoiceReport } from '../../hooks/usePaidInvoiceReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { AdvanceReport, CashBookSummary, CashFlowReport, CounterpartyReport, DirectionReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, VatReport } from '../../types';
+import type { AdvanceReport, CashBookSummary, CashFlowReport, CounterpartyReport, DirectionReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -1996,6 +1997,127 @@ function PaidAccountReportSection({
   );
 }
 
+function PaidInvoiceReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: PaidInvoiceReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const rows = (report?.invoices ?? []).slice(0, 10);
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-700">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Оплаченные счета
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по оплаченным счетам</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Фактические операции, сгруппированные по номеру оплаченного счета, с отдельным итогом по сумме оплаты.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по оплаченным счетам...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по оплаченным счетам</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Поступило"
+              value={formatCurrency(report.incomeTotal)}
+              icon={TrendingUp}
+              tone="income"
+              subtitle="По оплаченным счетам"
+            />
+            <MetricCard
+              title="Списано"
+              value={formatCurrency(report.expenseTotal)}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle="По оплаченным счетам"
+            />
+            <MetricCard
+              title="Оплачено"
+              value={formatCurrency(report.paidAmountTotal)}
+              icon={CheckCircle2}
+              tone="profit"
+              subtitle="Сумма оплат по счетам"
+            />
+            <MetricCard
+              title="Счетов"
+              value={String(report.invoices.length)}
+              icon={CreditCardIcon}
+              tone="rate"
+              subtitle="С фактическими оплатами"
+            />
+          </div>
+
+          <div className="mt-6 overflow-hidden rounded-3xl border border-slate-100 bg-white">
+            <div className="grid grid-cols-[minmax(180px,1.3fr)_repeat(4,minmax(120px,1fr))] gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 max-xl:hidden">
+              <div>Счет</div>
+              <div className="text-right">Операции</div>
+              <div className="text-right">Оплачено</div>
+              <div className="text-right">Итог</div>
+              <div className="text-right">Доля</div>
+            </div>
+            {rows.length > 0 ? rows.map((row) => (
+              <div key={row.paidInvoiceNumber} className="grid gap-3 border-b border-slate-100 px-4 py-4 last:border-b-0 xl:grid-cols-[minmax(180px,1.3fr)_repeat(4,minmax(120px,1fr))] xl:items-center">
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-slate-950">{row.paidInvoiceNumber}</div>
+                  <div className="mt-1 text-sm text-slate-500">{row.incomeCount + row.expenseCount} операций</div>
+                </div>
+                <div className="flex justify-between gap-3 text-sm xl:block xl:text-right">
+                  <span className="text-slate-500 xl:hidden">Операции</span>
+                  <span className="font-medium text-slate-800">{formatCurrency(row.operationTotal)}</span>
+                </div>
+                <div className="flex justify-between gap-3 text-sm xl:block xl:text-right">
+                  <span className="text-slate-500 xl:hidden">Оплачено</span>
+                  <span className="font-medium text-emerald-700">{formatCurrency(row.paidAmountTotal)}</span>
+                </div>
+                <div className="flex justify-between gap-3 text-sm xl:block xl:text-right">
+                  <span className="text-slate-500 xl:hidden">Итог</span>
+                  <span className="font-medium text-slate-950">{formatCurrency(row.netTotal)}</span>
+                </div>
+                <div className="flex justify-between gap-3 text-sm xl:block xl:text-right">
+                  <span className="text-slate-500 xl:hidden">Доля</span>
+                  <span className="font-medium text-slate-700">{row.share}%</span>
+                </div>
+              </div>
+            )) : (
+              <div className="p-8 text-center text-sm text-slate-500">
+                Нет операций по оплаченным счетам за период.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Reports() {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
@@ -2093,6 +2215,12 @@ export function Reports() {
     error: paidAccountReportError,
     reload: reloadPaidAccountReport,
   } = usePaidAccountReport(cashFlowDates);
+  const {
+    report: paidInvoiceReport,
+    loading: paidInvoiceReportLoading,
+    error: paidInvoiceReportError,
+    reload: reloadPaidInvoiceReport,
+  } = usePaidInvoiceReport(cashFlowDates);
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
@@ -2496,6 +2624,13 @@ export function Reports() {
               loading={paidAccountReportLoading}
               error={paidAccountReportError}
               onReload={reloadPaidAccountReport}
+            />
+
+            <PaidInvoiceReportSection
+              report={paidInvoiceReport}
+              loading={paidInvoiceReportLoading}
+              error={paidInvoiceReportError}
+              onReload={reloadPaidInvoiceReport}
             />
           </>
         )}

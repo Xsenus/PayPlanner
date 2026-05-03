@@ -997,6 +997,29 @@ export interface PaidAccountReport {
   accounts: PaidAccountReportItem[];
 }
 
+export interface PaidInvoiceReportItem {
+  paidInvoiceNumber: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  operationTotal: number;
+  paidAmountTotal: number;
+  incomeCount: number;
+  expenseCount: number;
+  share: number;
+}
+
+export interface PaidInvoiceReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  paidAmountTotal: number;
+  invoices: PaidInvoiceReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

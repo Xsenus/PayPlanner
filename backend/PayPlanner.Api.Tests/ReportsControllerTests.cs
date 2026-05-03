@@ -680,6 +680,63 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task PaidInvoices_GroupsFactOperationsByPaidInvoiceNumber()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 5_000m, new DateTime(2026, 5, 1), "Основной банк", paidInvoiceNumber: "INV-10", paidAmount: 4_500m),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 2), "Основной банк", paidInvoiceNumber: " inv-10 ", paidAmount: 1_900m),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 3), "Касса", paidInvoiceNumber: "INV-11"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 4), "Основной банк", paidAmount: 800m),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", paidInvoiceNumber: "INV-10", paidAmount: 99_999m),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 6), "Основной банк", paidInvoiceNumber: "INV-10", paidAmount: 50_000m));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.PaidInvoices(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<PaidInvoiceReportDto>(ok.Value);
+        Assert.Equal(9_000m, report.IncomeTotal);
+        Assert.Equal(2_000m, report.ExpenseTotal);
+        Assert.Equal(7_000m, report.NetTotal);
+        Assert.Equal(10_200m, report.PaidAmountTotal);
+
+        Assert.Collection(
+            report.Invoices,
+            item =>
+            {
+                Assert.Equal("INV-10", item.PaidInvoiceNumber);
+                Assert.Equal(5_000m, item.Income);
+                Assert.Equal(2_000m, item.Expense);
+                Assert.Equal(3_000m, item.NetTotal);
+                Assert.Equal(7_000m, item.OperationTotal);
+                Assert.Equal(6_400m, item.PaidAmountTotal);
+                Assert.Equal(63.6m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("INV-11", item.PaidInvoiceNumber);
+                Assert.Equal(3_000m, item.Income);
+                Assert.Equal(0m, item.Expense);
+                Assert.Equal(3_000m, item.PaidAmountTotal);
+                Assert.Equal(27.3m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("Без номера счета", item.PaidInvoiceNumber);
+                Assert.Equal(1_000m, item.Income);
+                Assert.Equal(0m, item.Expense);
+                Assert.Equal(800m, item.PaidAmountTotal);
+                Assert.Equal(9.1m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -698,7 +755,9 @@ public class ReportsControllerTests
         bool isAdvancePayment = false,
         DateTime? recognitionDate = null,
         int? paymentPriority = null,
-        string? paidAccountName = null)
+        string? paidAccountName = null,
+        string? paidInvoiceNumber = null,
+        decimal? paidAmount = null)
         => new()
         {
             Source = source,
@@ -719,6 +778,8 @@ public class ReportsControllerTests
             IsAdvancePayment = isAdvancePayment,
             PaymentPriority = paymentPriority,
             PaidAccountName = paidAccountName,
+            PaidInvoiceNumber = paidInvoiceNumber,
+            PaidAmount = paidAmount,
             Currency = "RUB",
             CreatedAt = DateTime.UtcNow,
         };
