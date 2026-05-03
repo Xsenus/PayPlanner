@@ -340,4 +340,42 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('source=Bank');
   });
+
+  it('loads plan fact report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      source: 'Bank',
+      planIncome: 10000,
+      factIncome: 8000,
+      incomeVariance: -2000,
+      incomeCompletionPercent: 80,
+      planExpense: 4000,
+      factExpense: 5000,
+      expenseVariance: 1000,
+      expenseExecutionPercent: 125,
+      planNetTotal: 6000,
+      factNetTotal: 3000,
+      netVariance: -3000,
+      days: [],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getPlanFactReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+      source: 'Bank',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/plan-fact?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('source=Bank');
+  });
 });

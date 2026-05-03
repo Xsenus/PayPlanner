@@ -458,6 +458,63 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task PlanFact_ComparesPlanAndFactOperations()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 10_000m, new DateTime(2026, 5, 1), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 8_000m, new DateTime(2026, 5, 1), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Plan, 4_000m, new DateTime(2026, 5, 2), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 5_000m, new DateTime(2026, 5, 2), "Основной банк"),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 3), "Касса"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 3), "Основной банк"));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.PlanFact(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            MoneyOperationSource.Bank,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<PlanFactReportDto>(ok.Value);
+        Assert.Equal(MoneyOperationSource.Bank, report.Source);
+        Assert.Equal(10_000m, report.PlanIncome);
+        Assert.Equal(8_000m, report.FactIncome);
+        Assert.Equal(-2_000m, report.IncomeVariance);
+        Assert.Equal(80.0m, report.IncomeCompletionPercent);
+        Assert.Equal(4_000m, report.PlanExpense);
+        Assert.Equal(5_000m, report.FactExpense);
+        Assert.Equal(1_000m, report.ExpenseVariance);
+        Assert.Equal(125.0m, report.ExpenseExecutionPercent);
+        Assert.Equal(6_000m, report.PlanNetTotal);
+        Assert.Equal(3_000m, report.FactNetTotal);
+        Assert.Equal(-3_000m, report.NetVariance);
+
+        Assert.Collection(
+            report.Days,
+            day =>
+            {
+                Assert.Equal(new DateTime(2026, 5, 1), day.Date);
+                Assert.Equal(10_000m, day.PlanIncome);
+                Assert.Equal(8_000m, day.FactIncome);
+                Assert.Equal(-2_000m, day.IncomeVariance);
+                Assert.Equal(10_000m, day.PlanNetTotal);
+                Assert.Equal(8_000m, day.FactNetTotal);
+            },
+            day =>
+            {
+                Assert.Equal(new DateTime(2026, 5, 2), day.Date);
+                Assert.Equal(4_000m, day.PlanExpense);
+                Assert.Equal(5_000m, day.FactExpense);
+                Assert.Equal(1_000m, day.ExpenseVariance);
+                Assert.Equal(-4_000m, day.PlanNetTotal);
+                Assert.Equal(-5_000m, day.FactNetTotal);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,

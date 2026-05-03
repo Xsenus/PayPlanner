@@ -12,6 +12,7 @@ import {
   Percent,
   RefreshCcw,
   Store,
+  Target,
   TrendingDown,
   TrendingUp,
   Wallet,
@@ -26,9 +27,10 @@ import { useProjectReport } from '../../hooks/useProjectReport';
 import { useDirectionReport } from '../../hooks/useDirectionReport';
 import { useSalesPointReport } from '../../hooks/useSalesPointReport';
 import { useVatReport } from '../../hooks/useVatReport';
+import { usePlanFactReport } from '../../hooks/usePlanFactReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { CashBookSummary, CashFlowReport, CounterpartyReport, DirectionReport, MoneyCategoryReport, MoneyOperationSource, ProjectReport, SalesPointReport, VatReport } from '../../types';
+import type { CashBookSummary, CashFlowReport, CounterpartyReport, DirectionReport, MoneyCategoryReport, MoneyOperationSource, PlanFactReport, ProjectReport, SalesPointReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -1469,6 +1471,139 @@ function VatReportSection({
   );
 }
 
+function PlanFactReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: PlanFactReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const rows = (report?.days ?? []).slice(-10);
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">
+            <Target className="h-3.5 w-3.5" />
+            План-факт
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">План-факт отчет</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Сравнение плановых и фактических денежных операций: выполнение доходов, превышение расходов и итоговое отклонение.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка план-факт отчета...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить план-факт отчет</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-5">
+            <MetricCard
+              title="План доходов"
+              value={formatCurrency(report.planIncome)}
+              icon={Target}
+              tone="rate"
+              subtitle={`Факт: ${formatCurrency(report.factIncome)}`}
+            />
+            <MetricCard
+              title="Выполнение доходов"
+              value={`${report.incomeCompletionPercent}%`}
+              icon={TrendingUp}
+              tone="income"
+              subtitle={`Отклонение: ${formatCurrency(report.incomeVariance)}`}
+            />
+            <MetricCard
+              title="План расходов"
+              value={formatCurrency(report.planExpense)}
+              icon={Target}
+              tone="rate"
+              subtitle={`Факт: ${formatCurrency(report.factExpense)}`}
+            />
+            <MetricCard
+              title="Исполнение расходов"
+              value={`${report.expenseExecutionPercent}%`}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle={`Отклонение: ${formatCurrency(report.expenseVariance)}`}
+            />
+            <MetricCard
+              title="Итоговое отклонение"
+              value={formatCurrency(report.netVariance)}
+              icon={ArrowUpRight}
+              tone="profit"
+              subtitle={`План ${formatCurrency(report.planNetTotal)} · факт ${formatCurrency(report.factNetTotal)}`}
+            />
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-950">Динамика по дням</h3>
+                <p className="mt-1 text-sm text-slate-500">Последние дни периода, где были плановые или фактические операции.</p>
+              </div>
+              <div className="text-sm text-slate-500">{report.days.length} дней</div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {rows.length > 0 ? rows.map((day) => (
+                <div key={day.date} className="grid gap-3 rounded-2xl bg-white p-4 shadow-sm lg:grid-cols-[110px_1fr_1fr_1fr] lg:items-center">
+                  <div className="font-semibold text-slate-950">{formatDate(day.date)}</div>
+                  <div>
+                    <div className="text-xs text-slate-500">Доходы</div>
+                    <div className="text-sm font-semibold text-emerald-700">
+                      {formatCurrency(day.factIncome)} / {formatCurrency(day.planIncome)}
+                    </div>
+                    <div className="text-xs text-slate-500">{formatCurrency(day.incomeVariance)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Расходы</div>
+                    <div className="text-sm font-semibold text-rose-700">
+                      {formatCurrency(day.factExpense)} / {formatCurrency(day.planExpense)}
+                    </div>
+                    <div className="text-xs text-slate-500">{formatCurrency(day.expenseVariance)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Итог</div>
+                    <div className="text-sm font-semibold text-slate-950">
+                      {formatCurrency(day.factNetTotal)} / {formatCurrency(day.planNetTotal)}
+                    </div>
+                    <div className="text-xs text-slate-500">{formatCurrency(day.netVariance)}</div>
+                  </div>
+                </div>
+              )) : (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+                  Нет плановых или фактических операций за период.
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Reports() {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
@@ -1542,6 +1677,12 @@ export function Reports() {
     error: vatReportError,
     reload: reloadVatReport,
   } = useVatReport(cashFlowDates);
+  const {
+    report: planFactReport,
+    loading: planFactReportLoading,
+    error: planFactReportError,
+    reload: reloadPlanFactReport,
+  } = usePlanFactReport(cashFlowDates);
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
@@ -1917,6 +2058,13 @@ export function Reports() {
               loading={vatReportLoading}
               error={vatReportError}
               onReload={reloadVatReport}
+            />
+
+            <PlanFactReportSection
+              report={planFactReport}
+              loading={planFactReportLoading}
+              error={planFactReportError}
+              onReload={reloadPlanFactReport}
             />
           </>
         )}

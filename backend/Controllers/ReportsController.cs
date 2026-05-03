@@ -188,6 +188,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("plan-fact")]
+    public async Task<ActionResult<PlanFactReportDto>> PlanFact(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildPlanFactReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -847,6 +870,106 @@ public class ReportsController : ControllerBase
     private static string FormatVatRateLabel(decimal? vatRate)
         => vatRate.HasValue ? $"{vatRate.Value:0.##}%" : "Без НДС";
 
+    private async Task<PlanFactReportDto> BuildPlanFactReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var rows = await BuildPlanFactQuery(from, to, source)
+            .Select(item => new PlanFactQueryRow
+            {
+                Date = item.Date,
+                Direction = item.Direction,
+                AccountingType = item.AccountingType,
+                Amount = item.Amount,
+            })
+            .ToListAsync(ct);
+
+        var planIncome = SumPlanFact(rows, MoneyOperationAccountingType.Plan, MoneyOperationDirection.Income);
+        var factIncome = SumPlanFact(rows, MoneyOperationAccountingType.Fact, MoneyOperationDirection.Income);
+        var planExpense = SumPlanFact(rows, MoneyOperationAccountingType.Plan, MoneyOperationDirection.Expense);
+        var factExpense = SumPlanFact(rows, MoneyOperationAccountingType.Fact, MoneyOperationDirection.Expense);
+
+        var days = rows
+            .GroupBy(item => item.Date.Date)
+            .Select(group =>
+            {
+                var dayPlanIncome = SumPlanFact(group, MoneyOperationAccountingType.Plan, MoneyOperationDirection.Income);
+                var dayFactIncome = SumPlanFact(group, MoneyOperationAccountingType.Fact, MoneyOperationDirection.Income);
+                var dayPlanExpense = SumPlanFact(group, MoneyOperationAccountingType.Plan, MoneyOperationDirection.Expense);
+                var dayFactExpense = SumPlanFact(group, MoneyOperationAccountingType.Fact, MoneyOperationDirection.Expense);
+
+                return new PlanFactDayDto
+                {
+                    Date = group.Key,
+                    PlanIncome = dayPlanIncome,
+                    FactIncome = dayFactIncome,
+                    IncomeVariance = dayFactIncome - dayPlanIncome,
+                    PlanExpense = dayPlanExpense,
+                    FactExpense = dayFactExpense,
+                    ExpenseVariance = dayFactExpense - dayPlanExpense,
+                    PlanNetTotal = dayPlanIncome - dayPlanExpense,
+                    FactNetTotal = dayFactIncome - dayFactExpense,
+                    NetVariance = (dayFactIncome - dayFactExpense) - (dayPlanIncome - dayPlanExpense),
+                };
+            })
+            .OrderBy(item => item.Date)
+            .ToList();
+
+        return new PlanFactReportDto
+        {
+            From = from,
+            To = to,
+            Source = source,
+            PlanIncome = planIncome,
+            FactIncome = factIncome,
+            IncomeVariance = factIncome - planIncome,
+            IncomeCompletionPercent = CalculatePercent(factIncome, planIncome),
+            PlanExpense = planExpense,
+            FactExpense = factExpense,
+            ExpenseVariance = factExpense - planExpense,
+            ExpenseExecutionPercent = CalculatePercent(factExpense, planExpense),
+            PlanNetTotal = planIncome - planExpense,
+            FactNetTotal = factIncome - factExpense,
+            NetVariance = (factIncome - factExpense) - (planIncome - planExpense),
+            Days = days,
+        };
+    }
+
+    private IQueryable<MoneyOperation> BuildPlanFactQuery(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source)
+    {
+        var query = _db.MoneyOperations
+            .AsNoTracking()
+            .Where(item =>
+                (item.AccountingType == MoneyOperationAccountingType.Plan ||
+                    item.AccountingType == MoneyOperationAccountingType.Fact) &&
+                (item.Direction == MoneyOperationDirection.Income || item.Direction == MoneyOperationDirection.Expense) &&
+                item.Date >= from &&
+                item.Date <= to);
+
+        if (source.HasValue)
+        {
+            query = query.Where(item => item.Source == source.Value);
+        }
+
+        return query;
+    }
+
+    private static decimal SumPlanFact(
+        IEnumerable<PlanFactQueryRow> rows,
+        MoneyOperationAccountingType accountingType,
+        MoneyOperationDirection direction)
+        => rows
+            .Where(item => item.AccountingType == accountingType && item.Direction == direction)
+            .Sum(item => item.Amount);
+
+    private static decimal CalculatePercent(decimal value, decimal total)
+        => total > 0m ? Math.Round(value / total * 100m, 1, MidpointRounding.AwayFromZero) : 0m;
+
     private sealed class CashFlowAccountQueryRow
     {
         public MoneyOperationSource Source { get; init; }
@@ -864,5 +987,13 @@ public class ReportsController : ControllerBase
         public decimal Expense { get; init; }
         public int IncomeCount { get; init; }
         public int ExpenseCount { get; init; }
+    }
+
+    private sealed class PlanFactQueryRow
+    {
+        public DateTime Date { get; init; }
+        public MoneyOperationDirection Direction { get; init; }
+        public MoneyOperationAccountingType AccountingType { get; init; }
+        public decimal Amount { get; init; }
     }
 }

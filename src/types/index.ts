@@ -898,6 +898,37 @@ export interface VatReport {
   rates: VatReportItem[];
 }
 
+export interface PlanFactDay {
+  date: string;
+  planIncome: number;
+  factIncome: number;
+  incomeVariance: number;
+  planExpense: number;
+  factExpense: number;
+  expenseVariance: number;
+  planNetTotal: number;
+  factNetTotal: number;
+  netVariance: number;
+}
+
+export interface PlanFactReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  planIncome: number;
+  factIncome: number;
+  incomeVariance: number;
+  incomeCompletionPercent: number;
+  planExpense: number;
+  factExpense: number;
+  expenseVariance: number;
+  expenseExecutionPercent: number;
+  planNetTotal: number;
+  factNetTotal: number;
+  netVariance: number;
+  days: PlanFactDay[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

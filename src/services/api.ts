@@ -2227,6 +2227,15 @@ export class ApiService {
     return this.request<VatReport>(`/reports/vat${q}`);
   }
 
+  async getPlanFactReport(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<PlanFactReport>(`/reports/plan-fact${q}`);
+  }
+
   /** Упрощённый вызов: сводка по клиенту. */
   async getClientSummaryStats(
     clientId: number,
@@ -2840,6 +2849,7 @@ import type {
   DirectionReport,
   SalesPointReport,
   VatReport,
+  PlanFactReport,
   MoneyOperationAccountSummary,
   MoneyBalanceReconciliationResult,
   MoneyBalanceReconciliationRunResult,
