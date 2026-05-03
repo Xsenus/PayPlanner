@@ -620,6 +620,29 @@ export interface CashOrderRegister {
   outgoingAmount: number;
 }
 
+export interface CashInventory {
+  id: number;
+  number: string;
+  date: string;
+  accountName: string;
+  accountingBalance: number;
+  actualBalance: number;
+  difference: number;
+  correctionCashOrderId?: number | null;
+  correctionCashOrderNumber?: string | null;
+  comment?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface CashInventoryCreateRequest {
+  date: string;
+  accountName?: string | null;
+  actualBalance: number;
+  comment?: string | null;
+  createCorrection: boolean;
+}
+
 export interface MoneyOperationSourceSummary {
   source: MoneyOperationSource;
   startBalance: number;

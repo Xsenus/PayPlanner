@@ -195,6 +195,116 @@ public class CashOrdersController : ControllerBase
         return Content(BuildRegisterPrintHtml(register, from, to, accountName), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
+    [HttpGet("inventories")]
+    public async Task<ActionResult<PagedResponse<CashInventoryDto>>> GetInventories(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? accountName = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10,
+        CancellationToken ct = default)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 5, 100);
+
+        var query = _db.CashInventories
+            .Include(item => item.CorrectionCashOrder)
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (from.HasValue)
+        {
+            query = query.Where(item => item.Date >= from.Value.Date);
+        }
+
+        if (to.HasValue)
+        {
+            query = query.Where(item => item.Date <= to.Value.Date);
+        }
+
+        var accountFilter = NormalizeAccountFilter(accountName);
+        if (accountFilter is not null)
+        {
+            query = query.Where(item => item.AccountName == accountFilter);
+        }
+
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .OrderByDescending(item => item.Date)
+            .ThenByDescending(item => item.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(item => Map(item))
+            .ToListAsync(ct);
+
+        return Ok(new PagedResponse<CashInventoryDto>
+        {
+            Items = items,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+        });
+    }
+
+    [HttpPost("inventories")]
+    public async Task<IActionResult> CreateInventory([FromBody] CashInventoryCreateRequest request, CancellationToken ct)
+    {
+        var accountName = NormalizeAccountFilter(request.AccountName);
+        if (accountName is null)
+        {
+            return BadRequest("Укажите кассу для инвентаризации.");
+        }
+
+        if (request.ActualBalance < 0m)
+        {
+            return BadRequest("Фактический остаток кассы не может быть отрицательным.");
+        }
+
+        var date = request.Date == default ? DateTime.Today : request.Date.Date;
+        var accountingBalance = await CalculateCashBalanceAsync(date, accountName, ct);
+        var difference = request.ActualBalance - accountingBalance;
+
+        CashOrder? correctionOrder = null;
+        if (request.CreateCorrection && difference != 0m)
+        {
+            var correctionType = difference > 0m ? CashOrderType.Incoming : CashOrderType.Outgoing;
+            correctionOrder = new CashOrder
+            {
+                Number = await GenerateNumberAsync(correctionType, date, ct),
+                Type = correctionType,
+                Status = CashOrderStatus.Posted,
+                Date = date,
+                Amount = Math.Abs(difference),
+                Currency = "RUB",
+                Account = accountName,
+                PayerName = difference > 0m ? "Инвентаризация кассы" : null,
+                ReceiverName = difference < 0m ? "Инвентаризация кассы" : null,
+                Basis = "Корректировка по инвентаризации кассы",
+                Comment = Normalize(request.Comment),
+                CreatedAt = DateTime.UtcNow,
+            };
+            _db.CashOrders.Add(correctionOrder);
+        }
+
+        var inventory = new CashInventory
+        {
+            Number = await GenerateInventoryNumberAsync(date, ct),
+            Date = date,
+            AccountName = accountName,
+            AccountingBalance = accountingBalance,
+            ActualBalance = request.ActualBalance,
+            Difference = difference,
+            CorrectionCashOrder = correctionOrder,
+            Comment = Normalize(request.Comment),
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        _db.CashInventories.Add(inventory);
+        await _db.SaveChangesAsync(ct);
+
+        return Created($"/api/cash-orders/inventories/{inventory.Id}", Map(inventory));
+    }
+
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
@@ -609,6 +719,14 @@ public class CashOrdersController : ControllerBase
         };
     }
 
+    private Task<decimal> CalculateCashBalanceAsync(DateTime date, string accountName, CancellationToken ct)
+        => _db.CashOrders
+            .AsNoTracking()
+            .Where(order => order.Status == CashOrderStatus.Posted)
+            .Where(order => order.Account == accountName)
+            .Where(order => order.Date <= date.Date)
+            .SumAsync(order => order.Type == CashOrderType.Incoming ? order.Amount : -order.Amount, ct);
+
     private IQueryable<CashOrder> BuildFilteredQuery(
         DateTime? from,
         DateTime? to,
@@ -686,6 +804,13 @@ public class CashOrdersController : ControllerBase
         return $"{yearPrefix}{count + 1:0000}";
     }
 
+    private async Task<string> GenerateInventoryNumberAsync(DateTime date, CancellationToken ct)
+    {
+        var yearPrefix = $"ИНВК-{date:yyyy}-";
+        var count = await _db.CashInventories.CountAsync(item => item.Number.StartsWith(yearPrefix), ct);
+        return $"{yearPrefix}{count + 1:0000}";
+    }
+
     private static string BuildBasis(Payment payment)
     {
         var account = string.IsNullOrWhiteSpace(payment.Account) ? null : $"счет №{payment.Account}";
@@ -756,6 +881,23 @@ public class CashOrdersController : ControllerBase
             CancelledReason = order.CancelledReason,
             CreatedAt = order.CreatedAt,
             UpdatedAt = order.UpdatedAt,
+        };
+
+    private static CashInventoryDto Map(CashInventory inventory)
+        => new()
+        {
+            Id = inventory.Id,
+            Number = inventory.Number,
+            Date = inventory.Date,
+            AccountName = inventory.AccountName,
+            AccountingBalance = inventory.AccountingBalance,
+            ActualBalance = inventory.ActualBalance,
+            Difference = inventory.Difference,
+            CorrectionCashOrderId = inventory.CorrectionCashOrderId,
+            CorrectionCashOrderNumber = inventory.CorrectionCashOrder?.Number,
+            Comment = inventory.Comment,
+            CreatedAt = inventory.CreatedAt,
+            UpdatedAt = inventory.UpdatedAt,
         };
 
     private static string BuildPrintHtml(CashOrder order)

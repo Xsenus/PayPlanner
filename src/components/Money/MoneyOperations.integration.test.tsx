@@ -7,6 +7,7 @@ import type { MoneyAccount, MoneyOperation, MoneyOperationsSummary } from '../..
 
 const {
   createCashOrderMock,
+  createCashInventoryMock,
   createCashOrderFromPaymentMock,
   createCashOrderFromMoneyOperationMock,
   cancelCashOrderMock,
@@ -17,6 +18,7 @@ const {
   downloadCashOrderPdfMock,
   getCashBookMock,
   getCashBookPrintHtmlMock,
+  getCashInventoriesMock,
   getCashOrderRegisterMock,
   getCashOrderRegisterPrintHtmlMock,
   getCashOrderPrintHtmlMock,
@@ -50,6 +52,7 @@ const {
   upsertUserSettingMock,
 } = vi.hoisted(() => ({
   createCashOrderMock: vi.fn(),
+  createCashInventoryMock: vi.fn(),
   createCashOrderFromPaymentMock: vi.fn(),
   createCashOrderFromMoneyOperationMock: vi.fn(),
   cancelCashOrderMock: vi.fn(),
@@ -60,6 +63,7 @@ const {
   downloadCashOrderPdfMock: vi.fn(),
   getCashBookMock: vi.fn(),
   getCashBookPrintHtmlMock: vi.fn(),
+  getCashInventoriesMock: vi.fn(),
   getCashOrderRegisterMock: vi.fn(),
   getCashOrderRegisterPrintHtmlMock: vi.fn(),
   getCashOrderPrintHtmlMock: vi.fn(),
@@ -131,6 +135,7 @@ vi.mock('../../hooks/usePersistedTableSettings', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     createCashOrder: createCashOrderMock,
+    createCashInventory: createCashInventoryMock,
     createCashOrderFromPayment: createCashOrderFromPaymentMock,
     createCashOrderFromMoneyOperation: createCashOrderFromMoneyOperationMock,
     cancelCashOrder: cancelCashOrderMock,
@@ -141,6 +146,7 @@ vi.mock('../../services/api', () => ({
     downloadCashOrderPdf: downloadCashOrderPdfMock,
     getCashBook: getCashBookMock,
     getCashBookPrintHtml: getCashBookPrintHtmlMock,
+    getCashInventories: getCashInventoriesMock,
     getCashOrderRegister: getCashOrderRegisterMock,
     getCashOrderRegisterPrintHtml: getCashOrderRegisterPrintHtmlMock,
     getCashOrderPrintHtml: getCashOrderPrintHtmlMock,
@@ -277,6 +283,7 @@ describe('MoneyOperations integration', () => {
     nextId = 10;
 
     createCashOrderMock.mockReset();
+    createCashInventoryMock.mockReset();
     createCashOrderFromPaymentMock.mockReset();
     createCashOrderFromMoneyOperationMock.mockReset();
     cancelCashOrderMock.mockReset();
@@ -287,6 +294,7 @@ describe('MoneyOperations integration', () => {
     downloadCashOrderPdfMock.mockReset();
     getCashBookMock.mockReset();
     getCashBookPrintHtmlMock.mockReset();
+    getCashInventoriesMock.mockReset();
     getCashOrderPrintHtmlMock.mockReset();
     getCashOrderMock.mockReset();
     getCashOrderRegisterMock.mockReset();
@@ -477,6 +485,26 @@ describe('MoneyOperations integration', () => {
       ],
     });
     getCashBookPrintHtmlMock.mockResolvedValue('<html><body>Кассовая книга</body></html>');
+    getCashInventoriesMock.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 8,
+    });
+    createCashInventoryMock.mockResolvedValue({
+      id: 1,
+      number: 'ИНВК-2026-0001',
+      date: '2026-04-30',
+      accountName: 'Основная касса',
+      accountingBalance: 0,
+      actualBalance: 0,
+      difference: 0,
+      correctionCashOrderId: null,
+      correctionCashOrderNumber: null,
+      comment: null,
+      createdAt: '2026-04-30T08:00:00Z',
+      updatedAt: null,
+    });
     getCashOrderRegisterPrintHtmlMock.mockResolvedValue('<html><body>Журнал регистрации</body></html>');
     getMoneyOperationsPrintHtmlMock.mockResolvedValue('<html><body>Денежный журнал</body></html>');
     getUserSettingMock.mockRejectedValue(new Error('not found'));

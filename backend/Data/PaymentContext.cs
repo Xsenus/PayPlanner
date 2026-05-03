@@ -69,7 +69,8 @@ public class PaymentContext : DbContext
         typeof(MoneyOperation),
         typeof(Payment),
         typeof(PowerOfAttorney),
-        typeof(CashOrder)
+        typeof(CashOrder),
+        typeof(CashInventory)
     };
 
     private static readonly HashSet<Type> MetadataOnlyAuditedEntityTypes = new()
@@ -132,6 +133,7 @@ public class PaymentContext : DbContext
     public DbSet<MoneyOperation> MoneyOperations => Set<MoneyOperation>();
     public DbSet<MoneyAccount> MoneyAccounts => Set<MoneyAccount>();
     public DbSet<CashOrder> CashOrders => Set<CashOrder>();
+    public DbSet<CashInventory> CashInventories => Set<CashInventory>();
     public DbSet<BankStatementImportBatch> BankStatementImportBatches => Set<BankStatementImportBatch>();
     public DbSet<BankStatementImportRow> BankStatementImportRows => Set<BankStatementImportRow>();
     public DbSet<MoneyBalanceReconciliationResult> MoneyBalanceReconciliationResults => Set<MoneyBalanceReconciliationResult>();
@@ -909,6 +911,29 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_CashOrders_InvoiceId");
         });
 
+        modelBuilder.Entity<CashInventory>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Number).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Date).HasColumnType("date");
+            entity.Property(e => e.AccountName).HasMaxLength(120).IsRequired();
+            entity.Property(e => e.AccountingBalance).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ActualBalance).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Difference).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Comment).HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.CorrectionCashOrder)
+                  .WithMany()
+                  .HasForeignKey(e => e.CorrectionCashOrderId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.Number).IsUnique().HasDatabaseName("IX_CashInventories_Number");
+            entity.HasIndex(e => e.Date).HasDatabaseName("IX_CashInventories_Date");
+            entity.HasIndex(e => e.AccountName).HasDatabaseName("IX_CashInventories_AccountName");
+            entity.HasIndex(e => e.CorrectionCashOrderId).HasDatabaseName("IX_CashInventories_CorrectionCashOrderId");
+        });
+
         // ------------------ ClientPassport ------------------
         modelBuilder.Entity<ClientPassport>(entity =>
         {
@@ -1544,6 +1569,7 @@ public class PaymentContext : DbContext
             ConfigureAudit<Payment>(modelBuilder);
             ConfigureAudit<PowerOfAttorney>(modelBuilder);
             ConfigureAudit<CashOrder>(modelBuilder);
+            ConfigureAudit<CashInventory>(modelBuilder);
             ConfigureAudit<Role>(modelBuilder, enableSoftDelete: false);
             ConfigureAudit<User>(modelBuilder, enableSoftDelete: false);
         }
@@ -1900,6 +1926,7 @@ public class PaymentContext : DbContext
         if (clrType == typeof(PowerOfAttorney)) return "power-of-attorney";
         if (clrType == typeof(MoneyOperation)) return "money-operation";
         if (clrType == typeof(CashOrder)) return "cash-order";
+        if (clrType == typeof(CashInventory)) return "cash-inventory";
 
         return null;
     }

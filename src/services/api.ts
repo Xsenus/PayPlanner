@@ -2565,6 +2565,28 @@ export class ApiService {
     return this.request<string>(`/cash-orders/register/print${q}`);
   }
 
+  async getCashInventories(params?: {
+    from?: string;
+    to?: string;
+    accountName?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 10,
+    });
+    return this.request<PagedResult<CashInventory>>(`/cash-orders/inventories${q}`);
+  }
+
+  async createCashInventory(payload: CashInventoryCreateRequest) {
+    return this.request<CashInventory>('/cash-orders/inventories', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getCashOrder(id: number) {
     return this.request<CashOrder>(`/cash-orders/${id}`);
   }
@@ -2735,6 +2757,8 @@ import type {
   BankStatementAutoImportRunResult,
   BankStatementImportResult,
   CashBookSummary,
+  CashInventory,
+  CashInventoryCreateRequest,
   CashOrder,
   CashOrderRegister,
   BankStatementImportBatch,

@@ -56,6 +56,7 @@ import type {
   MoneyOperationJournalStatus,
   MoneyOperationSource,
   CashBookSummary,
+  CashInventory,
   CashOrder,
   CashOrderRegister,
   CashOrderType,
@@ -2091,6 +2092,13 @@ export function MoneyOperations({
   const [cashLimitSettings, setCashLimitSettings] = useState<CashLimitSettings>(DEFAULT_CASH_LIMIT_SETTINGS);
   const [cashLimitLoading, setCashLimitLoading] = useState(false);
   const [cashLimitSaving, setCashLimitSaving] = useState(false);
+  const [cashInventories, setCashInventories] = useState<CashInventory[]>([]);
+  const [cashInventoryTotal, setCashInventoryTotal] = useState(0);
+  const [cashInventoryLoading, setCashInventoryLoading] = useState(false);
+  const [cashInventorySaving, setCashInventorySaving] = useState(false);
+  const [cashInventoryActualBalance, setCashInventoryActualBalance] = useState('');
+  const [cashInventoryComment, setCashInventoryComment] = useState('');
+  const [cashInventoryCreateCorrection, setCashInventoryCreateCorrection] = useState(true);
   const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentYear = new Date().getFullYear();
@@ -2223,6 +2231,19 @@ export function MoneyOperations({
         excess: item.closingBalance - cashLimitSettings.amount!,
       }));
   }, [cashLimitSettings.amount, cashLimitSettings.enabled, source, visibleDailyBalances]);
+  const cashInventoryAccountingBalance = useMemo(() => {
+    if (source !== 'Cash') {
+      return 0;
+    }
+
+    if (selectedAccountSummary) {
+      return selectedAccountSummary.endBalance;
+    }
+
+    return accountSummaries
+      .filter((item) => item.source === 'Cash')
+      .reduce((sum, item) => sum + item.endBalance, 0);
+  }, [accountSummaries, selectedAccountSummary, source]);
   const visibleBalanceReconciliationResults = useMemo(
     () => (accountName ? balanceReconciliationResults.filter((item) => item.accountName === accountName) : balanceReconciliationResults),
     [accountName, balanceReconciliationResults],
@@ -2603,6 +2624,49 @@ export function MoneyOperations({
     };
   }, [source]);
 
+  useEffect(() => {
+    if (source !== 'Cash') {
+      setCashInventories([]);
+      setCashInventoryTotal(0);
+      return;
+    }
+
+    let cancelled = false;
+    setCashInventoryLoading(true);
+
+    apiService
+      .getCashInventories({
+        from,
+        to,
+        accountName: accountName || undefined,
+        page: 1,
+        pageSize: 8,
+      })
+      .then((response) => {
+        if (!cancelled) {
+          setCashInventories(response.items);
+          setCashInventoryTotal(response.total);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setCashInventories([]);
+          setCashInventoryTotal(0);
+          const message = extractDisplayErrorMessage(error, 'Не удалось загрузить историю инвентаризаций кассы.');
+          toast.error(message, 'Касса');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCashInventoryLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accountName, cashOrdersRefreshKey, from, source, to, toast]);
+
   const saveBankAutoImportSettings = async (nextSettings = bankAutoImportSettings) => {
     setBankAutoImportSaving(true);
     try {
@@ -2693,6 +2757,41 @@ export function MoneyOperations({
       toast.error(message, 'Касса');
     } finally {
       setCashLimitSaving(false);
+    }
+  };
+
+  const handleCreateCashInventory = async () => {
+    const actualBalance = Number(cashInventoryActualBalance);
+    if (!Number.isFinite(actualBalance) || actualBalance < 0) {
+      toast.error('Укажите фактический остаток кассы.', 'Касса');
+      return;
+    }
+
+    const inventoryAccountName = accountName || selectedMoneyAccount?.name || '';
+    if (!inventoryAccountName.trim()) {
+      toast.error('Выберите конкретную кассу перед инвентаризацией.', 'Касса');
+      return;
+    }
+
+    setCashInventorySaving(true);
+    try {
+      await apiService.createCashInventory({
+        date: to,
+        accountName: inventoryAccountName,
+        actualBalance,
+        comment: cashInventoryComment.trim() || null,
+        createCorrection: cashInventoryCreateCorrection,
+      });
+      setCashInventoryActualBalance('');
+      setCashInventoryComment('');
+      setCashOrdersRefreshKey((value) => value + 1);
+      await reload();
+      toast.success('Инвентаризация кассы сохранена.', 'Касса');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось сохранить инвентаризацию кассы.');
+      toast.error(message, 'Касса');
+    } finally {
+      setCashInventorySaving(false);
     }
   };
 
@@ -3941,6 +4040,128 @@ export function MoneyOperations({
                   Показаны первые 8 дней из {cashLimitExceedances.length}
                 </div>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {source === 'Cash' && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Инвентаризация кассы</h2>
+              <p className="text-xs text-slate-500">
+                Фиксация фактического остатка и расхождения с учетным остатком по выбранной кассе.
+              </p>
+            </div>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-right">
+              <div className="text-xs uppercase text-slate-400">Учетный остаток</div>
+              <div className="text-base font-semibold text-slate-900">{formatMoney(cashInventoryAccountingBalance)} ₽</div>
+            </div>
+          </div>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-[180px_1fr_auto]">
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Фактический остаток
+              <input
+                type="number"
+                min="0"
+                step="100"
+                value={cashInventoryActualBalance}
+                onChange={(event) => setCashInventoryActualBalance(event.target.value)}
+                placeholder="0"
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Комментарий
+              <input
+                value={cashInventoryComment}
+                onChange={(event) => setCashInventoryComment(event.target.value)}
+                placeholder="Причина расхождения или примечание"
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => void handleCreateCashInventory()}
+                disabled={cashInventorySaving}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
+                <History className="h-4 w-4" />
+                {cashInventorySaving ? 'Сохранение...' : 'Провести'}
+              </button>
+            </div>
+          </div>
+
+          <label className="mt-3 inline-flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={cashInventoryCreateCorrection}
+              onChange={(event) => setCashInventoryCreateCorrection(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+            />
+            Создать корректирующий ПКО/РКО при расхождении
+          </label>
+
+          <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-400">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Номер</th>
+                  <th className="px-3 py-2 text-left font-medium">Дата</th>
+                  <th className="px-3 py-2 text-left font-medium">Касса</th>
+                  <th className="px-3 py-2 text-right font-medium">Учетный</th>
+                  <th className="px-3 py-2 text-right font-medium">Фактический</th>
+                  <th className="px-3 py-2 text-right font-medium">Расхождение</th>
+                  <th className="px-3 py-2 text-left font-medium">Коррекция</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {cashInventoryLoading ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                      Загрузка инвентаризаций...
+                    </td>
+                  </tr>
+                ) : cashInventories.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                      Инвентаризации за период еще не проводились.
+                    </td>
+                  </tr>
+                ) : (
+                  cashInventories.map((inventory) => (
+                    <tr key={inventory.id} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-medium text-slate-800">{inventory.number}</td>
+                      <td className="px-3 py-2 text-slate-600">{formatDate(inventory.date)}</td>
+                      <td className="px-3 py-2 text-slate-600">{inventory.accountName}</td>
+                      <td className="px-3 py-2 text-right">{formatMoney(inventory.accountingBalance)} ₽</td>
+                      <td className="px-3 py-2 text-right">{formatMoney(inventory.actualBalance)} ₽</td>
+                      <td className={`px-3 py-2 text-right ${inventory.difference === 0 ? 'text-slate-500' : inventory.difference > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {formatMoney(inventory.difference)} ₽
+                      </td>
+                      <td className="px-3 py-2">
+                        {inventory.correctionCashOrderId ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleOpenCashOrder(inventory.correctionCashOrderId!)}
+                            className="text-blue-600 underline-offset-2 hover:underline">
+                            {inventory.correctionCashOrderNumber || `Ордер ${inventory.correctionCashOrderId}`}
+                          </button>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          {cashInventoryTotal > cashInventories.length && (
+            <div className="mt-2 text-xs text-slate-500">
+              Показаны последние {cashInventories.length} из {cashInventoryTotal} инвентаризаций.
             </div>
           )}
         </div>
