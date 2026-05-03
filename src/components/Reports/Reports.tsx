@@ -2,16 +2,21 @@ import { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowUpRight,
+  Banknote,
   CalendarRange,
   CheckCircle2,
   Clock3,
+  RefreshCcw,
   TrendingDown,
   TrendingUp,
+  Wallet,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { usePeriodStats } from '../../hooks/usePeriodStats';
+import { useCashFlowReport } from '../../hooks/useCashFlowReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
+import type { CashFlowReport, MoneyOperationSource } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -73,6 +78,40 @@ function buildTitleSuffix(fromYM: `${number}-${string}`, toYM: `${number}-${stri
   }
 
   return `${formatYmLabel(fromYM)} - ${formatYmLabel(toYM)}`;
+}
+
+function monthRangeToDates(fromYM: `${number}-${string}`, toYM: `${number}-${string}`) {
+  const normalized = normalizeYmRange(fromYM, toYM);
+  const [fromYear, fromMonth] = normalized.fromYM.split('-').map(Number);
+  const [toYear, toMonth] = normalized.toYM.split('-').map(Number);
+  const monthDays = new Date(toYear, toMonth, 0).getDate();
+
+  return {
+    from: `${fromYear}-${String(fromMonth).padStart(2, '0')}-01`,
+    to: `${toYear}-${String(toMonth).padStart(2, '0')}-${String(monthDays).padStart(2, '0')}`,
+  };
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: 'short',
+  }).format(new Date(value));
+}
+
+function sourceLabel(source: MoneyOperationSource) {
+  switch (source) {
+    case 'Bank':
+      return 'Банк';
+    case 'Cash':
+      return 'Касса';
+    case 'Card':
+      return 'Карты';
+    case 'EMoney':
+      return 'E-money';
+    default:
+      return source;
+  }
 }
 
 function PieTooltip({ active, payload }: PieTooltipProps) {
@@ -201,6 +240,170 @@ function StatusPanel({
   );
 }
 
+function CashFlowReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: CashFlowReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const topAccounts = (report?.byAccount ?? []).slice(0, 6);
+  const recentDays = (report?.days ?? []).slice(-8);
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+            <Wallet className="h-3.5 w-3.5" />
+            ДДС
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет движения денежных средств</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Фактические денежные операции за период: начальный остаток, поступления, списания, чистый поток и конечный остаток.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета движения денежных средств...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет ДДС</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-5">
+            <MetricCard
+              title="Начальный остаток"
+              value={formatCurrency(report.openingBalance)}
+              icon={Wallet}
+              tone="rate"
+              subtitle="На начало выбранного периода"
+            />
+            <MetricCard
+              title="Поступления"
+              value={formatCurrency(report.income)}
+              icon={TrendingUp}
+              tone="income"
+              subtitle={`Фактических приходов: ${report.incomeCount}`}
+            />
+            <MetricCard
+              title="Списания"
+              value={formatCurrency(report.expense)}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle={`Фактических расходов: ${report.expenseCount}`}
+            />
+            <MetricCard
+              title="Чистый поток"
+              value={formatCurrency(report.netCashFlow)}
+              icon={ArrowUpRight}
+              tone="profit"
+              subtitle={report.netCashFlow >= 0 ? 'Приток за период' : 'Отток за период'}
+            />
+            <MetricCard
+              title="Конечный остаток"
+              value={formatCurrency(report.closingBalance)}
+              icon={Banknote}
+              tone="rate"
+              subtitle="На конец выбранного периода"
+            />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+            <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-950">Динамика по дням</h3>
+                  <p className="mt-1 text-sm text-slate-500">Последние дни периода с движением денег.</p>
+                </div>
+                <div className="text-sm text-slate-500">{report.days.length} дней</div>
+              </div>
+              <div className="mt-5 space-y-3">
+                {recentDays.length > 0 ? recentDays.map((day) => (
+                  <div key={day.date} className="grid gap-3 rounded-2xl bg-white p-4 shadow-sm sm:grid-cols-[110px_1fr_1fr_1fr] sm:items-center">
+                    <div className="text-sm font-semibold text-slate-900">{formatDate(day.date)}</div>
+                    <div>
+                      <div className="text-xs text-slate-500">Поступило</div>
+                      <div className="font-semibold text-emerald-700">{formatCurrency(day.income)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Списано</div>
+                      <div className="font-semibold text-rose-700">{formatCurrency(day.expense)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Остаток</div>
+                      <div className="font-semibold text-slate-950">{formatCurrency(day.closingBalance)}</div>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+                    В выбранном периоде нет фактических движений.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-950">Счета и источники</h3>
+                  <p className="mt-1 text-sm text-slate-500">Крупнейшие остатки и обороты по счетам.</p>
+                </div>
+                <div className="text-sm text-slate-500">{report.byAccount.length} счетов</div>
+              </div>
+              <div className="mt-5 space-y-3">
+                {topAccounts.length > 0 ? topAccounts.map((row) => (
+                  <div key={`${row.source}:${row.accountName}`} className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-950">{row.accountName}</div>
+                        <div className="mt-1 text-xs text-slate-500">{sourceLabel(row.source)}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-slate-500">Конечный остаток</div>
+                        <div className="font-semibold text-slate-950">{formatCurrency(row.closingBalance)}</div>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-xl bg-emerald-50 px-3 py-2 text-emerald-700">
+                        + {formatCurrency(row.income)}
+                      </div>
+                      <div className="rounded-xl bg-rose-50 px-3 py-2 text-rose-700">
+                        - {formatCurrency(row.expense)}
+                      </div>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+                    Нет счетов с движением за период.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Reports() {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
@@ -212,6 +415,16 @@ export function Reports() {
   );
 
   const { stats, types, loading, error, refresh } = usePeriodStats(normalizedRange.fromYM, normalizedRange.toYM);
+  const cashFlowDates = useMemo(
+    () => monthRangeToDates(normalizedRange.fromYM, normalizedRange.toYM),
+    [normalizedRange.fromYM, normalizedRange.toYM],
+  );
+  const {
+    report: cashFlowReport,
+    loading: cashFlowLoading,
+    error: cashFlowError,
+    reload: reloadCashFlow,
+  } = useCashFlowReport(cashFlowDates);
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
@@ -525,6 +738,13 @@ export function Reports() {
                 byStatus={types.expense.byStatus}
               />
             </section>
+
+            <CashFlowReportSection
+              report={cashFlowReport}
+              loading={cashFlowLoading}
+              error={cashFlowError}
+              onReload={reloadCashFlow}
+            />
           </>
         )}
       </div>

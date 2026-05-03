@@ -728,6 +728,49 @@ export interface MoneyOperationsSummary {
   bySource: MoneyOperationSourceSummary[];
 }
 
+export interface CashFlowSourceBreakdown {
+  source: MoneyOperationSource;
+  openingBalance: number;
+  income: number;
+  expense: number;
+  netCashFlow: number;
+  closingBalance: number;
+  incomeCount: number;
+  expenseCount: number;
+}
+
+export interface CashFlowAccountBreakdown extends CashFlowSourceBreakdown {
+  accountName: string;
+}
+
+export interface CashFlowDay {
+  date: string;
+  openingBalance: number;
+  income: number;
+  expense: number;
+  netCashFlow: number;
+  closingBalance: number;
+  incomeCount: number;
+  expenseCount: number;
+}
+
+export interface CashFlowReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  accountName?: string | null;
+  openingBalance: number;
+  income: number;
+  expense: number;
+  netCashFlow: number;
+  closingBalance: number;
+  incomeCount: number;
+  expenseCount: number;
+  bySource: CashFlowSourceBreakdown[];
+  byAccount: CashFlowAccountBreakdown[];
+  days: CashFlowDay[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;
