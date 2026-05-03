@@ -903,6 +903,8 @@ public class MoneyOperationsController : ControllerBase
                 IncomeTypeId = operation.IncomeTypeId,
                 CategoryName = operation.IncomeType != null ? operation.IncomeType.Name : operation.CategoryName,
                 Amount = operation.Amount,
+                VatRate = operation.VatRate,
+                VatAmount = operation.VatAmount,
                 Currency = operation.Currency,
                 PaymentOrderNumber = operation.PaymentOrderNumber,
                 Date = operation.Date,
@@ -1040,6 +1042,8 @@ public class MoneyOperationsController : ControllerBase
                     payment.Status == PaymentStatus.Completed && payment.PaidAmount > 0m
                         ? payment.PaidAmount
                         : payment.Amount,
+                VatRate = null,
+                VatAmount = null,
                 Currency = "RUB",
                 PaymentOrderNumber = null,
                 Date = payment.Status == PaymentStatus.Completed
@@ -1633,6 +1637,7 @@ public class MoneyOperationsController : ControllerBase
 
         model.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
         model.CounterpartyName = string.IsNullOrWhiteSpace(model.CounterpartyName) ? null : model.CounterpartyName.Trim();
+        ApplyVat(model);
         model.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
         model.PaymentOrderNumber = string.IsNullOrWhiteSpace(model.PaymentOrderNumber) ? null : model.PaymentOrderNumber.Trim();
         model.Purpose = string.IsNullOrWhiteSpace(model.Purpose) ? null : model.Purpose.Trim();
@@ -2179,6 +2184,9 @@ public class MoneyOperationsController : ControllerBase
         entity.AccountingType = model.AccountingType;
         entity.MoneyAccountId = model.MoneyAccountId;
         entity.Amount = model.Amount;
+        ApplyVat(model);
+        entity.VatRate = model.VatRate;
+        entity.VatAmount = model.VatAmount;
         entity.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
         entity.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
         entity.CounterpartyName = string.IsNullOrWhiteSpace(model.CounterpartyName) ? null : model.CounterpartyName.Trim();
@@ -2340,6 +2348,19 @@ public class MoneyOperationsController : ControllerBase
            (operation.Direction == MoneyOperationDirection.Income ||
             operation.Direction == MoneyOperationDirection.Expense);
 
+    private static void ApplyVat(MoneyOperation operation)
+    {
+        if (!operation.VatRate.HasValue || operation.VatRate.Value <= 0m || operation.Amount <= 0m)
+        {
+            operation.VatRate = operation.VatRate.HasValue && operation.VatRate.Value == 0m ? 0m : null;
+            operation.VatAmount = operation.VatRate == 0m ? 0m : null;
+            return;
+        }
+
+        operation.VatRate = Math.Round(operation.VatRate.Value, 2, MidpointRounding.AwayFromZero);
+        operation.VatAmount = Math.Round(operation.Amount * operation.VatRate.Value / (100m + operation.VatRate.Value), 2, MidpointRounding.AwayFromZero);
+    }
+
     private static string ToTitleSearchTerm(string value)
         => string.IsNullOrWhiteSpace(value)
             ? value
@@ -2373,6 +2394,8 @@ public class MoneyOperationsController : ControllerBase
             IncomeTypeId = row.IncomeTypeId,
             CategoryName = row.CategoryName,
             Amount = row.Amount,
+            VatRate = row.VatRate,
+            VatAmount = row.VatAmount,
             Currency = row.Currency,
             PaymentOrderNumber = row.PaymentOrderNumber,
             Date = row.Date,
@@ -2470,6 +2493,8 @@ public class MoneyOperationsController : ControllerBase
             "Контрагент",
             "Ответственный",
             "Сумма",
+            "Ставка НДС",
+            "Сумма НДС",
             "Валюта",
             "Назначение",
             "Платежное поручение",
@@ -2494,6 +2519,8 @@ public class MoneyOperationsController : ControllerBase
                 item.CounterpartyName ?? string.Empty,
                 item.ResponsibleName ?? string.Empty,
                 item.Amount.ToString("0.00", CultureInfo.InvariantCulture),
+                item.VatRate?.ToString("0.##", CultureInfo.InvariantCulture) ?? string.Empty,
+                item.VatAmount?.ToString("0.00", CultureInfo.InvariantCulture) ?? string.Empty,
                 item.Currency ?? string.Empty,
                 item.Purpose ?? string.Empty,
                 item.PaymentOrderNumber ?? string.Empty,
@@ -2554,6 +2581,8 @@ public class MoneyOperationsController : ControllerBase
             "Контрагент",
             "Ответственный",
             "Сумма",
+            "Ставка НДС",
+            "Сумма НДС",
             "Валюта",
             "Назначение",
             "Платежное поручение",
@@ -2578,6 +2607,8 @@ public class MoneyOperationsController : ControllerBase
                 item.CounterpartyName ?? string.Empty,
                 item.ResponsibleName ?? string.Empty,
                 item.Amount.ToString("0.00", CultureInfo.InvariantCulture),
+                item.VatRate?.ToString("0.##", CultureInfo.InvariantCulture) ?? string.Empty,
+                item.VatAmount?.ToString("0.00", CultureInfo.InvariantCulture) ?? string.Empty,
                 item.Currency ?? string.Empty,
                 item.Purpose ?? string.Empty,
                 item.PaymentOrderNumber ?? string.Empty,
@@ -2692,6 +2723,8 @@ public class MoneyOperationsController : ControllerBase
                 <td>{Html(item.CounterpartyName ?? "-")}</td>
                 <td>{Html(item.ResponsibleName ?? "-")}</td>
                 <td class="num">{Html(item.Amount.ToString("N2", ru))}</td>
+                <td class="num">{Html(item.VatRate.HasValue ? item.VatRate.Value.ToString("N2", ru) : "-")}</td>
+                <td class="num">{Html(item.VatAmount.HasValue ? item.VatAmount.Value.ToString("N2", ru) : "-")}</td>
                 <td>{Html(item.Currency ?? "-")}</td>
                 <td>{Html(item.Purpose ?? "-")}</td>
                 <td>{Html(item.PaymentOrderNumber ?? "-")}</td>
@@ -2704,7 +2737,7 @@ public class MoneyOperationsController : ControllerBase
         }
 
         var emptyRow = items.Count == 0
-            ? """<tr><td colspan="16" class="empty">Операции не найдены</td></tr>"""
+            ? """<tr><td colspan="18" class="empty">Операции не найдены</td></tr>"""
             : string.Empty;
 
         return $$"""
@@ -2768,6 +2801,8 @@ public class MoneyOperationsController : ControllerBase
           <th>Контрагент</th>
           <th>Ответственный</th>
           <th>Сумма</th>
+          <th>НДС, %</th>
+          <th>НДС</th>
           <th>Валюта</th>
           <th>Назначение</th>
           <th>П/п</th>
@@ -4132,6 +4167,8 @@ public class MoneyOperationsController : ControllerBase
         public int? IncomeTypeId { get; init; }
         public string? CategoryName { get; init; }
         public decimal Amount { get; init; }
+        public decimal? VatRate { get; init; }
+        public decimal? VatAmount { get; init; }
         public string? Currency { get; init; }
         public string? PaymentOrderNumber { get; init; }
         public DateTime Date { get; init; }

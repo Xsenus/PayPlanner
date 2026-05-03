@@ -35,6 +35,7 @@ public class MoneyOperationsControllerTests
             CounterpartyName = "  ООО Ромашка  ",
             CategoryName = "  Аренда  ",
             Amount = 15_500m,
+            VatRate = 20m,
             Currency = "  RUB  ",
             PaymentOrderNumber = "  873864  ",
             Date = new DateTime(2026, 4, 21),
@@ -54,6 +55,8 @@ public class MoneyOperationsControllerTests
         var createdOperation = Assert.IsType<MoneyOperation>(created.Value);
         Assert.Equal("Расчётный счёт", createdOperation.AccountName);
         Assert.Equal("ООО Ромашка", createdOperation.CounterpartyName);
+        Assert.Equal(20m, createdOperation.VatRate);
+        Assert.Equal(2_583.33m, createdOperation.VatAmount);
         Assert.Equal("RUB", createdOperation.Currency);
         Assert.Equal(new DateTime(2026, 4, 21), createdOperation.Date);
         Assert.Equal(new DateTime(2026, 4, 22), createdOperation.RecognitionDate);
@@ -67,6 +70,7 @@ public class MoneyOperationsControllerTests
             CounterpartyName = "  ООО Василёк  ",
             CategoryName = "  Возврат  ",
             Amount = 9_900m,
+            VatRate = 10m,
             Currency = "  USD  ",
             PaymentOrderNumber = "  445566  ",
             Date = new DateTime(2026, 4, 23),
@@ -87,6 +91,8 @@ public class MoneyOperationsControllerTests
         Assert.Equal(MoneyOperationDirection.Income, updatedOperation.Direction);
         Assert.Equal(MoneyOperationAccountingType.Plan, updatedOperation.AccountingType);
         Assert.Equal("ООО Василёк", updatedOperation.CounterpartyName);
+        Assert.Equal(10m, updatedOperation.VatRate);
+        Assert.Equal(900m, updatedOperation.VatAmount);
         Assert.Equal("USD", updatedOperation.Currency);
         Assert.Equal(new DateTime(2026, 4, 23), updatedOperation.Date);
         Assert.Null(updatedOperation.RecognitionDate);
@@ -439,9 +445,9 @@ public class MoneyOperationsControllerTests
         Assert.True(file.FileContents.Take(preamble.Length).SequenceEqual(preamble));
         var csv = Encoding.UTF8.GetString(file.FileContents[preamble.Length..]);
 
-        Assert.Contains("Дата;Источник;Статус;Движение;Учет;Счет;Контрагент;Ответственный;Сумма;Валюта", csv);
+        Assert.Contains("Дата;Источник;Статус;Движение;Учет;Счет;Контрагент;Ответственный;Сумма;Ставка НДС;Сумма НДС;Валюта", csv);
         Assert.Contains("Связанный счет;Договор;Статус сверки;Комментарий сверки;Вложения", csv);
-        Assert.Contains("Банк;В обработке;Приход;Факт;Основной банк;ООО Ромашка;;10000.00;RUB", csv);
+        Assert.Contains("Банк;В обработке;Приход;Факт;Основной банк;ООО Ромашка;;10000.00;;;RUB", csv);
         Assert.Contains("\"Оплата по счету; май\"", csv);
         Assert.Contains("Не сверено", csv);
         Assert.DoesNotContain("Поставщик", csv);

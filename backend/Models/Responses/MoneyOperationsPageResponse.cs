@@ -18,6 +18,8 @@ public sealed class MoneyOperationListItemDto
     public int? IncomeTypeId { get; init; }
     public string? CategoryName { get; init; }
     public decimal Amount { get; init; }
+    public decimal? VatRate { get; init; }
+    public decimal? VatAmount { get; init; }
     public string? Currency { get; init; }
     public string? PaymentOrderNumber { get; init; }
     public DateTime Date { get; init; }

@@ -14,6 +14,8 @@ public class MoneyOperation
     public IncomeType? IncomeType { get; set; }
     public string? CategoryName { get; set; }
     public decimal Amount { get; set; }
+    public decimal? VatRate { get; set; }
+    public decimal? VatAmount { get; set; }
     public string? Currency { get; set; }
     public string? PaymentOrderNumber { get; set; }
     public DateTime Date { get; set; }

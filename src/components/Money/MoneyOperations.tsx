@@ -174,6 +174,8 @@ const MONEY_OPERATION_COLUMNS = [
   { key: 'recognitionDate', label: 'Дата признания', defaultVisible: true, defaultWidth: 150 },
   { key: 'income', label: 'Приход', defaultVisible: true, defaultWidth: 130 },
   { key: 'expense', label: 'Расход', defaultVisible: true, defaultWidth: 130 },
+  { key: 'vatRate', label: 'НДС, %', defaultVisible: false, defaultWidth: 90 },
+  { key: 'vatAmount', label: 'НДС', defaultVisible: false, defaultWidth: 120 },
   { key: 'currency', label: 'Валюта', defaultVisible: true, defaultWidth: 90 },
   { key: 'accountName', label: 'Счета', defaultVisible: true, defaultWidth: 180 },
   { key: 'counterpartyName', label: 'Контрагент', defaultVisible: true, defaultWidth: 180 },
@@ -207,6 +209,8 @@ const DEFAULT_FORM: MoneyOperation = {
   incomeTypeId: null,
   categoryName: '',
   amount: 0,
+  vatRate: null,
+  vatAmount: null,
   currency: 'RUB',
   paymentOrderNumber: '',
   date: '',
@@ -256,6 +260,14 @@ function mapMoneyOperationToForm(source: MoneyOperationSource, initialData?: Mon
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
+function calculateVatAmount(amount: number | null | undefined, vatRate: number | null | undefined) {
+  if (!amount || amount <= 0 || vatRate === null || vatRate === undefined || vatRate <= 0) {
+    return vatRate === 0 ? 0 : null;
+  }
+
+  return Math.round((amount * vatRate) / (100 + vatRate) * 100) / 100;
 }
 
 function buildUniqueOptions(values: Array<string | null | undefined>) {
@@ -1617,6 +1629,20 @@ function MoneyOperationModal({
   const setField = <K extends keyof MoneyOperation>(key: K, value: MoneyOperation[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
+  const setAmount = (amount: number) => {
+    setForm((prev) => ({
+      ...prev,
+      amount,
+      vatAmount: calculateVatAmount(amount, prev.vatRate),
+    }));
+  };
+  const setVatRate = (vatRate: number | null) => {
+    setForm((prev) => ({
+      ...prev,
+      vatRate,
+      vatAmount: calculateVatAmount(prev.amount, vatRate),
+    }));
+  };
 
   const handleDirectionChange = (direction: MoneyOperationDirection) => {
     setForm((prev) => {
@@ -1797,9 +1823,32 @@ function MoneyOperationModal({
               <input
                 type="number"
                 value={form.amount}
-                onChange={(event) => setField('amount', Number(event.target.value))}
+                onChange={(event) => setAmount(Number(event.target.value))}
                 disabled={appliedInvoiceLocked}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              НДС, %
+              <select
+                value={form.vatRate ?? ''}
+                onChange={(event) => setVatRate(event.target.value === '' ? null : Number(event.target.value))}
+                className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
+                <option value="">Без НДС</option>
+                <option value="0">0%</option>
+                <option value="5">5%</option>
+                <option value="7">7%</option>
+                <option value="10">10%</option>
+                <option value="20">20%</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Сумма НДС
+              <input
+                type="number"
+                value={form.vatAmount ?? ''}
+                readOnly
+                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
@@ -3311,6 +3360,10 @@ export function MoneyOperations({
             {item.direction === 'Expense' ? `${formatMoney(item.amount)} ₽` : '—'}
           </span>
         );
+      case 'vatRate':
+        return item.vatRate === null || item.vatRate === undefined ? '—' : `${formatMoney(item.vatRate)}%`;
+      case 'vatAmount':
+        return item.vatAmount === null || item.vatAmount === undefined ? '—' : `${formatMoney(item.vatAmount)} ₽`;
       case 'currency':
         return item.currency ?? 'RUB';
       case 'accountName':

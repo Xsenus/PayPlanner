@@ -755,6 +755,8 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Direction).HasConversion<string>();
             entity.Property(e => e.AccountingType).HasConversion<string>();
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.VatRate).HasColumnType("decimal(5,2)");
+            entity.Property(e => e.VatAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.PaidAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Currency).HasMaxLength(12);
             entity.Property(e => e.AccountName).HasMaxLength(200);

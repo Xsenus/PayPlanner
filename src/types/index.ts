@@ -525,6 +525,8 @@ export interface MoneyOperation {
   incomeTypeId?: number | null;
   categoryName?: string | null;
   amount: number;
+  vatRate?: number | null;
+  vatAmount?: number | null;
   currency?: string | null;
   paymentOrderNumber?: string | null;
   date: string;
