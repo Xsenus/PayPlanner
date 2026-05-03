@@ -257,6 +257,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("paid-accounts")]
+    public async Task<ActionResult<PaidAccountReportDto>> PaidAccounts(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildPaidAccountReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -1167,6 +1190,82 @@ public class ReportsController : ControllerBase
             null => "Без приоритета",
             _ => $"Приоритет {priority.Value}",
         };
+
+    private async Task<PaidAccountReportDto> BuildPaidAccountReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var rows = await BuildFactQuery(from, to, source, null)
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                item.PaidAccountName,
+            })
+            .ToListAsync(ct);
+
+        var incomeTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Income)
+            .Sum(item => item.Amount);
+        var expenseTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+            .Sum(item => item.Amount);
+        var turnoverTotal = incomeTotal + expenseTotal;
+
+        var accounts = rows
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                PaidAccountName = ResolvePaidAccountName(item.PaidAccountName),
+            })
+            .GroupBy(item => item.PaidAccountName, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var income = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.Amount);
+                var expense = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.Amount);
+                var totalAmount = income + expense;
+
+                return new PaidAccountReportItemDto
+                {
+                    PaidAccountName = group.First().PaidAccountName,
+                    Income = income,
+                    Expense = expense,
+                    NetTotal = income - expense,
+                    TotalAmount = totalAmount,
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    Share = turnoverTotal > 0m
+                        ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderByDescending(item => item.TotalAmount)
+            .ThenBy(item => item.PaidAccountName)
+            .ToList();
+
+        return new PaidAccountReportDto
+        {
+            From = from,
+            To = to,
+            Source = source,
+            IncomeTotal = incomeTotal,
+            ExpenseTotal = expenseTotal,
+            NetTotal = incomeTotal - expenseTotal,
+            Accounts = accounts,
+        };
+    }
+
+    private static string ResolvePaidAccountName(string? paidAccountName)
+        => string.IsNullOrWhiteSpace(paidAccountName)
+            ? "Без счета оплаты"
+            : paidAccountName.Trim();
 
     private sealed class CashFlowAccountQueryRow
     {

@@ -976,6 +976,27 @@ export interface PaymentPriorityReport {
   priorities: PaymentPriorityReportItem[];
 }
 
+export interface PaidAccountReportItem {
+  paidAccountName: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  totalAmount: number;
+  incomeCount: number;
+  expenseCount: number;
+  share: number;
+}
+
+export interface PaidAccountReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  accounts: PaidAccountReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;
