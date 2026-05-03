@@ -1731,7 +1731,6 @@ describe('MoneyOperations integration', () => {
   }, 15000);
 
   it('loads and renders the cash orders journal in the cash section', async () => {
-    const user = userEvent.setup();
     operations = [];
     getCashOrderRegisterMock.mockResolvedValueOnce({
       items: [

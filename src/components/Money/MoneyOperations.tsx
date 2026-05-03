@@ -86,8 +86,14 @@ type BankStatementCategoryRulesSettings = {
   rules: BankStatementCategoryRule[];
 };
 
+type CashLimitSettings = {
+  enabled: boolean;
+  amount: number | null;
+};
+
 const BANK_STATEMENT_AUTO_IMPORT_SETTING_KEY = 'money.bankStatement.autoImport';
 const BANK_STATEMENT_CATEGORY_RULES_SETTING_KEY = 'money.bankStatement.categoryRules';
+const CASH_LIMIT_SETTING_KEY = 'money.cash.limit';
 
 const DEFAULT_BANK_STATEMENT_AUTO_IMPORT_SETTINGS: BankStatementAutoImportSettings = {
   enabled: false,
@@ -98,6 +104,11 @@ const DEFAULT_BANK_STATEMENT_AUTO_IMPORT_SETTINGS: BankStatementAutoImportSettin
 
 const DEFAULT_BANK_STATEMENT_CATEGORY_RULES_SETTINGS: BankStatementCategoryRulesSettings = {
   rules: [],
+};
+
+const DEFAULT_CASH_LIMIT_SETTINGS: CashLimitSettings = {
+  enabled: false,
+  amount: null,
 };
 
 const SOURCE_LABELS: Record<MoneyTab, string> = {
@@ -616,6 +627,31 @@ function serializeBankStatementCategoryRulesSettings(settings: BankStatementCate
         incomeTypeId: rule.incomeTypeId ?? null,
       }))
       .filter((rule) => rule.categoryName && rule.keywords),
+  });
+}
+
+function parseCashLimitSettings(value?: string | null): CashLimitSettings {
+  if (!value) return DEFAULT_CASH_LIMIT_SETTINGS;
+
+  try {
+    const parsed = JSON.parse(value) as Partial<CashLimitSettings>;
+    const amount = typeof parsed.amount === 'number' && Number.isFinite(parsed.amount) && parsed.amount > 0
+      ? parsed.amount
+      : null;
+    return {
+      enabled: Boolean(parsed.enabled) && amount !== null,
+      amount,
+    };
+  } catch {
+    return DEFAULT_CASH_LIMIT_SETTINGS;
+  }
+}
+
+function serializeCashLimitSettings(settings: CashLimitSettings) {
+  const amount = settings.amount && settings.amount > 0 ? settings.amount : null;
+  return JSON.stringify({
+    enabled: Boolean(settings.enabled && amount),
+    amount,
   });
 }
 
@@ -2052,6 +2088,9 @@ export function MoneyOperations({
   );
   const [bankCategoryRulesLoading, setBankCategoryRulesLoading] = useState(false);
   const [bankCategoryRulesSaving, setBankCategoryRulesSaving] = useState(false);
+  const [cashLimitSettings, setCashLimitSettings] = useState<CashLimitSettings>(DEFAULT_CASH_LIMIT_SETTINGS);
+  const [cashLimitLoading, setCashLimitLoading] = useState(false);
+  const [cashLimitSaving, setCashLimitSaving] = useState(false);
   const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentYear = new Date().getFullYear();
@@ -2172,6 +2211,18 @@ export function MoneyOperations({
     () => (accountName ? dailyBalances.filter((item) => item.accountName === accountName) : dailyBalances),
     [accountName, dailyBalances],
   );
+  const cashLimitExceedances = useMemo(() => {
+    if (source !== 'Cash' || !cashLimitSettings.enabled || !cashLimitSettings.amount) {
+      return [];
+    }
+
+    return visibleDailyBalances
+      .filter((item) => item.closingBalance > cashLimitSettings.amount!)
+      .map((item) => ({
+        ...item,
+        excess: item.closingBalance - cashLimitSettings.amount!,
+      }));
+  }, [cashLimitSettings.amount, cashLimitSettings.enabled, source, visibleDailyBalances]);
   const visibleBalanceReconciliationResults = useMemo(
     () => (accountName ? balanceReconciliationResults.filter((item) => item.accountName === accountName) : balanceReconciliationResults),
     [accountName, balanceReconciliationResults],
@@ -2520,6 +2571,38 @@ export function MoneyOperations({
     };
   }, [source]);
 
+  useEffect(() => {
+    if (source !== 'Cash') {
+      setCashLimitSettings(DEFAULT_CASH_LIMIT_SETTINGS);
+      return;
+    }
+
+    let cancelled = false;
+    setCashLimitLoading(true);
+
+    apiService
+      .getUserSetting(CASH_LIMIT_SETTING_KEY)
+      .then((setting) => {
+        if (!cancelled) {
+          setCashLimitSettings(parseCashLimitSettings(setting.value));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCashLimitSettings(DEFAULT_CASH_LIMIT_SETTINGS);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCashLimitLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
   const saveBankAutoImportSettings = async (nextSettings = bankAutoImportSettings) => {
     setBankAutoImportSaving(true);
     try {
@@ -2589,6 +2672,28 @@ export function MoneyOperations({
     setBankCategoryRulesSettings((current) => ({
       rules: current.rules.filter((rule) => rule.id !== id),
     }));
+  };
+
+  const updateCashLimitSettings = (patch: Partial<CashLimitSettings>) => {
+    setCashLimitSettings((current) => ({ ...current, ...patch }));
+  };
+
+  const saveCashLimitSettings = async (nextSettings = cashLimitSettings) => {
+    setCashLimitSaving(true);
+    try {
+      const normalizedSettings = parseCashLimitSettings(serializeCashLimitSettings(nextSettings));
+      const setting = await apiService.upsertUserSetting(
+        CASH_LIMIT_SETTING_KEY,
+        serializeCashLimitSettings(normalizedSettings),
+      );
+      setCashLimitSettings(parseCashLimitSettings(setting.value));
+      toast.success('Лимит кассы сохранён.', 'Касса');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось сохранить лимит кассы.');
+      toast.error(message, 'Касса');
+    } finally {
+      setCashLimitSaving(false);
+    }
   };
 
   const handleRunBankAutoImport = async () => {
@@ -3753,6 +3858,87 @@ export function MoneyOperations({
                       {file.fileName}: +{file.created} / {file.skipped}
                     </span>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {source === 'Cash' && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3">
+          <div className="grid gap-3 md:grid-cols-[auto_240px_auto_1fr]">
+            <label className="flex items-center gap-2 text-sm font-medium text-amber-900">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={cashLimitSettings.enabled}
+                disabled={cashLimitLoading || cashLimitSaving}
+                onChange={(event) => updateCashLimitSettings({ enabled: event.target.checked })}
+                className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+              />
+              Лимит кассы
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-amber-900">
+              Сумма лимита
+              <input
+                type="number"
+                min="0"
+                step="100"
+                value={cashLimitSettings.amount ?? ''}
+                onChange={(event) =>
+                  updateCashLimitSettings({
+                    amount: event.target.value ? Number(event.target.value) : null,
+                  })
+                }
+                placeholder="0"
+                className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-slate-700"
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => void saveCashLimitSettings()}
+                disabled={cashLimitLoading || cashLimitSaving}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60">
+                <Save className="h-4 w-4" />
+                {cashLimitSaving ? 'Сохранение...' : 'Сохранить'}
+              </button>
+            </div>
+            <div className="flex items-end text-sm text-amber-900">
+              {cashLimitSettings.enabled && cashLimitSettings.amount
+                ? cashLimitExceedances.length > 0
+                  ? `Превышений за период: ${cashLimitExceedances.length}`
+                  : 'Превышений за период нет.'
+                : 'Лимит выключен.'}
+            </div>
+          </div>
+
+          {cashLimitSettings.enabled && cashLimitSettings.amount && cashLimitExceedances.length > 0 && (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-amber-200 bg-white">
+              <table className="w-full min-w-[620px] text-sm">
+                <thead className="text-xs uppercase text-amber-700">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Дата</th>
+                    <th className="px-3 py-2 text-left font-medium">Касса</th>
+                    <th className="px-3 py-2 text-right font-medium">Остаток</th>
+                    <th className="px-3 py-2 text-right font-medium">Превышение</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-amber-100">
+                  {cashLimitExceedances.slice(0, 8).map((item) => (
+                    <tr key={`${item.accountName}-${item.date}`}>
+                      <td className="px-3 py-2 font-medium text-slate-800">{formatDate(item.date)}</td>
+                      <td className="px-3 py-2 text-slate-600">{item.accountName}</td>
+                      <td className="px-3 py-2 text-right text-amber-700">{formatMoney(item.closingBalance)} ₽</td>
+                      <td className="px-3 py-2 text-right text-rose-600">{formatMoney(item.excess)} ₽</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {cashLimitExceedances.length > 8 && (
+                <div className="border-t border-amber-100 px-3 py-2 text-xs text-amber-700">
+                  Показаны первые 8 дней из {cashLimitExceedances.length}
                 </div>
               )}
             </div>
