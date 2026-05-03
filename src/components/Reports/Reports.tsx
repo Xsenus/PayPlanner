@@ -14,9 +14,10 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { usePeriodStats } from '../../hooks/usePeriodStats';
 import { useCashFlowReport } from '../../hooks/useCashFlowReport';
+import { useCashReport } from '../../hooks/useCashReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { CashFlowReport, MoneyOperationSource } from '../../types';
+import type { CashBookSummary, CashFlowReport, MoneyOperationSource } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -404,6 +405,131 @@ function CashFlowReportSection({
   );
 }
 
+function CashReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: CashBookSummary | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const recentDays = (report?.days ?? []).slice(-8);
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-amber-100 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">
+            <Banknote className="h-3.5 w-3.5" />
+            Касса
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по кассе</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Кассовая книга за выбранный период: остатки, приходные и расходные ордера, дневное закрытие кассы.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по кассе...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по кассе</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Остаток на начало"
+              value={formatCurrency(report.openingBalance)}
+              icon={Wallet}
+              tone="rate"
+              subtitle={report.accountName ? `Касса: ${report.accountName}` : 'Все кассы'}
+            />
+            <MetricCard
+              title="Приход по кассе"
+              value={formatCurrency(report.income)}
+              icon={TrendingUp}
+              tone="income"
+              subtitle={`ПКО за период: ${report.incomingCount}`}
+            />
+            <MetricCard
+              title="Расход по кассе"
+              value={formatCurrency(report.expense)}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle={`РКО за период: ${report.outgoingCount}`}
+            />
+            <MetricCard
+              title="Остаток на конец"
+              value={formatCurrency(report.closingBalance)}
+              icon={Banknote}
+              tone="profit"
+              subtitle="Контроль закрытия кассового периода"
+            />
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-950">Дневное движение кассы</h3>
+                <p className="mt-1 text-sm text-slate-500">Последние дни выбранного периода с приходом, расходом и закрывающим остатком.</p>
+              </div>
+              <div className="text-sm text-slate-500">{report.days.length} дней</div>
+            </div>
+
+            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-100 bg-white">
+              {recentDays.length > 0 ? (
+                <div className="divide-y divide-slate-100">
+                  {recentDays.map((day) => (
+                    <div key={day.date} className="grid gap-3 px-4 py-3 text-sm sm:grid-cols-[110px_1fr_1fr_1fr_1fr] sm:items-center">
+                      <div className="font-semibold text-slate-900">{formatDate(day.date)}</div>
+                      <div>
+                        <div className="text-xs text-slate-500">Открытие</div>
+                        <div className="font-medium text-slate-900">{formatCurrency(day.openingBalance)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-500">Приход</div>
+                        <div className="font-medium text-emerald-700">{formatCurrency(day.income)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-500">Расход</div>
+                        <div className="font-medium text-rose-700">{formatCurrency(day.expense)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-500">Закрытие</div>
+                        <div className="font-semibold text-slate-950">{formatCurrency(day.closingBalance)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 text-center text-sm text-slate-500">
+                  В выбранном периоде нет проведенных кассовых ордеров.
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Reports() {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
@@ -425,6 +551,12 @@ export function Reports() {
     error: cashFlowError,
     reload: reloadCashFlow,
   } = useCashFlowReport(cashFlowDates);
+  const {
+    report: cashReport,
+    loading: cashReportLoading,
+    error: cashReportError,
+    reload: reloadCashReport,
+  } = useCashReport(cashFlowDates);
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
@@ -744,6 +876,13 @@ export function Reports() {
               loading={cashFlowLoading}
               error={cashFlowError}
               onReload={reloadCashFlow}
+            />
+
+            <CashReportSection
+              report={cashReport}
+              loading={cashReportLoading}
+              error={cashReportError}
+              onReload={reloadCashReport}
             />
           </>
         )}
