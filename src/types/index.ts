@@ -954,6 +954,28 @@ export interface AdvanceReport {
   counterparties: AdvanceReportItem[];
 }
 
+export interface PaymentPriorityReportItem {
+  priority?: number | null;
+  priorityLabel: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  totalAmount: number;
+  incomeCount: number;
+  expenseCount: number;
+  share: number;
+}
+
+export interface PaymentPriorityReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  priorities: PaymentPriorityReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

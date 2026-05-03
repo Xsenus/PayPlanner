@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock3,
   Compass,
+  Flag,
   FolderKanban,
   Handshake,
   Percent,
@@ -29,9 +30,10 @@ import { useSalesPointReport } from '../../hooks/useSalesPointReport';
 import { useVatReport } from '../../hooks/useVatReport';
 import { usePlanFactReport } from '../../hooks/usePlanFactReport';
 import { useAdvanceReport } from '../../hooks/useAdvanceReport';
+import { usePaymentPriorityReport } from '../../hooks/usePaymentPriorityReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { AdvanceReport, CashBookSummary, CashFlowReport, CounterpartyReport, DirectionReport, MoneyCategoryReport, MoneyOperationSource, PlanFactReport, ProjectReport, SalesPointReport, VatReport } from '../../types';
+import type { AdvanceReport, CashBookSummary, CashFlowReport, CounterpartyReport, DirectionReport, MoneyCategoryReport, MoneyOperationSource, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -1740,6 +1742,134 @@ function AdvanceReportSection({
   );
 }
 
+function PaymentPriorityReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: PaymentPriorityReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const rows = report?.priorities ?? [];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-red-100 bg-red-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-red-700">
+            <Flag className="h-3.5 w-3.5" />
+            Приоритеты
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по приоритетам платежей</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Фактические поступления и списания по приоритетам: видно, какой объем денег прошел по срочным и обычным платежам.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по приоритетам...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по приоритетам</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Поступило"
+              value={formatCurrency(report.incomeTotal)}
+              icon={TrendingUp}
+              tone="income"
+              subtitle="Фактические приходы"
+            />
+            <MetricCard
+              title="Списано"
+              value={formatCurrency(report.expenseTotal)}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle="Фактические расходы"
+            />
+            <MetricCard
+              title="Итог"
+              value={formatCurrency(report.netTotal)}
+              icon={ArrowUpRight}
+              tone="profit"
+              subtitle={report.netTotal >= 0 ? 'Приход выше расхода' : 'Расход выше прихода'}
+            />
+            <MetricCard
+              title="Групп"
+              value={String(report.priorities.length)}
+              icon={Flag}
+              tone="rate"
+              subtitle="Приоритетных групп"
+            />
+          </div>
+
+          <div className="mt-6 space-y-3">
+            {rows.length > 0 ? rows.map((row) => (
+              <div key={row.priorityLabel} className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-950">{row.priorityLabel}</h3>
+                    <div className="mt-1 text-sm text-slate-500">
+                      {row.incomeCount + row.expenseCount} операций · {row.share}% оборота
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-white px-4 py-3 text-right shadow-sm">
+                    <div className="text-xs text-slate-500">Итог</div>
+                    <div className="font-semibold text-slate-950">{formatCurrency(row.netTotal)}</div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                    <div className="text-xs text-emerald-700">Поступления</div>
+                    <div className="mt-1 font-semibold text-emerald-800">{formatCurrency(row.income)}</div>
+                  </div>
+                  <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                    <div className="text-xs text-rose-700">Списания</div>
+                    <div className="mt-1 font-semibold text-rose-800">{formatCurrency(row.expense)}</div>
+                  </div>
+                  <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                    <div className="text-xs text-red-700">Оборот</div>
+                    <div className="mt-1 font-semibold text-red-800">{formatCurrency(row.totalAmount)}</div>
+                  </div>
+                </div>
+
+                <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
+                  <div
+                    className="h-full rounded-full bg-red-500"
+                    style={{ width: `${Math.max(row.share, row.totalAmount > 0 ? 5 : 0)}%` }}
+                  />
+                </div>
+              </div>
+            )) : (
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                Нет фактических операций с приоритетами за период.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Reports() {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
@@ -1825,6 +1955,12 @@ export function Reports() {
     error: advanceReportError,
     reload: reloadAdvanceReport,
   } = useAdvanceReport(cashFlowDates);
+  const {
+    report: paymentPriorityReport,
+    loading: paymentPriorityReportLoading,
+    error: paymentPriorityReportError,
+    reload: reloadPaymentPriorityReport,
+  } = usePaymentPriorityReport(cashFlowDates);
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
@@ -2214,6 +2350,13 @@ export function Reports() {
               loading={advanceReportLoading}
               error={advanceReportError}
               onReload={reloadAdvanceReport}
+            />
+
+            <PaymentPriorityReportSection
+              report={paymentPriorityReport}
+              loading={paymentPriorityReportLoading}
+              error={paymentPriorityReportError}
+              onReload={reloadPaymentPriorityReport}
             />
           </>
         )}
