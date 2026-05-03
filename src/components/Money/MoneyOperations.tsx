@@ -73,13 +73,31 @@ type BankStatementAutoImportSettings = {
   lastCheckedAt?: string | null;
 };
 
+type BankStatementCategoryRule = {
+  id: string;
+  enabled: boolean;
+  categoryName: string;
+  paymentType: PaymentKind;
+  keywords: string;
+  incomeTypeId?: number | null;
+};
+
+type BankStatementCategoryRulesSettings = {
+  rules: BankStatementCategoryRule[];
+};
+
 const BANK_STATEMENT_AUTO_IMPORT_SETTING_KEY = 'money.bankStatement.autoImport';
+const BANK_STATEMENT_CATEGORY_RULES_SETTING_KEY = 'money.bankStatement.categoryRules';
 
 const DEFAULT_BANK_STATEMENT_AUTO_IMPORT_SETTINGS: BankStatementAutoImportSettings = {
   enabled: false,
   folderPath: '',
   fileMask: '*.csv;*.txt;*.1c',
   lastCheckedAt: null,
+};
+
+const DEFAULT_BANK_STATEMENT_CATEGORY_RULES_SETTINGS: BankStatementCategoryRulesSettings = {
+  rules: [],
 };
 
 const SOURCE_LABELS: Record<MoneyTab, string> = {
@@ -546,6 +564,58 @@ function serializeBankStatementAutoImportSettings(settings: BankStatementAutoImp
     folderPath: settings.folderPath.trim(),
     fileMask: settings.fileMask.trim() || '*.csv;*.txt;*.1c',
     lastCheckedAt: settings.lastCheckedAt ?? null,
+  });
+}
+
+function createEmptyBankStatementCategoryRule(): BankStatementCategoryRule {
+  return {
+    id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    enabled: true,
+    categoryName: '',
+    paymentType: 'Expense',
+    keywords: '',
+    incomeTypeId: null,
+  };
+}
+
+function parseBankStatementCategoryRulesSettings(value?: string | null): BankStatementCategoryRulesSettings {
+  if (!value) return DEFAULT_BANK_STATEMENT_CATEGORY_RULES_SETTINGS;
+
+  try {
+    const parsed = JSON.parse(value) as Partial<BankStatementCategoryRulesSettings>;
+    const rules = Array.isArray(parsed.rules)
+      ? parsed.rules
+          .map((rule, index) => {
+            const source = rule as Partial<BankStatementCategoryRule>;
+            return {
+              id: typeof source.id === 'string' && source.id.trim() ? source.id : `saved-rule-${index}`,
+              enabled: source.enabled !== false,
+              categoryName: typeof source.categoryName === 'string' ? source.categoryName : '',
+              paymentType: source.paymentType === 'Income' ? 'Income' : 'Expense',
+              keywords: typeof source.keywords === 'string' ? source.keywords : '',
+              incomeTypeId: typeof source.incomeTypeId === 'number' && source.incomeTypeId > 0 ? source.incomeTypeId : null,
+            };
+          })
+          .filter((rule) => rule.categoryName.trim() || rule.keywords.trim() || rule.incomeTypeId)
+      : [];
+    return { rules };
+  } catch {
+    return DEFAULT_BANK_STATEMENT_CATEGORY_RULES_SETTINGS;
+  }
+}
+
+function serializeBankStatementCategoryRulesSettings(settings: BankStatementCategoryRulesSettings) {
+  return JSON.stringify({
+    rules: settings.rules
+      .map((rule) => ({
+        id: rule.id,
+        enabled: rule.enabled,
+        categoryName: rule.categoryName.trim(),
+        paymentType: rule.paymentType,
+        keywords: rule.keywords.trim(),
+        incomeTypeId: rule.incomeTypeId ?? null,
+      }))
+      .filter((rule) => rule.categoryName && rule.keywords),
   });
 }
 
@@ -1976,6 +2046,12 @@ export function MoneyOperations({
   const [bankAutoImportSaving, setBankAutoImportSaving] = useState(false);
   const [bankAutoImportRunning, setBankAutoImportRunning] = useState(false);
   const [bankAutoImportRunResult, setBankAutoImportRunResult] = useState<BankStatementAutoImportRunResult | null>(null);
+  const [showBankCategoryRules, setShowBankCategoryRules] = useState(false);
+  const [bankCategoryRulesSettings, setBankCategoryRulesSettings] = useState<BankStatementCategoryRulesSettings>(
+    DEFAULT_BANK_STATEMENT_CATEGORY_RULES_SETTINGS,
+  );
+  const [bankCategoryRulesLoading, setBankCategoryRulesLoading] = useState(false);
+  const [bankCategoryRulesSaving, setBankCategoryRulesSaving] = useState(false);
   const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentYear = new Date().getFullYear();
@@ -2411,6 +2487,39 @@ export function MoneyOperations({
     };
   }, [source]);
 
+  useEffect(() => {
+    if (source !== 'Bank') {
+      setShowBankCategoryRules(false);
+      setBankCategoryRulesSettings(DEFAULT_BANK_STATEMENT_CATEGORY_RULES_SETTINGS);
+      return;
+    }
+
+    let cancelled = false;
+    setBankCategoryRulesLoading(true);
+
+    apiService
+      .getUserSetting(BANK_STATEMENT_CATEGORY_RULES_SETTING_KEY)
+      .then((setting) => {
+        if (!cancelled) {
+          setBankCategoryRulesSettings(parseBankStatementCategoryRulesSettings(setting.value));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBankCategoryRulesSettings(DEFAULT_BANK_STATEMENT_CATEGORY_RULES_SETTINGS);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBankCategoryRulesLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
   const saveBankAutoImportSettings = async (nextSettings = bankAutoImportSettings) => {
     setBankAutoImportSaving(true);
     try {
@@ -2433,6 +2542,53 @@ export function MoneyOperations({
 
   const updateBankAutoImportSettings = (patch: Partial<BankStatementAutoImportSettings>) => {
     setBankAutoImportSettings((current) => ({ ...current, ...patch }));
+  };
+
+  const saveBankCategoryRulesSettings = async (nextSettings = bankCategoryRulesSettings) => {
+    setBankCategoryRulesSaving(true);
+    try {
+      const normalizedSettings = parseBankStatementCategoryRulesSettings(
+        serializeBankStatementCategoryRulesSettings(nextSettings),
+      );
+      const setting = await apiService.upsertUserSetting(
+        BANK_STATEMENT_CATEGORY_RULES_SETTING_KEY,
+        serializeBankStatementCategoryRulesSettings(normalizedSettings),
+      );
+      setBankCategoryRulesSettings(parseBankStatementCategoryRulesSettings(setting.value));
+      toast.success('Правила распознавания выписки сохранены.', 'Выписка банка');
+    } catch (error) {
+      const message = extractDisplayErrorMessage(error, 'Не удалось сохранить правила распознавания выписки.');
+      toast.error(message, 'Выписка банка');
+    } finally {
+      setBankCategoryRulesSaving(false);
+    }
+  };
+
+  const addBankCategoryRule = () => {
+    setBankCategoryRulesSettings((current) => ({
+      rules: [...current.rules, createEmptyBankStatementCategoryRule()],
+    }));
+    setShowBankCategoryRules(true);
+  };
+
+  const updateBankCategoryRule = (id: string, patch: Partial<BankStatementCategoryRule>) => {
+    setBankCategoryRulesSettings((current) => ({
+      rules: current.rules.map((rule) =>
+        rule.id === id
+          ? {
+              ...rule,
+              ...patch,
+              incomeTypeId: patch.paymentType && patch.paymentType !== rule.paymentType ? null : patch.incomeTypeId ?? rule.incomeTypeId,
+            }
+          : rule,
+      ),
+    }));
+  };
+
+  const removeBankCategoryRule = (id: string) => {
+    setBankCategoryRulesSettings((current) => ({
+      rules: current.rules.filter((rule) => rule.id !== id),
+    }));
   };
 
   const handleRunBankAutoImport = async () => {
@@ -3524,6 +3680,14 @@ export function MoneyOperations({
                 Журнал импортов
                 <ChevronDown className={`h-4 w-4 transition-transform ${showBankImportsJournal ? 'rotate-180' : ''}`} />
               </button>
+              <button
+                type="button"
+                aria-label={showBankCategoryRules ? 'Скрыть правила распознавания выписки' : 'Открыть правила распознавания выписки'}
+                onClick={() => setShowBankCategoryRules((value) => !value)}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+                <SlidersHorizontal className="h-4 w-4" />
+                Правила
+              </button>
               <div className="text-xs text-slate-500">CSV, TSV, TXT, выгрузка 1С</div>
             </>
           )}
@@ -3593,6 +3757,130 @@ export function MoneyOperations({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {source === 'Bank' && showBankCategoryRules && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Правила распознавания выписки</h2>
+              <p className="text-xs text-slate-500">Ключевые слова назначений, которые будут применяться при следующем импорте.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={addBankCategoryRule}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <Plus className="h-4 w-4" />
+                Добавить
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveBankCategoryRulesSettings()}
+                disabled={bankCategoryRulesLoading || bankCategoryRulesSaving}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
+                <Save className="h-4 w-4" />
+                {bankCategoryRulesSaving ? 'Сохранение...' : 'Сохранить'}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="text-xs uppercase text-slate-400">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Вкл</th>
+                  <th className="px-3 py-2 text-left font-medium">Тип</th>
+                  <th className="px-3 py-2 text-left font-medium">Категория</th>
+                  <th className="px-3 py-2 text-left font-medium">Статья</th>
+                  <th className="px-3 py-2 text-left font-medium">Ключевые слова</th>
+                  <th className="px-3 py-2 text-right font-medium">Действия</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {bankCategoryRulesSettings.rules.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                      Правила ещё не добавлены.
+                    </td>
+                  </tr>
+                ) : (
+                  bankCategoryRulesSettings.rules.map((rule) => {
+                    const ruleCategoryOptions = categoryDictionaryOptions.filter(
+                      (option) => option.paymentType === rule.paymentType,
+                    );
+                    return (
+                      <tr key={rule.id} className="align-top">
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={rule.enabled}
+                            onChange={(event) => updateBankCategoryRule(rule.id, { enabled: event.target.checked })}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            aria-label={`Включить правило ${rule.categoryName || rule.id}`}
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={rule.paymentType}
+                            onChange={(event) =>
+                              updateBankCategoryRule(rule.id, { paymentType: event.target.value as PaymentKind })
+                            }
+                            className="w-32 rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700">
+                            <option value="Income">Приход</option>
+                            <option value="Expense">Расход</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            value={rule.categoryName}
+                            onChange={(event) => updateBankCategoryRule(rule.id, { categoryName: event.target.value })}
+                            placeholder="Например, Хостинг"
+                            className="w-52 rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={rule.incomeTypeId ?? ''}
+                            onChange={(event) =>
+                              updateBankCategoryRule(rule.id, {
+                                incomeTypeId: event.target.value ? Number(event.target.value) : null,
+                              })
+                            }
+                            className="w-56 rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700">
+                            <option value="">Только текстовая категория</option>
+                            {ruleCategoryOptions.map((option) => (
+                              <option key={`${option.paymentType}-${option.id}`} value={option.id}>
+                                {option.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            value={rule.keywords}
+                            onChange={(event) => updateBankCategoryRule(rule.id, { keywords: event.target.value })}
+                            placeholder="хостинг; cloud; vps"
+                            className="w-full min-w-64 rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => removeBankCategoryRule(rule.id)}
+                            aria-label={`Удалить правило ${rule.categoryName || rule.id}`}
+                            className="rounded-md border border-rose-200 p-2 text-rose-600 hover:bg-rose-50">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

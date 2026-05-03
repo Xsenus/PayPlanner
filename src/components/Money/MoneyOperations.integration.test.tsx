@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -2285,6 +2285,60 @@ describe('MoneyOperations integration', () => {
     await waitFor(() => expect(runBankStatementAutoImportMock).toHaveBeenCalled());
     expect(await screen.findByText(/Проверено файлов: 1/)).toBeTruthy();
     expect(await screen.findByText('statement.csv: +1 / 0')).toBeTruthy();
+  }, 15000);
+
+  it('loads and saves bank statement recognition rules', async () => {
+    const user = userEvent.setup();
+    getUserSettingMock.mockImplementation(async (key: string) => {
+      if (key === 'money.bankStatement.categoryRules') {
+        return {
+          key,
+          value: JSON.stringify({
+            rules: [
+              {
+                id: 'hosting',
+                enabled: true,
+                categoryName: 'Облачная инфраструктура',
+                paymentType: 'Expense',
+                keywords: 'хостинг; cloud',
+                incomeTypeId: 2,
+              },
+            ],
+          }),
+          updatedAt: '2026-04-21T08:00:00Z',
+        };
+      }
+      throw new Error('not found');
+    });
+
+    render(<MoneyOperations source="Bank" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Открыть правила распознавания выписки' }));
+    const panel = await screen.findByText('Правила распознавания выписки');
+    const rulesPanel = panel.closest('div.rounded-xl') as HTMLElement;
+    expect(screen.getByDisplayValue('Облачная инфраструктура')).toBeTruthy();
+    const keywordsInput = screen.getByDisplayValue('хостинг; cloud');
+    await user.clear(keywordsInput);
+    await user.type(keywordsInput, 'хостинг; cloud; vps');
+    await user.click(within(rulesPanel).getByRole('button', { name: /Сохранить/ }));
+
+    await waitFor(() => expect(upsertUserSettingMock).toHaveBeenCalled());
+    expect(upsertUserSettingMock).toHaveBeenCalledWith(
+      'money.bankStatement.categoryRules',
+      JSON.stringify({
+        rules: [
+          {
+            id: 'hosting',
+            enabled: true,
+            categoryName: 'Облачная инфраструктура',
+            paymentType: 'Expense',
+            keywords: 'хостинг; cloud; vps',
+            incomeTypeId: 2,
+          },
+        ],
+      }),
+    );
+    expect(toastSuccessMock).toHaveBeenCalledWith('Правила распознавания выписки сохранены.', 'Выписка банка');
   }, 15000);
 
   it('shows bank import journal details and rolls back an import batch', async () => {

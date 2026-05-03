@@ -12,6 +12,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace PayPlanner.Api.Controllers;
@@ -24,6 +25,7 @@ public class MoneyOperationsController : ControllerBase
     private const long MaxStatementFileSizeBytes = 10L * 1024L * 1024L;
     private const int MaxAutoImportStatementFiles = 20;
     private const string BankStatementAutoImportSettingKey = "money.bankStatement.autoImport";
+    private const string BankStatementCategoryRulesSettingKey = "money.bankStatement.categoryRules";
     private const string CashSourceToken = "\u043A\u0430\u0441";
     private const string CashSourceTitleToken = "\u041A\u0430\u0441";
     private const string CashSourceAlternativeToken = "\u043D\u0430\u043B\u0438\u0447";
@@ -123,6 +125,7 @@ public class MoneyOperationsController : ControllerBase
     private readonly ILogger<MoneyOperationsController> _logger;
     private readonly IInvoiceDocumentPdfService? _pdfService;
     private static readonly JsonSerializerOptions BankStatementAutoImportJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions BankStatementCategoryRulesJsonOptions = CreateBankStatementCategoryRulesJsonOptions();
 
     public MoneyOperationsController(
         PaymentContext db,
@@ -1697,6 +1700,7 @@ public class MoneyOperationsController : ControllerBase
         var statementBytes = memory.ToArray();
         var fileHash = Convert.ToHexString(SHA256.HashData(statementBytes)).ToLowerInvariant();
         var text = DecodeStatementBytes(statementBytes);
+        var manualCategoryRules = await GetBankStatementManualCategoryRulesAsync(GetCurrentUserId(), ct);
         if (LooksLikeClientBankExchange(text))
         {
             var clientBankResult = ParseClientBankExchange(text);
@@ -1706,6 +1710,7 @@ public class MoneyOperationsController : ControllerBase
                 file.FileName,
                 statementBytes.Length,
                 fileHash,
+                manualCategoryRules,
                 ct));
         }
 
@@ -1787,7 +1792,7 @@ public class MoneyOperationsController : ControllerBase
             importItems.Add(new BankStatementImportItem(rowNumber, date.Date, direction, amount, account, counterparty, purpose, documentNumber));
         }
 
-        return Ok(await ImportBankStatementItemsAsync(importItems, result, file.FileName, statementBytes.Length, fileHash, ct));
+        return Ok(await ImportBankStatementItemsAsync(importItems, result, file.FileName, statementBytes.Length, fileHash, manualCategoryRules, ct));
     }
 
     [HttpPost("bank-statement/auto-import/run")]
@@ -2123,6 +2128,7 @@ public class MoneyOperationsController : ControllerBase
             $"{batch.FileName} (повторная обработка)",
             batch.FileSize,
             $"{batch.FileHash}:reprocess:{batch.Id}:{DateTime.UtcNow:O}",
+            await GetBankStatementManualCategoryRulesAsync(GetCurrentUserId(), ct),
             ct));
     }
 
@@ -2795,6 +2801,13 @@ public class MoneyOperationsController : ControllerBase
     private static string Html(string value)
         => WebUtility.HtmlEncode(value);
 
+    private static JsonSerializerOptions CreateBankStatementCategoryRulesJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
+
     private static MoneyOperationSourceSummaryDto MapSourceSummaryRow(MoneyOperationSourceSummaryQueryRow row)
         => new()
         {
@@ -2862,6 +2875,7 @@ public class MoneyOperationsController : ControllerBase
         string fileName,
         long fileSize,
         string fileHash,
+        IReadOnlyCollection<BankStatementCategoryRule> manualCategoryRules,
         CancellationToken ct)
     {
         if (items.Count == 0)
@@ -2999,9 +3013,9 @@ public class MoneyOperationsController : ControllerBase
                 continue;
             }
 
-            var incomeTypeMatch = ResolveBankStatementIncomeType(item, incomeTypeCandidates);
+            var incomeTypeMatch = ResolveBankStatementIncomeType(item, incomeTypeCandidates, manualCategoryRules);
             var categoryName = incomeTypeMatch is null
-                ? ResolveBankStatementCategoryName(item)
+                ? ResolveBankStatementCategoryName(item, manualCategoryRules)
                 : null;
             var operation = new MoneyOperation
             {
@@ -3150,6 +3164,74 @@ public class MoneyOperationsController : ControllerBase
         await _db.SaveChangesAsync(ct);
     }
 
+    private async Task<IReadOnlyList<BankStatementCategoryRule>> GetBankStatementManualCategoryRulesAsync(
+        int? userId,
+        CancellationToken ct)
+    {
+        if (!userId.HasValue)
+        {
+            return [];
+        }
+
+        var value = await _db.UserSettings
+            .AsNoTracking()
+            .Where(setting => setting.UserId == userId.Value && setting.Key == BankStatementCategoryRulesSettingKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        try
+        {
+            var settings = JsonSerializer.Deserialize<BankStatementManualCategoryRulesSettings>(
+                value,
+                BankStatementCategoryRulesJsonOptions);
+            return settings?.Rules
+                .Where(rule => rule.Enabled)
+                .Select(TryCreateManualBankStatementCategoryRule)
+                .Where(rule => rule is not null)
+                .Cast<BankStatementCategoryRule>()
+                .Take(100)
+                .ToList()
+                ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static BankStatementCategoryRule? TryCreateManualBankStatementCategoryRule(
+        BankStatementManualCategoryRule rule)
+    {
+        if (string.IsNullOrWhiteSpace(rule.CategoryName) || string.IsNullOrWhiteSpace(rule.Keywords))
+        {
+            return null;
+        }
+
+        var paymentType = rule.PaymentType == PaymentType.Expense ? PaymentType.Expense : PaymentType.Income;
+        var keywords = rule.Keywords
+            .Split(new[] { ';', ',', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(keyword => NormalizeNameForMatch(keyword).Length >= 3)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToArray();
+        if (keywords.Length == 0)
+        {
+            return null;
+        }
+
+        var incomeTypeId = rule.IncomeTypeId.GetValueOrDefault() > 0 ? rule.IncomeTypeId : null;
+        return new BankStatementCategoryRule(
+            rule.CategoryName.Trim(),
+            paymentType,
+            keywords,
+            incomeTypeId,
+            IsManual: true);
+    }
+
     private static IReadOnlyList<string> EnumerateBankStatementAutoImportFiles(string folderPath, string fileMask)
     {
         var masks = (string.IsNullOrWhiteSpace(fileMask) ? "*.csv;*.txt;*.tsv;*.1c" : fileMask)
@@ -3185,7 +3267,7 @@ public class MoneyOperationsController : ControllerBase
     }
 
     private int? GetCurrentUserId()
-        => int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
+        => int.TryParse(User?.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
 
     private static BankStatementImportRow CreateImportRow(
         BankStatementImportBatch batch,
@@ -3543,7 +3625,8 @@ public class MoneyOperationsController : ControllerBase
 
     private static BankStatementIncomeTypeCandidate? ResolveBankStatementIncomeType(
         BankStatementImportItem item,
-        IReadOnlyCollection<BankStatementIncomeTypeCandidate> candidates)
+        IReadOnlyCollection<BankStatementIncomeTypeCandidate> candidates,
+        IReadOnlyCollection<BankStatementCategoryRule> manualCategoryRules)
     {
         var paymentType = item.Direction == MoneyOperationDirection.Income
             ? PaymentType.Income
@@ -3554,7 +3637,7 @@ public class MoneyOperationsController : ControllerBase
             return null;
         }
 
-        var categoryRule = ResolveBankStatementCategoryRule(paymentType, haystack);
+        var categoryRule = ResolveBankStatementCategoryRule(paymentType, haystack, manualCategoryRules);
         var matches = candidates
             .Where(candidate => candidate.PaymentType == paymentType)
             .Select(candidate => new
@@ -3577,24 +3660,30 @@ public class MoneyOperationsController : ControllerBase
             : null;
     }
 
-    private static string ResolveBankStatementCategoryName(BankStatementImportItem item)
+    private static string ResolveBankStatementCategoryName(
+        BankStatementImportItem item,
+        IReadOnlyCollection<BankStatementCategoryRule> manualCategoryRules)
     {
         var paymentType = item.Direction == MoneyOperationDirection.Income
             ? PaymentType.Income
             : PaymentType.Expense;
         var haystack = BuildBankStatementMatchHaystack(item);
-        return ResolveBankStatementCategoryRule(paymentType, haystack)?.CategoryName
+        return ResolveBankStatementCategoryRule(paymentType, haystack, manualCategoryRules)?.CategoryName
                ?? (item.Direction == MoneyOperationDirection.Income ? "Поступление по выписке" : "Списание по выписке");
     }
 
-    private static BankStatementCategoryRule? ResolveBankStatementCategoryRule(PaymentType paymentType, string haystack)
+    private static BankStatementCategoryRule? ResolveBankStatementCategoryRule(
+        PaymentType paymentType,
+        string haystack,
+        IReadOnlyCollection<BankStatementCategoryRule> manualCategoryRules)
     {
         if (haystack.Length < 3)
         {
             return null;
         }
 
-        var matches = BankStatementCategoryRules
+        var matches = manualCategoryRules
+            .Concat(BankStatementCategoryRules)
             .Where(rule => rule.PaymentType == paymentType)
             .Select(rule => new
             {
@@ -3603,6 +3692,7 @@ public class MoneyOperationsController : ControllerBase
             })
             .Where(match => match.Score > 0)
             .OrderByDescending(match => match.Score)
+            .ThenByDescending(match => match.Rule.IsManual)
             .ThenBy(match => match.Rule.CategoryName)
             .ToList();
 
@@ -3620,6 +3710,11 @@ public class MoneyOperationsController : ControllerBase
         if (categoryRule is null)
         {
             return directScore;
+        }
+
+        if (categoryRule.IncomeTypeId == candidate.Id)
+        {
+            return Math.Max(directScore, 2200);
         }
 
         var categoryScore = ScoreBankStatementIncomeType(candidate.Name, NormalizeNameForMatch(categoryRule.CategoryName));
@@ -3959,7 +4054,9 @@ public class MoneyOperationsController : ControllerBase
     private sealed record BankStatementCategoryRule(
         string CategoryName,
         PaymentType PaymentType,
-        IReadOnlyCollection<string> Keywords);
+        IReadOnlyCollection<string> Keywords,
+        int? IncomeTypeId = null,
+        bool IsManual = false);
 
     private sealed class BankStatementAutoImportSettings
     {
@@ -3967,6 +4064,20 @@ public class MoneyOperationsController : ControllerBase
         public string? FolderPath { get; set; }
         public string FileMask { get; set; } = "*.csv;*.txt;*.1c";
         public DateTime? LastCheckedAt { get; set; }
+    }
+
+    private sealed class BankStatementManualCategoryRulesSettings
+    {
+        public List<BankStatementManualCategoryRule> Rules { get; set; } = [];
+    }
+
+    private sealed class BankStatementManualCategoryRule
+    {
+        public bool Enabled { get; set; } = true;
+        public string CategoryName { get; set; } = string.Empty;
+        public PaymentType PaymentType { get; set; } = PaymentType.Income;
+        public string Keywords { get; set; } = string.Empty;
+        public int? IncomeTypeId { get; set; }
     }
 
     private sealed record InvoiceLinkValidationResult(Invoice? Invoice, string? Error);

@@ -4217,6 +4217,67 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task ImportBankStatement_UsesManualUserRulesForCategoryAndIncomeType()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = "Bank rules role",
+            Description = "Role for bank rules test",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var user = new User
+        {
+            Email = "bank-rules@example.test",
+            PasswordHash = "hash",
+            FullName = "Настройщик банка",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var hostingType = new IncomeType
+        {
+            Name = "Облачная инфраструктура",
+            PaymentType = PaymentType.Expense,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.IncomeTypes.Add(hostingType);
+        await db.SaveChangesAsync();
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = "money.bankStatement.categoryRules",
+            Value = $$"""
+            {"rules":[{"enabled":true,"categoryName":"Облачная инфраструктура","paymentType":"Expense","keywords":"хостинг; cloud; vps","incomeTypeId":{{hostingType.Id}}}]}
+            """,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user.Id);
+
+        var action = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Поступило;Списано;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;;3900;ООО Датацентр;Оплата cloud VPS и хостинг за май;701\n",
+                "statement.csv"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        Assert.Equal(1, result.Created);
+
+        var operation = await db.MoneyOperations.SingleAsync();
+        Assert.Equal(hostingType.Id, operation.IncomeTypeId);
+        Assert.Null(operation.CategoryName);
+    }
+
+    [Fact]
     public async Task MoneyAccount_CreateOperation_BindsAccountAndFiltersById()
     {
         await using var db = await CreateContextAsync();
