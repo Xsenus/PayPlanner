@@ -1062,6 +1062,32 @@ export interface PaymentPurposeReport {
   purposes: PaymentPurposeReportItem[];
 }
 
+export interface MatchStatusReportItem {
+  status: MoneyOperationMatchStatus;
+  statusLabel: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  totalAmount: number;
+  incomeCount: number;
+  expenseCount: number;
+  operationCount: number;
+  share: number;
+}
+
+export interface MatchStatusReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  operationCount: number;
+  matchedCount: number;
+  needsAttentionCount: number;
+  statuses: MatchStatusReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

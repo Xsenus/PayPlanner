@@ -2290,6 +2290,15 @@ export class ApiService {
     return this.request<PaymentPurposeReport>(`/reports/payment-purposes${q}`);
   }
 
+  async getMatchStatusReport(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<MatchStatusReport>(`/reports/match-statuses${q}`);
+  }
+
   /** Упрощённый вызов: сводка по клиенту. */
   async getClientSummaryStats(
     clientId: number,
@@ -2910,6 +2919,7 @@ import type {
   PaidInvoiceReport,
   PaymentOrderReport,
   PaymentPurposeReport,
+  MatchStatusReport,
   MoneyOperationAccountSummary,
   MoneyBalanceReconciliationResult,
   MoneyBalanceReconciliationRunResult,

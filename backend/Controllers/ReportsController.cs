@@ -349,6 +349,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("match-statuses")]
+    public async Task<ActionResult<MatchStatusReportDto>> MatchStatuses(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildMatchStatusReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -1567,6 +1590,98 @@ public class ReportsController : ControllerBase
         => string.IsNullOrWhiteSpace(purpose)
             ? "Без назначения"
             : purpose.Trim();
+
+    private async Task<MatchStatusReportDto> BuildMatchStatusReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var rows = await BuildFactQuery(from, to, source, null)
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                item.MatchStatus,
+            })
+            .ToListAsync(ct);
+
+        var incomeTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Income)
+            .Sum(item => item.Amount);
+        var expenseTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+            .Sum(item => item.Amount);
+        var turnoverTotal = incomeTotal + expenseTotal;
+
+        var statuses = rows
+            .GroupBy(item => item.MatchStatus)
+            .Select(group =>
+            {
+                var income = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.Amount);
+                var expense = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.Amount);
+                var totalAmount = income + expense;
+
+                return new MatchStatusReportItemDto
+                {
+                    Status = group.Key,
+                    StatusLabel = FormatMatchStatusLabel(group.Key),
+                    Income = income,
+                    Expense = expense,
+                    NetTotal = income - expense,
+                    TotalAmount = totalAmount,
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    OperationCount = group.Count(),
+                    Share = turnoverTotal > 0m
+                        ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderBy(item => MatchStatusSortOrder(item.Status))
+            .ThenByDescending(item => item.TotalAmount)
+            .ToList();
+
+        return new MatchStatusReportDto
+        {
+            From = from,
+            To = to,
+            Source = source,
+            IncomeTotal = incomeTotal,
+            ExpenseTotal = expenseTotal,
+            NetTotal = incomeTotal - expenseTotal,
+            OperationCount = rows.Count,
+            MatchedCount = rows.Count(item => item.MatchStatus == MoneyOperationMatchStatus.Matched),
+            NeedsAttentionCount = rows.Count(item =>
+                item.MatchStatus == MoneyOperationMatchStatus.None ||
+                item.MatchStatus == MoneyOperationMatchStatus.ClarificationRequired),
+            Statuses = statuses,
+        };
+    }
+
+    private static int MatchStatusSortOrder(MoneyOperationMatchStatus status)
+        => status switch
+        {
+            MoneyOperationMatchStatus.ClarificationRequired => 0,
+            MoneyOperationMatchStatus.None => 1,
+            MoneyOperationMatchStatus.Matched => 2,
+            MoneyOperationMatchStatus.Ignored => 3,
+            _ => 4,
+        };
+
+    private static string FormatMatchStatusLabel(MoneyOperationMatchStatus status)
+        => status switch
+        {
+            MoneyOperationMatchStatus.None => "Не сверено",
+            MoneyOperationMatchStatus.ClarificationRequired => "Требует уточнения",
+            MoneyOperationMatchStatus.Matched => "Сверено",
+            MoneyOperationMatchStatus.Ignored => "Исключено",
+            _ => status.ToString(),
+        };
 
     private sealed class CashFlowAccountQueryRow
     {
