@@ -1041,6 +1041,27 @@ export interface PaymentOrderReport {
   orders: PaymentOrderReportItem[];
 }
 
+export interface PaymentPurposeReportItem {
+  purpose: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  totalAmount: number;
+  incomeCount: number;
+  expenseCount: number;
+  share: number;
+}
+
+export interface PaymentPurposeReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  purposes: PaymentPurposeReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

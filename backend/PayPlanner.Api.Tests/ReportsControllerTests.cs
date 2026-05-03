@@ -790,6 +790,59 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task PaymentPurposes_GroupsFactOperationsByPurpose()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 8_000m, new DateTime(2026, 5, 1), "Основной банк", purpose: "Оплата услуг"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 2), "Основной банк", purpose: " оплата услуг "),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_500m, new DateTime(2026, 5, 3), "Касса", purpose: "Возврат"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 500m, new DateTime(2026, 5, 4), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", purpose: "Оплата услуг"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 6), "Основной банк", purpose: "Оплата услуг"));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.PaymentPurposes(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<PaymentPurposeReportDto>(ok.Value);
+        Assert.Equal(8_500m, report.IncomeTotal);
+        Assert.Equal(3_500m, report.ExpenseTotal);
+        Assert.Equal(5_000m, report.NetTotal);
+
+        Assert.Collection(
+            report.Purposes,
+            item =>
+            {
+                Assert.Equal("Оплата услуг", item.Purpose);
+                Assert.Equal(8_000m, item.Income);
+                Assert.Equal(2_000m, item.Expense);
+                Assert.Equal(6_000m, item.NetTotal);
+                Assert.Equal(10_000m, item.TotalAmount);
+                Assert.Equal(83.3m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("Возврат", item.Purpose);
+                Assert.Equal(0m, item.Income);
+                Assert.Equal(1_500m, item.Expense);
+                Assert.Equal(12.5m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("Без назначения", item.Purpose);
+                Assert.Equal(500m, item.Income);
+                Assert.Equal(0m, item.Expense);
+                Assert.Equal(4.2m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -811,7 +864,8 @@ public class ReportsControllerTests
         string? paidAccountName = null,
         string? paidInvoiceNumber = null,
         decimal? paidAmount = null,
-        string? paymentOrderNumber = null)
+        string? paymentOrderNumber = null,
+        string? purpose = null)
         => new()
         {
             Source = source,
@@ -835,6 +889,7 @@ public class ReportsControllerTests
             PaidInvoiceNumber = paidInvoiceNumber,
             PaidAmount = paidAmount,
             PaymentOrderNumber = paymentOrderNumber,
+            Purpose = purpose,
             Currency = "RUB",
             CreatedAt = DateTime.UtcNow,
         };
