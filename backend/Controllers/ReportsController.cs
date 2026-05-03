@@ -303,6 +303,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("payment-orders")]
+    public async Task<ActionResult<PaymentOrderReportDto>> PaymentOrders(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildPaymentOrderReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -1369,6 +1392,82 @@ public class ReportsController : ControllerBase
         => string.IsNullOrWhiteSpace(paidInvoiceNumber)
             ? "Без номера счета"
             : paidInvoiceNumber.Trim();
+
+    private async Task<PaymentOrderReportDto> BuildPaymentOrderReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var rows = await BuildFactQuery(from, to, source, null)
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                item.PaymentOrderNumber,
+            })
+            .ToListAsync(ct);
+
+        var incomeTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Income)
+            .Sum(item => item.Amount);
+        var expenseTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+            .Sum(item => item.Amount);
+        var turnoverTotal = incomeTotal + expenseTotal;
+
+        var orders = rows
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                PaymentOrderNumber = ResolvePaymentOrderNumber(item.PaymentOrderNumber),
+            })
+            .GroupBy(item => item.PaymentOrderNumber, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var income = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.Amount);
+                var expense = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.Amount);
+                var totalAmount = income + expense;
+
+                return new PaymentOrderReportItemDto
+                {
+                    PaymentOrderNumber = group.First().PaymentOrderNumber,
+                    Income = income,
+                    Expense = expense,
+                    NetTotal = income - expense,
+                    TotalAmount = totalAmount,
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    Share = turnoverTotal > 0m
+                        ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderByDescending(item => item.TotalAmount)
+            .ThenBy(item => item.PaymentOrderNumber)
+            .ToList();
+
+        return new PaymentOrderReportDto
+        {
+            From = from,
+            To = to,
+            Source = source,
+            IncomeTotal = incomeTotal,
+            ExpenseTotal = expenseTotal,
+            NetTotal = incomeTotal - expenseTotal,
+            Orders = orders,
+        };
+    }
+
+    private static string ResolvePaymentOrderNumber(string? paymentOrderNumber)
+        => string.IsNullOrWhiteSpace(paymentOrderNumber)
+            ? "Без номера платежки"
+            : paymentOrderNumber.Trim();
 
     private sealed class CashFlowAccountQueryRow
     {

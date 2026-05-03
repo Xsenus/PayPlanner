@@ -1020,6 +1020,27 @@ export interface PaidInvoiceReport {
   invoices: PaidInvoiceReportItem[];
 }
 
+export interface PaymentOrderReportItem {
+  paymentOrderNumber: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  totalAmount: number;
+  incomeCount: number;
+  expenseCount: number;
+  share: number;
+}
+
+export interface PaymentOrderReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  orders: PaymentOrderReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;
