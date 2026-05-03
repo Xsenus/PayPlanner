@@ -771,6 +771,23 @@ export interface CashFlowReport {
   days: CashFlowDay[];
 }
 
+export interface MoneyCategoryReportItem {
+  categoryName: string;
+  amount: number;
+  count: number;
+  share: number;
+}
+
+export interface MoneyCategoryReport {
+  from: string;
+  to: string;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  income: MoneyCategoryReportItem[];
+  expense: MoneyCategoryReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

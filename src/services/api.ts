@@ -2173,6 +2173,15 @@ export class ApiService {
     return this.request<CashFlowReport>(`/reports/cash-flow${q}`);
   }
 
+  async getMoneyCategoryReport(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<MoneyCategoryReport>(`/reports/categories${q}`);
+  }
+
   /** Упрощённый вызов: сводка по клиенту. */
   async getClientSummaryStats(
     clientId: number,
@@ -2780,6 +2789,7 @@ import type {
   MoneyOperationDirection,
   MoneyOperationSource,
   CashFlowReport,
+  MoneyCategoryReport,
   MoneyOperationAccountSummary,
   MoneyBalanceReconciliationResult,
   MoneyBalanceReconciliationRunResult,

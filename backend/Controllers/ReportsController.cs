@@ -50,6 +50,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("categories")]
+    public async Task<ActionResult<MoneyCategoryReportDto>> Categories(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildCategoryReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -245,6 +268,86 @@ public class ReportsController : ControllerBase
         }
 
         return query;
+    }
+
+    private async Task<MoneyCategoryReportDto> BuildCategoryReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var query = BuildFactQuery(from, to, source, null)
+            .Include(item => item.IncomeType);
+
+        var rows = await query
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                IncomeTypeName = item.IncomeType != null ? item.IncomeType.Name : null,
+                item.CategoryName,
+            })
+            .ToListAsync(ct);
+
+        var incomeTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Income)
+            .Sum(item => item.Amount);
+        var expenseTotal = rows
+            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+            .Sum(item => item.Amount);
+
+        return new MoneyCategoryReportDto
+        {
+            From = from,
+            To = to,
+            IncomeTotal = incomeTotal,
+            ExpenseTotal = expenseTotal,
+            NetTotal = incomeTotal - expenseTotal,
+            Income = BuildCategoryItems(
+                rows.Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Select(item => (item.Amount, CategoryName: ResolveCategoryName(item.IncomeTypeName, item.CategoryName))),
+                incomeTotal),
+            Expense = BuildCategoryItems(
+                rows.Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Select(item => (item.Amount, CategoryName: ResolveCategoryName(item.IncomeTypeName, item.CategoryName))),
+                expenseTotal),
+        };
+    }
+
+    private static List<MoneyCategoryReportItemDto> BuildCategoryItems(
+        IEnumerable<(decimal Amount, string CategoryName)> rows,
+        decimal total)
+        => rows
+            .GroupBy(item => item.CategoryName, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var amount = group.Sum(item => item.Amount);
+
+                return new MoneyCategoryReportItemDto
+                {
+                    CategoryName = group.First().CategoryName,
+                    Amount = amount,
+                    Count = group.Count(),
+                    Share = total > 0m ? Math.Round(amount / total * 100m, 1, MidpointRounding.AwayFromZero) : 0m,
+                };
+            })
+            .OrderByDescending(item => item.Amount)
+            .ThenBy(item => item.CategoryName)
+            .ToList();
+
+    private static string ResolveCategoryName(string? incomeTypeName, string? categoryName)
+    {
+        if (!string.IsNullOrWhiteSpace(incomeTypeName))
+        {
+            return incomeTypeName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(categoryName))
+        {
+            return categoryName.Trim();
+        }
+
+        return "Без статьи";
     }
 
     private sealed class CashFlowAccountQueryRow

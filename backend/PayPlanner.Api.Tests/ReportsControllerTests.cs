@@ -109,19 +109,99 @@ public class ReportsControllerTests
         Assert.Equal("Основной банк", account.AccountName);
     }
 
+    [Fact]
+    public async Task Categories_GroupsFactOperationsByIncomeTypeAndCategoryName()
+    {
+        await using var db = await CreateContextAsync();
+        var services = new IncomeType
+        {
+            Name = "Услуги",
+            PaymentType = PaymentType.Income,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var taxes = new IncomeType
+        {
+            Name = "Налоги",
+            PaymentType = PaymentType.Expense,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.IncomeTypes.AddRange(services, taxes);
+        await db.SaveChangesAsync();
+
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 10_000m, new DateTime(2026, 5, 1), "Основной банк", services.Id),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 5_000m, new DateTime(2026, 5, 2), "Основной банк", services.Id),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 3), "Касса", categoryName: "Розница"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 4_000m, new DateTime(2026, 5, 4), "Основной банк", taxes.Id),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 5), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", services.Id));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Categories(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<MoneyCategoryReportDto>(ok.Value);
+        Assert.Equal(18_000m, report.IncomeTotal);
+        Assert.Equal(5_000m, report.ExpenseTotal);
+        Assert.Equal(13_000m, report.NetTotal);
+
+        Assert.Collection(
+            report.Income,
+            item =>
+            {
+                Assert.Equal("Услуги", item.CategoryName);
+                Assert.Equal(15_000m, item.Amount);
+                Assert.Equal(2, item.Count);
+                Assert.Equal(83.3m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("Розница", item.CategoryName);
+                Assert.Equal(3_000m, item.Amount);
+                Assert.Equal(1, item.Count);
+                Assert.Equal(16.7m, item.Share);
+            });
+
+        Assert.Collection(
+            report.Expense,
+            item =>
+            {
+                Assert.Equal("Налоги", item.CategoryName);
+                Assert.Equal(4_000m, item.Amount);
+                Assert.Equal(80.0m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("Без статьи", item.CategoryName);
+                Assert.Equal(1_000m, item.Amount);
+                Assert.Equal(20.0m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
         MoneyOperationAccountingType accountingType,
         decimal amount,
         DateTime date,
-        string accountName)
+        string accountName,
+        int? incomeTypeId = null,
+        string? categoryName = null)
         => new()
         {
             Source = source,
             Direction = direction,
             AccountingType = accountingType,
             AccountName = accountName,
+            IncomeTypeId = incomeTypeId,
+            CategoryName = categoryName,
             Amount = amount,
             Date = date,
             Currency = "RUB",
