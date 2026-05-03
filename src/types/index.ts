@@ -929,6 +929,31 @@ export interface PlanFactReport {
   days: PlanFactDay[];
 }
 
+export interface AdvanceReportItem {
+  counterpartyName: string;
+  incomeTotal: number;
+  expenseTotal: number;
+  recognizedTotal: number;
+  unrecognizedTotal: number;
+  incomeCount: number;
+  expenseCount: number;
+  recognizedCount: number;
+  unrecognizedCount: number;
+}
+
+export interface AdvanceReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  recognizedTotal: number;
+  unrecognizedTotal: number;
+  recognizedCount: number;
+  unrecognizedCount: number;
+  counterparties: AdvanceReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

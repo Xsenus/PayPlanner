@@ -515,6 +515,62 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task Advances_GroupsAdvanceFactOperationsByCounterpartyAndRecognition()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 10_000m, new DateTime(2026, 5, 1), "Основной банк", counterpartyName: "ООО Ромашка", isAdvancePayment: true, recognitionDate: new DateTime(2026, 5, 10)),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 6_000m, new DateTime(2026, 5, 2), "Основной банк", counterpartyName: "ООО Ромашка", isAdvancePayment: true),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 4_000m, new DateTime(2026, 5, 3), "Основной банк", counterpartyName: "ИП Петров", isAdvancePayment: true, recognitionDate: new DateTime(2026, 6, 1)),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 4), "Касса", isAdvancePayment: true),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", counterpartyName: "ООО Ромашка", isAdvancePayment: true),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 7_000m, new DateTime(2026, 5, 6), "Основной банк", counterpartyName: "ООО Ромашка"));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Advances(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<AdvanceReportDto>(ok.Value);
+        Assert.Equal(19_000m, report.IncomeTotal);
+        Assert.Equal(4_000m, report.ExpenseTotal);
+        Assert.Equal(10_000m, report.RecognizedTotal);
+        Assert.Equal(13_000m, report.UnrecognizedTotal);
+        Assert.Equal(1, report.RecognizedCount);
+        Assert.Equal(3, report.UnrecognizedCount);
+
+        Assert.Collection(
+            report.Counterparties,
+            item =>
+            {
+                Assert.Equal("ООО Ромашка", item.CounterpartyName);
+                Assert.Equal(16_000m, item.IncomeTotal);
+                Assert.Equal(0m, item.ExpenseTotal);
+                Assert.Equal(10_000m, item.RecognizedTotal);
+                Assert.Equal(6_000m, item.UnrecognizedTotal);
+                Assert.Equal(2, item.IncomeCount);
+            },
+            item =>
+            {
+                Assert.Equal("ИП Петров", item.CounterpartyName);
+                Assert.Equal(0m, item.IncomeTotal);
+                Assert.Equal(4_000m, item.ExpenseTotal);
+                Assert.Equal(0m, item.RecognizedTotal);
+                Assert.Equal(4_000m, item.UnrecognizedTotal);
+            },
+            item =>
+            {
+                Assert.Equal("Без контрагента", item.CounterpartyName);
+                Assert.Equal(3_000m, item.IncomeTotal);
+                Assert.Equal(3_000m, item.UnrecognizedTotal);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -529,7 +585,9 @@ public class ReportsControllerTests
         string? directionName = null,
         string? salesPointName = null,
         decimal? vatRate = null,
-        decimal? vatAmount = null)
+        decimal? vatAmount = null,
+        bool isAdvancePayment = false,
+        DateTime? recognitionDate = null)
         => new()
         {
             Source = source,
@@ -546,6 +604,8 @@ public class ReportsControllerTests
             VatAmount = vatAmount,
             Amount = amount,
             Date = date,
+            RecognitionDate = recognitionDate,
+            IsAdvancePayment = isAdvancePayment,
             Currency = "RUB",
             CreatedAt = DateTime.UtcNow,
         };

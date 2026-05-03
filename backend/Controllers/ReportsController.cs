@@ -211,6 +211,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("advances")]
+    public async Task<ActionResult<AdvanceReportDto>> Advances(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildAdvanceReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -969,6 +992,82 @@ public class ReportsController : ControllerBase
 
     private static decimal CalculatePercent(decimal value, decimal total)
         => total > 0m ? Math.Round(value / total * 100m, 1, MidpointRounding.AwayFromZero) : 0m;
+
+    private async Task<AdvanceReportDto> BuildAdvanceReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var rows = await BuildFactQuery(from, to, source, null)
+            .Where(item => item.IsAdvancePayment)
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                item.CounterpartyName,
+                item.RecognitionDate,
+            })
+            .ToListAsync(ct);
+
+        var enriched = rows
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                CounterpartyName = ResolveCounterpartyName(item.CounterpartyName),
+                IsRecognized = item.RecognitionDate.HasValue && item.RecognitionDate.Value.Date <= to,
+            })
+            .ToList();
+
+        var counterparties = enriched
+            .GroupBy(item => item.CounterpartyName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new AdvanceReportItemDto
+            {
+                CounterpartyName = group.First().CounterpartyName,
+                IncomeTotal = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.Amount),
+                ExpenseTotal = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.Amount),
+                RecognizedTotal = group
+                    .Where(item => item.IsRecognized)
+                    .Sum(item => item.Amount),
+                UnrecognizedTotal = group
+                    .Where(item => !item.IsRecognized)
+                    .Sum(item => item.Amount),
+                IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                RecognizedCount = group.Count(item => item.IsRecognized),
+                UnrecognizedCount = group.Count(item => !item.IsRecognized),
+            })
+            .OrderByDescending(item => item.IncomeTotal + item.ExpenseTotal)
+            .ThenBy(item => item.CounterpartyName)
+            .ToList();
+
+        return new AdvanceReportDto
+        {
+            From = from,
+            To = to,
+            Source = source,
+            IncomeTotal = enriched
+                .Where(item => item.Direction == MoneyOperationDirection.Income)
+                .Sum(item => item.Amount),
+            ExpenseTotal = enriched
+                .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                .Sum(item => item.Amount),
+            RecognizedTotal = enriched
+                .Where(item => item.IsRecognized)
+                .Sum(item => item.Amount),
+            UnrecognizedTotal = enriched
+                .Where(item => !item.IsRecognized)
+                .Sum(item => item.Amount),
+            RecognizedCount = enriched.Count(item => item.IsRecognized),
+            UnrecognizedCount = enriched.Count(item => !item.IsRecognized),
+            Counterparties = counterparties,
+        };
+    }
 
     private sealed class CashFlowAccountQueryRow
     {

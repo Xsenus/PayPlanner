@@ -378,4 +378,47 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('source=Bank');
   });
+
+  it('loads advance report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      source: 'Bank',
+      incomeTotal: 16000,
+      expenseTotal: 4000,
+      recognizedTotal: 10000,
+      unrecognizedTotal: 10000,
+      recognizedCount: 1,
+      unrecognizedCount: 2,
+      counterparties: [{
+        counterpartyName: 'ООО Ромашка',
+        incomeTotal: 16000,
+        expenseTotal: 0,
+        recognizedTotal: 10000,
+        unrecognizedTotal: 6000,
+        incomeCount: 2,
+        expenseCount: 0,
+        recognizedCount: 1,
+        unrecognizedCount: 1,
+      }],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getAdvanceReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+      source: 'Bank',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/advances?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('source=Bank');
+  });
 });

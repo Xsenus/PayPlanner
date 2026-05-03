@@ -2236,6 +2236,15 @@ export class ApiService {
     return this.request<PlanFactReport>(`/reports/plan-fact${q}`);
   }
 
+  async getAdvanceReport(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<AdvanceReport>(`/reports/advances${q}`);
+  }
+
   /** Упрощённый вызов: сводка по клиенту. */
   async getClientSummaryStats(
     clientId: number,
@@ -2850,6 +2859,7 @@ import type {
   SalesPointReport,
   VatReport,
   PlanFactReport,
+  AdvanceReport,
   MoneyOperationAccountSummary,
   MoneyBalanceReconciliationResult,
   MoneyBalanceReconciliationRunResult,
