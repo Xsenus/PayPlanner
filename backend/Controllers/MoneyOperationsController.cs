@@ -39,6 +39,85 @@ public class MoneyOperationsController : ControllerBase
     private const string EMoneySourceYuMoneyToken = "\u042EMoney";
     private const string EMoneySourceYooMoneyToken = "YooMoney";
     private const string EMoneySourceYandexToken = "\u042F\u043D\u0434\u0435\u043A\u0441";
+    private static readonly BankStatementCategoryRule[] BankStatementCategoryRules =
+    [
+        new("Оплата от клиентов", PaymentType.Income,
+        [
+            "оплата по счету",
+            "оплата услуг",
+            "за услуги",
+            "по договору оказания",
+            "поступление от клиента",
+            "оплата от покупателя",
+        ]),
+        new("Возврат от поставщика", PaymentType.Income,
+        [
+            "возврат от поставщика",
+            "возврат оплаты",
+            "возврат денежных средств",
+            "возврат переплаты",
+        ]),
+        new("Эквайринг", PaymentType.Income,
+        [
+            "эквайринг",
+            "поступление по эквайрингу",
+            "зачисление по терминалу",
+        ]),
+        new("Банковская комиссия", PaymentType.Expense,
+        [
+            "банковская комиссия",
+            "комиссия банка",
+            "комиссия за",
+            "расчетно кассов",
+            "рко",
+            "обслуживание счета",
+            "эквайринг",
+        ]),
+        new("Налоги и сборы", PaymentType.Expense,
+        [
+            "налог",
+            "ндс",
+            "ндфл",
+            "усн",
+            "страховые взносы",
+            "взносы",
+            "пени",
+            "штраф",
+            "казначейство",
+            "фнс",
+        ]),
+        new("Зарплата", PaymentType.Expense,
+        [
+            "заработная плата",
+            "зарплата",
+            "аванс",
+            "реестр на выплату",
+            "по ведомости",
+        ]),
+        new("Аренда", PaymentType.Expense,
+        [
+            "арендная плата",
+            "аренда",
+            "аренда офиса",
+            "за помещение",
+        ]),
+        new("Расчеты с поставщиками", PaymentType.Expense,
+        [
+            "оплата поставщику",
+            "за материалы",
+            "за товары",
+            "по договору поставки",
+            "за оборудование",
+            "за услуги связи",
+        ]),
+        new("Возврат клиенту", PaymentType.Expense,
+        [
+            "возврат клиенту",
+            "возврат покупателю",
+            "возврат оплаты",
+            "возврат денежных средств",
+        ]),
+    ];
 
     private readonly PaymentContext _db;
     private readonly ILogger<MoneyOperationsController> _logger;
@@ -2921,6 +3000,9 @@ public class MoneyOperationsController : ControllerBase
             }
 
             var incomeTypeMatch = ResolveBankStatementIncomeType(item, incomeTypeCandidates);
+            var categoryName = incomeTypeMatch is null
+                ? ResolveBankStatementCategoryName(item)
+                : null;
             var operation = new MoneyOperation
             {
                 Source = MoneyOperationSource.Bank,
@@ -2929,9 +3011,7 @@ public class MoneyOperationsController : ControllerBase
                 AccountName = item.AccountName,
                 CounterpartyName = item.CounterpartyName,
                 IncomeTypeId = incomeTypeMatch?.Id,
-                CategoryName = incomeTypeMatch is null
-                    ? item.Direction == MoneyOperationDirection.Income ? "Поступление по выписке" : "Списание по выписке"
-                    : null,
+                CategoryName = categoryName,
                 Amount = item.Amount,
                 Currency = "RUB",
                 PaymentOrderNumber = item.DocumentNumber,
@@ -3468,19 +3548,19 @@ public class MoneyOperationsController : ControllerBase
         var paymentType = item.Direction == MoneyOperationDirection.Income
             ? PaymentType.Income
             : PaymentType.Expense;
-        var haystack = NormalizeNameForMatch(string.Join(' ', new[] { item.Purpose, item.CounterpartyName }
-            .Where(value => !string.IsNullOrWhiteSpace(value))));
+        var haystack = BuildBankStatementMatchHaystack(item);
         if (haystack.Length < 3)
         {
             return null;
         }
 
+        var categoryRule = ResolveBankStatementCategoryRule(paymentType, haystack);
         var matches = candidates
             .Where(candidate => candidate.PaymentType == paymentType)
             .Select(candidate => new
             {
                 Candidate = candidate,
-                Score = ScoreBankStatementIncomeType(candidate.Name, haystack),
+                Score = ScoreBankStatementIncomeTypeCandidate(candidate, haystack, categoryRule),
             })
             .Where(match => match.Score > 0)
             .OrderByDescending(match => match.Score)
@@ -3495,6 +3575,55 @@ public class MoneyOperationsController : ControllerBase
         return matches.Count == 1 || matches[0].Score > matches[1].Score
             ? matches[0].Candidate
             : null;
+    }
+
+    private static string ResolveBankStatementCategoryName(BankStatementImportItem item)
+    {
+        var paymentType = item.Direction == MoneyOperationDirection.Income
+            ? PaymentType.Income
+            : PaymentType.Expense;
+        var haystack = BuildBankStatementMatchHaystack(item);
+        return ResolveBankStatementCategoryRule(paymentType, haystack)?.CategoryName
+               ?? (item.Direction == MoneyOperationDirection.Income ? "Поступление по выписке" : "Списание по выписке");
+    }
+
+    private static BankStatementCategoryRule? ResolveBankStatementCategoryRule(PaymentType paymentType, string haystack)
+    {
+        if (haystack.Length < 3)
+        {
+            return null;
+        }
+
+        var matches = BankStatementCategoryRules
+            .Where(rule => rule.PaymentType == paymentType)
+            .Select(rule => new
+            {
+                Rule = rule,
+                Score = rule.Keywords.Max(keyword => ScoreBankStatementKeyword(keyword, haystack)),
+            })
+            .Where(match => match.Score > 0)
+            .OrderByDescending(match => match.Score)
+            .ThenBy(match => match.Rule.CategoryName)
+            .ToList();
+
+        return matches.Count == 0
+            ? null
+            : matches[0].Rule;
+    }
+
+    private static int ScoreBankStatementIncomeTypeCandidate(
+        BankStatementIncomeTypeCandidate candidate,
+        string haystack,
+        BankStatementCategoryRule? categoryRule)
+    {
+        var directScore = ScoreBankStatementIncomeType(candidate.Name, haystack);
+        if (categoryRule is null)
+        {
+            return directScore;
+        }
+
+        var categoryScore = ScoreBankStatementIncomeType(candidate.Name, NormalizeNameForMatch(categoryRule.CategoryName));
+        return Math.Max(directScore, categoryScore > 0 ? 800 + categoryScore : 0);
     }
 
     private static int ScoreBankStatementIncomeType(string name, string haystack)
@@ -3518,6 +3647,32 @@ public class MoneyOperationsController : ControllerBase
             ? 500 + words.Sum(word => word.Length)
             : 0;
     }
+
+    private static int ScoreBankStatementKeyword(string keyword, string haystack)
+    {
+        var normalizedKeyword = NormalizeNameForMatch(keyword);
+        if (normalizedKeyword.Length < 3)
+        {
+            return 0;
+        }
+
+        if (haystack.Contains(normalizedKeyword, StringComparison.Ordinal))
+        {
+            return 1000 + normalizedKeyword.Length;
+        }
+
+        var words = normalizedKeyword
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(word => word.Length >= 3)
+            .ToArray();
+        return words.Length > 1 && words.All(word => haystack.Contains(word, StringComparison.Ordinal))
+            ? 500 + words.Sum(word => word.Length)
+            : 0;
+    }
+
+    private static string BuildBankStatementMatchHaystack(BankStatementImportItem item)
+        => NormalizeNameForMatch(string.Join(' ', new[] { item.Purpose, item.CounterpartyName }
+            .Where(value => !string.IsNullOrWhiteSpace(value))));
 
     private static IEnumerable<string> ExtractInvoiceNumberTokens(string? text)
     {
@@ -3774,7 +3929,11 @@ public class MoneyOperationsController : ControllerBase
     }
 
     private static string NormalizeNameForMatch(string value)
-        => Regex.Replace(value.Trim().ToLowerInvariant(), @"\s+", " ", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+    {
+        var normalized = value.Trim().ToLowerInvariant().Replace('ё', 'е');
+        normalized = Regex.Replace(normalized, @"[^\p{L}\p{Nd}]+", " ", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+        return Regex.Replace(normalized, @"\s+", " ", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)).Trim();
+    }
 
     private sealed record BankStatementInvoiceCandidate(
         int PaymentId,
@@ -3796,6 +3955,11 @@ public class MoneyOperationsController : ControllerBase
         int Id,
         string Name,
         PaymentType PaymentType);
+
+    private sealed record BankStatementCategoryRule(
+        string CategoryName,
+        PaymentType PaymentType,
+        IReadOnlyCollection<string> Keywords);
 
     private sealed class BankStatementAutoImportSettings
     {
