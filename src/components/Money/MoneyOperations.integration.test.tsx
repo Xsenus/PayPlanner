@@ -863,6 +863,35 @@ describe('MoneyOperations integration', () => {
 
     expect(await screen.findByText('Изменилось')).toBeTruthy();
     expect(screen.getByTitle('Сохранено 02.05.2026. Изменение сумм: 200,00 ₽')).toBeTruthy();
+    expect(screen.getByText('Сумма изменилась')).toBeTruthy();
+  });
+
+  it('shows reconciliation notifications for bank mismatches', async () => {
+    operations = [
+      createOperation({
+        id: 1,
+        amount: 500,
+        accountName: '',
+        moneyAccountName: null,
+        purpose: '',
+        paymentOrderNumber: '101',
+      }),
+      createOperation({
+        id: 2,
+        amount: 500,
+        accountName: '',
+        moneyAccountName: null,
+        purpose: '',
+        paymentOrderNumber: '101',
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByText('Уведомления сверки')).toBeTruthy();
+    expect(screen.getByText('Неизвестный счет')).toBeTruthy();
+    expect(screen.getByText('Пустое назначение платежа')).toBeTruthy();
+    expect(screen.getByText('Дубликаты операций')).toBeTruthy();
   });
 
   it('labels icon-only journal controls', async () => {

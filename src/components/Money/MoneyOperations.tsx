@@ -410,6 +410,12 @@ type DailyBalanceCheckSource = Pick<
   MoneyOperationDailyBalance,
   'openingBalance' | 'income' | 'expense' | 'closingBalance' | 'incomeCount' | 'expenseCount' | 'isBalanced'
 >;
+type ReconciliationNotification = {
+  key: string;
+  title: string;
+  description: string;
+  tone: 'rose' | 'amber';
+};
 
 function getBalanceCheck(source: BalanceCheckSource) {
   const expectedEndBalance = Math.round((source.startBalance + source.income - source.expense) * 100) / 100;
@@ -2111,6 +2117,82 @@ export function MoneyOperations({
         .sort((left, right) => new Date(right.checkedAt).getTime() - new Date(left.checkedAt).getTime())[0] ?? null,
     [visibleBalanceReconciliationResults],
   );
+  const reconciliationNotifications = useMemo<ReconciliationNotification[]>(() => {
+    if (source === 'Total') {
+      return [];
+    }
+
+    const notifications: ReconciliationNotification[] = [];
+    const staleRows = visibleDailyBalances
+      .map((item) => {
+        const saved = balanceReconciliationByKey.get(`${item.source}-${item.accountName}-${toDateInputValue(item.date)}`);
+        const drift = getSavedBalanceDrift(item, saved);
+        return saved && drift && !drift.isActual ? { item, drift } : null;
+      })
+      .filter((item): item is { item: MoneyOperationDailyBalance; drift: { amountDifference: number; isActual: boolean } } =>
+        Boolean(item),
+      );
+
+    if (staleRows.length > 0) {
+      const totalDifference = staleRows.reduce((sum, row) => sum + row.drift.amountDifference, 0);
+      notifications.push({
+        key: 'amount',
+        title: 'Сумма изменилась',
+        description: `${staleRows.length} дн. требуют повторной сверки. Разница: ${formatMoney(totalDifference)} ₽.`,
+        tone: 'rose',
+      });
+    }
+
+    const operationsWithUnknownAccount = items.filter(
+      (item) => item.source === source && !item.accountName?.trim() && !item.moneyAccountName?.trim(),
+    );
+    if (operationsWithUnknownAccount.length > 0) {
+      notifications.push({
+        key: 'unknown-account',
+        title: 'Неизвестный счет',
+        description: `${operationsWithUnknownAccount.length} опер. без счета в текущей выборке.`,
+        tone: 'amber',
+      });
+    }
+
+    const operationsWithoutPurpose = items.filter(
+      (item) => item.source === source && item.source === 'Bank' && !item.purpose?.trim(),
+    );
+    if (operationsWithoutPurpose.length > 0) {
+      notifications.push({
+        key: 'purpose',
+        title: 'Пустое назначение платежа',
+        description: `${operationsWithoutPurpose.length} банк. опер. требуют назначения платежа.`,
+        tone: 'amber',
+      });
+    }
+
+    const duplicateGroups = new Map<string, MoneyOperation[]>();
+    items
+      .filter((item) => item.source === source && item.id > 0)
+      .forEach((item) => {
+        const duplicateKey = [
+          item.source,
+          item.direction,
+          toDateInputValue(item.date),
+          roundMoney(item.amount),
+          item.paymentOrderNumber?.trim() || item.counterpartyName?.trim() || '',
+          item.purpose?.trim() || '',
+        ].join('|');
+        duplicateGroups.set(duplicateKey, [...(duplicateGroups.get(duplicateKey) ?? []), item]);
+      });
+    const duplicateCount = Array.from(duplicateGroups.values()).filter((group) => group.length > 1).length;
+    if (duplicateCount > 0) {
+      notifications.push({
+        key: 'duplicate',
+        title: 'Дубликаты операций',
+        description: `${duplicateCount} похож. групп в текущей выборке.`,
+        tone: 'amber',
+      });
+    }
+
+    return notifications;
+  }, [balanceReconciliationByKey, items, source, visibleDailyBalances]);
   const selectedMoneyAccount = useMemo(
     () => (moneyAccountId === '' ? null : moneyAccounts.find((account) => account.id === moneyAccountId) ?? null),
     [moneyAccountId, moneyAccounts],
@@ -3772,6 +3854,29 @@ export function MoneyOperations({
           </button>
         </div>
       </div>
+
+      {source !== 'Total' && reconciliationNotifications.length > 0 && (
+        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            Уведомления сверки
+          </div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {reconciliationNotifications.map((notification) => (
+              <div
+                key={notification.key}
+                className={`rounded-lg border bg-white px-3 py-2 ${
+                  notification.tone === 'rose' ? 'border-rose-200' : 'border-amber-200'
+                }`}>
+                <div className={notification.tone === 'rose' ? 'text-sm font-semibold text-rose-700' : 'text-sm font-semibold text-amber-700'}>
+                  {notification.title}
+                </div>
+                <div className="mt-1 text-xs text-slate-600">{notification.description}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {source !== 'Total' && visibleDailyBalances.length > 0 && (
         <div className="mt-6 rounded-xl border border-slate-200 bg-white">
