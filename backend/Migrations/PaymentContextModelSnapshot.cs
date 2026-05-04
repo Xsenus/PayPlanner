@@ -1133,7 +1133,7 @@ namespace PayPlanner.Api.Migrations
 
                     b.ToTable("ClientCases", t =>
                         {
-                            t.HasCheckConstraint("CK_ClientCases_Owner", "(ClientId IS NOT NULL AND LegalEntityId IS NULL) OR (ClientId IS NULL AND LegalEntityId IS NOT NULL)");
+                            t.HasCheckConstraint("CK_ClientCases_Owner", "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
                         });
                 });
 

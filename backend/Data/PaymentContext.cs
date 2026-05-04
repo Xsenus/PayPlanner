@@ -1129,7 +1129,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.LegalEntityId, e.Status }).HasDatabaseName("IX_ClientCases_LegalEntityId_Status");
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_ClientCases_Owner",
-                "(ClientId IS NOT NULL AND LegalEntityId IS NULL) OR (ClientId IS NULL AND LegalEntityId IS NOT NULL)"));
+                "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)"));
         });
 
         // ------------------ DealType ------------------

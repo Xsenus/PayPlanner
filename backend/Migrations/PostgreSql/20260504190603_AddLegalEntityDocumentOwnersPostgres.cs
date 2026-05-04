@@ -65,7 +65,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
             migrationBuilder.AddCheckConstraint(
                 name: "CK_ClientCases_Owner",
                 table: "ClientCases",
-                sql: "(ClientId IS NOT NULL AND LegalEntityId IS NULL) OR (ClientId IS NULL AND LegalEntityId IS NOT NULL)");
+                sql: "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Acts_LegalEntityId",
