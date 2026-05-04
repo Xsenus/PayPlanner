@@ -728,6 +728,7 @@ export class ApiService {
     const response = await fetch(url, {
       ...options,
       headers,
+      credentials: 'include',
     });
 
     if (!response.ok) {
@@ -2451,6 +2452,7 @@ export class ApiService {
     const response = await fetch(`${API_BASE_URL}/money-operations/export.csv${q}`, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      credentials: 'include',
     });
 
     if (!response.ok) {
@@ -2485,6 +2487,7 @@ export class ApiService {
     const response = await fetch(`${API_BASE_URL}/money-operations/export.pdf${q}`, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      credentials: 'include',
     });
 
     if (!response.ok) {
@@ -2519,6 +2522,7 @@ export class ApiService {
     const response = await fetch(`${API_BASE_URL}/money-operations/export.xls${q}`, {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      credentials: 'include',
     });
 
     if (!response.ok) {

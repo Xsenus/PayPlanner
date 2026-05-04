@@ -473,6 +473,7 @@ public class InvoicesController : ControllerBase
         var now = DateTime.UtcNow;
         var actor = User.GetDisplayName();
         var actorId = GetUserId(User);
+        await CancelLinkedActsAsync(payment, reason, now, actorId, ct);
 
         if (hasReceivedMoney && request.ReceivedMoneyAction is InvoiceCancellationMoneyAction.LeaveAsAdvance or InvoiceCancellationMoneyAction.Reallocate)
         {
@@ -551,6 +552,38 @@ public class InvoicesController : ControllerBase
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
         ApplyPersistedPaymentState(dto, payment);
         return Ok(dto);
+    }
+
+    private async Task CancelLinkedActsAsync(Payment invoicePayment, string reason, DateTime now, int? actorId, CancellationToken ct)
+    {
+        var linkedActs = await _db.Acts
+            .Where(act => act.InvoiceId == invoicePayment.Id)
+            .ToListAsync(ct);
+
+        if (linkedActs.Count == 0)
+        {
+            return;
+        }
+
+        var invoiceNumber = Normalize(invoicePayment.Invoice?.Number) ?? Normalize(invoicePayment.Account) ?? invoicePayment.Id.ToString(CultureInfo.InvariantCulture);
+        foreach (var act in linkedActs)
+        {
+            act.Status = ActStatus.Terminated;
+            act.WorkflowStatus = ActWorkflowStatus.Cancelled;
+            act.CancelledAt ??= now;
+            act.CancelledByUserId ??= actorId;
+            act.CancelledReason = reason;
+            act.Comment = AppendActCancellationComment(act.Comment, invoiceNumber, reason, now);
+            act.UpdatedAt = now;
+        }
+    }
+
+    private static string AppendActCancellationComment(string? comment, string invoiceNumber, string reason, DateTime now)
+    {
+        var cancellationLine = $"Акт аннулирован вместе со счётом №{invoiceNumber} {now:dd.MM.yyyy HH:mm}. Причина: {reason}";
+        return string.IsNullOrWhiteSpace(comment)
+            ? cancellationLine
+            : $"{comment.Trim()}{Environment.NewLine}{cancellationLine}";
     }
 
     [HttpPost]
@@ -3292,6 +3325,7 @@ public class InvoicesController : ControllerBase
 
         if (!ShouldReplaceInstallmentPlan(request))
         {
+            SyncGeneratedInstallmentBindings(invoicePayment, existingInstallmentPayments.Select(item => item.Payment).ToList(), responsibleIds);
             return null;
         }
 
@@ -3405,6 +3439,31 @@ public class InvoicesController : ControllerBase
         }
 
         return null;
+    }
+
+    private void SyncGeneratedInstallmentBindings(
+        Payment invoicePayment,
+        IReadOnlyCollection<Payment> generatedInstallments,
+        IReadOnlyCollection<int> responsibleIds)
+    {
+        foreach (var installment in generatedInstallments)
+        {
+            installment.Account = invoicePayment.Account;
+            installment.AccountDate = invoicePayment.AccountDate;
+            installment.Type = invoicePayment.Type;
+            installment.ClientId = invoicePayment.ClientId;
+            installment.ExpenseClientId = invoicePayment.ExpenseClientId;
+            installment.ContractId = invoicePayment.ContractId;
+            installment.ClientCaseId = invoicePayment.ClientCaseId;
+            installment.ClientCaseReference = invoicePayment.ClientCaseReference;
+            installment.PaymentSourceId = invoicePayment.PaymentSourceId;
+            installment.ServiceId = invoicePayment.ServiceId;
+            installment.IncomeTypeId = invoicePayment.IncomeTypeId;
+            installment.DealTypeId = invoicePayment.DealTypeId;
+            installment.PaymentStatusId = invoicePayment.PaymentStatusId;
+
+            SyncPaymentResponsibles(installment, responsibleIds);
+        }
     }
 
     private Task<List<Payment>> LoadGeneratedInstallmentPaymentsAsync(

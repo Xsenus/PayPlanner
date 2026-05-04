@@ -2109,6 +2109,7 @@ export function MoneyOperations({
   const [moneyOperationsExcelExporting, setMoneyOperationsExcelExporting] = useState(false);
   const [moneyOperationsPdfExporting, setMoneyOperationsPdfExporting] = useState(false);
   const [moneyOperationsPrinting, setMoneyOperationsPrinting] = useState(false);
+  const [journalActionsOpen, setJournalActionsOpen] = useState(false);
   const [bankStatementImportResult, setBankStatementImportResult] = useState<{
     batchId?: number | null;
     rowsRead: number;
@@ -2149,6 +2150,7 @@ export function MoneyOperations({
   const [cashInventoryComment, setCashInventoryComment] = useState('');
   const [cashInventoryCreateCorrection, setCashInventoryCreateCorrection] = useState(true);
   const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
+  const journalActionsRef = useRef<HTMLDivElement | null>(null);
 
   const currentYear = new Date().getFullYear();
   const [from, setFrom] = useState(`${currentYear}-01-01`);
@@ -2931,6 +2933,30 @@ export function MoneyOperations({
 
     return { rows, total };
   }, [summary.bySource]);
+
+  const journalActionBusy =
+    moneyOperationsExporting
+    || moneyOperationsPdfExporting
+    || moneyOperationsExcelExporting
+    || moneyOperationsPrinting;
+
+  useEffect(() => {
+    if (!journalActionsOpen) {
+      return;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (journalActionsRef.current && target && !journalActionsRef.current.contains(target)) {
+        setJournalActionsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [journalActionsOpen]);
 
   const handleExportCsv = async () => {
     setMoneyOperationsExporting(true);
@@ -4568,38 +4594,73 @@ export function MoneyOperations({
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Обновить
           </button>
-          <button
-            type="button"
-            onClick={() => void handleExportCsv()}
-            disabled={moneyOperationsExporting}
-            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
-            <Download className={`h-4 w-4 ${moneyOperationsExporting ? 'animate-pulse' : ''}`} />
-            {moneyOperationsExporting ? 'Экспорт...' : 'CSV'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleExportPdf()}
-            disabled={moneyOperationsPdfExporting}
-            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
-            <Download className={`h-4 w-4 ${moneyOperationsPdfExporting ? 'animate-pulse' : ''}`} />
-            {moneyOperationsPdfExporting ? 'PDF...' : 'PDF'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleExportExcel()}
-            disabled={moneyOperationsExcelExporting}
-            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
-            <Download className={`h-4 w-4 ${moneyOperationsExcelExporting ? 'animate-pulse' : ''}`} />
-            {moneyOperationsExcelExporting ? 'Excel...' : 'Excel'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handlePrintJournal()}
-            disabled={moneyOperationsPrinting}
-            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
-            <Printer className={`h-4 w-4 ${moneyOperationsPrinting ? 'animate-pulse' : ''}`} />
-            {moneyOperationsPrinting ? 'Печать...' : 'Печать'}
-          </button>
+          <div ref={journalActionsRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setJournalActionsOpen((prev) => !prev)}
+              disabled={journalActionBusy}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              aria-haspopup="menu"
+              aria-expanded={journalActionsOpen}>
+              {journalActionBusy ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              {journalActionBusy ? 'Выполняется...' : 'Экспорт и печать'}
+              <ChevronDown className={`h-4 w-4 transition-transform ${journalActionsOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {journalActionsOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 z-20 mt-2 w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJournalActionsOpen(false);
+                    void handleExportCsv();
+                  }}
+                  disabled={moneyOperationsExporting}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  <Download className={`h-4 w-4 ${moneyOperationsExporting ? 'animate-pulse' : ''}`} />
+                  {moneyOperationsExporting ? 'Экспорт CSV...' : 'CSV'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJournalActionsOpen(false);
+                    void handleExportPdf();
+                  }}
+                  disabled={moneyOperationsPdfExporting}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  <Download className={`h-4 w-4 ${moneyOperationsPdfExporting ? 'animate-pulse' : ''}`} />
+                  {moneyOperationsPdfExporting ? 'Экспорт PDF...' : 'PDF'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJournalActionsOpen(false);
+                    void handleExportExcel();
+                  }}
+                  disabled={moneyOperationsExcelExporting}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  <Download className={`h-4 w-4 ${moneyOperationsExcelExporting ? 'animate-pulse' : ''}`} />
+                  {moneyOperationsExcelExporting ? 'Экспорт Excel...' : 'Excel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJournalActionsOpen(false);
+                    void handlePrintJournal();
+                  }}
+                  disabled={moneyOperationsPrinting}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                  <Printer className={`h-4 w-4 ${moneyOperationsPrinting ? 'animate-pulse' : ''}`} />
+                  {moneyOperationsPrinting ? 'Подготовка печати...' : 'Печать'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

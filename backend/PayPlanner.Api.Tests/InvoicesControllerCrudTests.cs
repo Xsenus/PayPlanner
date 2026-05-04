@@ -351,6 +351,84 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Cancel_CancelsLinkedActs()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client With Act");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-CANCEL-ACT", clientId, new DateTime(2026, 4, 20), 12_000m);
+        request.InstallmentPlan = CreateInstallmentPlanRequest(
+            total: 12_000m,
+            startDate: new DateTime(2026, 4, 20),
+            new DateTime(2026, 5, 20),
+            new DateTime(2026, 6, 20));
+
+        var createAction = await controller.Create(request, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var linkedAct = new Act
+        {
+            Number = "ACT-CANCEL-LINKED",
+            Title = "Linked act",
+            Date = new DateTime(2026, 4, 21),
+            Amount = 12_000m,
+            ClientId = clientId,
+            InvoiceId = createdDto.Id,
+            InvoiceNumber = request.Number,
+            Status = ActStatus.Signed,
+            WorkflowStatus = ActWorkflowStatus.Signed,
+            SignedAt = new DateTime(2026, 4, 22),
+        };
+        var unrelatedAct = new Act
+        {
+            Number = "ACT-CANCEL-OTHER",
+            Title = "Unrelated act",
+            Date = new DateTime(2026, 4, 21),
+            Amount = 12_000m,
+            ClientId = clientId,
+            InvoiceNumber = request.Number,
+            Status = ActStatus.Signed,
+            WorkflowStatus = ActWorkflowStatus.Signed,
+            SignedAt = new DateTime(2026, 4, 22),
+        };
+        db.Acts.AddRange(linkedAct, unrelatedAct);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var cancelAction = await controller.Cancel(
+            createdDto.Id,
+            new CancelInvoiceRequest { Reason = "Работа прекращена" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(cancelAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(PaymentStatus.Cancelled, dto.Status);
+
+        db.ChangeTracker.Clear();
+        var storedLinkedAct = await db.Acts.AsNoTracking().SingleAsync(act => act.Id == linkedAct.Id);
+        Assert.Equal(ActStatus.Terminated, storedLinkedAct.Status);
+        Assert.Equal(ActWorkflowStatus.Cancelled, storedLinkedAct.WorkflowStatus);
+        Assert.NotNull(storedLinkedAct.CancelledAt);
+        Assert.Equal(actorUserId, storedLinkedAct.CancelledByUserId);
+        Assert.Equal("Работа прекращена", storedLinkedAct.CancelledReason);
+        Assert.Contains("Акт аннулирован вместе со счётом №INV-CANCEL-ACT", storedLinkedAct.Comment, StringComparison.Ordinal);
+        Assert.Contains("Работа прекращена", storedLinkedAct.Comment, StringComparison.Ordinal);
+
+        var storedUnrelatedAct = await db.Acts.AsNoTracking().SingleAsync(act => act.Id == unrelatedAct.Id);
+        Assert.Equal(ActStatus.Signed, storedUnrelatedAct.Status);
+        Assert.Equal(ActWorkflowStatus.Signed, storedUnrelatedAct.WorkflowStatus);
+
+        var storedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        var installments = await LoadInstallmentPaymentsAsync(db, storedParent.InvoiceId!.Value, storedParent.Id);
+        Assert.Equal(2, installments.Count);
+        Assert.All(installments, installment => Assert.Equal(PaymentStatus.Cancelled, installment.Status));
+    }
+
+    [Fact]
     public async Task Cancel_RejectsInvoiceWithReceivedMoney()
     {
         await using var db = await CreateContextAsync();
@@ -892,6 +970,53 @@ public class InvoicesControllerCrudTests
             .Distinct()
             .ToListAsync();
         Assert.Equal(new[] { responsibleId2 }, updatedInstallmentResponsibleIds);
+    }
+
+    [Fact]
+    public async Task Update_ChangesInvoiceClient_PropagatesToGeneratedInstallments()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var originalClientId = await CreateClientAsync(db, "Original Client");
+        var newClientId = await CreateClientAsync(db, "New Client");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createRequest = CreateRequest("INV-CL-CHANGE-1", originalClientId, new DateTime(2026, 4, 10), 9_000m);
+        createRequest.InstallmentPlan = CreateInstallmentPlanRequest(
+            total: 9_000m,
+            startDate: new DateTime(2026, 4, 10),
+            new DateTime(2026, 5, 10),
+            new DateTime(2026, 6, 10));
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        db.ChangeTracker.Clear();
+        var createdParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        var createdInstallments = await LoadInstallmentPaymentsAsync(db, createdParent.InvoiceId!.Value, createdParent.Id);
+        Assert.Equal(2, createdInstallments.Count);
+        Assert.All(createdInstallments, installment => Assert.Equal(originalClientId, installment.ClientId));
+
+        var updateRequest = CreateRequest("INV-CL-CHANGE-1", newClientId, new DateTime(2026, 4, 10), 9_000m);
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        _ = Assert.IsType<InvoiceDto>(ok.Value);
+
+        db.ChangeTracker.Clear();
+        var updatedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(newClientId, updatedParent.ClientId);
+        var updatedInstallments = await LoadInstallmentPaymentsAsync(db, updatedParent.InvoiceId!.Value, updatedParent.Id);
+        Assert.Equal(2, updatedInstallments.Count);
+        Assert.All(updatedInstallments, installment =>
+        {
+            Assert.Equal(newClientId, installment.ClientId);
+            Assert.Equal("INV-CL-CHANGE-1", installment.Account);
+            Assert.Equal(new DateTime(2026, 4, 10), installment.AccountDate);
+        });
     }
 
     [Fact]

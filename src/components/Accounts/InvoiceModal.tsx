@@ -43,6 +43,7 @@ import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import {
   filterRepresentativeInvoiceWhenInstallmentsExist,
   getStatusSourcePaymentsForInvoice,
+  isGeneratedInstallmentPayment,
   isInvoiceManagedPayment,
 } from '../../utils/invoicePayments';
 import { getAppliedClientBalanceAmount } from '../../utils/systemNotes';
@@ -2078,6 +2079,10 @@ export function InvoiceModal({
     () => buildInvoiceStatusSnapshot(relatedPayments, form.status, form.dueDate, form.amount),
     [form.amount, form.dueDate, form.status, relatedPayments],
   );
+  const hasGeneratedRelatedPayments = useMemo(
+    () => relatedPayments.some((payment) => isGeneratedInstallmentPayment(payment)),
+    [relatedPayments],
+  );
 
   const effectiveInvoiceStatus = form.status;
   const installmentPlanAmountMismatch = useMemo(() => {
@@ -2305,6 +2310,31 @@ export function InvoiceModal({
     if (selectedActs.length > invoiceRules.maxActsPerInvoice) {
       setLocalError(`В счёте можно указать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`);
       return;
+    }
+
+    const currentClientId = Number(form.clientId);
+    const originalClientId = Number(invoice?.clientId ?? 0);
+    if (
+      mode === 'edit'
+      && invoice
+      && Number.isFinite(currentClientId)
+      && currentClientId > 0
+      && Number.isFinite(originalClientId)
+      && originalClientId > 0
+      && currentClientId !== originalClientId
+      && hasGeneratedRelatedPayments
+    ) {
+      const accepted = await confirm({
+        title: 'Смена клиента счета',
+        description:
+          'У счета есть сформированные платежи. При смене клиента они тоже будут перепривязаны к новому клиенту. Продолжить?',
+        confirmLabel: 'Да, изменить',
+        cancelLabel: 'Отмена',
+      });
+
+      if (!accepted) {
+        return;
+      }
     }
 
     const dueDateResolution = await resolveInstallmentDueDateForSave();
