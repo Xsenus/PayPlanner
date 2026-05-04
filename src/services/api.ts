@@ -2317,6 +2317,14 @@ export class ApiService {
     return this.request<CurrencyReport>(`/reports/currencies${q}`);
   }
 
+  async getCashOrderReport(params?: {
+    from?: string;
+    to?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<CashOrderReport>(`/reports/cash-orders${q}`);
+  }
+
   /** Упрощённый вызов: сводка по клиенту. */
   async getClientSummaryStats(
     clientId: number,
@@ -2940,6 +2948,7 @@ import type {
   MatchStatusReport,
   JournalStatusReport,
   CurrencyReport,
+  CashOrderReport,
   MoneyOperationAccountSummary,
   MoneyBalanceReconciliationResult,
   MoneyBalanceReconciliationRunResult,

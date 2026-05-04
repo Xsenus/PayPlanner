@@ -418,6 +418,28 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("cash-orders")]
+    public async Task<ActionResult<CashOrderReportDto>> CashOrders(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildCashOrderReportAsync(start, end, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -1930,6 +1952,96 @@ public class ReportsController : ControllerBase
         => string.IsNullOrWhiteSpace(currency)
             ? "RUB"
             : currency.Trim().ToUpperInvariant();
+
+    private async Task<CashOrderReportDto> BuildCashOrderReportAsync(
+        DateTime from,
+        DateTime to,
+        CancellationToken ct)
+    {
+        var rows = await _db.CashOrders
+            .AsNoTracking()
+            .Where(item => item.Date >= from && item.Date <= to)
+            .Select(item => new
+            {
+                item.Status,
+                item.Type,
+                item.Amount,
+            })
+            .ToListAsync(ct);
+
+        var turnoverTotal = rows.Sum(item => item.Amount);
+        var statuses = rows
+            .GroupBy(item => item.Status)
+            .Select(group =>
+            {
+                var incomingTotal = group
+                    .Where(item => item.Type == CashOrderType.Incoming)
+                    .Sum(item => item.Amount);
+                var outgoingTotal = group
+                    .Where(item => item.Type == CashOrderType.Outgoing)
+                    .Sum(item => item.Amount);
+                var totalAmount = incomingTotal + outgoingTotal;
+
+                return new CashOrderReportItemDto
+                {
+                    Status = group.Key,
+                    StatusLabel = FormatCashOrderStatusLabel(group.Key),
+                    IncomingTotal = incomingTotal,
+                    OutgoingTotal = outgoingTotal,
+                    NetTotal = incomingTotal - outgoingTotal,
+                    TotalAmount = totalAmount,
+                    IncomingCount = group.Count(item => item.Type == CashOrderType.Incoming),
+                    OutgoingCount = group.Count(item => item.Type == CashOrderType.Outgoing),
+                    OrderCount = group.Count(),
+                    Share = turnoverTotal > 0m
+                        ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderBy(item => CashOrderStatusSortOrder(item.Status))
+            .ThenByDescending(item => item.TotalAmount)
+            .ToList();
+
+        var postedRows = rows.Where(item => item.Status == CashOrderStatus.Posted).ToList();
+        var postedIncomingTotal = postedRows
+            .Where(item => item.Type == CashOrderType.Incoming)
+            .Sum(item => item.Amount);
+        var postedOutgoingTotal = postedRows
+            .Where(item => item.Type == CashOrderType.Outgoing)
+            .Sum(item => item.Amount);
+
+        return new CashOrderReportDto
+        {
+            From = from,
+            To = to,
+            PostedIncomingTotal = postedIncomingTotal,
+            PostedOutgoingTotal = postedOutgoingTotal,
+            PostedNetTotal = postedIncomingTotal - postedOutgoingTotal,
+            OrderCount = rows.Count,
+            DraftCount = rows.Count(item => item.Status == CashOrderStatus.Draft),
+            PostedCount = rows.Count(item => item.Status == CashOrderStatus.Posted),
+            CancelledCount = rows.Count(item => item.Status == CashOrderStatus.Cancelled),
+            Statuses = statuses,
+        };
+    }
+
+    private static int CashOrderStatusSortOrder(CashOrderStatus status)
+        => status switch
+        {
+            CashOrderStatus.Draft => 0,
+            CashOrderStatus.Posted => 1,
+            CashOrderStatus.Cancelled => 2,
+            _ => 3,
+        };
+
+    private static string FormatCashOrderStatusLabel(CashOrderStatus status)
+        => status switch
+        {
+            CashOrderStatus.Draft => "Черновик",
+            CashOrderStatus.Posted => "Проведен",
+            CashOrderStatus.Cancelled => "Отменен",
+            _ => status.ToString(),
+        };
 
     private sealed class CashFlowAccountQueryRow
     {

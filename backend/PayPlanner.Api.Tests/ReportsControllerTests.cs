@@ -1016,6 +1016,63 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task CashOrders_GroupsOrdersByStatus()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.AddRange(
+            CashOrder("PKO-1", CashOrderType.Incoming, CashOrderStatus.Posted, 5_000m, new DateTime(2026, 5, 1)),
+            CashOrder("RKO-1", CashOrderType.Outgoing, CashOrderStatus.Posted, 2_000m, new DateTime(2026, 5, 2)),
+            CashOrder("PKO-2", CashOrderType.Incoming, CashOrderStatus.Draft, 1_000m, new DateTime(2026, 5, 3)),
+            CashOrder("RKO-2", CashOrderType.Outgoing, CashOrderStatus.Cancelled, 500m, new DateTime(2026, 5, 4)),
+            CashOrder("PKO-OLD", CashOrderType.Incoming, CashOrderStatus.Posted, 99_999m, new DateTime(2026, 4, 30)));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.CashOrders(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CashOrderReportDto>(ok.Value);
+        Assert.Equal(5_000m, report.PostedIncomingTotal);
+        Assert.Equal(2_000m, report.PostedOutgoingTotal);
+        Assert.Equal(3_000m, report.PostedNetTotal);
+        Assert.Equal(4, report.OrderCount);
+        Assert.Equal(1, report.DraftCount);
+        Assert.Equal(2, report.PostedCount);
+        Assert.Equal(1, report.CancelledCount);
+
+        Assert.Collection(
+            report.Statuses,
+            item =>
+            {
+                Assert.Equal(CashOrderStatus.Draft, item.Status);
+                Assert.Equal("Черновик", item.StatusLabel);
+                Assert.Equal(1_000m, item.IncomingTotal);
+                Assert.Equal(0m, item.OutgoingTotal);
+                Assert.Equal(11.8m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(CashOrderStatus.Posted, item.Status);
+                Assert.Equal("Проведен", item.StatusLabel);
+                Assert.Equal(5_000m, item.IncomingTotal);
+                Assert.Equal(2_000m, item.OutgoingTotal);
+                Assert.Equal(7_000m, item.TotalAmount);
+                Assert.Equal(82.4m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(CashOrderStatus.Cancelled, item.Status);
+                Assert.Equal("Отменен", item.StatusLabel);
+                Assert.Equal(0m, item.IncomingTotal);
+                Assert.Equal(500m, item.OutgoingTotal);
+                Assert.Equal(5.9m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -1067,6 +1124,23 @@ public class ReportsControllerTests
             Purpose = purpose,
             MatchStatus = matchStatus,
             Currency = currency,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+    private static CashOrder CashOrder(
+        string number,
+        CashOrderType type,
+        CashOrderStatus status,
+        decimal amount,
+        DateTime date)
+        => new()
+        {
+            Number = number,
+            Type = type,
+            Status = status,
+            Amount = amount,
+            Date = date,
+            Currency = "RUB",
             CreatedAt = DateTime.UtcNow,
         };
 

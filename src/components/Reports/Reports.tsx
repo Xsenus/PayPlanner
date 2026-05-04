@@ -39,9 +39,10 @@ import { usePaymentPurposeReport } from '../../hooks/usePaymentPurposeReport';
 import { useMatchStatusReport } from '../../hooks/useMatchStatusReport';
 import { useJournalStatusReport } from '../../hooks/useJournalStatusReport';
 import { useCurrencyReport } from '../../hooks/useCurrencyReport';
+import { useCashOrderReport } from '../../hooks/useCashOrderReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { AdvanceReport, CashBookSummary, CashFlowReport, CounterpartyReport, CurrencyReport, DirectionReport, JournalStatusReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, VatReport } from '../../types';
+import type { AdvanceReport, CashBookSummary, CashFlowReport, CashOrderReport, CounterpartyReport, CurrencyReport, DirectionReport, JournalStatusReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -2723,6 +2724,122 @@ function CurrencyReportSection({
   );
 }
 
+function CashOrderReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: CashOrderReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const rows = report?.statuses ?? [];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-700">
+            <Banknote className="h-3.5 w-3.5" />
+            Кассовые ордера
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по кассовым ордерам</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Сводка приходных и расходных кассовых ордеров по статусам оформления за выбранный период.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по кассовым ордерам...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по кассовым ордерам</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Приход проведен"
+              value={formatCurrency(report.postedIncomingTotal)}
+              icon={TrendingUp}
+              tone="income"
+              subtitle="По проведенным ПКО"
+            />
+            <MetricCard
+              title="Расход проведен"
+              value={formatCurrency(report.postedOutgoingTotal)}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle="По проведенным РКО"
+            />
+            <MetricCard
+              title="Итог"
+              value={formatCurrency(report.postedNetTotal)}
+              icon={ArrowUpRight}
+              tone="profit"
+              subtitle="Проведенные ордера"
+            />
+            <MetricCard
+              title="Ордеров"
+              value={String(report.orderCount)}
+              icon={Banknote}
+              tone="rate"
+              subtitle={`${report.draftCount} черн. · ${report.cancelledCount} отм.`}
+            />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
+            {rows.length > 0 ? rows.map((row) => (
+              <div key={row.status} className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-950">{row.statusLabel}</h3>
+                    <div className="mt-1 text-sm text-slate-500">
+                      {row.orderCount} ордеров · {row.share}% оборота
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-slate-500">Оборот</div>
+                    <div className="font-semibold text-slate-950">{formatCurrency(row.totalAmount)}</div>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="text-xs text-emerald-700">Приход</div>
+                    <div className="mt-1 font-semibold text-emerald-800">{formatCurrency(row.incomingTotal)}</div>
+                  </div>
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="text-xs text-rose-700">Расход</div>
+                    <div className="mt-1 font-semibold text-rose-800">{formatCurrency(row.outgoingTotal)}</div>
+                  </div>
+                </div>
+              </div>
+            )) : (
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500 xl:col-span-3">
+                Нет кассовых ордеров за период.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Reports() {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
@@ -2856,6 +2973,12 @@ export function Reports() {
     error: currencyReportError,
     reload: reloadCurrencyReport,
   } = useCurrencyReport(cashFlowDates);
+  const {
+    report: cashOrderReport,
+    loading: cashOrderReportLoading,
+    error: cashOrderReportError,
+    reload: reloadCashOrderReport,
+  } = useCashOrderReport(cashFlowDates);
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
@@ -3301,6 +3424,13 @@ export function Reports() {
               loading={currencyReportLoading}
               error={currencyReportError}
               onReload={reloadCurrencyReport}
+            />
+
+            <CashOrderReportSection
+              report={cashOrderReport}
+              loading={cashOrderReportLoading}
+              error={cashOrderReportError}
+              onReload={reloadCashOrderReport}
             />
           </>
         )}

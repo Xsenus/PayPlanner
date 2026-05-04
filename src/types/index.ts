@@ -1136,6 +1136,32 @@ export interface CurrencyReport {
   currencies: CurrencyReportItem[];
 }
 
+export interface CashOrderReportItem {
+  status: CashOrderStatus;
+  statusLabel: string;
+  incomingTotal: number;
+  outgoingTotal: number;
+  netTotal: number;
+  totalAmount: number;
+  incomingCount: number;
+  outgoingCount: number;
+  orderCount: number;
+  share: number;
+}
+
+export interface CashOrderReport {
+  from: string;
+  to: string;
+  postedIncomingTotal: number;
+  postedOutgoingTotal: number;
+  postedNetTotal: number;
+  orderCount: number;
+  draftCount: number;
+  postedCount: number;
+  cancelledCount: number;
+  statuses: CashOrderReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

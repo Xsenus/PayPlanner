@@ -747,4 +747,46 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('source=Bank');
   });
+
+  it('loads cash order report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      postedIncomingTotal: 5000,
+      postedOutgoingTotal: 2000,
+      postedNetTotal: 3000,
+      orderCount: 2,
+      draftCount: 0,
+      postedCount: 2,
+      cancelledCount: 0,
+      statuses: [{
+        status: 'Posted',
+        statusLabel: 'Проведен',
+        incomingTotal: 5000,
+        outgoingTotal: 2000,
+        netTotal: 3000,
+        totalAmount: 7000,
+        incomingCount: 1,
+        outgoingCount: 1,
+        orderCount: 2,
+        share: 100,
+      }],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getCashOrderReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/cash-orders?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+  });
 });
