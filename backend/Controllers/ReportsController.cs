@@ -372,6 +372,29 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("journal-statuses")]
+    public async Task<ActionResult<JournalStatusReportDto>> JournalStatuses(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildJournalStatusReportAsync(start, end, source, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -1680,6 +1703,132 @@ public class ReportsController : ControllerBase
             MoneyOperationMatchStatus.ClarificationRequired => "Требует уточнения",
             MoneyOperationMatchStatus.Matched => "Сверено",
             MoneyOperationMatchStatus.Ignored => "Исключено",
+            _ => status.ToString(),
+        };
+
+    private async Task<JournalStatusReportDto> BuildJournalStatusReportAsync(
+        DateTime from,
+        DateTime to,
+        MoneyOperationSource? source,
+        CancellationToken ct)
+    {
+        var rows = await BuildFactQuery(from, to, source, null)
+            .Select(item => new
+            {
+                item.Source,
+                item.Direction,
+                item.AccountingType,
+                item.MatchStatus,
+                item.Amount,
+            })
+            .ToListAsync(ct);
+
+        var enriched = rows
+            .Select(item => new
+            {
+                item.Direction,
+                item.Amount,
+                Status = ResolveJournalStatus(item.Source, item.Direction, item.AccountingType, item.MatchStatus),
+            })
+            .ToList();
+
+        var incomeTotal = enriched
+            .Where(item => item.Direction == MoneyOperationDirection.Income)
+            .Sum(item => item.Amount);
+        var expenseTotal = enriched
+            .Where(item => item.Direction == MoneyOperationDirection.Expense)
+            .Sum(item => item.Amount);
+        var turnoverTotal = incomeTotal + expenseTotal;
+
+        var statuses = enriched
+            .GroupBy(item => item.Status)
+            .Select(group =>
+            {
+                var income = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.Amount);
+                var expense = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.Amount);
+                var totalAmount = income + expense;
+
+                return new JournalStatusReportItemDto
+                {
+                    Status = group.Key,
+                    StatusLabel = FormatJournalStatusLabel(group.Key),
+                    Income = income,
+                    Expense = expense,
+                    NetTotal = income - expense,
+                    TotalAmount = totalAmount,
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    OperationCount = group.Count(),
+                    Share = turnoverTotal > 0m
+                        ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderBy(item => JournalStatusSortOrder(item.Status))
+            .ThenByDescending(item => item.TotalAmount)
+            .ToList();
+
+        return new JournalStatusReportDto
+        {
+            From = from,
+            To = to,
+            Source = source,
+            IncomeTotal = incomeTotal,
+            ExpenseTotal = expenseTotal,
+            NetTotal = incomeTotal - expenseTotal,
+            OperationCount = enriched.Count,
+            PostedCount = enriched.Count(item => item.Status == MoneyOperationJournalStatus.Posted),
+            ProcessingCount = enriched.Count(item => item.Status == MoneyOperationJournalStatus.Processing),
+            ErrorCount = enriched.Count(item => item.Status == MoneyOperationJournalStatus.Error),
+            Statuses = statuses,
+        };
+    }
+
+    private static MoneyOperationJournalStatus ResolveJournalStatus(
+        MoneyOperationSource source,
+        MoneyOperationDirection direction,
+        MoneyOperationAccountingType accountingType,
+        MoneyOperationMatchStatus matchStatus)
+    {
+        if (matchStatus == MoneyOperationMatchStatus.ClarificationRequired)
+        {
+            return MoneyOperationJournalStatus.Error;
+        }
+
+        if (accountingType == MoneyOperationAccountingType.Plan)
+        {
+            return MoneyOperationJournalStatus.Processing;
+        }
+
+        if (source == MoneyOperationSource.Bank &&
+            direction == MoneyOperationDirection.Income &&
+            matchStatus == MoneyOperationMatchStatus.None)
+        {
+            return MoneyOperationJournalStatus.Processing;
+        }
+
+        return MoneyOperationJournalStatus.Posted;
+    }
+
+    private static int JournalStatusSortOrder(MoneyOperationJournalStatus status)
+        => status switch
+        {
+            MoneyOperationJournalStatus.Error => 0,
+            MoneyOperationJournalStatus.Processing => 1,
+            MoneyOperationJournalStatus.Posted => 2,
+            _ => 3,
+        };
+
+    private static string FormatJournalStatusLabel(MoneyOperationJournalStatus status)
+        => status switch
+        {
+            MoneyOperationJournalStatus.Posted => "Проведено",
+            MoneyOperationJournalStatus.Processing => "В обработке",
+            MoneyOperationJournalStatus.Error => "Ошибка",
             _ => status.ToString(),
         };
 

@@ -2299,6 +2299,15 @@ export class ApiService {
     return this.request<MatchStatusReport>(`/reports/match-statuses${q}`);
   }
 
+  async getJournalStatusReport(params?: {
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<JournalStatusReport>(`/reports/journal-statuses${q}`);
+  }
+
   /** Упрощённый вызов: сводка по клиенту. */
   async getClientSummaryStats(
     clientId: number,
@@ -2920,6 +2929,7 @@ import type {
   PaymentOrderReport,
   PaymentPurposeReport,
   MatchStatusReport,
+  JournalStatusReport,
   MoneyOperationAccountSummary,
   MoneyBalanceReconciliationResult,
   MoneyBalanceReconciliationRunResult,

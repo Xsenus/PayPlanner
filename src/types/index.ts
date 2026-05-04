@@ -1088,6 +1088,33 @@ export interface MatchStatusReport {
   statuses: MatchStatusReportItem[];
 }
 
+export interface JournalStatusReportItem {
+  status: MoneyOperationJournalStatus;
+  statusLabel: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  totalAmount: number;
+  incomeCount: number;
+  expenseCount: number;
+  operationCount: number;
+  share: number;
+}
+
+export interface JournalStatusReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  operationCount: number;
+  postedCount: number;
+  processingCount: number;
+  errorCount: number;
+  statuses: JournalStatusReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

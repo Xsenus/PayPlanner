@@ -910,6 +910,66 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task JournalStatuses_GroupsFactOperationsByComputedJournalStatus()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 6_000m, new DateTime(2026, 5, 1), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 2), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 3), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 4), "Основной банк", matchStatus: MoneyOperationMatchStatus.ClarificationRequired),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 500m, new DateTime(2026, 5, 5), "Касса"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 6), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 7), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.JournalStatuses(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<JournalStatusReportDto>(ok.Value);
+        Assert.Equal(9_500m, report.IncomeTotal);
+        Assert.Equal(3_000m, report.ExpenseTotal);
+        Assert.Equal(6_500m, report.NetTotal);
+        Assert.Equal(5, report.OperationCount);
+        Assert.Equal(3, report.PostedCount);
+        Assert.Equal(1, report.ProcessingCount);
+        Assert.Equal(1, report.ErrorCount);
+
+        Assert.Collection(
+            report.Statuses,
+            item =>
+            {
+                Assert.Equal(MoneyOperationJournalStatus.Error, item.Status);
+                Assert.Equal("Ошибка", item.StatusLabel);
+                Assert.Equal(0m, item.Income);
+                Assert.Equal(1_000m, item.Expense);
+                Assert.Equal(8m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(MoneyOperationJournalStatus.Processing, item.Status);
+                Assert.Equal("В обработке", item.StatusLabel);
+                Assert.Equal(3_000m, item.Income);
+                Assert.Equal(0m, item.Expense);
+                Assert.Equal(24m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(MoneyOperationJournalStatus.Posted, item.Status);
+                Assert.Equal("Проведено", item.StatusLabel);
+                Assert.Equal(6_500m, item.Income);
+                Assert.Equal(2_000m, item.Expense);
+                Assert.Equal(8_500m, item.TotalAmount);
+                Assert.Equal(68m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
