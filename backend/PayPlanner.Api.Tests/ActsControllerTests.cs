@@ -725,7 +725,7 @@ public class ActsControllerTests
     }
 
     [Fact]
-    public void ActDocumentTemplateEngine_RendersSignatureLinesAndCaptionsForBothParties()
+    public void ActDocumentTemplateEngine_RendersKubStyleSlashSignaturesForBothParties()
     {
         var act = new Act
         {
@@ -762,15 +762,87 @@ public class ActsControllerTests
 
         var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
 
-        Assert.Contains("signature-lines-table", normalizedHtml);
-        Assert.Equal(2, Regex.Matches(normalizedHtml, "расшифровка подписи", RegexOptions.CultureInvariant).Count);
-        Assert.Equal(2, Regex.Matches(normalizedHtml, ">подпись<", RegexOptions.CultureInvariant).Count);
+        Assert.Contains("signature-sign-cell", normalizedHtml);
+        Assert.Equal(2, Regex.Matches(normalizedHtml, "<span class=\"signature-mark\">", RegexOptions.CultureInvariant).Count);
         Assert.Contains("data:image/png;base64,signature-demo", normalizedHtml);
         Assert.Contains("data:image/png;base64,seal-demo", normalizedHtml);
-        Assert.Contains("Кожеваткин А. В.", normalizedHtml);
-        Assert.Contains("Губанова О. И.", normalizedHtml);
-        Assert.DoesNotContain("/ Кожеваткин А. В. /", normalizedHtml);
-        Assert.DoesNotContain("/ Губанова О. И. /", normalizedHtml);
+        Assert.Contains("/ Кожеваткин А. В. /", normalizedHtml);
+        Assert.Contains("/ Губанова О. И. /", normalizedHtml);
+        Assert.DoesNotContain("signature-lines-table", normalizedHtml);
+        Assert.DoesNotContain("расшифровка подписи", normalizedHtml);
+    }
+
+    [Fact]
+    public void ActDocumentTemplateEngine_RendersExpenseActWithSupplierAsExecutorAndCompanyAsCustomer()
+    {
+        var supplier = new Client
+        {
+            Id = 201,
+            Name = "Исаева Марина",
+        };
+        var caseClient = new Client
+        {
+            Id = 202,
+            Name = "Павлов Павел Олегович",
+        };
+        var company = new LegalEntity
+        {
+            ShortName = "ИП Кожеваткин Андрей Владимирович",
+            FullName = "Индивидуальный предприниматель Кожеваткин Андрей Владимирович",
+            Inn = "633009620345",
+            Address = "446200, Самарская обл, г Новокуйбышевск, ул. Миронова д. 9",
+            TreasuryAccountNumber = "40802810414500006073",
+            TreasuryBankName = "ТОЧКА ПАО БАНКА \"ФК ОТКРЫТИЕ\"",
+            TreasuryBankBik = "044525999",
+            TreasuryCorrAccountNumber = "30101810845250000999",
+            Director = "Кожеваткин Андрей Владимирович",
+            DirectorSignatureDataUrl = "data:image/png;base64,signature-demo",
+            SealDataUrl = "data:image/png;base64,seal-demo",
+        };
+        var act = new Act
+        {
+            Number = "160",
+            Date = new DateTime(2022, 6, 17),
+            Amount = 1_200m,
+            Client = caseClient,
+            InvoiceNumber = "160",
+            Invoice = new Payment
+            {
+                Type = PaymentType.Expense,
+                Account = "160",
+                AccountDate = new DateTime(2022, 6, 16),
+                Client = supplier,
+                ExpenseClient = caseClient,
+            },
+        };
+
+        var html = ActDocumentTemplateEngine.RenderHtml(
+            act,
+            [
+                new ActLineItem
+                {
+                    Name = "Подготовка письма о возможности заключения мирового соглашения",
+                    Quantity = 1m,
+                    Unit = "усл.ед.",
+                    Price = 1_200m,
+                    SortOrder = 0,
+                },
+            ],
+            company,
+            includeSignatureAndSeal: true);
+
+        var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
+        var supplierIndex = normalizedHtml.IndexOf("Исаева Марина", StringComparison.Ordinal);
+        var companyIndex = normalizedHtml.IndexOf("Индивидуальный предприниматель Кожеваткин Андрей Владимирович", StringComparison.Ordinal);
+
+        Assert.True(supplierIndex >= 0, "Поставщик должен быть исполнителем расходного акта.");
+        Assert.True(companyIndex > supplierIndex, "Наша организация должна быть заказчиком расходного акта.");
+        Assert.Contains("Счет № 160 от 16.06.2022", normalizedHtml);
+        Assert.Contains("р/с 40802810414500006073", normalizedHtml);
+        Assert.Contains("ТОЧКА ПАО БАНКА &quot;ФК ОТКРЫТИЕ&quot;", normalizedHtml);
+        Assert.DoesNotContain("Павлов Павел Олегович", normalizedHtml);
+        Assert.DoesNotContain("data:image/png;base64,signature-demo", normalizedHtml);
+        Assert.DoesNotContain("data:image/png;base64,seal-demo", normalizedHtml);
     }
 
     [Fact]

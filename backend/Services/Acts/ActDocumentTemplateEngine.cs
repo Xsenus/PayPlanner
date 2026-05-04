@@ -19,8 +19,14 @@ public static class ActDocumentTemplateEngine
         LegalEntity? mainCompany,
         bool includeSignatureAndSeal)
     {
-        var seller = BuildSeller(mainCompany);
-        var buyer = BuildBuyer(act);
+        var companyParty = BuildSeller(mainCompany);
+        var isExpenseAct = act.Invoice?.Type == PaymentType.Expense;
+        var seller = isExpenseAct
+            ? BuildExpenseSeller(act)
+            : companyParty;
+        var buyer = isExpenseAct
+            ? BuildCompanyBuyer(companyParty)
+            : BuildBuyer(act);
         var effectiveLineItems = BuildEffectiveLineItems(act, lineItems);
         var basis = BuildBasis(act);
         var totalAmount = effectiveLineItems.Sum(item => item.Total);
@@ -41,10 +47,10 @@ public static class ActDocumentTemplateEngine
             rows.AppendLine("</tr>");
         }
 
-        var signatureHtml = includeSignatureAndSeal
+        var signatureHtml = includeSignatureAndSeal && !isExpenseAct
             ? BuildImageHtml(mainCompany?.DirectorSignatureDataUrl, "Подпись", "signature")
             : string.Empty;
-        var sealHtml = includeSignatureAndSeal
+        var sealHtml = includeSignatureAndSeal && !isExpenseAct
             ? BuildImageHtml(mainCompany?.SealDataUrl, "Печать", "seal")
             : string.Empty;
         var commentHtml = string.IsNullOrWhiteSpace(act.Comment)
@@ -228,36 +234,21 @@ public static class ActDocumentTemplateEngine
       text-transform: uppercase;
     }
     .signature-party {
-      min-height: 34px;
-      padding-bottom: 12px;
+      min-height: 30px;
+      padding-bottom: 10px;
       font-size: 12px !important;
     }
-    .signature-lines-table td {
-      border: 0;
-      vertical-align: bottom;
-    }
-    .signature-line-cell {
+    .signature-sign-cell {
       position: relative;
-      width: 45%;
-      height: 56px;
-      padding: 0 6px 4px 6px;
-      border-bottom: 1px solid #000000;
-      text-align: center;
-      vertical-align: bottom;
-      overflow: visible;
-    }
-    .signature-decode-cell {
-      width: 55%;
-      height: 56px;
-      padding: 0 6px 4px 6px;
-      border-bottom: 1px solid #000000;
+      min-height: 58px;
+      padding-top: 28px;
       text-align: center;
       vertical-align: bottom;
     }
-    .signature-caption {
-      padding-top: 4px !important;
-      font-size: 11px !important;
-      text-align: center;
+    .signature-mark {
+      position: relative;
+      z-index: 4;
+      white-space: nowrap;
     }
     .signature {
       position: absolute;
@@ -325,8 +316,8 @@ public static class ActDocumentTemplateEngine
               <td class="totals-value">{{FormatMoney(totalAmount)}}</td>
             </tr>
             <tr>
-              <td class="totals-label">Без налога (НДС):</td>
-              <td class="totals-value">-</td>
+              <td class="totals-label">В том числе НДС:</td>
+              <td class="totals-value">0,00</td>
             </tr>
           </tbody>
         </table>
@@ -348,38 +339,19 @@ public static class ActDocumentTemplateEngine
                 <td>
                   <div class="signature-role">ИСПОЛНИТЕЛЬ</div>
                   <div class="signature-party">{{Encode(seller.SignaturePartyName)}}</div>
-                  <table class="signature-lines-table">
-                    <tbody>
-                      <tr>
-                        <td class="signature-line-cell">
-                          {{signatureHtml}}
-                          {{sealHtml}}
-                        </td>
-                        <td class="signature-decode-cell">{{Encode(seller.SignatoryShortName)}}</td>
-                      </tr>
-                      <tr>
-                        <td class="signature-caption">подпись</td>
-                        <td class="signature-caption">расшифровка подписи</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                  <div class="signature-sign-cell">
+                    {{signatureHtml}}
+                    {{sealHtml}}
+                    <span class="signature-mark">/ {{Encode(seller.SignatoryShortName)}} /</span>
+                  </div>
                 </td>
                 <td class="signature-gap"></td>
                 <td>
                   <div class="signature-role">ЗАКАЗЧИК</div>
                   <div class="signature-party">{{Encode(buyer.SignaturePartyName)}}</div>
-                  <table class="signature-lines-table">
-                    <tbody>
-                      <tr>
-                        <td class="signature-line-cell"></td>
-                        <td class="signature-decode-cell">{{Encode(buyer.SignatoryShortName)}}</td>
-                      </tr>
-                      <tr>
-                        <td class="signature-caption">подпись</td>
-                        <td class="signature-caption">расшифровка подписи</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                  <div class="signature-sign-cell">
+                    <span class="signature-mark">/ {{Encode(buyer.SignatoryShortName)}} /</span>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -476,9 +448,39 @@ public static class ActDocumentTemplateEngine
         return new SellerInfo(Encode(requisitesText), signaturePartyName, signatoryShortName);
     }
 
-    private static BuyerInfo BuildBuyer(Act act)
+    private static SellerInfo BuildExpenseSeller(Act act)
     {
-        var buyerClients = EnumerateBuyerClients(act).ToList();
+        var supplier = act.Invoice?.Client ?? act.Client;
+        var supplierInfo = BuildClientParty(
+            supplier is null ? [] : [supplier],
+            FirstNotEmpty(supplier?.Name, act.Invoice?.CounterpartyName, "Исполнитель"));
+
+        return new SellerInfo(
+            supplierInfo.RequisitesHtml,
+            supplierInfo.SignaturePartyName,
+            supplierInfo.SignatoryShortName);
+    }
+
+    private static BuyerInfo BuildCompanyBuyer(SellerInfo companyParty)
+        => new(
+            WebUtility.HtmlDecode(companyParty.RequisitesHtml),
+            companyParty.RequisitesHtml,
+            companyParty.SignaturePartyName,
+            companyParty.SignatoryShortName);
+
+    private static BuyerInfo BuildBuyer(Act act)
+        => BuildClientParty(
+            EnumerateBuyerClients(act).ToList(),
+            FirstNotEmpty(
+                act.Client?.Name,
+                act.Invoice?.Client?.Name,
+                act.Invoice?.ExpenseClient?.Name,
+                act.Invoice?.CounterpartyName,
+                "Заказчик"));
+
+    private static BuyerInfo BuildClientParty(IReadOnlyCollection<Client> clients, string fallbackName)
+    {
+        var buyerClients = clients.ToList();
         var buyerClient = buyerClients.FirstOrDefault();
         var buyerProfiles = buyerClients
             .Select(client => new BuyerClientData(client, ParseBuyerProfile(client.Notes)))
@@ -486,10 +488,7 @@ public static class ActDocumentTemplateEngine
 
         var displayName = FirstNotEmpty(
             buyerClient?.Name,
-            act.Client?.Name,
-            act.Invoice?.Client?.Name,
-            act.Invoice?.ExpenseClient?.Name,
-            act.Invoice?.CounterpartyName,
+            fallbackName,
             "Заказчик");
 
         var company = buyerClients
