@@ -1540,14 +1540,6 @@ export function InvoiceModal({
   }, [invoice?.id, invoice?.invoiceEntityId, mode, open]);
 
   useEffect(() => {
-    if (form.type !== 'Income' && installmentPlan) {
-      setInstallmentPlan(null);
-      setInstallmentModalOpen(false);
-      setInstallmentPlanTouched(true);
-    }
-  }, [form.type, installmentPlan]);
-
-  useEffect(() => {
     if (!open || mode !== 'create') return;
 
     const nextAutoResponsibleId = selectedResponsibleSourceClient?.responsibleUserId
@@ -2338,7 +2330,6 @@ export function InvoiceModal({
   };
 
   const handleOpenInstallmentCalculator = () => {
-    if (form.type !== 'Income') return;
     setInstallmentModalOpen(true);
   };
 
@@ -3627,15 +3618,13 @@ export function InvoiceModal({
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center justify-between gap-2 font-medium text-slate-700">
                                   {t('invoiceAmount') ?? 'Сумма'}
-                                  {isIncome && (
-                                    <button
-                                      type="button"
-                                      onClick={handleOpenInstallmentCalculator}
-                                      className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
-                                    >
-                                      {installmentPlan ? 'Изменить рассрочку' : (t('invoiceInstallmentButton') ?? 'Рассрочка')}
-                                    </button>
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={handleOpenInstallmentCalculator}
+                                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+                                  >
+                                    {installmentPlan ? 'Изменить рассрочку' : (t('invoiceInstallmentButton') ?? 'Рассрочка')}
+                                  </button>
                                 </span>
                                 <input
                                   type="text"
@@ -3645,7 +3634,7 @@ export function InvoiceModal({
                                   className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-right text-sm tabular-nums text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                   placeholder="0.00"
                                 />
-                                {isIncome && installmentPlan ? (
+                                {installmentPlan ? (
                                   <span className={`text-xs ${installmentPlanAmountMismatch ? 'text-amber-600' : 'text-slate-500'}`}>
                                     {installmentPlanAmountMismatch
                                       ? 'Сумма изменилась, пересчитайте рассрочку.'

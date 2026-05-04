@@ -798,6 +798,84 @@ describe('InvoiceModal integration', () => {
     expect(dateInputs[1]?.value).toBe('2026-06-10');
   });
 
+  it('allows applying an installment plan to an expense invoice', async () => {
+    installmentPlannerPlanRef.current = {
+      total: 12000,
+      downPayment: 0,
+      annualRate: 0,
+      months: 3,
+      startDate: '2026-05-10',
+      roundingMode: 'none',
+      roundingStep: null,
+      toPay: 12000,
+      overpay: 0,
+      loanAmount: 12000,
+      baseMonthlyPayment: 4000,
+      roundedMonthlyPayment: 4000,
+      items: [
+        { sequence: 1, date: '2026-05-10', principal: 4000, interest: 0, payment: 4000, balance: 8000 },
+        { sequence: 2, date: '2026-06-10', principal: 4000, interest: 0, payment: 4000, balance: 4000 },
+        { sequence: 3, date: '2026-07-10', principal: 4000, interest: 0, payment: 4000, balance: 0 },
+      ],
+    };
+
+    const invoice = {
+      id: 534,
+      invoiceEntityId: 30,
+      number: '30',
+      date: '2026-05-10',
+      dueDate: '2026-05-10',
+      amount: 12000,
+      type: 'Expense',
+      status: 'Pending',
+      clientId: 1,
+      expenseClientId: 2,
+      lineItems: [{ name: 'Expense service', quantity: 1, unit: 'pcs', price: 12000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Supplier'), createTestClient(2, 'Client owner')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    const installmentButton = document.querySelector('label button[type="button"]') as HTMLButtonElement | null;
+    expect(installmentButton).toBeTruthy();
+    fireEvent.click(installmentButton!);
+    expect(await screen.findByTestId('installment-planner')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'apply-installment-plan' }));
+
+    await waitFor(() => {
+      expect(vi.mocked(apiService.updateInvoice)).toHaveBeenCalledWith(
+        534,
+        expect.objectContaining({
+          type: 'Expense',
+          expenseClientId: 2,
+          dueDate: '2026-07-10',
+          replaceInstallmentPlan: true,
+          installmentPlan: expect.objectContaining({
+            months: 3,
+            items: expect.arrayContaining([
+              expect.objectContaining({ sequence: 1 }),
+              expect.objectContaining({ sequence: 2 }),
+              expect.objectContaining({ sequence: 3 }),
+            ]),
+          }),
+        }),
+      );
+    });
+  });
+
   it('sends explicit installment removal when the plan is cleared from the editor', async () => {
     const invoice = {
       id: 533,
