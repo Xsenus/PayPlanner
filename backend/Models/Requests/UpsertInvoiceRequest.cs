@@ -28,10 +28,13 @@ public class UpsertInvoiceRequest
 
     public DateTime? PaidDate { get; set; }
 
-    [Required]
-    public int ClientId { get; set; }
+    public int? ClientId { get; set; }
+
+    public int? LegalEntityId { get; set; }
 
     public int? ExpenseClientId { get; set; }
+
+    public int? ExpenseLegalEntityId { get; set; }
 
     public int? ContractId { get; set; }
 

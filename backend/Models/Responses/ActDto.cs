@@ -25,6 +25,9 @@ public class ActDto
     public string? CancelledReason { get; set; }
     public int? ClientId { get; set; }
     public string? ClientName { get; set; }
+    public int? LegalEntityId { get; set; }
+    public string? LegalEntityName { get; set; }
+    public string? LegalEntityInn { get; set; }
     public int? ResponsibleId { get; set; }
     public string? ResponsibleName { get; set; }
     public string? Comment { get; set; }

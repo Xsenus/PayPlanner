@@ -204,8 +204,8 @@ public class ClientsV2Controller : ControllerBase
         {
             var casesCountByClient = await _db.ClientCases
                 .AsNoTracking()
-                .Where(c => itemIds.Contains(c.ClientId))
-                .GroupBy(c => c.ClientId)
+                .Where(c => c.ClientId.HasValue && itemIds.Contains(c.ClientId.Value))
+                .GroupBy(c => c.ClientId!.Value)
                 .Select(g => new { ClientId = g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.ClientId, x => x.Count, ct);
 

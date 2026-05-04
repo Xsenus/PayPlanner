@@ -36,6 +36,7 @@ public static class PaymentDomainService
         if (payment.Type != PaymentType.Expense)
         {
             payment.ExpenseClientId = null;
+            payment.ExpenseLegalEntityId = null;
         }
 
         payment.Date = payment.Date.Date;

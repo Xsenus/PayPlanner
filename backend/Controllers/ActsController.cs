@@ -63,7 +63,8 @@ public class ActsController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default,
         [FromQuery] bool includeLineItems = false,
-        [FromQuery] string? workflowStatus = null)
+        [FromQuery] string? workflowStatus = null,
+        [FromQuery] int? legalEntityId = null)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
@@ -77,6 +78,11 @@ public class ActsController : ControllerBase
         var query = _db.Acts.AsNoTracking()
             .ApplyActFilters(from, to, status, type, clientId, responsibleId, search)
             .ApplyActSort(sortBy, sortDir);
+
+        if (legalEntityId.HasValue)
+        {
+            query = query.Where(act => act.LegalEntityId == legalEntityId.Value);
+        }
 
         if (normalizedWorkflowStatus is not null)
         {
@@ -123,6 +129,44 @@ public class ActsController : ControllerBase
             .Where(id => id > 0)
             .ToHashSet();
     }
+
+    private static CounterpartyOwner ResolveActOwner(UpsertActRequest request, Payment? invoice)
+    {
+        var requestClientId = request.ClientId is > 0 ? request.ClientId : null;
+        var requestLegalEntityId = request.LegalEntityId is > 0 ? request.LegalEntityId : null;
+        if (requestClientId.HasValue || requestLegalEntityId.HasValue)
+        {
+            return new CounterpartyOwner(requestClientId, requestLegalEntityId);
+        }
+
+        return new CounterpartyOwner(
+            invoice?.ClientId is > 0 ? invoice.ClientId : null,
+            invoice?.LegalEntityId is > 0 ? invoice.LegalEntityId : null);
+    }
+
+    private async Task<ActionResult?> ValidateActOwnerAsync(int? clientId, int? legalEntityId, CancellationToken ct)
+    {
+        var hasClient = clientId.HasValue && clientId.Value > 0;
+        var hasLegalEntity = legalEntityId.HasValue && legalEntityId.Value > 0;
+        if (hasClient == hasLegalEntity)
+        {
+            return BadRequest("Act must reference either clientId or legalEntityId.");
+        }
+
+        if (hasClient && !await _db.Clients.AsNoTracking().AnyAsync(client => client.Id == clientId!.Value, ct))
+        {
+            return BadRequest($"Unknown clientId {clientId!.Value}");
+        }
+
+        if (hasLegalEntity && !await _db.LegalEntities.AsNoTracking().AnyAsync(entity => entity.Id == legalEntityId!.Value, ct))
+        {
+            return BadRequest($"Unknown legalEntityId {legalEntityId!.Value}");
+        }
+
+        return null;
+    }
+
+    private sealed record CounterpartyOwner(int? ClientId, int? LegalEntityId);
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ActDto>> GetById(int id, CancellationToken ct)
@@ -214,7 +258,8 @@ public class ActsController : ControllerBase
         [FromQuery] int? responsibleId,
         [FromQuery] string? search,
         CancellationToken ct = default,
-        [FromQuery] string? workflowStatus = null)
+        [FromQuery] string? workflowStatus = null,
+        [FromQuery] int? legalEntityId = null)
     {
         var normalizedWorkflowStatus = NormalizeActWorkflowStatusOrNull(workflowStatus);
         if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
@@ -224,6 +269,11 @@ public class ActsController : ControllerBase
 
         var query = _db.Acts.AsNoTracking()
             .ApplyActFilters(from, to, status, type, clientId, responsibleId, search);
+
+        if (legalEntityId.HasValue)
+        {
+            query = query.Where(act => act.LegalEntityId == legalEntityId.Value);
+        }
 
         if (normalizedWorkflowStatus is not null)
         {
@@ -325,6 +375,10 @@ public class ActsController : ControllerBase
             return resolvedLineItems.Error;
         }
 
+        var owner = ResolveActOwner(request, invoice);
+        var ownerValidationError = await ValidateActOwnerAsync(owner.ClientId, owner.LegalEntityId, ct);
+        if (ownerValidationError is not null) return ownerValidationError;
+
         var act = new Act
         {
             Number = request.Number.Trim(),
@@ -337,7 +391,8 @@ public class ActsController : ControllerBase
             CounterpartyInn = Normalize(request.CounterpartyInn),
             Status = request.Status,
             WorkflowStatus = workflowStatus,
-            ClientId = request.ClientId,
+            ClientId = owner.ClientId,
+            LegalEntityId = owner.LegalEntityId,
             ResponsibleId = request.ResponsibleId ?? User.GetUserId(),
             Comment = Normalize(request.Comment),
             CreatedAt = DateTime.UtcNow,
@@ -349,6 +404,7 @@ public class ActsController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
+        await _db.Entry(act).Reference(a => a.LegalEntity).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
         await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
@@ -394,6 +450,10 @@ public class ActsController : ControllerBase
             return resolvedLineItems.Error;
         }
 
+        var owner = ResolveActOwner(request, invoice);
+        var ownerValidationError = await ValidateActOwnerAsync(owner.ClientId, owner.LegalEntityId, ct);
+        if (ownerValidationError is not null) return ownerValidationError;
+
         act.Number = request.Number.Trim();
         act.Title = Normalize(request.Title);
         act.Date = request.Date.Date;
@@ -404,7 +464,8 @@ public class ActsController : ControllerBase
         act.CounterpartyInn = Normalize(request.CounterpartyInn);
         act.Status = request.Status;
         act.WorkflowStatus = workflowStatus;
-        act.ClientId = request.ClientId;
+        act.ClientId = owner.ClientId;
+        act.LegalEntityId = owner.LegalEntityId;
         act.ResponsibleId = request.ResponsibleId;
         act.Comment = Normalize(request.Comment);
         act.UpdatedAt = DateTime.UtcNow;
@@ -413,6 +474,7 @@ public class ActsController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
+        await _db.Entry(act).Reference(a => a.LegalEntity).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
         await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
@@ -596,6 +658,9 @@ public class ActsController : ControllerBase
         CancelledReason = act.CancelledReason,
         ClientId = act.ClientId,
         ClientName = act.Client != null ? act.Client.Name : null,
+        LegalEntityId = act.LegalEntityId,
+        LegalEntityName = act.LegalEntity != null ? act.LegalEntity.ShortName : null,
+        LegalEntityInn = act.LegalEntity != null ? act.LegalEntity.Inn : null,
         ResponsibleId = act.ResponsibleId,
         ResponsibleName = act.Responsible != null ? act.Responsible.FullName : null,
         Comment = act.Comment,
@@ -649,6 +714,9 @@ public class ActsController : ControllerBase
         CancelledReason = act.CancelledReason,
         ClientId = act.ClientId,
         ClientName = act.Client != null ? act.Client.Name : null,
+        LegalEntityId = act.LegalEntityId,
+        LegalEntityName = act.LegalEntity != null ? act.LegalEntity.ShortName : null,
+        LegalEntityInn = act.LegalEntity != null ? act.LegalEntity.Inn : null,
         ResponsibleId = act.ResponsibleId,
         ResponsibleName = act.Responsible != null ? act.Responsible.FullName : null,
         Comment = act.Comment,
@@ -673,6 +741,8 @@ public class ActsController : ControllerBase
                 .ThenInclude(client => client!.Addresses)
             .Include(act => act.Client)
                 .ThenInclude(client => client!.Passports)
+            .Include(act => act.LegalEntity)
+                .ThenInclude(entity => entity!.Addresses)
             .Include(act => act.Responsible)
             .Include(act => act.LineItems)
             .Include(act => act.Invoice)
@@ -687,6 +757,12 @@ public class ActsController : ControllerBase
             .Include(act => act.Invoice)
                 .ThenInclude(invoice => invoice!.ExpenseClient)
                     .ThenInclude(client => client!.Passports)
+            .Include(act => act.Invoice)
+                .ThenInclude(invoice => invoice!.LegalEntity)
+                    .ThenInclude(entity => entity!.Addresses)
+            .Include(act => act.Invoice)
+                .ThenInclude(invoice => invoice!.ExpenseLegalEntity)
+                    .ThenInclude(entity => entity!.Addresses)
             .FirstOrDefaultAsync(act => act.Id == id, ct);
     }
 
@@ -1110,6 +1186,9 @@ public class ActsController : ControllerBase
             CancelledReason = act.CancelledReason,
             ClientId = act.ClientId,
             ClientName = act.Client?.Name,
+            LegalEntityId = act.LegalEntityId,
+            LegalEntityName = act.LegalEntity?.ShortName,
+            LegalEntityInn = act.LegalEntity?.Inn,
             ResponsibleId = act.ResponsibleId,
             ResponsibleName = act.Responsible?.FullName,
             Comment = act.Comment,

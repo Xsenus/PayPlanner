@@ -16,7 +16,17 @@ namespace PayPlanner.Api.Models
         /// <summary>
         /// Идентификатор клиента-владельца дела.
         /// </summary>
-        public int ClientId { get; set; }
+        public int? ClientId { get; set; }
+
+        /// <summary>
+        /// Навигация на юридическое лицо-владельца.
+        /// </summary>
+        public LegalEntity? LegalEntity { get; set; }
+
+        /// <summary>
+        /// Идентификатор юридического лица-владельца дела.
+        /// </summary>
+        public int? LegalEntityId { get; set; }
 
         /// <summary>
         /// Дата создания дела (UTC).

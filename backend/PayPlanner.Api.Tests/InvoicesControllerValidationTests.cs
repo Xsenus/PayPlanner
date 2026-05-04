@@ -253,7 +253,7 @@ public class InvoicesControllerValidationTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
         var message = Assert.IsType<string>(badRequest.Value);
-        Assert.Equal($"Client cases are not linked to selected client: {foreignCaseId}", message);
+        Assert.Equal($"Client cases are not linked to selected counterparty: {foreignCaseId}", message);
     }
 
     [Fact]
@@ -289,7 +289,7 @@ public class InvoicesControllerValidationTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
         var message = Assert.IsType<string>(badRequest.Value);
-        Assert.Equal($"Acts are not linked to selected client: {foreignActId}", message);
+        Assert.Equal($"Acts are not linked to selected counterparty: {foreignActId}", message);
     }
 
     [Fact]

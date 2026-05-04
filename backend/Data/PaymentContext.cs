@@ -254,6 +254,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ClientId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.LegalEntity)
+                  .WithMany(le => le.Acts)
+                  .HasForeignKey(e => e.LegalEntityId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(e => e.Responsible)
                   .WithMany(u => u.Acts)
                   .HasForeignKey(e => e.ResponsibleId)
@@ -273,6 +278,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_Acts_Status");
             entity.HasIndex(e => e.WorkflowStatus).HasDatabaseName("IX_Acts_WorkflowStatus");
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_Acts_ClientId");
+            entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_Acts_LegalEntityId");
             entity.HasIndex(e => e.ResponsibleId).HasDatabaseName("IX_Acts_ResponsibleId");
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Acts_Number");
             entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_Acts_InvoiceId");
@@ -599,6 +605,16 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ExpenseClientId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.LegalEntity)
+                  .WithMany(le => le.Payments)
+                  .HasForeignKey(e => e.LegalEntityId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.ExpenseLegalEntity)
+                  .WithMany()
+                  .HasForeignKey(e => e.ExpenseLegalEntityId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(e => e.Contract)
                   .WithMany(c => c.Payments)
                   .HasForeignKey(e => e.ContractId)
@@ -673,6 +689,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.PaymentStatusId).HasDatabaseName("IX_Payments_PaymentStatusId");
             entity.HasIndex(e => e.ContractId).HasDatabaseName("IX_Payments_ContractId");
             entity.HasIndex(e => e.ExpenseClientId).HasDatabaseName("IX_Payments_ExpenseClientId");
+            entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_Payments_LegalEntityId");
+            entity.HasIndex(e => e.ExpenseLegalEntityId).HasDatabaseName("IX_Payments_ExpenseLegalEntityId");
             entity.HasIndex(e => e.DocumentKind).HasDatabaseName("IX_Payments_DocumentKind");
             entity.HasIndex(e => e.InvoiceWorkflowStatus).HasDatabaseName("IX_Payments_InvoiceWorkflowStatus");
             entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_Payments_InvoiceId");
@@ -1097,11 +1115,21 @@ public class PaymentContext : DbContext
                   .HasForeignKey(cc => cc.ClientId)
                   .OnDelete(DeleteBehavior.Cascade);
 
+            entity.HasOne(cc => cc.LegalEntity)
+                  .WithMany(le => le.Cases)
+                  .HasForeignKey(cc => cc.LegalEntityId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
             // ---- Индексы ----
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_ClientCases_Status");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_ClientCases_CreatedAt");
             entity.HasIndex(e => new { e.ClientId, e.CreatedAt }).HasDatabaseName("IX_ClientCases_ClientId_CreatedAt");
             entity.HasIndex(e => new { e.ClientId, e.Status }).HasDatabaseName("IX_ClientCases_ClientId_Status");
+            entity.HasIndex(e => new { e.LegalEntityId, e.CreatedAt }).HasDatabaseName("IX_ClientCases_LegalEntityId_CreatedAt");
+            entity.HasIndex(e => new { e.LegalEntityId, e.Status }).HasDatabaseName("IX_ClientCases_LegalEntityId_Status");
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_ClientCases_Owner",
+                "(ClientId IS NOT NULL AND LegalEntityId IS NULL) OR (ClientId IS NULL AND LegalEntityId IS NOT NULL)"));
         });
 
         // ------------------ DealType ------------------

@@ -14,7 +14,9 @@ export interface InvoiceEditorFormDraft {
   type: PaymentKind;
   status: PaymentStatus;
   clientId: string;
+  legalEntityId: string;
   expenseClientId: string;
+  expenseLegalEntityId: string;
   contractId: string;
   clientCaseReference: string;
   description: string;
@@ -43,6 +45,8 @@ export interface InvoiceEditorActDraft {
   invoiceNumber?: string | null;
   clientId?: number | null;
   clientName?: string | null;
+  legalEntityId?: number | null;
+  legalEntityName?: string | null;
   status: ActStatus;
 }
 
@@ -165,6 +169,8 @@ function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | nu
             invoiceNumber: typeof item.invoiceNumber === 'string' ? item.invoiceNumber : null,
             clientId: typeof item.clientId === 'number' && Number.isFinite(item.clientId) ? item.clientId : null,
             clientName: typeof item.clientName === 'string' ? item.clientName : null,
+            legalEntityId: typeof item.legalEntityId === 'number' && Number.isFinite(item.legalEntityId) ? item.legalEntityId : null,
+            legalEntityName: typeof item.legalEntityName === 'string' ? item.legalEntityName : null,
             status: ACT_STATUSES.includes(item.status as ActStatus) ? (item.status as ActStatus) : 'Created',
           };
         })
@@ -184,7 +190,9 @@ function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | nu
     type,
     status,
     clientId: readString(form.clientId),
+    legalEntityId: readString(form.legalEntityId),
     expenseClientId: readString(form.expenseClientId),
+    expenseLegalEntityId: readString(form.expenseLegalEntityId),
     contractId: readString(form.contractId),
     clientCaseReference: readString(form.clientCaseReference),
     description: readString(form.description),

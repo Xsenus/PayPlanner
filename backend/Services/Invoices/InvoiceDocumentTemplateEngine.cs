@@ -401,6 +401,42 @@ public static class InvoiceDocumentTemplateEngine
     {
         var isExpense = payment.Type == PaymentType.Expense;
         var directClient = isExpense ? payment.ExpenseClient : payment.Client;
+        var directLegalEntity = isExpense ? payment.ExpenseLegalEntity : payment.LegalEntity;
+        if (directClient is null && directLegalEntity is not null)
+        {
+            var legalName = FirstNotEmpty(directLegalEntity.FullName, directLegalEntity.ShortName, payment.CounterpartyName, "Контрагент");
+            var legalAddress = LegalEntityAddressResolver.ResolvePreferredAddress(directLegalEntity);
+            var legalRequisitesLines = new List<string>
+            {
+                string.Join(", ", new[]
+                {
+                    legalName,
+                    string.IsNullOrWhiteSpace(directLegalEntity.Inn) ? null : $"ИНН {directLegalEntity.Inn}",
+                    string.IsNullOrWhiteSpace(directLegalEntity.Kpp) ? null : $"КПП {directLegalEntity.Kpp}",
+                    string.IsNullOrWhiteSpace(directLegalEntity.Ogrn) ? null : $"ОГРН {directLegalEntity.Ogrn}",
+                }.Where(static part => !string.IsNullOrWhiteSpace(part))),
+            };
+            if (!string.IsNullOrWhiteSpace(legalAddress))
+            {
+                legalRequisitesLines.Add(legalAddress);
+            }
+
+            return new BuyerInfo
+            {
+                Name = legalName,
+                Address = legalAddress,
+                Passport = string.Empty,
+                Inn = directLegalEntity.Inn ?? string.Empty,
+                Snils = string.Empty,
+                Phone = directLegalEntity.Phone ?? string.Empty,
+                Email = directLegalEntity.Email ?? string.Empty,
+                Contract = string.Empty,
+                Foundation = string.Empty,
+                Case = BuildBuyerCase(payment),
+                Requisites = string.Join(", ", legalRequisitesLines.Where(static part => !string.IsNullOrWhiteSpace(part))),
+                RequisitesHtml = BuildCounterpartyLinesHtml(legalRequisitesLines),
+            };
+        }
         var buyerProfile = ParseBuyerProfile(directClient?.Notes);
         var primaryPassport = directClient?.Passports
             .OrderByDescending(passport => passport.IsPrimary)

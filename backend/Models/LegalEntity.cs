@@ -179,6 +179,9 @@ public class LegalEntity
     public DateTime? UpdatedAt { get; set; }
 
     public ICollection<Client> Clients { get; set; } = new List<Client>();
+    public ICollection<ClientCase> Cases { get; set; } = new List<ClientCase>();
+    public ICollection<Payment> Payments { get; set; } = new List<Payment>();
+    public ICollection<Act> Acts { get; set; } = new List<Act>();
 
     public ICollection<AddressRecord> Addresses { get; set; } = new List<AddressRecord>();
     public ICollection<UserCompanyAccess> UserCompanyAccesses { get; set; } = new List<UserCompanyAccess>();

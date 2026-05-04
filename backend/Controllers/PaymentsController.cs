@@ -143,7 +143,9 @@ public class PaymentsController : ControllerBase
         e.Description = model.Description ?? string.Empty;
         e.Notes = model.Notes ?? string.Empty;
         e.ClientId = model.ClientId;
+        e.LegalEntityId = model.LegalEntityId;
         e.ExpenseClientId = model.ExpenseClientId;
+        e.ExpenseLegalEntityId = model.ExpenseLegalEntityId;
         e.ClientCaseId = model.ClientCaseId;
         e.ContractId = model.ContractId;
         e.DealTypeId = model.DealTypeId;
@@ -292,7 +294,9 @@ public class PaymentsController : ControllerBase
         e.Description = model.Description ?? string.Empty;
         e.Notes = model.Notes ?? string.Empty;
         e.ClientId = model.ClientId;
+        e.LegalEntityId = model.LegalEntityId;
         e.ExpenseClientId = model.ExpenseClientId;
+        e.ExpenseLegalEntityId = model.ExpenseLegalEntityId;
         e.ClientCaseId = model.ClientCaseId;
         e.ContractId = model.ContractId;
         e.DealTypeId = model.DealTypeId;
@@ -494,7 +498,9 @@ public class PaymentsController : ControllerBase
         {
             payment.Type = invoiceDocument.Type;
             payment.ClientId = invoiceDocument.ClientId;
+            payment.LegalEntityId = invoiceDocument.LegalEntityId;
             payment.ExpenseClientId = invoiceDocument.ExpenseClientId;
+            payment.ExpenseLegalEntityId = invoiceDocument.ExpenseLegalEntityId;
             payment.ContractId = invoiceDocument.ContractId;
 
             var linkedCaseIds = invoiceDocument.InvoiceClientCases
@@ -540,7 +546,9 @@ public class PaymentsController : ControllerBase
                     Invoice = invoice,
                     Type = payment.Type,
                     ClientId = payment.ClientId,
+                    LegalEntityId = payment.LegalEntityId,
                     ExpenseClientId = payment.ExpenseClientId,
+                    ExpenseLegalEntityId = payment.ExpenseLegalEntityId,
                     ContractId = payment.ContractId,
                     ClientCaseId = payment.ClientCaseId,
                 };
@@ -637,14 +645,61 @@ public class PaymentsController : ControllerBase
 
     private async Task<ActionResult?> ValidatePaymentAttributionAsync(Payment payment, CancellationToken ct)
     {
-        if (payment.Type == PaymentType.Expense && payment.ExpenseClientId.HasValue && payment.ExpenseClientId.Value > 0)
+        var hasClient = payment.ClientId.HasValue && payment.ClientId.Value > 0;
+        var hasLegalEntity = payment.LegalEntityId.HasValue && payment.LegalEntityId.Value > 0;
+        if (hasClient && hasLegalEntity)
+        {
+            return BadRequest("Payment must reference either clientId or legalEntityId, not both.");
+        }
+
+        if (hasClient)
+        {
+            var clientExists = await _db.Clients
+                .AsNoTracking()
+                .AnyAsync(client => client.Id == payment.ClientId!.Value, ct);
+            if (!clientExists)
+            {
+                return BadRequest($"Unknown clientId {payment.ClientId!.Value}");
+            }
+        }
+
+        if (hasLegalEntity)
+        {
+            var legalEntityExists = await _db.LegalEntities
+                .AsNoTracking()
+                .AnyAsync(entity => entity.Id == payment.LegalEntityId!.Value, ct);
+            if (!legalEntityExists)
+            {
+                return BadRequest($"Unknown legalEntityId {payment.LegalEntityId!.Value}");
+            }
+        }
+
+        var hasExpenseClient = payment.ExpenseClientId.HasValue && payment.ExpenseClientId.Value > 0;
+        var hasExpenseLegalEntity = payment.ExpenseLegalEntityId.HasValue && payment.ExpenseLegalEntityId.Value > 0;
+        if (hasExpenseClient && hasExpenseLegalEntity)
+        {
+            return BadRequest("Expense payment must reference either expenseClientId or expenseLegalEntityId, not both.");
+        }
+
+        if (payment.Type == PaymentType.Expense && hasExpenseClient)
         {
             var expenseClientExists = await _db.Clients
                 .AsNoTracking()
-                .AnyAsync(client => client.Id == payment.ExpenseClientId.Value, ct);
+                .AnyAsync(client => client.Id == payment.ExpenseClientId!.Value, ct);
             if (!expenseClientExists)
             {
-                return BadRequest($"Unknown expenseClientId {payment.ExpenseClientId.Value}");
+                return BadRequest($"Unknown expenseClientId {payment.ExpenseClientId!.Value}");
+            }
+        }
+
+        if (payment.Type == PaymentType.Expense && hasExpenseLegalEntity)
+        {
+            var expenseLegalEntityExists = await _db.LegalEntities
+                .AsNoTracking()
+                .AnyAsync(entity => entity.Id == payment.ExpenseLegalEntityId!.Value, ct);
+            if (!expenseLegalEntityExists)
+            {
+                return BadRequest($"Unknown expenseLegalEntityId {payment.ExpenseLegalEntityId!.Value}");
             }
         }
 
@@ -656,11 +711,16 @@ public class PaymentsController : ControllerBase
         var caseOwnerClientId = payment.Type == PaymentType.Expense
             ? payment.ExpenseClientId
             : payment.ClientId;
-        if (!caseOwnerClientId.HasValue || caseOwnerClientId.Value <= 0)
+        var caseOwnerLegalEntityId = payment.Type == PaymentType.Expense
+            ? payment.ExpenseLegalEntityId
+            : payment.LegalEntityId;
+        var hasCaseOwnerClient = caseOwnerClientId.HasValue && caseOwnerClientId.Value > 0;
+        var hasCaseOwnerLegalEntity = caseOwnerLegalEntityId.HasValue && caseOwnerLegalEntityId.Value > 0;
+        if (hasCaseOwnerClient == hasCaseOwnerLegalEntity)
         {
             return payment.Type == PaymentType.Expense
-                ? BadRequest("ExpenseClientId is required when clientCaseId is specified for expense payments.")
-                : BadRequest("ClientId is required when clientCaseId is specified.");
+                ? BadRequest("ExpenseClientId or expenseLegalEntityId is required when clientCaseId is specified for expense payments.")
+                : BadRequest("ClientId or legalEntityId is required when clientCaseId is specified.");
         }
 
         var clientCase = await _db.ClientCases
@@ -671,11 +731,18 @@ public class PaymentsController : ControllerBase
             return BadRequest($"Unknown clientCaseId {payment.ClientCaseId.Value}");
         }
 
-        if (clientCase.ClientId != caseOwnerClientId.Value)
+        if (hasCaseOwnerClient && clientCase.ClientId != caseOwnerClientId!.Value)
         {
             return payment.Type == PaymentType.Expense
                 ? BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to expenseClientId {caseOwnerClientId.Value}")
                 : BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to clientId {caseOwnerClientId.Value}");
+        }
+
+        if (hasCaseOwnerLegalEntity && clientCase.LegalEntityId != caseOwnerLegalEntityId!.Value)
+        {
+            return payment.Type == PaymentType.Expense
+                ? BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to expenseLegalEntityId {caseOwnerLegalEntityId.Value}")
+                : BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to legalEntityId {caseOwnerLegalEntityId.Value}");
         }
 
         return null;
@@ -805,6 +872,7 @@ public class PaymentsController : ControllerBase
                 ClientCaseId = payment.ClientCaseId,
                 ClientCaseReference = payment.ClientCaseReference,
                 ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
                 ContractId = payment.ContractId,
                 CounterpartyName = payment.CounterpartyName,
                 CreatedAt = payment.CreatedAt,
@@ -813,6 +881,7 @@ public class PaymentsController : ControllerBase
                 Description = payment.Description,
                 DocumentKind = payment.DocumentKind,
                 ExpenseClientId = payment.ExpenseClientId,
+                ExpenseLegalEntityId = payment.ExpenseLegalEntityId,
                 IncomeTypeId = payment.IncomeTypeId,
                 InvoiceId = payment.InvoiceId,
                 IsPaid = payment.IsPaid,
@@ -876,10 +945,26 @@ public class PaymentsController : ControllerBase
                     {
                         Id = payment.ClientCase.Id,
                         ClientId = payment.ClientCase.ClientId,
+                        LegalEntityId = payment.ClientCase.LegalEntityId,
                         Title = payment.ClientCase.Title,
                         Description = payment.ClientCase.Description,
                         Status = payment.ClientCase.Status,
                         CreatedAt = payment.ClientCase.CreatedAt,
+                    },
+                LegalEntity = payment.LegalEntity == null
+                    ? null
+                    : new LegalEntity
+                    {
+                        Id = payment.LegalEntity.Id,
+                        ShortName = payment.LegalEntity.ShortName,
+                        FullName = payment.LegalEntity.FullName,
+                        Inn = payment.LegalEntity.Inn,
+                        Kpp = payment.LegalEntity.Kpp,
+                        Ogrn = payment.LegalEntity.Ogrn,
+                        Address = payment.LegalEntity.Address,
+                        Phone = payment.LegalEntity.Phone,
+                        Email = payment.LegalEntity.Email,
+                        CreatedAt = payment.LegalEntity.CreatedAt,
                     },
                 ExpenseClient = payment.ExpenseClient == null
                     ? null
@@ -909,6 +994,21 @@ public class PaymentsController : ControllerBase
                                 CreatedAt = payment.ExpenseClient.ClientStatus.CreatedAt,
                                 SystemKey = payment.ExpenseClient.ClientStatus.SystemKey,
                             },
+                    },
+                ExpenseLegalEntity = payment.ExpenseLegalEntity == null
+                    ? null
+                    : new LegalEntity
+                    {
+                        Id = payment.ExpenseLegalEntity.Id,
+                        ShortName = payment.ExpenseLegalEntity.ShortName,
+                        FullName = payment.ExpenseLegalEntity.FullName,
+                        Inn = payment.ExpenseLegalEntity.Inn,
+                        Kpp = payment.ExpenseLegalEntity.Kpp,
+                        Ogrn = payment.ExpenseLegalEntity.Ogrn,
+                        Address = payment.ExpenseLegalEntity.Address,
+                        Phone = payment.ExpenseLegalEntity.Phone,
+                        Email = payment.ExpenseLegalEntity.Email,
+                        CreatedAt = payment.ExpenseLegalEntity.CreatedAt,
                     },
                 DealType = payment.DealType == null
                     ? null

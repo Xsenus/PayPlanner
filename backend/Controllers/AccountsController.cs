@@ -73,6 +73,9 @@ public class AccountsController : ControllerBase
                 HasInstallmentMarker = payment.SystemNotes != null
                     && payment.SystemNotes.Contains(InvoiceManagedPaymentRules.InstallmentPaymentMarker),
                 ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
+                LegalEntityName = payment.LegalEntity != null ? payment.LegalEntity.ShortName : null,
+                LegalEntityInn = payment.LegalEntity != null ? payment.LegalEntity.Inn : null,
                 ClientName = payment.Client != null ? payment.Client.Name : null,
                 ClientCompany = payment.Client != null ? payment.Client.Company : null,
                 ClientStatusId = payment.Client != null ? payment.Client.ClientStatusId : null,
@@ -89,6 +92,9 @@ public class AccountsController : ControllerBase
                     }
                     : null,
                 ExpenseClientId = payment.ExpenseClientId,
+                ExpenseLegalEntityId = payment.ExpenseLegalEntityId,
+                ExpenseLegalEntityName = payment.ExpenseLegalEntity != null ? payment.ExpenseLegalEntity.ShortName : null,
+                ExpenseLegalEntityInn = payment.ExpenseLegalEntity != null ? payment.ExpenseLegalEntity.Inn : null,
                 ExpenseClientName = payment.ExpenseClient != null ? payment.ExpenseClient.Name : null,
                 ExpenseClientCompany = payment.ExpenseClient != null ? payment.ExpenseClient.Company : null,
                 ExpenseClientStatusId = payment.ExpenseClient != null ? payment.ExpenseClient.ClientStatusId : null,
@@ -138,7 +144,7 @@ public class AccountsController : ControllerBase
         }
 
         var groups = candidateItems
-            .GroupBy(item => BuildGroupKey(item.InvoiceEntityId, item.Number, item.Date, item.ClientId, item.ClientCaseId, item.Type, item.Id))
+            .GroupBy(item => BuildGroupKey(item.InvoiceEntityId, item.Number, item.Date, item.ClientId, item.LegalEntityId, item.ClientCaseId, item.Type, item.Id))
             .Select(group =>
             {
                 var orderedGroup = group
@@ -163,7 +169,7 @@ public class AccountsController : ControllerBase
                     Representative = representative,
                     EditorPaymentId = editorPaymentId > 0 ? editorPaymentId : representative.Id,
                     InvoiceEntityId = invoiceEntityId,
-                    LegacyGroupKey = BuildLegacyGroupKey(representative.Number, representative.Date, representative.ClientId, representative.ClientCaseId, representative.Type),
+                    LegacyGroupKey = BuildLegacyGroupKey(representative.Number, representative.Date, representative.ClientId, representative.LegalEntityId, representative.ClientCaseId, representative.Type),
                     FallbackAmount = representative.Amount,
                     InvoicePaymentIds = orderedGroup.Select(item => item.Id).ToHashSet(),
                     CandidatePayments = orderedGroup.Select(CreateAggregateItem).ToList(),
@@ -216,6 +222,7 @@ public class AccountsController : ControllerBase
                 HasInstallmentMarker = payment.SystemNotes != null
                     && payment.SystemNotes.Contains(InvoiceManagedPaymentRules.InstallmentPaymentMarker),
                 ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
                 ClientCaseId = payment.ClientCaseId,
                 Type = payment.Type,
             })
@@ -223,7 +230,7 @@ public class AccountsController : ControllerBase
 
         var paymentsByLegacyKey = paymentAggregateItems
             .Where(item => item.DocumentKind != DocumentKind.Invoice && !item.InvoiceId.HasValue)
-            .Select(item => new { Item = item, LegacyKey = BuildLegacyGroupKey(item.Account, item.AccountDate ?? item.Date, item.ClientId, item.ClientCaseId, item.Type) })
+            .Select(item => new { Item = item, LegacyKey = BuildLegacyGroupKey(item.Account, item.AccountDate ?? item.Date, item.ClientId, item.LegalEntityId, item.ClientCaseId, item.Type) })
             .Where(entry => entry.LegacyKey is not null && legacyGroupKeys.Contains(entry.LegacyKey))
             .GroupBy(entry => entry.LegacyKey!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
@@ -970,11 +977,17 @@ public class AccountsController : ControllerBase
             IsPaid = effectiveInvoiceStatus == PaymentStatus.Completed,
             PaidDate = group.PaidDate ?? representative.PaidDate,
             ClientId = representative.ClientId,
+            LegalEntityId = representative.LegalEntityId,
+            LegalEntityName = representative.LegalEntityName,
+            LegalEntityInn = representative.LegalEntityInn,
             ClientName = representative.ClientName,
             ClientCompany = representative.ClientCompany,
             ClientStatusId = representative.ClientStatusId,
             ClientStatus = representative.ClientStatus,
             ExpenseClientId = representative.ExpenseClientId,
+            ExpenseLegalEntityId = representative.ExpenseLegalEntityId,
+            ExpenseLegalEntityName = representative.ExpenseLegalEntityName,
+            ExpenseLegalEntityInn = representative.ExpenseLegalEntityInn,
             ExpenseClientName = representative.ExpenseClientName,
             ExpenseClientCompany = representative.ExpenseClientCompany,
             ExpenseClientStatusId = representative.ExpenseClientStatusId,
@@ -1007,6 +1020,8 @@ public class AccountsController : ControllerBase
                 Status = act.Status,
                 ClientId = act.ClientId,
                 ClientName = act.ClientName,
+                LegalEntityId = act.LegalEntityId,
+                LegalEntityName = act.LegalEntityName,
                 ResponsibleId = act.ResponsibleId,
                 ResponsibleName = act.ResponsibleName,
                 Comment = act.Comment,
@@ -1127,6 +1142,7 @@ public class AccountsController : ControllerBase
                 {
                     Id = clientCase.Id,
                     ClientId = clientCase.ClientId,
+                    LegalEntityId = clientCase.LegalEntityId,
                     Title = clientCase.Title,
                     Status = clientCase.Status,
                     CreatedAt = clientCase.CreatedAt,
@@ -1158,6 +1174,7 @@ public class AccountsController : ControllerBase
                 {
                     Id = link.ClientCase.Id,
                     ClientId = link.ClientCase.ClientId,
+                    LegalEntityId = link.ClientCase.LegalEntityId,
                     Title = link.ClientCase.Title,
                     Status = link.ClientCase.Status,
                     CreatedAt = link.ClientCase.CreatedAt,
@@ -1529,6 +1546,7 @@ public class AccountsController : ControllerBase
         string? accountNumber,
         DateTime accountDate,
         int? clientId,
+        int? legalEntityId,
         int? clientCaseId,
         PaymentType type,
         int fallbackId)
@@ -1538,7 +1556,7 @@ public class AccountsController : ControllerBase
             return $"entity:{invoiceEntityId.Value}";
         }
 
-        var legacyKey = BuildLegacyGroupKey(accountNumber, accountDate, clientId, clientCaseId, type);
+        var legacyKey = BuildLegacyGroupKey(accountNumber, accountDate, clientId, legalEntityId, clientCaseId, type);
         return legacyKey is not null ? $"legacy:{legacyKey}" : $"legacy:id:{fallbackId}";
     }
 
@@ -1546,17 +1564,23 @@ public class AccountsController : ControllerBase
         string? accountNumber,
         DateTime? accountDate,
         int? clientId,
+        int? legalEntityId,
         int? clientCaseId,
         PaymentType type)
     {
         var normalizedAccount = NormalizeAccount(accountNumber);
-        if (normalizedAccount is null || !clientId.HasValue || clientId.Value <= 0)
+        var ownerKey = clientId.HasValue && clientId.Value > 0
+            ? $"client:{clientId.Value}"
+            : legalEntityId.HasValue && legalEntityId.Value > 0
+                ? $"legal:{legalEntityId.Value}"
+                : null;
+        if (normalizedAccount is null || ownerKey is null)
         {
             return null;
         }
 
         var year = (accountDate ?? DateTime.MinValue).Year;
-        return $"{normalizedAccount}::{year}::client:{clientId.Value}::case:{clientCaseId?.ToString() ?? "none"}::type:{type}";
+        return $"{normalizedAccount}::{year}::{ownerKey}::case:{clientCaseId?.ToString() ?? "none"}::type:{type}";
     }
 
     private static string? NormalizeAccount(string? value)
@@ -1593,11 +1617,17 @@ public class AccountsController : ControllerBase
         public string? SystemNotes { get; init; }
         public bool HasInstallmentMarker { get; init; }
         public int? ClientId { get; init; }
+        public int? LegalEntityId { get; init; }
+        public string? LegalEntityName { get; init; }
+        public string? LegalEntityInn { get; init; }
         public string? ClientName { get; init; }
         public string? ClientCompany { get; init; }
         public int? ClientStatusId { get; init; }
         public ClientStatusDto? ClientStatus { get; init; }
         public int? ExpenseClientId { get; init; }
+        public int? ExpenseLegalEntityId { get; init; }
+        public string? ExpenseLegalEntityName { get; init; }
+        public string? ExpenseLegalEntityInn { get; init; }
         public string? ExpenseClientName { get; init; }
         public string? ExpenseClientCompany { get; init; }
         public int? ExpenseClientStatusId { get; init; }
@@ -1634,6 +1664,7 @@ public class AccountsController : ControllerBase
         public string? SystemNotes { get; init; }
         public bool HasInstallmentMarker { get; init; }
         public int? ClientId { get; init; }
+        public int? LegalEntityId { get; init; }
         public int? ClientCaseId { get; init; }
         public PaymentType Type { get; init; }
     }

@@ -18,6 +18,7 @@ public class CasesV1Controller : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] int? clientId,
+        [FromQuery] int? legalEntityId,
         [FromQuery] ClientCaseStatus? status,
         [FromQuery] string? search,
         [FromQuery] string? sortBy,
@@ -26,7 +27,7 @@ public class CasesV1Controller : ControllerBase
     {
         var q = _db.ClientCases.AsQueryable()
             .WithCaseIncludes()
-            .ApplyCaseFilters(clientId, status, search)
+            .ApplyCaseFilters(clientId, legalEntityId, status, search)
             .ApplyCaseSort(sortBy, sortDir);
 
         return Ok(await q.AsNoTracking().ToListAsync(ct));
@@ -43,25 +44,30 @@ public class CasesV1Controller : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] ClientCase model)
+    public async Task<IActionResult> Create([FromBody] ClientCase model, CancellationToken ct)
     {
+        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, ct);
+        if (validation is not null) return validation;
         _db.ClientCases.Add(model);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         return Created($"/api/v1/cases/{model.Id}", model);
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] ClientCase model)
+    public async Task<IActionResult> Update(int id, [FromBody] ClientCase model, CancellationToken ct)
     {
-        var e = await _db.ClientCases.FindAsync(id);
+        var e = await _db.ClientCases.FindAsync([id], ct);
         if (e is null) return NotFound();
+        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, ct);
+        if (validation is not null) return validation;
 
         e.Title = model.Title;
         e.Description = model.Description;
         e.Status = model.Status;
         e.ClientId = model.ClientId;
+        e.LegalEntityId = model.LegalEntityId;
 
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         return Ok(e);
     }
 
@@ -78,5 +84,27 @@ public class CasesV1Controller : ControllerBase
         _db.ClientCases.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    private async Task<IActionResult?> ValidateCaseOwnerAsync(int? clientId, int? legalEntityId, CancellationToken ct)
+    {
+        var hasClient = clientId.HasValue && clientId.Value > 0;
+        var hasLegalEntity = legalEntityId.HasValue && legalEntityId.Value > 0;
+        if (hasClient == hasLegalEntity)
+        {
+            return BadRequest("У дела должен быть выбран ровно один владелец: клиент или юридическое лицо.");
+        }
+
+        if (hasClient && !await _db.Clients.AsNoTracking().AnyAsync(client => client.Id == clientId!.Value, ct))
+        {
+            return BadRequest($"Unknown clientId {clientId!.Value}");
+        }
+
+        if (hasLegalEntity && !await _db.LegalEntities.AsNoTracking().AnyAsync(entity => entity.Id == legalEntityId!.Value, ct))
+        {
+            return BadRequest($"Unknown legalEntityId {legalEntityId!.Value}");
+        }
+
+        return null;
     }
 }

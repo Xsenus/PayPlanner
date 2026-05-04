@@ -317,7 +317,8 @@ public sealed partial class DatabaseImportService
 
     private static void CopyClientCase(ClientCase source, ClientCase target, ImportMaps maps)
     {
-        target.ClientId = MapRequired(maps.Clients, source.ClientId);
+        target.ClientId = MapId(maps.Clients, source.ClientId);
+        target.LegalEntityId = MapId(maps.LegalEntities, source.LegalEntityId);
         target.Title = source.Title;
         target.Description = source.Description;
         target.Status = source.Status;

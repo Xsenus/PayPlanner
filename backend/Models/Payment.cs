@@ -82,9 +82,29 @@ namespace PayPlanner.Api.Models
         public int? ClientId { get; set; }
 
         /// <summary>
+        /// Внешний ключ на юридическое лицо-контрагента.
+        /// </summary>
+        public int? LegalEntityId { get; set; }
+
+        /// <summary>
+        /// Навигация на юридическое лицо-контрагента.
+        /// </summary>
+        public LegalEntity? LegalEntity { get; set; }
+
+        /// <summary>
         /// Клиент, к которому относится расходный счет. Для доходных счетов обычно не заполняется.
         /// </summary>
         public int? ExpenseClientId { get; set; }
+
+        /// <summary>
+        /// Юридическое лицо, к которому относится расходный счет.
+        /// </summary>
+        public int? ExpenseLegalEntityId { get; set; }
+
+        /// <summary>
+        /// Навигация на юридическое лицо, к которому относится расходный счет.
+        /// </summary>
+        public LegalEntity? ExpenseLegalEntity { get; set; }
 
         /// <summary>
         /// Навигация на клиента, к которому относится расходный счет.

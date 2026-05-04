@@ -319,7 +319,7 @@ describe('InvoiceModal integration', () => {
     });
   });
 
-  it('creates a client from a legal entity and uses it as the invoice client', async () => {
+  it('selects a legal entity directly and sends it as the invoice counterparty', async () => {
     const legalEntity: LegalEntitySummary = {
       id: 55,
       shortName: 'ООО Ромашка',
@@ -334,17 +334,8 @@ describe('InvoiceModal integration', () => {
       createdAt: '2026-04-15T00:00:00Z',
       clients: [],
     } as LegalEntitySummary;
-    const createdClient = {
-      ...createTestClient(42, 'ООО Ромашка'),
-      legalEntityId: legalEntity.id,
-      legalEntity,
-      phone: '+7 999 000-00-00',
-      email: 'info@romashka.test',
-      address: 'Москва',
-    } as Client;
     const onClientCreated = vi.fn();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    vi.mocked(apiService.createClient).mockResolvedValue(createdClient);
 
     const invoice = {
       id: 701,
@@ -378,22 +369,19 @@ describe('InvoiceModal integration', () => {
     fireEvent.click(screen.getByRole('button', { name: /открыть выбор: клиент/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Юрлица' }));
     expect(screen.getByText('ООО Ромашка')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /создать клиента/i }));
+    fireEvent.click(screen.getByRole('button', { name: /выбрать юрлицо/i }));
 
     await waitFor(() => {
-      expect(apiService.createClient).toHaveBeenCalledWith(expect.objectContaining({
-        name: 'ООО Ромашка',
-        legalEntityId: 55,
-      }));
+      expect(apiService.createClient).not.toHaveBeenCalled();
     });
-    expect(onClientCreated).toHaveBeenCalledWith(createdClient);
+    expect(onClientCreated).not.toHaveBeenCalled();
 
     const form = container.querySelector('form');
     expect(form).toBeTruthy();
     fireEvent.submit(form as HTMLFormElement);
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ clientId: 42 }));
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ clientId: null, legalEntityId: 55 }));
     });
   });
 

@@ -451,6 +451,19 @@ public static class ActDocumentTemplateEngine
     private static SellerInfo BuildExpenseSeller(Act act)
     {
         var supplier = act.Invoice?.Client ?? act.Client;
+        var supplierLegalEntity = act.Invoice?.LegalEntity ?? act.LegalEntity;
+        if (supplier is null && supplierLegalEntity is not null)
+        {
+            var legalSupplierInfo = BuildLegalEntityBuyerParty(
+                supplierLegalEntity,
+                FirstNotEmpty(supplierLegalEntity.FullName, supplierLegalEntity.ShortName, act.Invoice?.CounterpartyName, "Исполнитель"));
+
+            return new SellerInfo(
+                legalSupplierInfo.RequisitesHtml,
+                legalSupplierInfo.SignaturePartyName,
+                legalSupplierInfo.SignatoryShortName);
+        }
+
         var supplierInfo = BuildClientParty(
             supplier is null ? [] : [supplier],
             FirstNotEmpty(supplier?.Name, act.Invoice?.CounterpartyName, "Исполнитель"));
@@ -477,6 +490,33 @@ public static class ActDocumentTemplateEngine
                 act.Invoice?.ExpenseClient?.Name,
                 act.Invoice?.CounterpartyName,
                 "Заказчик"));
+
+    private static BuyerInfo BuildLegalEntityBuyerParty(LegalEntity? legalEntity, string fallbackName)
+    {
+        var displayName = FirstNotEmpty(legalEntity?.FullName, legalEntity?.ShortName, fallbackName, "Контрагент");
+        var address = legalEntity is null ? string.Empty : LegalEntityAddressResolver.ResolvePreferredAddress(legalEntity);
+        var requisitesLines = new List<string>
+        {
+            string.Join(", ", new[]
+            {
+                displayName,
+                string.IsNullOrWhiteSpace(legalEntity?.Inn) ? null : $"ИНН {legalEntity!.Inn}",
+                string.IsNullOrWhiteSpace(legalEntity?.Kpp) ? null : $"КПП {legalEntity!.Kpp}",
+                string.IsNullOrWhiteSpace(legalEntity?.Ogrn) ? null : $"ОГРН {legalEntity!.Ogrn}",
+            }.Where(static value => !string.IsNullOrWhiteSpace(value))),
+        };
+
+        if (!string.IsNullOrWhiteSpace(address))
+        {
+            requisitesLines.Add(address);
+        }
+
+        return new BuyerInfo(
+            Encode(string.Join(", ", requisitesLines.Where(static value => !string.IsNullOrWhiteSpace(value)))),
+            string.Join("<br/>", requisitesLines.Where(static value => !string.IsNullOrWhiteSpace(value)).Select(Encode)),
+            displayName,
+            BuildShortName(displayName));
+    }
 
     private static BuyerInfo BuildClientParty(IReadOnlyCollection<Client> clients, string fallbackName)
     {

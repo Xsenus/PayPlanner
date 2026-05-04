@@ -1367,7 +1367,7 @@ public class PaymentsControllerTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
         Assert.Equal(
-            "ExpenseClientId is required when clientCaseId is specified for expense payments.",
+            "ExpenseClientId or expenseLegalEntityId is required when clientCaseId is specified for expense payments.",
             badRequest.Value);
     }
 

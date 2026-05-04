@@ -4,16 +4,17 @@ import type { ClientCase } from '../types';
 
 type CaseCreateUpdate = Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
 
-export function useClientCases(clientId?: number | string, options: { enabled?: boolean } = {}) {
+export function useClientCases(clientId?: number | string, options: { enabled?: boolean; legalEntityId?: number | string } = {}) {
   const [cases, setCases] = useState<ClientCase[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
   const cid = clientId != null ? Number(clientId) : undefined;
+  const legalEntityId = options.legalEntityId != null ? Number(options.legalEntityId) : undefined;
   const enabled = options.enabled ?? true;
 
   const refresh = useCallback(async () => {
-    if (!enabled || !cid) {
+    if (!enabled || (!cid && !legalEntityId)) {
       setCases([]);
       setLoading(false);
       return;
@@ -21,14 +22,14 @@ export function useClientCases(clientId?: number | string, options: { enabled?: 
     setLoading(true);
     setError(null);
     try {
-      const data = await apiService.getCasesV1({ clientId: cid });
+      const data = await apiService.getCasesV1({ clientId: cid, legalEntityId });
       setCases(data);
     } catch (e) {
       setError(e);
     } finally {
       setLoading(false);
     }
-  }, [cid, enabled]);
+  }, [cid, enabled, legalEntityId]);
 
   useEffect(() => {
     void refresh();
@@ -36,15 +37,16 @@ export function useClientCases(clientId?: number | string, options: { enabled?: 
 
   const createCase = useCallback(
     async (payload: CaseCreateUpdate) => {
-      if (!cid) throw new Error('clientId is required');
+      if (!cid && !legalEntityId) throw new Error('clientId or legalEntityId is required');
       const created = await apiService.createCase({
         ...payload,
-        clientId: cid,
+        clientId: cid ?? null,
+        legalEntityId: legalEntityId ?? null,
       } as CaseCreateUpdate);
       setCases((prev) => [created, ...prev]);
       return created;
     },
-    [cid],
+    [cid, legalEntityId],
   );
 
   const updateCase = useCallback(async (id: number, payload: CaseCreateUpdate) => {

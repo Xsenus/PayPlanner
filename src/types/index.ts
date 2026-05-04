@@ -453,7 +453,8 @@ export interface CleanedAddress {
 
 export interface ClientCase {
   id: number;
-  clientId: number;
+  clientId?: number | null;
+  legalEntityId?: number | null;
   title: string;
   description?: string;
   status: string;
@@ -471,7 +472,9 @@ export interface ClientCase {
 
 export interface InvoiceClientCaseLink {
   id: number;
-  clientId: number;
+  clientId?: number | null;
+  legalEntityId?: number | null;
+  legalEntityName?: string | null;
   title: string;
   status: string;
   createdAt: string;
@@ -1529,6 +1532,9 @@ export interface Act {
   cancelledReason?: string | null;
   clientId?: number | null;
   clientName?: string | null;
+  legalEntityId?: number | null;
+  legalEntityName?: string | null;
+  legalEntityInn?: string | null;
   responsibleId?: number | null;
   responsibleName?: string | null;
   responsibles?: InvoiceResponsible[];
@@ -1560,6 +1566,7 @@ export interface ActInput {
   status: ActStatus;
   workflowStatus?: ActWorkflowStatus;
   clientId?: number | null;
+  legalEntityId?: number | null;
   responsibleId?: number | null;
   comment?: string | null;
   lineItems?: Array<Pick<ActLineItem, 'sourceKey' | 'quantity'> & Partial<Pick<ActLineItem, 'name' | 'unit' | 'price'>>>;
@@ -1689,7 +1696,13 @@ export interface Payment {
   auditDeletedByUserId?: number | null;
   auditDeletedByUserName?: string | null;
   clientId?: number | null;
+  legalEntityId?: number | null;
+  legalEntityName?: string | null;
+  legalEntityInn?: string | null;
   expenseClientId?: number | null;
+  expenseLegalEntityId?: number | null;
+  expenseLegalEntityName?: string | null;
+  expenseLegalEntityInn?: string | null;
   contractId?: number | null;
   documentKind?: DocumentKind;
   paymentOrderNumber?: string | null;
@@ -1845,8 +1858,10 @@ export interface InvoiceInput {
   type: 'Income' | 'Expense';
   status: PaymentStatus;
   workflowStatus?: InvoiceWorkflowStatus;
-  clientId: number;
+  clientId?: number | null;
+  legalEntityId?: number | null;
   expenseClientId?: number | null;
+  expenseLegalEntityId?: number | null;
   contractId?: number | null;
   clientCaseId?: number | null;
   clientCaseIds?: number[];

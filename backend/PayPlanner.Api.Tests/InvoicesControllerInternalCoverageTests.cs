@@ -420,11 +420,13 @@ public class InvoicesControllerInternalCoverageTests
             "ResolveInvoiceResponsibleIdsAsync",
             clientWithResponsibleId,
             null,
+            null,
             CancellationToken.None);
         var fromCurrentUser = await InvokePrivateAsync<HashSet<int>>(
             controller,
             "ResolveInvoiceResponsibleIdsAsync",
             clientWithoutResponsibleId,
+            null,
             null,
             CancellationToken.None);
 
@@ -1892,6 +1894,7 @@ public class InvoicesControllerInternalCoverageTests
             controller,
             "ValidateInvoiceClientCasesAsync",
             owner.Id,
+            null,
             new UpsertInvoiceRequest
             {
                 ClientCaseIds = [ownerCase.Id, 99_001],
@@ -1906,6 +1909,7 @@ public class InvoicesControllerInternalCoverageTests
             controller,
             "ValidateInvoiceClientCasesAsync",
             owner.Id,
+            null,
             new UpsertInvoiceRequest
             {
                 ClientCaseIds = [foreignCase.Id, foreignCaseTwo.Id],
@@ -1995,6 +1999,7 @@ public class InvoicesControllerInternalCoverageTests
             controller,
             "ValidateInvoiceActsAsync",
             owner.Id,
+            null,
             new UpsertInvoiceRequest
             {
                 ActIds = [ownAct.Id, 88_001],
@@ -2009,6 +2014,7 @@ public class InvoicesControllerInternalCoverageTests
             controller,
             "ValidateInvoiceActsAsync",
             owner.Id,
+            null,
             new UpsertInvoiceRequest
             {
                 ActIds = [foreignAct.Id, foreignActTwo.Id],
@@ -2023,6 +2029,7 @@ public class InvoicesControllerInternalCoverageTests
             controller,
             "ValidateInvoiceActsAsync",
             owner.Id,
+            null,
             new UpsertInvoiceRequest
             {
                 ActIds = [linkedAct.Id, linkedActTwo.Id],

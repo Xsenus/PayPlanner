@@ -7,7 +7,6 @@ import type {
   ActResponsible,
   Client,
   ClientCase,
-  ClientInput,
   Contract,
   ContractClient,
   ContractInput,
@@ -59,7 +58,9 @@ type FormState = {
   status: PaymentStatus;
   workflowStatus: InvoiceWorkflowStatus;
   clientId: string;
+  legalEntityId: string;
   expenseClientId: string;
+  expenseLegalEntityId: string;
   contractId: string;
   clientCaseReference: string;
   description: string;
@@ -170,28 +171,6 @@ function getLegalEntityDisplayName(entity: LegalEntitySummary): string {
   return entity.shortName?.trim() || entity.fullName?.trim() || `Юр. лицо #${entity.id}`;
 }
 
-function buildLegalEntityClientPayload(entity: LegalEntitySummary): ClientInput {
-  const name = getLegalEntityDisplayName(entity);
-  const requisites = [
-    entity.inn ? `ИНН ${entity.inn}` : null,
-    entity.kpp ? `КПП ${entity.kpp}` : null,
-    entity.ogrn ? `ОГРН ${entity.ogrn}` : null,
-  ].filter(Boolean).join(', ');
-
-  return {
-    name,
-    email: entity.email ?? '',
-    phone: entity.phone ?? '',
-    company: entity.fullName?.trim() || entity.shortName?.trim() || '',
-    address: entity.address ?? '',
-    notes: requisites ? `Создано из юридического лица. ${requisites}.` : 'Создано из юридического лица.',
-    isActive: true,
-    legalEntityId: entity.id,
-    responsibleUserId: entity.responsibleUserId ?? null,
-    clientStatusId: null,
-  };
-}
-
 function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: number): LineItem[] {
   if (source && source.length > 0) {
     return source.map((item, index) => ({
@@ -218,8 +197,8 @@ function normalizeLineItems(source?: InvoiceLineItem[] | null, fallbackAmount?: 
   ];
 }
 
-type ActOption = Pick<Act, 'id' | 'number' | 'title' | 'date' | 'amount' | 'invoiceNumber' | 'clientId' | 'clientName' | 'status'>;
-type ClientCaseOption = Pick<ClientCase, 'id' | 'clientId' | 'title' | 'status' | 'createdAt'>;
+type ActOption = Pick<Act, 'id' | 'number' | 'title' | 'date' | 'amount' | 'invoiceNumber' | 'clientId' | 'clientName' | 'legalEntityId' | 'legalEntityName' | 'status'>;
+type ClientCaseOption = Pick<ClientCase, 'id' | 'clientId' | 'legalEntityId' | 'title' | 'status' | 'createdAt'>;
 
 interface InvoiceModalProps {
   open: boolean;
@@ -281,7 +260,9 @@ function normalizeInvoiceToForm(
       status: 'Pending',
       workflowStatus: 'Draft',
       clientId: defaultClientId ? String(defaultClientId) : '',
+      legalEntityId: '',
       expenseClientId: resolvedType === 'Expense' && defaultExpenseClientId ? String(defaultExpenseClientId) : '',
+      expenseLegalEntityId: '',
       contractId: '',
       clientCaseReference: '',
       description: '',
@@ -301,11 +282,13 @@ function normalizeInvoiceToForm(
     status: invoice.status ?? 'Pending',
     workflowStatus: invoice.workflowStatus ?? 'Draft',
     clientId: invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
+    legalEntityId: invoice.legalEntityId ? String(invoice.legalEntityId) : '',
     expenseClientId: invoice.expenseClientId
       ? String(invoice.expenseClientId)
       : (invoice.type ?? resolvedType) === 'Expense' && defaultExpenseClientId
         ? String(defaultExpenseClientId)
         : '',
+    expenseLegalEntityId: invoice.expenseLegalEntityId ? String(invoice.expenseLegalEntityId) : '',
     contractId: invoice.contractId ? String(invoice.contractId) : '',
     clientCaseReference: invoice.clientCaseReference ?? '',
     description: invoice.description ?? '',
@@ -331,6 +314,7 @@ function normalizeInvoiceClientCases(invoice: Invoice | null): ClientCaseOption[
     return invoice.clientCases.map((item) => ({
       id: item.id,
       clientId: item.clientId,
+      legalEntityId: item.legalEntityId,
       title: item.title,
       status: item.status,
       createdAt: item.createdAt,
@@ -345,6 +329,10 @@ function normalizeInvoiceClientCases(invoice: Invoice | null): ClientCaseOption[
           invoice.type === 'Expense'
             ? (invoice.expenseClientId ?? invoice.clientId ?? 0)
             : (invoice.clientId ?? 0),
+        legalEntityId:
+          invoice.type === 'Expense'
+            ? (invoice.expenseLegalEntityId ?? invoice.legalEntityId ?? null)
+            : (invoice.legalEntityId ?? null),
         title: invoice.clientCaseTitle ?? '',
         status: '',
         createdAt: invoice.createdAt,
@@ -366,6 +354,8 @@ function normalizeInvoiceActs(invoice: Invoice | null): ActOption[] {
       invoiceNumber: invoice.number,
       clientId: item.clientId ?? undefined,
       clientName: item.clientName ?? undefined,
+      legalEntityId: item.legalEntityId ?? undefined,
+      legalEntityName: item.legalEntityName ?? undefined,
       status: item.status,
     }));
   }
@@ -381,6 +371,8 @@ function normalizeInvoiceActs(invoice: Invoice | null): ActOption[] {
         invoiceNumber: invoice.actNumber ?? invoice.number,
         clientId: invoice.clientId ?? undefined,
         clientName: invoice.clientName ?? undefined,
+        legalEntityId: invoice.legalEntityId ?? undefined,
+        legalEntityName: invoice.legalEntityName ?? undefined,
         status: (invoice.actStatus ?? 'Created') as ActStatus,
       },
     ];
@@ -813,7 +805,6 @@ export function InvoiceModal({
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientPickerScope, setClientPickerScope] = useState<ClientPickerScope>('clients');
   const [clientPickerSearch, setClientPickerSearch] = useState('');
-  const [creatingClientFromLegalEntityId, setCreatingClientFromLegalEntityId] = useState<number | null>(null);
   const [selectedActs, setSelectedActs] = useState<ActOption[]>(() => normalizeInvoiceActs(invoice));
   const [actOptions, setActOptions] = useState<ActOption[]>(() => normalizeInvoiceActs(invoice));
   const [clientCaseOptions, setClientCaseOptions] = useState<ClientCaseOption[]>(() => normalizeInvoiceClientCases(invoice));
@@ -1209,9 +1200,17 @@ export function InvoiceModal({
     () => clients.find((client) => String(client.id) === form.clientId) ?? null,
     [clients, form.clientId],
   );
+  const selectedLegalEntity = useMemo(
+    () => legalEntities.find((entity) => String(entity.id) === form.legalEntityId) ?? null,
+    [legalEntities, form.legalEntityId],
+  );
   const selectedExpenseClient = useMemo(
     () => clients.find((client) => String(client.id) === form.expenseClientId) ?? null,
     [clients, form.expenseClientId],
+  );
+  const selectedExpenseLegalEntity = useMemo(
+    () => legalEntities.find((entity) => String(entity.id) === form.expenseLegalEntityId) ?? null,
+    [legalEntities, form.expenseLegalEntityId],
   );
   const clientsById = useMemo(() => {
     const map = new Map<number, Client>();
@@ -1235,10 +1234,16 @@ export function InvoiceModal({
     return map;
   }, [clients]);
   const caseOwnerClientId = resolveCaseOwnerClientId(form.type, form.clientId, form.expenseClientId);
+  const caseOwnerLegalEntityId = form.type === 'Expense'
+    ? (form.expenseLegalEntityId || form.legalEntityId)
+    : form.legalEntityId;
+  const caseOwnerKey = caseOwnerClientId ? `client:${caseOwnerClientId}` : caseOwnerLegalEntityId ? `legal:${caseOwnerLegalEntityId}` : '';
   const selectedCaseOwnerClient = isIncome ? selectedClient : selectedExpenseClient;
+  const selectedCaseOwnerLegalEntity = isIncome ? selectedLegalEntity : (selectedExpenseLegalEntity ?? selectedLegalEntity);
   const selectedResponsibleSourceClient = isIncome
     ? selectedClient
     : (selectedExpenseClient ?? selectedClient);
+  const selectedCounterpartyName = selectedClient?.name ?? (selectedLegalEntity ? getLegalEntityDisplayName(selectedLegalEntity) : '');
   const counterpartyLabel = isIncome ? 'Клиент' : 'Поставщик';
   const counterpartyBlockTitle = isIncome ? 'Клиент и договор' : 'Поставщик и договор';
   const counterpartyPlaceholder = isIncome ? 'Выберите клиента' : 'Выберите поставщика';
@@ -1326,10 +1331,17 @@ export function InvoiceModal({
     return selectedClientCaseIds
       .map((id) => {
         const match = clientCaseOptions.find((item) => item.id === id) ?? null;
-        return clientCaseLabel(match ?? { id, clientId: selectedCaseOwnerClient?.id ?? 0, title: '', status: '', createdAt: '' });
+        return clientCaseLabel(match ?? {
+          id,
+          clientId: selectedCaseOwnerClient?.id ?? null,
+          legalEntityId: selectedCaseOwnerLegalEntity?.id ?? null,
+          title: '',
+          status: '',
+          createdAt: '',
+        });
       })
       .join(', ');
-  }, [clientCaseOptions, selectedCaseOwnerClient?.id, selectedClientCaseIds]);
+  }, [clientCaseOptions, selectedCaseOwnerClient?.id, selectedCaseOwnerLegalEntity?.id, selectedClientCaseIds]);
   const selectedActsSummary = useMemo(
     () => selectedActs.map((item) => actLabel(item)).filter(Boolean).join(', '),
     [selectedActs],
@@ -1408,7 +1420,7 @@ export function InvoiceModal({
     let cancelled = false;
 
     async function loadContractsByClient() {
-      if (!open || !form.clientId) {
+      if (!open || (!form.clientId && !form.legalEntityId)) {
         setContractOptions([]);
         setContractsError(null);
         setContractsLoadedClientId('');
@@ -1481,7 +1493,7 @@ export function InvoiceModal({
 
   useEffect(() => {
     if (!open || !form.contractId) return;
-    if (!form.clientId) {
+    if (!form.clientId && !form.legalEntityId) {
       setForm((prev) => ({ ...prev, contractId: '' }));
       return;
     }
@@ -1516,14 +1528,16 @@ export function InvoiceModal({
     let cancelled = false;
 
     async function loadClientCasesByClient() {
-      if (!open || !caseOwnerClientId) {
+      if (!open || !caseOwnerKey) {
         setClientCaseOptions([]);
         setClientCasesError(null);
         return;
       }
 
-      const clientId = Number.parseInt(caseOwnerClientId, 10);
-      if (!Number.isFinite(clientId) || clientId <= 0) {
+      const clientId = caseOwnerClientId ? Number.parseInt(caseOwnerClientId, 10) : undefined;
+      const legalEntityId = caseOwnerLegalEntityId ? Number.parseInt(caseOwnerLegalEntityId, 10) : undefined;
+      if ((!clientId || !Number.isFinite(clientId) || clientId <= 0)
+        && (!legalEntityId || !Number.isFinite(legalEntityId) || legalEntityId <= 0)) {
         setClientCaseOptions([]);
         setClientCasesError(null);
         return;
@@ -1532,7 +1546,10 @@ export function InvoiceModal({
       setClientCasesLoading(true);
       setClientCasesError(null);
       try {
-        const response = await apiService.getCases({ clientId });
+        const response = await apiService.getCases({
+          clientId: clientId && clientId > 0 ? clientId : undefined,
+          legalEntityId: legalEntityId && legalEntityId > 0 ? legalEntityId : undefined,
+        });
         if (!cancelled) {
           const nextOptions = [...(response ?? [])].sort(
             (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
@@ -1553,7 +1570,7 @@ export function InvoiceModal({
     return () => {
       cancelled = true;
     };
-  }, [open, caseOwnerClientId]);
+  }, [open, caseOwnerClientId, caseOwnerLegalEntityId, caseOwnerKey]);
 
   useEffect(() => {
     if (open) {
@@ -1883,7 +1900,7 @@ export function InvoiceModal({
     let cancelled = false;
 
     async function loadActsByClient() {
-      if (!open || !form.clientId) {
+      if (!open || (!form.clientId && !form.legalEntityId)) {
         setActOptions([]);
         setActsError(null);
         return;
@@ -1896,7 +1913,8 @@ export function InvoiceModal({
           pageSize: 200,
           sortBy: 'date',
           sortDir: 'desc',
-          clientId: Number(form.clientId),
+          clientId: form.clientId ? Number(form.clientId) : undefined,
+          legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : undefined,
         });
         if (cancelled) return;
 
@@ -1910,6 +1928,8 @@ export function InvoiceModal({
           invoiceNumber: act.invoiceNumber ?? undefined,
           clientId: act.clientId ?? undefined,
           clientName: act.clientName ?? undefined,
+          legalEntityId: act.legalEntityId ?? undefined,
+          legalEntityName: act.legalEntityName ?? undefined,
           status: act.status,
         })));
         setActsError(null);
@@ -1928,7 +1948,7 @@ export function InvoiceModal({
     return () => {
       cancelled = true;
     };
-  }, [form.clientId, open]);
+  }, [form.clientId, form.legalEntityId, open]);
 
   const handleActSelect = (act: ActOption) => {
     if (!selectedActs.some((item) => item.id === act.id) && selectedActs.length >= invoiceRules.maxActsPerInvoice) {
@@ -1955,7 +1975,11 @@ export function InvoiceModal({
   const handleTypeSelect = (nextType: PaymentKind) => {
     if (isTypeLocked) return;
     const nextCaseOwnerClientId = resolveCaseOwnerClientId(nextType, form.clientId, form.expenseClientId);
-    if (nextType !== form.type && nextCaseOwnerClientId !== caseOwnerClientId) {
+    const nextCaseOwnerLegalEntityId = nextType === 'Expense'
+      ? (form.expenseLegalEntityId || form.legalEntityId)
+      : form.legalEntityId;
+    const nextCaseOwnerKey = nextCaseOwnerClientId ? `client:${nextCaseOwnerClientId}` : nextCaseOwnerLegalEntityId ? `legal:${nextCaseOwnerLegalEntityId}` : '';
+    if (nextType !== form.type && nextCaseOwnerKey !== caseOwnerKey) {
       setSelectedClientCaseIds([]);
       setClientCaseOptions([]);
       setCaseDropdownOpen(false);
@@ -1965,6 +1989,7 @@ export function InvoiceModal({
       ...prev,
       type: nextType,
       expenseClientId: nextType === 'Income' ? '' : prev.expenseClientId,
+      expenseLegalEntityId: nextType === 'Income' ? '' : prev.expenseLegalEntityId,
     }));
   };
 
@@ -1978,11 +2003,12 @@ export function InvoiceModal({
     const nextClientId = String(client.id);
     const clientChanged = form.clientId !== nextClientId;
     const nextCaseOwnerClientId = resolveCaseOwnerClientId(form.type, nextClientId, form.expenseClientId);
-    if (clientChanged) {
+    const nextCaseOwnerKey = nextCaseOwnerClientId ? `client:${nextCaseOwnerClientId}` : form.legalEntityId ? `legal:${form.legalEntityId}` : '';
+    if (clientChanged || form.legalEntityId) {
       lastAutoContractClientIdRef.current = '';
       setSelectedActs([]);
       setActOptions([]);
-      if (nextCaseOwnerClientId !== caseOwnerClientId) {
+      if (nextCaseOwnerKey !== caseOwnerKey) {
         setSelectedClientCaseIds([]);
         setClientCaseOptions([]);
       }
@@ -1992,30 +2018,32 @@ export function InvoiceModal({
     setForm((prev) => ({
       ...prev,
       clientId: nextClientId,
-      contractId: clientChanged ? '' : prev.contractId,
+      legalEntityId: '',
+      contractId: clientChanged || prev.legalEntityId ? '' : prev.contractId,
     }));
     setClientPickerOpen(false);
   };
 
-  const handleLegalEntityClientPick = (client: Client) => {
-    handleClientPick(client);
-  };
-
-  const handleCreateClientFromLegalEntity = async (entity: LegalEntitySummary) => {
-    setCreatingClientFromLegalEntityId(entity.id);
+  const handleLegalEntityPick = (entity: LegalEntitySummary) => {
+    const nextLegalEntityId = String(entity.id);
+    const legalEntityChanged = form.legalEntityId !== nextLegalEntityId;
     setLocalError(null);
-
-    try {
-      const created = await apiService.createClient(buildLegalEntityClientPayload(entity));
-      onClientCreated?.(created);
-      handleClientPick(created);
-      toast.success('Клиент создан на основе юридического лица.', 'Юр. лицо выбрано');
-    } catch (err) {
-      const message = extractDisplayErrorMessage(err, 'Не удалось создать клиента на основе юридического лица.');
-      setLocalError(message);
-    } finally {
-      setCreatingClientFromLegalEntityId(null);
+    if (legalEntityChanged || form.clientId) {
+      lastAutoContractClientIdRef.current = '';
+      setSelectedActs([]);
+      setActOptions([]);
+      setSelectedClientCaseIds([]);
+      setClientCaseOptions([]);
+      setCaseDropdownOpen(false);
+      setActDropdownOpen(false);
     }
+    setForm((prev) => ({
+      ...prev,
+      clientId: '',
+      legalEntityId: nextLegalEntityId,
+      contractId: '',
+    }));
+    setClientPickerOpen(false);
   };
 
   const handleExpenseClientChange = (nextClientId: string) => {
@@ -2030,6 +2058,7 @@ export function InvoiceModal({
     setForm((prev) => ({
       ...prev,
       expenseClientId: nextClientId,
+      expenseLegalEntityId: nextClientId ? '' : prev.expenseLegalEntityId,
     }));
   };
 
@@ -2059,12 +2088,13 @@ export function InvoiceModal({
   };
 
   const handleCreateClientCase = async (patch: Partial<ClientCase>) => {
-    if (!caseOwnerClientId) {
+    if (!caseOwnerClientId && !caseOwnerLegalEntityId) {
       throw new Error(isIncome ? 'Сначала выберите клиента' : 'Сначала выберите клиента, к которому относится расход');
     }
 
     const created = await apiService.createCase({
-      clientId: Number(caseOwnerClientId),
+      clientId: caseOwnerClientId ? Number(caseOwnerClientId) : null,
+      legalEntityId: caseOwnerLegalEntityId ? Number(caseOwnerLegalEntityId) : null,
       title: patch.title?.trim() ?? '',
       description: patch.description?.trim(),
       status: patch.status ?? 'Open',
@@ -2117,7 +2147,8 @@ export function InvoiceModal({
         creationMode: shouldBuildFromInvoice ? 'Full' : 'Manual',
         invoiceId: linkedInvoiceId,
         invoiceNumber: form.number.trim() || undefined,
-        clientId: form.clientId ? Number(form.clientId) : undefined,
+        clientId: form.clientId ? Number(form.clientId) : null,
+        legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : null,
         contractId: form.contractId ? Number(form.contractId) : undefined,
         responsibleId: selectedResponsibleId ? Number(selectedResponsibleId) : undefined,
         counterpartyInn: invoice?.counterpartyInn?.trim() || undefined,
@@ -2134,6 +2165,8 @@ export function InvoiceModal({
         invoiceNumber: created.invoiceNumber ?? undefined,
         clientId: created.clientId ?? undefined,
         clientName: created.clientName ?? undefined,
+        legalEntityId: created.legalEntityId ?? undefined,
+        legalEntityName: created.legalEntityName ?? undefined,
         status: created.status,
       };
 
@@ -2231,8 +2264,10 @@ export function InvoiceModal({
       type: form.type,
       status: statusOverride ?? form.status,
       workflowStatus: statusOverride ? deriveInvoiceWorkflowStatus(statusOverride, safeAmount) : form.workflowStatus,
-      clientId: Number(form.clientId),
+      clientId: form.clientId ? Number(form.clientId) : null,
+      legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : null,
       expenseClientId: form.type === 'Expense' && form.expenseClientId ? Number(form.expenseClientId) : null,
+      expenseLegalEntityId: form.type === 'Expense' && form.expenseLegalEntityId ? Number(form.expenseLegalEntityId) : null,
       contractId: form.contractId ? Number(form.contractId) : undefined,
       clientCaseId: clientCaseIds[0] ?? null,
       clientCaseIds,
@@ -2316,6 +2351,10 @@ export function InvoiceModal({
       form.type === 'Expense'
         ? (form.expenseClientId ? Number(form.expenseClientId) : form.clientId ? Number(form.clientId) : null)
         : (form.clientId ? Number(form.clientId) : form.expenseClientId ? Number(form.expenseClientId) : null);
+    const resolvedLegalEntityId =
+      form.type === 'Expense'
+        ? (form.expenseLegalEntityId ? Number(form.expenseLegalEntityId) : form.legalEntityId ? Number(form.legalEntityId) : null)
+        : (form.legalEntityId ? Number(form.legalEntityId) : form.expenseLegalEntityId ? Number(form.expenseLegalEntityId) : null);
 
     if (isPageMode) {
       storeInvoiceEditorDraft(buildInvoiceEditorDraft());
@@ -2330,6 +2369,7 @@ export function InvoiceModal({
         invoiceId: linkedInvoiceId,
         invoiceNumber: form.number.trim() || undefined,
         clientId: resolvedClientId,
+        legalEntityId: resolvedLegalEntityId,
         contractId: form.contractId ? Number(form.contractId) : null,
         responsibleId: selectedResponsibleId ? Number(selectedResponsibleId) : null,
         status: 'Created',
@@ -2355,6 +2395,8 @@ export function InvoiceModal({
     form.date,
     form.description,
     form.expenseClientId,
+    form.expenseLegalEntityId,
+    form.legalEntityId,
     form.number,
     form.type,
     invoice,
@@ -2392,12 +2434,12 @@ export function InvoiceModal({
       setLocalError(t('invoiceDate') ?? 'Дата обязательна');
       return;
     }
-    if (!form.clientId) {
+    if (!form.clientId && !form.legalEntityId) {
       setLocalError(`Выберите ${counterpartyLabel.toLocaleLowerCase('ru')}`);
       return;
     }
 
-    if (!isIncome && selectedClientCaseIds.length > 0 && !form.expenseClientId) {
+    if (!isIncome && selectedClientCaseIds.length > 0 && !form.expenseClientId && !form.expenseLegalEntityId) {
       setLocalError('Выберите клиента, к делу которого относится расход');
       return;
     }
@@ -2423,22 +2465,28 @@ export function InvoiceModal({
       return;
     }
 
-    const currentClientId = Number(form.clientId);
-    const originalClientId = Number(invoice?.clientId ?? 0);
+    const currentOwnerKey = form.clientId
+      ? `client:${form.clientId}`
+      : form.legalEntityId
+        ? `legal:${form.legalEntityId}`
+        : '';
+    const originalOwnerKey = invoice?.clientId
+      ? `client:${invoice.clientId}`
+      : invoice?.legalEntityId
+        ? `legal:${invoice.legalEntityId}`
+        : '';
     if (
       mode === 'edit'
       && invoice
-      && Number.isFinite(currentClientId)
-      && currentClientId > 0
-      && Number.isFinite(originalClientId)
-      && originalClientId > 0
-      && currentClientId !== originalClientId
+      && currentOwnerKey
+      && originalOwnerKey
+      && currentOwnerKey !== originalOwnerKey
       && hasGeneratedRelatedPayments
     ) {
       const accepted = await confirm({
-        title: 'Смена клиента счета',
+        title: 'Смена контрагента счета',
         description:
-          'У счета есть сформированные платежи. При смене клиента они тоже будут перепривязаны к новому клиенту. Продолжить?',
+          'У счета есть сформированные платежи. При смене контрагента они тоже будут перепривязаны. Продолжить?',
         confirmLabel: 'Да, изменить',
         cancelLabel: 'Отмена',
       });
@@ -2904,12 +2952,13 @@ export function InvoiceModal({
   const canShowRelatedPaymentActions = mode === 'edit' && !!onAddRelatedPayment;
   const createCaseStub = useMemo<ClientCase>(() => ({
     id: 0,
-    clientId: caseOwnerClientId ? Number(caseOwnerClientId) : 0,
+    clientId: caseOwnerClientId ? Number(caseOwnerClientId) : null,
+    legalEntityId: caseOwnerLegalEntityId ? Number(caseOwnerLegalEntityId) : null,
     title: '',
     description: '',
     status: 'Open',
     createdAt: new Date().toISOString(),
-  }), [caseOwnerClientId]);
+  }), [caseOwnerClientId, caseOwnerLegalEntityId]);
   const statusHistorySection = (
     <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
       <div className="space-y-3">
@@ -3020,7 +3069,7 @@ export function InvoiceModal({
                   setCaseDropdownOpen((prev) => !prev);
                   setActDropdownOpen(false);
                 }}
-                disabled={!caseOwnerClientId}
+                disabled={!caseOwnerKey}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <List className="h-4 w-4" />
@@ -3030,7 +3079,7 @@ export function InvoiceModal({
                 title="Создать дело"
                 aria-label="Создать дело"
                 onClick={() => setCreateCaseOpen(true)}
-                disabled={!caseOwnerClientId}
+                disabled={!caseOwnerKey}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus className="h-4 w-4" />
@@ -3039,7 +3088,7 @@ export function InvoiceModal({
           </div>
 
           <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-            {!caseOwnerClientId ? (
+            {!caseOwnerKey ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
                 {isIncome ? 'Сначала выберите клиента.' : 'Сначала выберите клиента, к которому относится расход.'}
               </div>
@@ -3058,7 +3107,14 @@ export function InvoiceModal({
                     >
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-slate-900">
-                          {clientCaseLabel(selectedCase ?? { id, clientId: selectedCaseOwnerClient?.id ?? 0, title: '', status: '', createdAt: '' })}
+                          {clientCaseLabel(selectedCase ?? {
+                            id,
+                            clientId: selectedCaseOwnerClient?.id ?? null,
+                            legalEntityId: selectedCaseOwnerLegalEntity?.id ?? null,
+                            title: '',
+                            status: '',
+                            createdAt: '',
+                          })}
                         </div>
                         <div className="mt-1 text-xs text-slate-500">{clientCaseStatusLabel(selectedCase?.status)}</div>
                       </div>
@@ -3161,7 +3217,7 @@ export function InvoiceModal({
                   setActDropdownOpen((prev) => !prev);
                   setCaseDropdownOpen(false);
                 }}
-                disabled={!form.clientId}
+                disabled={!form.clientId && !form.legalEntityId}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <List className="h-4 w-4" />
@@ -3182,7 +3238,7 @@ export function InvoiceModal({
                   setCreateActError(null);
                   setCreateActOpen(true);
                 }}
-                disabled={!form.clientId}
+                disabled={!form.clientId && !form.legalEntityId}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus className="h-4 w-4" />
@@ -3191,7 +3247,7 @@ export function InvoiceModal({
           </div>
 
           <div className="min-h-[136px] rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-            {!form.clientId ? (
+            {!form.clientId && !form.legalEntityId ? (
               <div className="flex min-h-[108px] items-center justify-center text-center text-xs text-slate-500">
                 Сначала выберите {counterpartyLabel.toLocaleLowerCase('ru')}.
               </div>
@@ -4222,7 +4278,7 @@ export function InvoiceModal({
                               <div className="flex gap-2">
                                 <input
                                   type="text"
-                                  value={selectedClient?.name ?? ''}
+                                  value={selectedCounterpartyName}
                                   readOnly
                                   className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-slate-50"
                                   placeholder={counterpartyPlaceholder}
@@ -4242,17 +4298,23 @@ export function InvoiceModal({
                               {lookupsError && (
                                 <span className="text-xs text-rose-600">{lookupsError}</span>
                               )}
-                              {(selectedClient?.clientStatus || selectedClient?.responsibleUserName) && (
+                              {(selectedClient?.clientStatus || selectedClient?.responsibleUserName || selectedLegalEntity) && (
                                 <div className="mt-2 space-y-1 rounded-xl border border-slate-100 bg-slate-50 p-2">
-                                  {selectedClient.clientStatus && (
+                                  {selectedLegalEntity && (
+                                    <p className="text-xs text-slate-600">
+                                      Юрлицо: {getLegalEntityDisplayName(selectedLegalEntity)}
+                                      {selectedLegalEntity.inn ? `, ИНН ${selectedLegalEntity.inn}` : ''}
+                                    </p>
+                                  )}
+                                  {selectedClient?.clientStatus && (
                                     <ClientStatusBadge status={selectedClient.clientStatus} />
                                   )}
-                                  {selectedClient.responsibleUserName && (
+                                  {selectedClient?.responsibleUserName && (
                                     <p className="text-xs text-slate-600">
                                       Ответственный: {selectedClient.responsibleUserName}
                                     </p>
                                   )}
-                                  {selectedClient.clientStatus?.description && (
+                                  {selectedClient?.clientStatus?.description && (
                                     <p className="text-xs text-slate-500">{selectedClient.clientStatus.description}</p>
                                   )}
                                 </div>
@@ -4809,7 +4871,6 @@ export function InvoiceModal({
                       .filter((client): client is Client => Boolean(client)),
                   ].filter((client, index, source) => source.findIndex((item) => item.id === client.id) === index);
                   const displayName = getLegalEntityDisplayName(entity);
-                  const isCreating = creatingClientFromLegalEntityId === entity.id;
 
                   return (
                     <div key={entity.id} className="border-b border-slate-100 px-3 py-3 last:border-0">
@@ -4830,12 +4891,11 @@ export function InvoiceModal({
                         </div>
                         <button
                           type="button"
-                          onClick={() => void handleCreateClientFromLegalEntity(entity)}
-                          disabled={isCreating}
+                          onClick={() => handleLegalEntityPick(entity)}
                           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-60"
                         >
-                          {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                          {linkedClients.length > 0 ? 'Создать отдельного клиента' : 'Создать клиента'}
+                          <Check className="h-4 w-4" />
+                          Выбрать юрлицо
                         </button>
                       </div>
                       {linkedClients.length > 0 ? (
@@ -4844,7 +4904,7 @@ export function InvoiceModal({
                             <button
                               key={client.id}
                               type="button"
-                              onClick={() => handleLegalEntityClientPick(client)}
+                              onClick={() => handleClientPick(client)}
                               className="inline-flex items-center rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                             >
                               Выбрать: {client.name}

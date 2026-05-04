@@ -830,6 +830,7 @@ export class ApiService {
     from?: string;
     to?: string;
     clientId?: number;
+    legalEntityId?: number;
     status?: ContractStatus;
     search?: string;
     sortBy?: ContractsSortKey;
@@ -1180,6 +1181,7 @@ export class ApiService {
     status?: PaymentStatus;
     workflowStatus?: InvoiceWorkflowStatus;
     clientId?: number;
+    legalEntityId?: number;
     clientIds?: string;
     clientRole?: InvoiceClientRole;
     contractId?: number;
@@ -1933,11 +1935,11 @@ export class ApiService {
   // Перегрузки совместимости
   async getCases(): Promise<ClientCase[]>;
   async getCases(clientId?: number): Promise<ClientCase[]>;
-  async getCases(params?: { clientId?: number }): Promise<ClientCase[]>;
-  async getCases(a?: number | { clientId?: number }) {
+  async getCases(params?: { clientId?: number; legalEntityId?: number }): Promise<ClientCase[]>;
+  async getCases(a?: number | { clientId?: number; legalEntityId?: number }) {
     let q = '';
     if (typeof a === 'object') {
-      q = buildQuery({ clientId: a?.clientId });
+      q = buildQuery({ clientId: a?.clientId, legalEntityId: a?.legalEntityId });
     } else {
       q = buildQuery({ clientId: a });
     }
@@ -1963,6 +1965,7 @@ export class ApiService {
   // V1/V2 для дел (опционально)
   async getCasesV1(params?: {
     clientId?: number;
+    legalEntityId?: number;
     status?: string; // если у тебя есть строгий тип, замени тут string на него
     search?: string;
     sortBy?: 'createdAt' | 'title' | 'status';
@@ -1974,6 +1977,7 @@ export class ApiService {
 
   async getCasesV2(params?: {
     clientId?: number;
+    legalEntityId?: number;
     status?: string;
     search?: string;
     sortBy?: 'createdAt' | 'title' | 'status';

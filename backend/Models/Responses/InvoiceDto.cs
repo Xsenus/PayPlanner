@@ -23,13 +23,19 @@ public class InvoiceDto
     public bool IsPaid { get; set; }
     public DateTime? PaidDate { get; set; }
     public int? ClientId { get; set; }
+    public int? LegalEntityId { get; set; }
     public int? ExpenseClientId { get; set; }
+    public int? ExpenseLegalEntityId { get; set; }
     public int? ContractId { get; set; }
     public string? ClientName { get; set; }
+    public string? LegalEntityName { get; set; }
+    public string? LegalEntityInn { get; set; }
     public string? ClientCompany { get; set; }
     public int? ClientStatusId { get; set; }
     public ClientStatusDto? ClientStatus { get; set; }
     public string? ExpenseClientName { get; set; }
+    public string? ExpenseLegalEntityName { get; set; }
+    public string? ExpenseLegalEntityInn { get; set; }
     public string? ExpenseClientCompany { get; set; }
     public int? ExpenseClientStatusId { get; set; }
     public ClientStatusDto? ExpenseClientStatus { get; set; }
@@ -73,7 +79,8 @@ public class InvoiceDto
 public class InvoiceClientCaseDto
 {
     public int Id { get; set; }
-    public int ClientId { get; set; }
+    public int? ClientId { get; set; }
+    public int? LegalEntityId { get; set; }
     public string Title { get; set; } = string.Empty;
     public ClientCaseStatus Status { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -90,7 +97,9 @@ public class InvoiceActDto
     public ActStatus Status { get; set; }
     public string WorkflowStatus { get; set; } = ActWorkflowStatus.Draft;
     public int? ClientId { get; set; }
+    public int? LegalEntityId { get; set; }
     public string? ClientName { get; set; }
+    public string? LegalEntityName { get; set; }
     public int? ResponsibleId { get; set; }
     public string? ResponsibleName { get; set; }
     public string? Comment { get; set; }

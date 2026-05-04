@@ -37,6 +37,8 @@ public class UpsertActRequest
 
     public int? ClientId { get; set; }
 
+    public int? LegalEntityId { get; set; }
+
     public int? ContractId { get; set; }
 
     public int? ResponsibleId { get; set; }

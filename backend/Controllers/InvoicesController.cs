@@ -603,11 +603,8 @@ public class InvoicesController : ControllerBase
             return BadRequest("Unknown invoice workflow status.");
         }
 
-        var clientExists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == request.ClientId, ct);
-        if (!clientExists)
-        {
-            return BadRequest($"Unknown clientId {request.ClientId}");
-        }
+        var counterpartyValidationError = await ValidateCounterpartyAsync(request.ClientId, request.LegalEntityId, "counterparty", ct);
+        if (counterpartyValidationError is not null) return counterpartyValidationError;
 
         var expenseClientValidationError = await ValidateExpenseClientAsync(request, ct);
         if (expenseClientValidationError is not null)
@@ -649,14 +646,14 @@ public class InvoicesController : ControllerBase
             return lineItemServiceValidationError;
         }
 
-        var caseOwnerClientId = ResolveInvoiceCaseOwnerClientId(request);
-        var clientCaseValidation = await ValidateInvoiceClientCasesAsync(caseOwnerClientId, request, ct);
+        var caseOwner = ResolveInvoiceCaseOwner(request);
+        var clientCaseValidation = await ValidateInvoiceClientCasesAsync(caseOwner.ClientId, caseOwner.LegalEntityId, request, ct);
         if (clientCaseValidation.Error is not null)
         {
             return clientCaseValidation.Error;
         }
 
-        var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request, null, ct);
+        var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request.LegalEntityId, request, null, ct);
         if (actValidation.Error is not null)
         {
             return actValidation.Error;
@@ -687,7 +684,9 @@ public class InvoicesController : ControllerBase
             ClientCaseReference = Normalize(request.ClientCaseReference),
             Notes = Normalize(request.ActReference) ?? string.Empty,
             ClientId = request.ClientId,
+            LegalEntityId = request.LegalEntityId,
             ExpenseClientId = ResolveInvoiceExpenseClientId(request),
+            ExpenseLegalEntityId = ResolveInvoiceExpenseLegalEntityId(request),
             ContractId = request.ContractId,
             ClientCaseId = clientCaseValidation.ClientCaseIds.Count > 0 ? clientCaseValidation.ClientCaseIds[0] : null,
             PaymentSourceId = request.PaymentSourceId,
@@ -701,7 +700,7 @@ public class InvoicesController : ControllerBase
 
         payment.SystemNotes = InvoiceLineItemStorage.RemoveFromSystemNotes(payment.SystemNotes);
 
-        var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(caseOwnerClientId, request.ResponsibleIds, ct);
+        var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(caseOwner.ClientId, caseOwner.LegalEntityId, request.ResponsibleIds, ct);
         if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
         {
             return BadRequest("One or more responsible users were not found.");
@@ -772,10 +771,8 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        if (!await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == request.ClientId, ct))
-        {
-            return BadRequest($"Unknown clientId {request.ClientId}");
-        }
+        var counterpartyValidationError = await ValidateCounterpartyAsync(request.ClientId, request.LegalEntityId, "counterparty", ct);
+        if (counterpartyValidationError is not null) return counterpartyValidationError;
 
         var expenseClientValidationError = await ValidateExpenseClientAsync(request, ct);
         if (expenseClientValidationError is not null)
@@ -817,14 +814,14 @@ public class InvoicesController : ControllerBase
             return lineItemServiceValidationError;
         }
 
-        var caseOwnerClientId = ResolveInvoiceCaseOwnerClientId(request);
-        var clientCaseValidation = await ValidateInvoiceClientCasesAsync(caseOwnerClientId, request, ct);
+        var caseOwner = ResolveInvoiceCaseOwner(request);
+        var clientCaseValidation = await ValidateInvoiceClientCasesAsync(caseOwner.ClientId, caseOwner.LegalEntityId, request, ct);
         if (clientCaseValidation.Error is not null)
         {
             return clientCaseValidation.Error;
         }
 
-        var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request, id, ct);
+        var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request.LegalEntityId, request, id, ct);
         if (actValidation.Error is not null)
         {
             return actValidation.Error;
@@ -834,6 +831,7 @@ public class InvoicesController : ControllerBase
 
         var resolvedDueDate = ResolveInvoiceDueDate(request);
         var resolvedExpenseClientId = ResolveInvoiceExpenseClientId(request);
+        var resolvedExpenseLegalEntityId = ResolveInvoiceExpenseLegalEntityId(request);
         int? resolvedClientCaseId = clientCaseValidation.ClientCaseIds.Count > 0
             ? clientCaseValidation.ClientCaseIds[0]
             : null;
@@ -885,7 +883,9 @@ public class InvoicesController : ControllerBase
         payment.ClientCaseReference = Normalize(request.ClientCaseReference);
         payment.Notes = Normalize(request.ActReference) ?? string.Empty;
         payment.ClientId = request.ClientId;
+        payment.LegalEntityId = request.LegalEntityId;
         payment.ExpenseClientId = resolvedExpenseClientId;
+        payment.ExpenseLegalEntityId = resolvedExpenseLegalEntityId;
         payment.ContractId = request.ContractId;
         payment.ClientCaseId = resolvedClientCaseId;
         payment.PaymentSourceId = request.PaymentSourceId;
@@ -896,7 +896,7 @@ public class InvoicesController : ControllerBase
         payment.CounterpartyName = null;
         payment.SystemNotes = InvoiceLineItemStorage.RemoveFromSystemNotes(payment.SystemNotes);
 
-        var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(caseOwnerClientId, request.ResponsibleIds, ct);
+        var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(caseOwner.ClientId, caseOwner.LegalEntityId, request.ResponsibleIds, ct);
         if (!await EnsureResponsibleIdsExistAsync(responsibleIds, ct))
         {
             return BadRequest("One or more responsible users were not found.");
@@ -1033,7 +1033,9 @@ public class InvoicesController : ControllerBase
             Amount = payment.Amount,
             InvoiceWorkflowStatus = payment.InvoiceWorkflowStatus,
             ClientId = payment.ClientId,
+            LegalEntityId = payment.LegalEntityId,
             ExpenseClientId = payment.ExpenseClientId,
+            ExpenseLegalEntityId = payment.ExpenseLegalEntityId,
             ContractId = payment.ContractId,
             DocumentKind = DocumentKind.Invoice,
             Date = payment.Date,
@@ -2711,15 +2713,16 @@ public class InvoicesController : ControllerBase
         return NormalizeIds(ids);
     }
 
-    private async Task<ActionResult?> ValidateContractClientLinkAsync(int? contractId, int clientId, CancellationToken ct)
+    private async Task<ActionResult?> ValidateContractClientLinkAsync(int? contractId, int? clientId, CancellationToken ct)
     {
         if (!contractId.HasValue) return null;
+        if (!clientId.HasValue || clientId.Value <= 0) return BadRequest("Contract can be linked only when a client counterparty is selected.");
 
         var contractExists = await _db.Contracts.AsNoTracking().AnyAsync(c => c.Id == contractId.Value, ct);
         if (!contractExists) return BadRequest($"Unknown contractId {contractId.Value}");
 
         var linkExists = await _db.Set<ClientContract>().AsNoTracking()
-            .AnyAsync(x => x.ContractId == contractId.Value && x.ClientId == clientId, ct);
+            .AnyAsync(x => x.ContractId == contractId.Value && x.ClientId == clientId.Value, ct);
         if (!linkExists) return BadRequest("Client is not linked to selected contract.");
 
         return null;
@@ -2727,13 +2730,12 @@ public class InvoicesController : ControllerBase
 
     private async Task<ActionResult?> ValidateExpenseClientAsync(UpsertInvoiceRequest request, CancellationToken ct)
     {
-        if (request.Type != PaymentType.Expense || !request.ExpenseClientId.HasValue)
+        if (request.Type != PaymentType.Expense)
         {
             return null;
         }
 
-        var exists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == request.ExpenseClientId.Value, ct);
-        return exists ? null : BadRequest($"Unknown expenseClientId {request.ExpenseClientId.Value}");
+        return await ValidateCounterpartyAsync(request.ExpenseClientId, request.ExpenseLegalEntityId, "expense", ct);
     }
 
     private static int? ResolveInvoiceExpenseClientId(UpsertInvoiceRequest request)
@@ -2741,12 +2743,44 @@ public class InvoicesController : ControllerBase
             ? request.ExpenseClientId.Value
             : null;
 
-    private static int ResolveInvoiceCaseOwnerClientId(UpsertInvoiceRequest request)
-        => request.Type == PaymentType.Expense
-            ? ResolveInvoiceExpenseClientId(request) ?? request.ClientId
-            : request.ClientId;
+    private static int? ResolveInvoiceExpenseLegalEntityId(UpsertInvoiceRequest request)
+        => request.Type == PaymentType.Expense && request.ExpenseLegalEntityId.HasValue && request.ExpenseLegalEntityId.Value > 0
+            ? request.ExpenseLegalEntityId.Value
+            : null;
 
-    private async Task<(ActionResult? Error, List<int> ClientCaseIds)> ValidateInvoiceClientCasesAsync(int clientId, UpsertInvoiceRequest request, CancellationToken ct)
+    private sealed record CounterpartyOwner(int? ClientId, int? LegalEntityId);
+
+    private static CounterpartyOwner ResolveInvoiceCaseOwner(UpsertInvoiceRequest request)
+        => request.Type == PaymentType.Expense
+            ? new CounterpartyOwner(ResolveInvoiceExpenseClientId(request) ?? request.ClientId, ResolveInvoiceExpenseLegalEntityId(request) ?? request.LegalEntityId)
+            : new CounterpartyOwner(request.ClientId, request.LegalEntityId);
+
+    private async Task<ActionResult?> ValidateCounterpartyAsync(int? clientId, int? legalEntityId, string fieldName, CancellationToken ct)
+    {
+        var hasClient = clientId.HasValue && clientId.Value > 0;
+        var hasLegalEntity = legalEntityId.HasValue && legalEntityId.Value > 0;
+        if (hasClient == hasLegalEntity)
+        {
+            return BadRequest($"{fieldName}: specify exactly one of clientId or legalEntityId.");
+        }
+
+        if (hasClient)
+        {
+            var exists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == clientId!.Value, ct);
+            var clientFieldName = string.Equals(fieldName, "expense", StringComparison.OrdinalIgnoreCase)
+                ? "expenseClientId"
+                : "clientId";
+            return exists ? null : BadRequest($"Unknown {clientFieldName} {clientId}");
+        }
+
+        var legalExists = await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Id == legalEntityId!.Value, ct);
+        var legalEntityFieldName = string.Equals(fieldName, "expense", StringComparison.OrdinalIgnoreCase)
+            ? "expenseLegalEntityId"
+            : "legalEntityId";
+        return legalExists ? null : BadRequest($"Unknown {legalEntityFieldName} {legalEntityId}");
+    }
+
+    private async Task<(ActionResult? Error, List<int> ClientCaseIds)> ValidateInvoiceClientCasesAsync(int? clientId, int? legalEntityId, UpsertInvoiceRequest request, CancellationToken ct)
     {
         var clientCaseIds = NormalizeInvoiceClientCaseIds(request);
         if (clientCaseIds.Count == 0)
@@ -2763,7 +2797,7 @@ public class InvoicesController : ControllerBase
         var cases = await _db.ClientCases
             .AsNoTracking()
             .Where(x => clientCaseIds.Contains(x.Id))
-            .Select(x => new { x.Id, x.ClientId })
+            .Select(x => new { x.Id, x.ClientId, x.LegalEntityId })
             .ToListAsync(ct);
 
         if (cases.Count != clientCaseIds.Count)
@@ -2774,20 +2808,20 @@ public class InvoicesController : ControllerBase
         }
 
         var foreignClientCaseIds = cases
-            .Where(x => x.ClientId != clientId)
+            .Where(x => x.ClientId != clientId || x.LegalEntityId != legalEntityId)
             .Select(x => x.Id)
             .OrderBy(x => x)
             .ToList();
 
         if (foreignClientCaseIds.Count > 0)
         {
-            return (BadRequest($"Client cases are not linked to selected client: {string.Join(", ", foreignClientCaseIds)}"), new List<int>());
+            return (BadRequest($"Client cases are not linked to selected counterparty: {string.Join(", ", foreignClientCaseIds)}"), new List<int>());
         }
 
         return (null, clientCaseIds);
     }
 
-    private async Task<(ActionResult? Error, List<int> ActIds)> ValidateInvoiceActsAsync(int clientId, UpsertInvoiceRequest request, int? invoiceId, CancellationToken ct)
+    private async Task<(ActionResult? Error, List<int> ActIds)> ValidateInvoiceActsAsync(int? clientId, int? legalEntityId, UpsertInvoiceRequest request, int? invoiceId, CancellationToken ct)
     {
         var actIds = NormalizeInvoiceActIds(request);
         if (actIds.Count == 0)
@@ -2804,7 +2838,7 @@ public class InvoicesController : ControllerBase
         var acts = await _db.Acts
             .AsNoTracking()
             .Where(x => actIds.Contains(x.Id))
-            .Select(x => new { x.Id, x.ClientId, x.InvoiceId })
+            .Select(x => new { x.Id, x.ClientId, x.LegalEntityId, x.InvoiceId })
             .ToListAsync(ct);
 
         if (acts.Count != actIds.Count)
@@ -2815,14 +2849,14 @@ public class InvoicesController : ControllerBase
         }
 
         var foreignClientActIds = acts
-            .Where(x => x.ClientId != clientId)
+            .Where(x => x.ClientId != clientId || x.LegalEntityId != legalEntityId)
             .Select(x => x.Id)
             .OrderBy(x => x)
             .ToList();
 
         if (foreignClientActIds.Count > 0)
         {
-            return (BadRequest($"Acts are not linked to selected client: {string.Join(", ", foreignClientActIds)}"), new List<int>());
+            return (BadRequest($"Acts are not linked to selected counterparty: {string.Join(", ", foreignClientActIds)}"), new List<int>());
         }
 
         var linkedToOtherInvoices = acts
@@ -2859,9 +2893,13 @@ public class InvoicesController : ControllerBase
         IsPaid = x.Payment.IsPaid,
         PaidDate = x.Payment.PaidDate,
         ClientId = x.Payment.ClientId,
+        LegalEntityId = x.Payment.LegalEntityId,
         ExpenseClientId = x.Payment.ExpenseClientId,
+        ExpenseLegalEntityId = x.Payment.ExpenseLegalEntityId,
         ContractId = x.Payment.ContractId,
         ClientName = x.Payment.Client != null ? x.Payment.Client.Name : null,
+        LegalEntityName = x.Payment.LegalEntity != null ? x.Payment.LegalEntity.ShortName : null,
+        LegalEntityInn = x.Payment.LegalEntity != null ? x.Payment.LegalEntity.Inn : null,
         ClientCompany = x.Payment.Client != null ? x.Payment.Client.Company : null,
         ClientStatusId = x.Payment.Client != null ? x.Payment.Client.ClientStatusId : null,
         ClientStatus = x.Payment.Client != null && x.Payment.Client.ClientStatus != null
@@ -2877,6 +2915,8 @@ public class InvoicesController : ControllerBase
             }
             : null,
         ExpenseClientName = x.Payment.ExpenseClient != null ? x.Payment.ExpenseClient.Name : null,
+        ExpenseLegalEntityName = x.Payment.ExpenseLegalEntity != null ? x.Payment.ExpenseLegalEntity.ShortName : null,
+        ExpenseLegalEntityInn = x.Payment.ExpenseLegalEntity != null ? x.Payment.ExpenseLegalEntity.Inn : null,
         ExpenseClientCompany = x.Payment.ExpenseClient != null ? x.Payment.ExpenseClient.Company : null,
         ExpenseClientStatusId = x.Payment.ExpenseClient != null ? x.Payment.ExpenseClient.ClientStatusId : null,
         ExpenseClientStatus = x.Payment.ExpenseClient != null && x.Payment.ExpenseClient.ClientStatus != null
@@ -2950,13 +2990,19 @@ public class InvoicesController : ControllerBase
             IsPaid = raw.IsPaid,
             PaidDate = raw.PaidDate,
             ClientId = raw.ClientId,
+            LegalEntityId = raw.LegalEntityId,
             ExpenseClientId = raw.ExpenseClientId,
+            ExpenseLegalEntityId = raw.ExpenseLegalEntityId,
             ContractId = raw.ContractId,
             ClientName = raw.ClientName,
+            LegalEntityName = raw.LegalEntityName,
+            LegalEntityInn = raw.LegalEntityInn,
             ClientCompany = raw.ClientCompany,
             ClientStatusId = raw.ClientStatusId,
             ClientStatus = raw.ClientStatus,
             ExpenseClientName = raw.ExpenseClientName,
+            ExpenseLegalEntityName = raw.ExpenseLegalEntityName,
+            ExpenseLegalEntityInn = raw.ExpenseLegalEntityInn,
             ExpenseClientCompany = raw.ExpenseClientCompany,
             ExpenseClientStatusId = raw.ExpenseClientStatusId,
             ExpenseClientStatus = raw.ExpenseClientStatus,
@@ -3452,7 +3498,9 @@ public class InvoicesController : ControllerBase
             installment.AccountDate = invoicePayment.AccountDate;
             installment.Type = invoicePayment.Type;
             installment.ClientId = invoicePayment.ClientId;
+            installment.LegalEntityId = invoicePayment.LegalEntityId;
             installment.ExpenseClientId = invoicePayment.ExpenseClientId;
+            installment.ExpenseLegalEntityId = invoicePayment.ExpenseLegalEntityId;
             installment.ContractId = invoicePayment.ContractId;
             installment.ClientCaseId = invoicePayment.ClientCaseId;
             installment.ClientCaseReference = invoicePayment.ClientCaseReference;
@@ -3676,7 +3724,9 @@ public class InvoicesController : ControllerBase
         payment.Description = BuildInstallmentDescription(invoicePayment.Account, item.Sequence, plan.Items.Count);
         payment.Notes = BuildInstallmentNotes(item);
         payment.ClientId = request.ClientId;
+        payment.LegalEntityId = request.LegalEntityId;
         payment.ExpenseClientId = invoicePayment.ExpenseClientId;
+        payment.ExpenseLegalEntityId = invoicePayment.ExpenseLegalEntityId;
         payment.ContractId = request.ContractId;
         payment.ClientCaseId = invoicePayment.ClientCaseId;
         payment.ClientCaseReference = invoicePayment.ClientCaseReference;
@@ -3747,10 +3797,12 @@ public class InvoicesController : ControllerBase
         var sameDate = payment.Date.Date == item.Date.Date;
         var sameAmount = Math.Abs(payment.Amount - item.Payment) <= 0.01m;
         var sameClient = payment.ClientId == request.ClientId;
+        var sameLegalEntity = payment.LegalEntityId == request.LegalEntityId;
         var sameExpenseClient = payment.ExpenseClientId == invoicePayment.ExpenseClientId;
+        var sameExpenseLegalEntity = payment.ExpenseLegalEntityId == invoicePayment.ExpenseLegalEntityId;
         var sameCase = payment.ClientCaseId == invoicePayment.ClientCaseId;
         var sameContract = payment.ContractId == request.ContractId;
-        return sameDate && sameAmount && sameClient && sameExpenseClient && sameCase && sameContract;
+        return sameDate && sameAmount && sameClient && sameLegalEntity && sameExpenseClient && sameExpenseLegalEntity && sameCase && sameContract;
     }
 
     private static string BuildInstallmentDescription(string? invoiceNumber, int sequence, int totalCount)
@@ -4026,6 +4078,7 @@ public class InvoicesController : ControllerBase
                 {
                     Id = x.Id,
                     ClientId = x.ClientId,
+                    LegalEntityId = x.LegalEntityId,
                     Title = x.Title,
                     Status = x.Status,
                     CreatedAt = x.CreatedAt,
@@ -4056,6 +4109,7 @@ public class InvoicesController : ControllerBase
                 {
                     Id = x.ClientCase.Id,
                     ClientId = x.ClientCase.ClientId,
+                    LegalEntityId = x.ClientCase.LegalEntityId,
                     Title = x.ClientCase.Title,
                     Status = x.ClientCase.Status,
                     CreatedAt = x.ClientCase.CreatedAt,
@@ -4238,7 +4292,7 @@ public class InvoicesController : ControllerBase
         return existingCount == responsibleIds.Count;
     }
 
-    private async Task<HashSet<int>> ResolveInvoiceResponsibleIdsAsync(int clientId, List<int>? responsibleIds, CancellationToken ct)
+    private async Task<HashSet<int>> ResolveInvoiceResponsibleIdsAsync(int? clientId, int? legalEntityId, List<int>? responsibleIds, CancellationToken ct)
     {
         var normalized = NormalizeResponsibleIds(responsibleIds);
         if (normalized.Count > 0)
@@ -4246,11 +4300,23 @@ public class InvoicesController : ControllerBase
             return normalized;
         }
 
-        var clientResponsibleUserId = await _db.Clients
-            .AsNoTracking()
-            .Where(c => c.Id == clientId)
-            .Select(c => c.ResponsibleUserId)
-            .FirstOrDefaultAsync(ct);
+        int? clientResponsibleUserId = null;
+        if (clientId.HasValue && clientId.Value > 0)
+        {
+            clientResponsibleUserId = await _db.Clients
+                .AsNoTracking()
+                .Where(c => c.Id == clientId.Value)
+                .Select(c => c.ResponsibleUserId)
+                .FirstOrDefaultAsync(ct);
+        }
+        else if (legalEntityId.HasValue && legalEntityId.Value > 0)
+        {
+            clientResponsibleUserId = await _db.LegalEntities
+                .AsNoTracking()
+                .Where(entity => entity.Id == legalEntityId.Value)
+                .Select(entity => entity.ResponsibleUserId)
+                .FirstOrDefaultAsync(ct);
+        }
         if (clientResponsibleUserId.HasValue && clientResponsibleUserId.Value > 0)
         {
             return new HashSet<int> { clientResponsibleUserId.Value };
@@ -4659,6 +4725,7 @@ public class InvoicesController : ControllerBase
             ClientCaseId = effectiveClientCaseId,
             ClientCaseReference = representative.ClientCaseReference,
             ClientId = effectiveClientId ?? representative.ClientId,
+            LegalEntityId = representative.LegalEntityId,
             ContractId = representative.ContractId,
             CounterpartyName = representative.CounterpartyName,
             Date = representative.Date,
@@ -4666,6 +4733,7 @@ public class InvoicesController : ControllerBase
             Description = representative.Description,
             DocumentKind = DocumentKind.Payment,
             ExpenseClientId = representative.ExpenseClientId,
+            ExpenseLegalEntityId = representative.ExpenseLegalEntityId,
             IncomeTypeId = representative.IncomeTypeId,
             InvoiceId = invoiceEntityId,
             IsNotForAccounting = representative.IsNotForAccounting,
@@ -4991,10 +5059,14 @@ public class InvoicesController : ControllerBase
                 .ThenInclude(client => client!.Addresses)
             .Include(p => p.Client)
                 .ThenInclude(client => client!.Passports)
+            .Include(p => p.LegalEntity)
+                .ThenInclude(entity => entity!.Addresses)
             .Include(p => p.ExpenseClient)
                 .ThenInclude(client => client!.Addresses)
             .Include(p => p.ExpenseClient)
                 .ThenInclude(client => client!.Passports)
+            .Include(p => p.ExpenseLegalEntity)
+                .ThenInclude(entity => entity!.Addresses)
             .Include(p => p.Contract)
             .Include(p => p.ClientCase)
             .Include(p => p.InvoiceClientCases)
@@ -5342,13 +5414,19 @@ public class InvoicesController : ControllerBase
         public bool IsPaid { get; init; }
         public DateTime? PaidDate { get; init; }
         public int? ClientId { get; init; }
+        public int? LegalEntityId { get; init; }
         public int? ExpenseClientId { get; init; }
+        public int? ExpenseLegalEntityId { get; init; }
         public int? ContractId { get; init; }
         public string? ClientName { get; init; }
+        public string? LegalEntityName { get; init; }
+        public string? LegalEntityInn { get; init; }
         public string? ClientCompany { get; init; }
         public int? ClientStatusId { get; init; }
         public ClientStatusDto? ClientStatus { get; init; }
         public string? ExpenseClientName { get; init; }
+        public string? ExpenseLegalEntityName { get; init; }
+        public string? ExpenseLegalEntityInn { get; init; }
         public string? ExpenseClientCompany { get; init; }
         public int? ExpenseClientStatusId { get; init; }
         public ClientStatusDto? ExpenseClientStatus { get; init; }

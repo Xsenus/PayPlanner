@@ -15,11 +15,16 @@ public class CasesController : ControllerBase
     public CasesController(PaymentContext db) => _db = db;
 
     [HttpGet]
-    public async Task<IActionResult> Get([FromQuery] int? clientId, CancellationToken ct)
+    public async Task<IActionResult> Get([FromQuery] int? clientId, [FromQuery] int? legalEntityId, CancellationToken ct)
     {
-        var q = _db.ClientCases.Include(c => c.Client).AsQueryable();
+        var q = _db.ClientCases.Include(c => c.Client).Include(c => c.LegalEntity).AsQueryable();
         if (clientId.HasValue) q = q.Where(c => c.ClientId == clientId.Value);
-        var items = await q.AsNoTracking().OrderBy(c => c.ClientId).ThenBy(c => c.CreatedAt).ToListAsync(ct);
+        if (legalEntityId.HasValue) q = q.Where(c => c.LegalEntityId == legalEntityId.Value);
+        var items = await q.AsNoTracking()
+            .OrderBy(c => c.ClientId ?? int.MaxValue)
+            .ThenBy(c => c.LegalEntityId ?? int.MaxValue)
+            .ThenBy(c => c.CreatedAt)
+            .ToListAsync(ct);
         return Ok(items);
     }
 
@@ -28,6 +33,7 @@ public class CasesController : ControllerBase
     {
         var entity = await _db.ClientCases
             .Include(c => c.Client)
+            .Include(c => c.LegalEntity)
             .Include(c => c.Payments)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -36,25 +42,30 @@ public class CasesController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] ClientCase model)
+    public async Task<IActionResult> Create([FromBody] ClientCase model, CancellationToken ct)
     {
+        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, ct);
+        if (validation is not null) return validation;
         _db.ClientCases.Add(model);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         return Created($"/api/cases/{model.Id}", model);
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] ClientCase model)
+    public async Task<IActionResult> Update(int id, [FromBody] ClientCase model, CancellationToken ct)
     {
-        var e = await _db.ClientCases.FindAsync(id);
+        var e = await _db.ClientCases.FindAsync([id], ct);
         if (e is null) return NotFound();
+        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, ct);
+        if (validation is not null) return validation;
 
         e.Title = model.Title;
         e.Description = model.Description;
         e.Status = model.Status;
         e.ClientId = model.ClientId;
+        e.LegalEntityId = model.LegalEntityId;
 
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         return Ok(e);
     }
 
@@ -72,5 +83,27 @@ public class CasesController : ControllerBase
         _db.ClientCases.Remove(e);
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    private async Task<IActionResult?> ValidateCaseOwnerAsync(int? clientId, int? legalEntityId, CancellationToken ct)
+    {
+        var hasClient = clientId.HasValue && clientId.Value > 0;
+        var hasLegalEntity = legalEntityId.HasValue && legalEntityId.Value > 0;
+        if (hasClient == hasLegalEntity)
+        {
+            return BadRequest("У дела должен быть выбран ровно один владелец: клиент или юридическое лицо.");
+        }
+
+        if (hasClient && !await _db.Clients.AsNoTracking().AnyAsync(client => client.Id == clientId!.Value, ct))
+        {
+            return BadRequest($"Unknown clientId {clientId!.Value}");
+        }
+
+        if (hasLegalEntity && !await _db.LegalEntities.AsNoTracking().AnyAsync(entity => entity.Id == legalEntityId!.Value, ct))
+        {
+            return BadRequest($"Unknown legalEntityId {legalEntityId!.Value}");
+        }
+
+        return null;
     }
 }

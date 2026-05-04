@@ -38,6 +38,10 @@ namespace PayPlanner.Api.Extensions
                     (a.Client != null &&
                         ((a.Client.Name != null && a.Client.Name.ToLower().Contains(term)) ||
                          (a.Client.Company != null && a.Client.Company.ToLower().Contains(term)))) ||
+                    (a.LegalEntity != null &&
+                        ((a.LegalEntity.ShortName != null && a.LegalEntity.ShortName.ToLower().Contains(term)) ||
+                         (a.LegalEntity.FullName != null && a.LegalEntity.FullName.ToLower().Contains(term)) ||
+                         (a.LegalEntity.Inn != null && a.LegalEntity.Inn.ToLower().Contains(term)))) ||
                     (a.Responsible != null &&
                         (a.Responsible.FullName != null && a.Responsible.FullName.ToLower().Contains(term)))
                 );
@@ -58,8 +62,8 @@ namespace PayPlanner.Api.Extensions
                     : q.OrderBy(a => a.InvoiceNumber ?? string.Empty),
                 "status" => desc ? q.OrderByDescending(a => a.Status) : q.OrderBy(a => a.Status),
                 "client" => desc
-                    ? q.OrderByDescending(a => a.Client != null ? a.Client.Name : string.Empty)
-                    : q.OrderBy(a => a.Client != null ? a.Client.Name : string.Empty),
+                    ? q.OrderByDescending(a => a.Client != null ? a.Client.Name : a.LegalEntity != null ? a.LegalEntity.ShortName : string.Empty)
+                    : q.OrderBy(a => a.Client != null ? a.Client.Name : a.LegalEntity != null ? a.LegalEntity.ShortName : string.Empty),
                 "inn" or "counterpartyinn" => desc
                     ? q.OrderByDescending(a => a.CounterpartyInn ?? string.Empty)
                     : q.OrderBy(a => a.CounterpartyInn ?? string.Empty),
@@ -75,8 +79,10 @@ namespace PayPlanner.Api.Extensions
         public static IQueryable<Payment> WithPaymentIncludes(this IQueryable<Payment> q) =>
             q.Include(p => p.Client)
                  .ThenInclude(c => c!.ClientStatus)
+             .Include(p => p.LegalEntity)
              .Include(p => p.ExpenseClient)
                  .ThenInclude(c => c!.ClientStatus)
+             .Include(p => p.ExpenseLegalEntity)
               .Include(p => p.ClientCase)
               .Include(p => p.DealType)
               .Include(p => p.IncomeType)
@@ -228,15 +234,17 @@ namespace PayPlanner.Api.Extensions
         public static IQueryable<ClientCase> WithCaseIncludes(this IQueryable<ClientCase> q, bool includePayments = false)
         {
             q = q.Include(c => c.Client);
+            q = q.Include(c => c.LegalEntity);
             if (includePayments) q = q.Include(c => c.Payments);
             return q;
         }
 
         public static IQueryable<ClientCase> ApplyCaseFilters(
             this IQueryable<ClientCase> q,
-            int? clientId, ClientCaseStatus? status, string? search)
+            int? clientId, int? legalEntityId, ClientCaseStatus? status, string? search)
         {
             if (clientId.HasValue) q = q.Where(c => c.ClientId == clientId.Value);
+            if (legalEntityId.HasValue) q = q.Where(c => c.LegalEntityId == legalEntityId.Value);
             if (status.HasValue) q = q.Where(c => c.Status == status.Value);
 
             if (!string.IsNullOrWhiteSpace(search))

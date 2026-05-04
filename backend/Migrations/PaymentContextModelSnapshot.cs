@@ -91,6 +91,9 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
 
+                    b.Property<int?>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Number")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -146,6 +149,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_Act_IsDeleted");
+
+                    b.HasIndex("LegalEntityId")
+                        .HasDatabaseName("IX_Acts_LegalEntityId");
 
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Acts_Number");
@@ -1042,7 +1048,7 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("ClientId")
+                    b.Property<int?>("ClientId")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedAt")
@@ -1074,6 +1080,9 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
+
+                    b.Property<int?>("LegalEntityId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
@@ -1116,7 +1125,16 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("ClientId", "Status")
                         .HasDatabaseName("IX_ClientCases_ClientId_Status");
 
-                    b.ToTable("ClientCases");
+                    b.HasIndex("LegalEntityId", "CreatedAt")
+                        .HasDatabaseName("IX_ClientCases_LegalEntityId_CreatedAt");
+
+                    b.HasIndex("LegalEntityId", "Status")
+                        .HasDatabaseName("IX_ClientCases_LegalEntityId_Status");
+
+                    b.ToTable("ClientCases", t =>
+                        {
+                            t.HasCheckConstraint("CK_ClientCases_Owner", "(ClientId IS NOT NULL AND LegalEntityId IS NULL) OR (ClientId IS NULL AND LegalEntityId IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientContract", b =>
@@ -2967,6 +2985,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("ExpenseClientId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("ExpenseLegalEntityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("IncomeTypeId")
                         .HasColumnType("INTEGER");
 
@@ -3018,6 +3039,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<string>("LegacyAccountNumber")
                         .HasMaxLength(120)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("LegalEntityId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Notes")
                         .IsRequired()
@@ -3106,6 +3130,9 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("ExpenseClientId")
                         .HasDatabaseName("IX_Payments_ExpenseClientId");
 
+                    b.HasIndex("ExpenseLegalEntityId")
+                        .HasDatabaseName("IX_Payments_ExpenseLegalEntityId");
+
                     b.HasIndex("IncomeTypeId")
                         .HasDatabaseName("IX_Payments_IncomeTypeId");
 
@@ -3126,6 +3153,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("LegacyAccountNumber")
                         .HasDatabaseName("IX_Payments_LegacyAccountNumber");
+
+                    b.HasIndex("LegalEntityId")
+                        .HasDatabaseName("IX_Payments_LegalEntityId");
 
                     b.HasIndex("PaymentSourceId")
                         .HasDatabaseName("IX_Payments_PaymentSourceId");
@@ -4588,6 +4618,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("InvoiceId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany("Acts")
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.User", "Responsible")
                         .WithMany("Acts")
                         .HasForeignKey("ResponsibleId")
@@ -4596,6 +4631,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Client");
 
                     b.Navigation("Invoice");
+
+                    b.Navigation("LegalEntity");
 
                     b.Navigation("Responsible");
                 });
@@ -4741,10 +4778,16 @@ namespace PayPlanner.Api.Migrations
                     b.HasOne("PayPlanner.Api.Models.Client", "Client")
                         .WithMany("Cases")
                         .HasForeignKey("ClientId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany("Cases")
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("Client");
+
+                    b.Navigation("LegalEntity");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientContract", b =>
@@ -4966,6 +5009,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("ExpenseClientId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "ExpenseLegalEntity")
+                        .WithMany()
+                        .HasForeignKey("ExpenseLegalEntityId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.IncomeType", "IncomeType")
                         .WithMany("Payments")
                         .HasForeignKey("IncomeTypeId")
@@ -4974,6 +5022,11 @@ namespace PayPlanner.Api.Migrations
                     b.HasOne("PayPlanner.Api.Models.Invoice", "Invoice")
                         .WithMany("Payments")
                         .HasForeignKey("InvoiceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany("Payments")
+                        .HasForeignKey("LegalEntityId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("PayPlanner.Api.Models.PaymentSource", "PaymentSource")
@@ -5001,9 +5054,13 @@ namespace PayPlanner.Api.Migrations
 
                     b.Navigation("ExpenseClient");
 
+                    b.Navigation("ExpenseLegalEntity");
+
                     b.Navigation("IncomeType");
 
                     b.Navigation("Invoice");
+
+                    b.Navigation("LegalEntity");
 
                     b.Navigation("PaymentSource");
 
@@ -5251,9 +5308,15 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
                 {
+                    b.Navigation("Acts");
+
                     b.Navigation("Addresses");
 
+                    b.Navigation("Cases");
+
                     b.Navigation("Clients");
+
+                    b.Navigation("Payments");
 
                     b.Navigation("UserCompanyAccesses");
                 });
