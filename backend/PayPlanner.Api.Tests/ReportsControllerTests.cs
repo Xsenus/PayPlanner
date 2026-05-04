@@ -970,6 +970,52 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task Currencies_GroupsFactOperationsByCurrency()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 7_000m, new DateTime(2026, 5, 1), "Основной банк", currency: "RUB"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 2), "Основной банк", currency: " rub "),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 3), "Основной банк", currency: "usd"),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 4), "Касса", currency: null),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", currency: "USD"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 6), "Основной банк", currency: "RUB"));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.Currencies(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CurrencyReportDto>(ok.Value);
+        Assert.Equal(10_000m, report.IncomeTotal);
+        Assert.Equal(3_000m, report.ExpenseTotal);
+        Assert.Equal(7_000m, report.NetTotal);
+
+        Assert.Collection(
+            report.Currencies,
+            item =>
+            {
+                Assert.Equal("RUB", item.Currency);
+                Assert.Equal(7_000m, item.Income);
+                Assert.Equal(3_000m, item.Expense);
+                Assert.Equal(4_000m, item.NetTotal);
+                Assert.Equal(10_000m, item.TotalAmount);
+                Assert.Equal(76.9m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal("USD", item.Currency);
+                Assert.Equal(3_000m, item.Income);
+                Assert.Equal(0m, item.Expense);
+                Assert.Equal(23.1m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -993,7 +1039,8 @@ public class ReportsControllerTests
         decimal? paidAmount = null,
         string? paymentOrderNumber = null,
         string? purpose = null,
-        MoneyOperationMatchStatus matchStatus = MoneyOperationMatchStatus.None)
+        MoneyOperationMatchStatus matchStatus = MoneyOperationMatchStatus.None,
+        string? currency = "RUB")
         => new()
         {
             Source = source,
@@ -1019,7 +1066,7 @@ public class ReportsControllerTests
             PaymentOrderNumber = paymentOrderNumber,
             Purpose = purpose,
             MatchStatus = matchStatus,
-            Currency = "RUB",
+            Currency = currency,
             CreatedAt = DateTime.UtcNow,
         };
 

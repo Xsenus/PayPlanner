@@ -708,4 +708,43 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('source=Bank');
   });
+
+  it('loads currency report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      source: 'Bank',
+      incomeTotal: 7000,
+      expenseTotal: 2000,
+      netTotal: 5000,
+      currencies: [{
+        currency: 'RUB',
+        income: 7000,
+        expense: 2000,
+        netTotal: 5000,
+        totalAmount: 9000,
+        incomeCount: 1,
+        expenseCount: 1,
+        share: 100,
+      }],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getCurrencyReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+      source: 'Bank',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/currencies?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('source=Bank');
+  });
 });

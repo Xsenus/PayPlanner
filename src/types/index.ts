@@ -1115,6 +1115,27 @@ export interface JournalStatusReport {
   statuses: JournalStatusReportItem[];
 }
 
+export interface CurrencyReportItem {
+  currency: string;
+  income: number;
+  expense: number;
+  netTotal: number;
+  totalAmount: number;
+  incomeCount: number;
+  expenseCount: number;
+  share: number;
+}
+
+export interface CurrencyReport {
+  from: string;
+  to: string;
+  source?: MoneyOperationSource | null;
+  incomeTotal: number;
+  expenseTotal: number;
+  netTotal: number;
+  currencies: CurrencyReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

@@ -38,9 +38,10 @@ import { usePaymentOrderReport } from '../../hooks/usePaymentOrderReport';
 import { usePaymentPurposeReport } from '../../hooks/usePaymentPurposeReport';
 import { useMatchStatusReport } from '../../hooks/useMatchStatusReport';
 import { useJournalStatusReport } from '../../hooks/useJournalStatusReport';
+import { useCurrencyReport } from '../../hooks/useCurrencyReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { AdvanceReport, CashBookSummary, CashFlowReport, CounterpartyReport, DirectionReport, JournalStatusReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, VatReport } from '../../types';
+import type { AdvanceReport, CashBookSummary, CashFlowReport, CounterpartyReport, CurrencyReport, DirectionReport, JournalStatusReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -2602,6 +2603,126 @@ function JournalStatusReportSection({
   );
 }
 
+function CurrencyReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: CurrencyReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const rows = report?.currencies ?? [];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-700">
+            <Wallet className="h-3.5 w-3.5" />
+            Валюты
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по валютам операций</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Фактический оборот по валютам операций с долей каждой валюты в выбранном периоде.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по валютам...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по валютам</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Поступило"
+              value={formatCurrency(report.incomeTotal)}
+              icon={TrendingUp}
+              tone="income"
+              subtitle="Во всех валютах"
+            />
+            <MetricCard
+              title="Списано"
+              value={formatCurrency(report.expenseTotal)}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle="Во всех валютах"
+            />
+            <MetricCard
+              title="Итог"
+              value={formatCurrency(report.netTotal)}
+              icon={ArrowUpRight}
+              tone="profit"
+              subtitle={report.netTotal >= 0 ? 'Поступления выше списаний' : 'Списания выше поступлений'}
+            />
+            <MetricCard
+              title="Валют"
+              value={String(report.currencies.length)}
+              icon={Wallet}
+              tone="rate"
+              subtitle="С фактическими операциями"
+            />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {rows.length > 0 ? rows.map((row) => (
+              <div key={row.currency} className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-950">{row.currency}</h3>
+                    <div className="mt-1 text-sm text-slate-500">
+                      {row.incomeCount + row.expenseCount} операций · {row.share}% оборота
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-slate-500">Оборот</div>
+                    <div className="font-semibold text-slate-950">{formatCurrency(row.totalAmount)}</div>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-3">
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="text-xs text-emerald-700">Приход</div>
+                    <div className="mt-1 font-semibold text-emerald-800">{formatCurrency(row.income)}</div>
+                  </div>
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="text-xs text-rose-700">Расход</div>
+                    <div className="mt-1 font-semibold text-rose-800">{formatCurrency(row.expense)}</div>
+                  </div>
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="text-xs text-slate-500">Итог</div>
+                    <div className="mt-1 font-semibold text-slate-950">{formatCurrency(row.netTotal)}</div>
+                  </div>
+                </div>
+              </div>
+            )) : (
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500 xl:col-span-2">
+                Нет операций по валютам за период.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Reports() {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
@@ -2729,6 +2850,12 @@ export function Reports() {
     error: journalStatusReportError,
     reload: reloadJournalStatusReport,
   } = useJournalStatusReport(cashFlowDates);
+  const {
+    report: currencyReport,
+    loading: currencyReportLoading,
+    error: currencyReportError,
+    reload: reloadCurrencyReport,
+  } = useCurrencyReport(cashFlowDates);
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
@@ -3167,6 +3294,13 @@ export function Reports() {
               loading={journalStatusReportLoading}
               error={journalStatusReportError}
               onReload={reloadJournalStatusReport}
+            />
+
+            <CurrencyReportSection
+              report={currencyReport}
+              loading={currencyReportLoading}
+              error={currencyReportError}
+              onReload={reloadCurrencyReport}
             />
           </>
         )}
