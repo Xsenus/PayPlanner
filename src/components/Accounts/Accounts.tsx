@@ -36,6 +36,7 @@ import type {
   ClientRole,
   Invoice,
   InvoiceInput,
+  LegalEntitySummary,
   Payment,
   PaymentKind,
   PaymentPayload,
@@ -668,29 +669,45 @@ export function Accounts({
   };
 
   const [clients, setClients] = useState<Client[]>([]);
+  const [legalEntities, setLegalEntities] = useState<LegalEntitySummary[]>([]);
+  const [legalEntitiesLoaded, setLegalEntitiesLoaded] = useState(false);
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
 
   const ensureInvoiceLookups = useCallback(async () => {
     if (!modalOpen && !pageEditingInvoiceId) return;
-    if (clients.length > 0 && actResponsibles.length > 0 && !lookupsError) return;
+    if (clients.length > 0 && actResponsibles.length > 0 && legalEntitiesLoaded && !lookupsError) return;
     setLookupsLoading(true);
     try {
-      const [clientsResponse, responsiblesResponse] = await Promise.all([
+      const [clientsResponse, responsiblesResponse, legalEntitiesResponse] = await Promise.all([
         clients.length > 0 ? Promise.resolve(clients) : apiService.getClients(),
         apiService.getActResponsibles(),
+        legalEntitiesLoaded ? Promise.resolve(legalEntities) : apiService.getLegalEntities(),
       ]);
       if (!clients.length) {
         setClients(clientsResponse ?? []);
       }
       setActResponsibles(responsiblesResponse ?? []);
+      if (!legalEntitiesLoaded) {
+        setLegalEntities(legalEntitiesResponse ?? []);
+        setLegalEntitiesLoaded(true);
+      }
       setLookupsError(null);
     } catch (err) {
       setLookupsError(err instanceof Error ? err.message : 'Не удалось загрузить справочники');
     } finally {
       setLookupsLoading(false);
     }
-  }, [modalOpen, pageEditingInvoiceId, clients, actResponsibles.length, lookupsError]);
+  }, [modalOpen, pageEditingInvoiceId, clients, actResponsibles.length, legalEntities, legalEntitiesLoaded, lookupsError]);
+
+  const handleInvoiceClientCreated = useCallback((client: Client) => {
+    setClients((prev) => {
+      const exists = prev.some((item) => item.id === client.id);
+      return exists
+        ? prev.map((item) => (item.id === client.id ? client : item))
+        : [client, ...prev];
+    });
+  }, []);
 
   const ensureActLookups = useCallback(async () => {
     if (!actModalOpen) return;
@@ -1814,6 +1831,10 @@ export function Accounts({
           submitting={submitting}
           errorMessage={modalError}
           clients={clients}
+          legalEntities={legalEntities}
+          legalEntitiesLoading={lookupsLoading && !legalEntitiesLoaded}
+          legalEntitiesError={lookupsError}
+          onClientCreated={handleInvoiceClientCreated}
           responsibles={actResponsibles}
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}
@@ -2775,6 +2796,10 @@ export function Accounts({
           submitting={submitting}
           errorMessage={modalError}
           clients={clients}
+          legalEntities={legalEntities}
+          legalEntitiesLoading={lookupsLoading && !legalEntitiesLoaded}
+          legalEntitiesError={lookupsError}
+          onClientCreated={handleInvoiceClientCreated}
           responsibles={actResponsibles}
           lookupsLoading={lookupsLoading}
           lookupsError={lookupsError}

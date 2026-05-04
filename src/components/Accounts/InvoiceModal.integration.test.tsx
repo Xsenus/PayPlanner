@@ -10,6 +10,7 @@ import type {
   ContractInput,
   InstallmentPlanInput,
   Invoice,
+  LegalEntitySummary,
   MoneyOperation,
   Payment,
   ServiceCategoryDictionaryItem,
@@ -118,6 +119,7 @@ vi.mock('../../services/api', () => ({
     createAct: vi.fn(),
     updateInvoice: vi.fn(),
     createInvoice: vi.fn(),
+    createClient: vi.fn(),
     sendInvoiceByEmail: vi.fn(),
     deleteInvoice: vi.fn(),
   },
@@ -272,6 +274,7 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.getMoneyOperationsPaged).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue({ items: [], totalCount: 0, summary: {} });
     vi.mocked(apiService.updateInvoice).mockClear();
+    vi.mocked(apiService.createClient).mockReset();
   });
 
   it('keeps the linked contract selected after invoice data is reopened and contracts finish loading', async () => {
@@ -313,6 +316,84 @@ describe('InvoiceModal integration', () => {
 
     await waitFor(() => {
       expect(getContractSelect().value).toBe('77');
+    });
+  });
+
+  it('creates a client from a legal entity and uses it as the invoice client', async () => {
+    const legalEntity: LegalEntitySummary = {
+      id: 55,
+      shortName: 'ООО Ромашка',
+      fullName: 'Общество с ограниченной ответственностью Ромашка',
+      inn: '7701000000',
+      kpp: '770101001',
+      ogrn: null,
+      address: 'Москва',
+      phone: '+7 999 000-00-00',
+      email: 'info@romashka.test',
+      clientsCount: 0,
+      createdAt: '2026-04-15T00:00:00Z',
+      clients: [],
+    } as LegalEntitySummary;
+    const createdClient = {
+      ...createTestClient(42, 'ООО Ромашка'),
+      legalEntityId: legalEntity.id,
+      legalEntity,
+      phone: '+7 999 000-00-00',
+      email: 'info@romashka.test',
+      address: 'Москва',
+    } as Client;
+    const onClientCreated = vi.fn();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(apiService.createClient).mockResolvedValue(createdClient);
+
+    const invoice = {
+      id: 701,
+      invoiceEntityId: 701,
+      number: '701',
+      date: '2026-04-15',
+      amount: 15000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      lineItems: [{ name: 'Услуга', quantity: 1, unit: 'шт', price: 15000 }],
+    } as unknown as Invoice;
+
+    const { container } = render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createTestClient(1, 'Старый клиент')]}
+        legalEntities={[legalEntity]}
+        onClientCreated={onClientCreated}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /открыть выбор: клиент/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Юрлица' }));
+    expect(screen.getByText('ООО Ромашка')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /создать клиента/i }));
+
+    await waitFor(() => {
+      expect(apiService.createClient).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'ООО Ромашка',
+        legalEntityId: 55,
+      }));
+    });
+    expect(onClientCreated).toHaveBeenCalledWith(createdClient);
+
+    const form = container.querySelector('form');
+    expect(form).toBeTruthy();
+    fireEvent.submit(form as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ clientId: 42 }));
     });
   });
 
