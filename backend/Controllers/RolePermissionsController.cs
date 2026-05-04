@@ -206,6 +206,9 @@ public class RolePermissionsController : ControllerBase
                 case RolePermissionCatalog.Reports:
                     dto.Reports = ToSection(permission);
                     break;
+                case RolePermissionCatalog.Tasks:
+                    dto.Tasks = ToSection(permission);
+                    break;
                 case RolePermissionCatalog.Calculator:
                     dto.Calculator = ToSection(permission);
                     break;
@@ -246,6 +249,7 @@ public class RolePermissionsController : ControllerBase
         => new(StringComparer.OrdinalIgnoreCase)
         {
             [RolePermissionCatalog.Calendar] = ToValues(dto.Calendar),
+            [RolePermissionCatalog.Tasks] = ToValues(dto.Tasks),
             [RolePermissionCatalog.Reports] = ToValues(dto.Reports),
             [RolePermissionCatalog.Calculator] = ToValues(dto.Calculator),
             [RolePermissionCatalog.LegalEntities] = ToValues(dto.LegalEntities),

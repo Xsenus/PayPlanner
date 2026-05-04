@@ -1,0 +1,52 @@
+using System.ComponentModel.DataAnnotations;
+
+namespace PayPlanner.Api.Models;
+
+public class TaskJournalItem
+{
+    public int Id { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string ObjectName { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(500)]
+    public string Title { get; set; } = string.Empty;
+
+    [MaxLength(4000)]
+    public string? Description { get; set; }
+
+    public int? AssigneeUserId { get; set; }
+    public User? AssigneeUser { get; set; }
+
+    [MaxLength(256)]
+    public string AssigneeName { get; set; } = string.Empty;
+
+    public int? AuthorUserId { get; set; }
+    public User? AuthorUser { get; set; }
+
+    [MaxLength(256)]
+    public string AuthorName { get; set; } = string.Empty;
+
+    public DateTime DueAt { get; set; }
+
+    [MaxLength(32)]
+    public string Type { get; set; } = "task";
+
+    [MaxLength(32)]
+    public string Priority { get; set; } = "normal";
+
+    [MaxLength(32)]
+    public string Status { get; set; } = "new";
+
+    [MaxLength(4000)]
+    public string? Result { get; set; }
+
+    public string RemindersJson { get; set; } = "[]";
+    public string ChannelsJson { get; set; } = "[]";
+    public string TagsJson { get; set; } = "[]";
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
+}

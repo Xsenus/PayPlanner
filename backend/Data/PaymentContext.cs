@@ -70,7 +70,8 @@ public class PaymentContext : DbContext
         typeof(Payment),
         typeof(PowerOfAttorney),
         typeof(CashOrder),
-        typeof(CashInventory)
+        typeof(CashInventory),
+        typeof(TaskJournalItem)
     };
 
     private static readonly HashSet<Type> MetadataOnlyAuditedEntityTypes = new()
@@ -1555,6 +1556,41 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.EntityId).HasDatabaseName("IX_SpreadsheetImportBatchOperations_EntityId");
         });
 
+        modelBuilder.Entity<TaskJournalItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ObjectName).HasMaxLength(300).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(4000);
+            entity.Property(e => e.AssigneeName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AuthorName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Type).HasMaxLength(32).HasDefaultValue("task").IsRequired();
+            entity.Property(e => e.Priority).HasMaxLength(32).HasDefaultValue("normal").IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue("new").IsRequired();
+            entity.Property(e => e.Result).HasMaxLength(4000);
+            entity.Property(e => e.RemindersJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+            entity.Property(e => e.ChannelsJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+            entity.Property(e => e.TagsJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.AssigneeUser)
+                .WithMany()
+                .HasForeignKey(e => e.AssigneeUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.AuthorUser)
+                .WithMany()
+                .HasForeignKey(e => e.AuthorUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.DueAt).HasDatabaseName("IX_TaskJournalItems_DueAt");
+            entity.HasIndex(e => e.Status).HasDatabaseName("IX_TaskJournalItems_Status");
+            entity.HasIndex(e => e.Type).HasDatabaseName("IX_TaskJournalItems_Type");
+            entity.HasIndex(e => e.Priority).HasDatabaseName("IX_TaskJournalItems_Priority");
+            entity.HasIndex(e => e.AssigneeUserId).HasDatabaseName("IX_TaskJournalItems_AssigneeUserId");
+            entity.HasIndex(e => e.AuthorUserId).HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
+        });
+
         if (UseObjectAuditModel)
         {
             ConfigureAudit<Act>(modelBuilder);
@@ -1572,6 +1608,7 @@ public class PaymentContext : DbContext
             ConfigureAudit<PowerOfAttorney>(modelBuilder);
             ConfigureAudit<CashOrder>(modelBuilder);
             ConfigureAudit<CashInventory>(modelBuilder);
+            ConfigureAudit<TaskJournalItem>(modelBuilder);
             ConfigureAudit<Role>(modelBuilder, enableSoftDelete: false);
             ConfigureAudit<User>(modelBuilder, enableSoftDelete: false);
         }
@@ -1929,6 +1966,7 @@ public class PaymentContext : DbContext
         if (clrType == typeof(MoneyOperation)) return "money-operation";
         if (clrType == typeof(CashOrder)) return "cash-order";
         if (clrType == typeof(CashInventory)) return "cash-inventory";
+        if (clrType == typeof(TaskJournalItem)) return "task-journal-item";
 
         return null;
     }
@@ -2138,6 +2176,7 @@ public class PaymentContext : DbContext
     /// </summary>
     public DbSet<UserActivityLog> UserActivityLogs { get; set; }
     public DbSet<ObjectAuditEvent> ObjectAuditEvents { get; set; }
+    public DbSet<TaskJournalItem> TaskJournalItems { get; set; }
 
     /// <summary>
     /// Пользовательские настройки.

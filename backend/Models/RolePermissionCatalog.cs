@@ -6,6 +6,7 @@ namespace PayPlanner.Api.Models;
 public static class RolePermissionCatalog
 {
     public const string Calendar = "calendar";
+    public const string Tasks = "tasks";
     public const string Reports = "reports";
     public const string Calculator = "calculator";
     public const string LegalEntities = "legalEntities";
@@ -21,6 +22,7 @@ public static class RolePermissionCatalog
     public static readonly string[] AllSections =
     [
         Calendar,
+        Tasks,
         Reports,
         Calculator,
         LegalEntities,
@@ -38,6 +40,7 @@ public static class RolePermissionCatalog
         => new Dictionary<string, RolePermissionValues>(StringComparer.OrdinalIgnoreCase)
         {
             [Calendar] = new(true, true, true, true, true, true),
+            [Tasks] = new(true, true, true, true, true, false),
             [Reports] = new(true, true, true, true, true, false),
             [Calculator] = new(true, true, true, true, true, false),
             [LegalEntities] = new(true, true, true, true, true, false),
@@ -70,6 +73,7 @@ public static class RolePermissionCatalog
         return new RolePermissionsDto
         {
             Calendar = ToCalendar(defaults[Calendar]),
+            Tasks = ToSection(defaults[Tasks]),
             Reports = ToSection(defaults[Reports]),
             Calculator = ToSection(defaults[Calculator]),
             LegalEntities = ToSection(defaults[LegalEntities]),

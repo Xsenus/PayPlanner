@@ -3851,6 +3851,157 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("SystemSettings");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AssigneeName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AssigneeUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AuthorName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AuthorUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ChannelsJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("DueAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("ObjectName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Priority")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("normal");
+
+                    b.Property<string>("RemindersJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]");
+
+                    b.Property<string>("Result")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("new");
+
+                    b.Property<string>("TagsJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("task");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssigneeUserId")
+                        .HasDatabaseName("IX_TaskJournalItems_AssigneeUserId");
+
+                    b.HasIndex("AuthorUserId")
+                        .HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_TaskJournalItem_DeletedAt_Audit");
+
+                    b.HasIndex("DueAt")
+                        .HasDatabaseName("IX_TaskJournalItems_DueAt");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_TaskJournalItem_IsDeleted");
+
+                    b.HasIndex("Priority")
+                        .HasDatabaseName("IX_TaskJournalItems_Priority");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_TaskJournalItems_Status");
+
+                    b.HasIndex("Type")
+                        .HasDatabaseName("IX_TaskJournalItems_Type");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_TaskJournalItem_UpdatedAt_Audit");
+
+                    b.ToTable("TaskJournalItems");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemDictionaryItem", b =>
                 {
                     b.Property<int>("Id")
@@ -4931,6 +5082,23 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Batch");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "AssigneeUser")
+                        .WithMany()
+                        .HasForeignKey("AssigneeUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AssigneeUser");
+
+                    b.Navigation("AuthorUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TelegramAuthRequest", b =>

@@ -3950,6 +3950,159 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("SystemSettings");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AssigneeName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("AssigneeUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AuthorName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("AuthorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ChannelsJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTime>("DueAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("ObjectName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Priority")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("normal");
+
+                    b.Property<string>("RemindersJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]");
+
+                    b.Property<string>("Result")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("new");
+
+                    b.Property<string>("TagsJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("task");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssigneeUserId")
+                        .HasDatabaseName("IX_TaskJournalItems_AssigneeUserId");
+
+                    b.HasIndex("AuthorUserId")
+                        .HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_TaskJournalItem_DeletedAt_Audit");
+
+                    b.HasIndex("DueAt")
+                        .HasDatabaseName("IX_TaskJournalItems_DueAt");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_TaskJournalItem_IsDeleted");
+
+                    b.HasIndex("Priority")
+                        .HasDatabaseName("IX_TaskJournalItems_Priority");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_TaskJournalItems_Status");
+
+                    b.HasIndex("Type")
+                        .HasDatabaseName("IX_TaskJournalItems_Type");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_TaskJournalItem_UpdatedAt_Audit");
+
+                    b.ToTable("TaskJournalItems");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemDictionaryItem", b =>
                 {
                     b.Property<int>("Id")
@@ -5045,6 +5198,23 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsRequired();
 
                     b.Navigation("Batch");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "AssigneeUser")
+                        .WithMany()
+                        .HasForeignKey("AssigneeUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AssigneeUser");
+
+                    b.Navigation("AuthorUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TelegramAuthRequest", b =>

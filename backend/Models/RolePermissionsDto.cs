@@ -17,6 +17,7 @@ public class CalendarPermissionsDto : MenuSectionPermissionsDto
 public class RolePermissionsDto
 {
     public CalendarPermissionsDto Calendar { get; set; } = new();
+    public MenuSectionPermissionsDto Tasks { get; set; } = new();
     public MenuSectionPermissionsDto Reports { get; set; } = new();
     public MenuSectionPermissionsDto Calculator { get; set; } = new();
     public MenuSectionPermissionsDto Clients { get; set; } = new();
