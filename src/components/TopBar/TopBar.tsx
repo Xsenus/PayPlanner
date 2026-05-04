@@ -3,7 +3,12 @@ import { Bell, Building2, LogOut, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { useDialog } from '../../hooks/useDialog';
+import { apiService } from '../../services/api';
 import { setStoredCompanyProfileCompanyId, setStoredCompanyProfileMode } from '../../utils/companyProfileBridge';
+import {
+  TASK_JOURNAL_EVENT,
+  type TaskJournalNotification,
+} from '../../utils/taskJournalStore';
 
 type TopBarProps = {
   title: string;
@@ -26,6 +31,7 @@ export default function TopBar({ title, onSignOut, onOpenProfile }: TopBarProps)
   const { confirm } = useDialog();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [taskNotifications, setTaskNotifications] = useState<TaskJournalNotification[]>([]);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const notificationsRef = useRef<HTMLDivElement | null>(null);
@@ -35,6 +41,27 @@ export default function TopBar({ title, onSignOut, onOpenProfile }: TopBarProps)
   useEffect(() => {
     setAvatarLoadFailed(false);
   }, [user?.photoUrl]);
+
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      apiService.getTaskJournalNotifications()
+        .then((items) => {
+          if (alive) setTaskNotifications(items);
+        })
+        .catch(() => {
+          if (alive) setTaskNotifications([]);
+        });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener(TASK_JOURNAL_EVENT, refresh);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
+    };
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -76,15 +103,57 @@ export default function TopBar({ title, onSignOut, onOpenProfile }: TopBarProps)
             <button
               type="button"
               onClick={() => setNotificationsOpen((prev) => !prev)}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700"
+              className="relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700"
               aria-label="Уведомления"
             >
               <Bell className="h-5 w-5" />
+              {taskNotifications.length > 0 ? (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[11px] font-semibold text-white">
+                  {taskNotifications.length > 9 ? '9+' : taskNotifications.length}
+                </span>
+              ) : null}
             </button>
 
             {notificationsOpen ? (
-              <div className="absolute right-0 mt-4 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-xl">
-                Новых уведомлений пока нет
+              <div className="absolute right-0 mt-4 w-[min(92vw,24rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                <div className="border-b border-slate-100 px-4 py-3">
+                  <div className="text-sm font-semibold text-slate-900">Уведомления</div>
+                  <div className="mt-1 text-xs text-slate-500">Сроки и напоминания из журнала задач</div>
+                </div>
+
+                {taskNotifications.length > 0 ? (
+                  <div className="max-h-96 overflow-y-auto py-2">
+                    {taskNotifications.slice(0, 6).map((notification) => (
+                      <button
+                        key={notification.id}
+                        type="button"
+                        onClick={() => {
+                          setNotificationsOpen(false);
+                          setActiveTab('tasks');
+                        }}
+                        className="block w-full px-4 py-3 text-left transition-colors hover:bg-slate-50"
+                      >
+                        <div className="flex items-start gap-3">
+                          <span
+                            className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
+                              notification.tone === 'rose'
+                                ? 'bg-rose-500'
+                                : notification.tone === 'amber'
+                                  ? 'bg-amber-500'
+                                  : 'bg-blue-500'
+                            }`}
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold text-slate-900">{notification.title}</span>
+                            <span className="mt-1 block text-sm leading-5 text-slate-600">{notification.description}</span>
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-4 py-5 text-sm text-slate-500">Новых уведомлений пока нет</div>
+                )}
               </div>
             ) : null}
           </div>

@@ -7,6 +7,7 @@ import {
   CalendarDays,
   FileCheck2,
   FileSignature,
+  ListTodo,
   Lock,
   RotateCcw,
   Settings,
@@ -75,6 +76,12 @@ const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
     description: 'Доступ к отчётам, обзорам и аналитическим данным.',
     icon: BarChart3,
   },
+  tasks: {
+    key: 'tasks',
+    title: 'Журнал задач',
+    description: 'Постановка задач, контроль сроков, исполнителей и результатов.',
+    icon: ListTodo,
+  },
   calculator: {
     key: 'calculator',
     title: 'Калькулятор',
@@ -142,7 +149,7 @@ const GROUPS: GroupConfig[] = [
     key: 'core',
     title: 'Основные разделы',
     description: 'Базовые рабочие модули и аналитика.',
-    sections: ['calendar', 'reports', 'calculator'],
+    sections: ['calendar', 'tasks', 'reports', 'calculator'],
   },
   {
     key: 'crm',

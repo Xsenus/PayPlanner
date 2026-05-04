@@ -4,6 +4,7 @@ export const LAST_TAB_STORAGE_KEY = 'pp.last_active_tab';
 
 const ALL_TABS: Tab[] = [
   'calendar',
+  'tasks',
   'reports',
   'calculator',
   'legalEntities',

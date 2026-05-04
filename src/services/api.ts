@@ -1456,6 +1456,63 @@ export class ApiService {
     return this.request<void>(`/role-permissions/${roleId}`, { method: 'DELETE' });
   }
 
+  // ===== Task journal =====
+  async getTaskJournalItems(params?: {
+    search?: string;
+    status?: string;
+    type?: string;
+    assigneeUserId?: number;
+    from?: string;
+    to?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      search: params?.search,
+      status: params?.status,
+      type: params?.type,
+      assigneeUserId: params?.assigneeUserId,
+      from: params?.from,
+      to: params?.to,
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 100,
+    });
+    return this.request<PagedResult<TaskJournalItem>>(`/tasks${q}`);
+  }
+
+  async getTaskJournalAssignees() {
+    return this.request<TaskJournalAssignee[]>('/tasks/assignees');
+  }
+
+  async getTaskJournalNotifications() {
+    return this.request<TaskJournalNotification[]>('/tasks/notifications');
+  }
+
+  async createTaskJournalItem(payload: TaskJournalUpsertPayload) {
+    return this.request<TaskJournalItem>('/tasks', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateTaskJournalItem(id: number, payload: TaskJournalUpsertPayload) {
+    return this.request<TaskJournalItem>(`/tasks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateTaskJournalStatus(id: number, status: TaskJournalStatus) {
+    return this.request<TaskJournalItem>(`/tasks/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async deleteTaskJournalItem(id: number) {
+    return this.request<void>(`/tasks/${id}`, { method: 'DELETE' });
+  }
+
   // ===== Payments (back-compat + расширенные варианты) =====
 
   // Перегрузки — чтобы не ломать старые вызовы
@@ -3015,3 +3072,10 @@ import type {
 import { BaseDictItem } from '../types/dictionaries';
 import type { RolePermissions } from '../types/permissions';
 import type { CreateUserActivityInput, UserActivityFiltersResponse, UserActivityLogItem, UserActivityLogResponse, UserActivityStatus } from '../types/userActivity';
+import type {
+  TaskJournalAssignee,
+  TaskJournalItem,
+  TaskJournalNotification,
+  TaskJournalStatus,
+  TaskJournalUpsertPayload,
+} from '../utils/taskJournalStore';

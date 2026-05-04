@@ -3,6 +3,7 @@ import {
   Calendar,
   BarChart,
   Calculator,
+  ListTodo,
   Users,
   Settings,
   UserCog,
@@ -119,6 +120,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     const items: SidebarItem[] = [];
     if (permissions.calendar.canView) {
       items.push({ id: 'calendar', tab: 'calendar' as Tab, label: t('calendar') ?? 'Календарь', icon: Calendar });
+    }
+    if (permissions.tasks.canView) {
+      items.push({ id: 'tasks', tab: 'tasks' as Tab, label: 'Журнал задач', icon: ListTodo });
     }
     if (permissions.reports.canView) {
       items.push({ id: 'reports', tab: 'reports' as Tab, label: t('reports') ?? 'Отчёты', icon: BarChart });

@@ -39,6 +39,7 @@ type ActReturnContext =
   | { tab: 'contractDetail'; contractId: number };
 
 const Calendar = lazy(() => import('./components/Calendar/Calendar').then((module) => ({ default: module.Calendar })));
+const TaskJournal = lazy(() => import('./components/Tasks/TaskJournal').then((module) => ({ default: module.TaskJournal })));
 const Reports = lazy(() => import('./components/Reports/Reports').then((module) => ({ default: module.Reports })));
 const Calculator = lazy(() => import('./components/Calculator/Calculator').then((module) => ({ default: module.Calculator })));
 const Clients = lazy(() => import('./components/Clients/Clients').then((module) => ({ default: module.Clients })));
@@ -82,6 +83,7 @@ function AppContent() {
   const tabNames: Record<string, string> = useMemo(
     () => ({
       calendar: 'Календарь',
+      tasks: 'Журнал задач',
       reports: 'Отчеты',
       calculator: 'Калькулятор',
       legalEntities: 'Юр. лица',
@@ -150,6 +152,7 @@ function AppContent() {
     () =>
       [
         { tab: 'calendar' as Tab, allowed: permissions.calendar.canView },
+        { tab: 'tasks' as Tab, allowed: permissions.tasks.canView },
         { tab: 'reports' as Tab, allowed: permissions.reports.canView },
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
@@ -190,6 +193,8 @@ function AppContent() {
       switch (tab) {
         case 'calendar':
           return permissions.calendar.canView;
+        case 'tasks':
+          return permissions.tasks.canView;
         case 'reports':
           return permissions.reports.canView;
         case 'calculator':
@@ -682,6 +687,11 @@ function AppContent() {
         return permissions.calendar.canView
           ? <Calendar onOpenClient={handleOpenClient} />
           : renderNoAccess('Раздел календаря недоступен для вашей роли.');
+
+      case 'tasks':
+        return permissions.tasks.canView
+          ? <TaskJournal />
+          : renderNoAccess('Журнал задач недоступен для вашей роли.');
 
       case 'reports':
         return permissions.reports.canView
