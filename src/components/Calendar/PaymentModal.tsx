@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Trash2, Info, History, Search, UserRoundSearch, Ban, WalletCards } from 'lucide-react';
+import { X, Trash2, Info, History, Search, UserRoundSearch, Ban, WalletCards, Building2 } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
@@ -10,6 +11,7 @@ import type {
   PaymentStatus,
   Client,
   ClientCase,
+  LegalEntitySummary,
   PaymentPayload,
   Invoice,
   InvoiceInput,
@@ -36,7 +38,9 @@ type LinkedInvoiceContext = {
   number: string;
   date: string;
   clientId?: number | null;
+  legalEntityId?: number | null;
   expenseClientId?: number | null;
+  expenseLegalEntityId?: number | null;
   clientCaseId?: number | null;
   type?: PaymentKind;
 };
@@ -66,6 +70,10 @@ function normalizeMoneyInputValue(value: string): string {
   if (!value.trim()) return '';
   const num = parseDecimal(value);
   return Number.isFinite(num) ? num.toFixed(2) : '';
+}
+
+function getLegalEntityDisplayName(entity: LegalEntitySummary): string {
+  return entity.shortName?.trim() || entity.fullName?.trim() || `Юр. лицо #${entity.id}`;
 }
 
 interface PaymentModalProps {
@@ -106,6 +114,7 @@ export function PaymentModal({
   const formRef = useRef<HTMLFormElement>(null);
 
   const { clients, loading: clientsLoading } = useClients();
+  const { legalEntities, loading: legalEntitiesLoading, error: legalEntitiesError } = useLegalEntities();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
   const { t } = useTranslation();
   const { confirm } = useDialog();
@@ -134,7 +143,9 @@ export function PaymentModal({
     lastPaymentDate: '',
     notes: '',
     clientId: '',
+    legalEntityId: '',
     expenseClientId: '',
+    expenseLegalEntityId: '',
     clientCaseId: '',
     dealTypeId: '',
     incomeTypeId: '',
@@ -161,12 +172,21 @@ export function PaymentModal({
     () => clients.find((c) => String(c.id) === formData.clientId) ?? null,
     [clients, formData.clientId],
   );
+  const selectedLegalEntity = useMemo(
+    () => legalEntities.find((entity) => String(entity.id) === formData.legalEntityId) ?? null,
+    [legalEntities, formData.legalEntityId],
+  );
   const selectedExpenseClient = useMemo(
     () => clients.find((c) => String(c.id) === formData.expenseClientId) ?? null,
     [clients, formData.expenseClientId],
   );
+  const selectedExpenseLegalEntity = useMemo(
+    () => legalEntities.find((entity) => String(entity.id) === formData.expenseLegalEntityId) ?? null,
+    [legalEntities, formData.expenseLegalEntityId],
+  );
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientPickerMode, setClientPickerMode] = useState<'client' | 'expense'>('client');
+  const [clientPickerScope, setClientPickerScope] = useState<'clients' | 'legalEntities'>('clients');
   const [clientPickerSearch, setClientPickerSearch] = useState('');
   const filteredClients = useMemo(() => {
     const query = clientPickerSearch.trim().toLowerCase();
@@ -180,6 +200,31 @@ export function PaymentModal({
         .some((value) => value.toLowerCase().includes(query)),
     );
   }, [clientPickerSearch, clients]);
+  const filteredLegalEntities = useMemo(() => {
+    const query = clientPickerSearch.trim().toLowerCase();
+    const sorted = [...legalEntities].sort((left, right) =>
+      getLegalEntityDisplayName(left).localeCompare(getLegalEntityDisplayName(right), 'ru', { sensitivity: 'base' }),
+    );
+    if (!query) {
+      return sorted;
+    }
+
+    return sorted.filter((entity) => {
+      const linkedClients = entity.clients ?? [];
+      return [
+        entity.shortName,
+        entity.fullName ?? '',
+        entity.inn ?? '',
+        entity.kpp ?? '',
+        entity.ogrn ?? '',
+        entity.responsibleUserName ?? '',
+        ...linkedClients.map((client) => client.name ?? ''),
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [clientPickerSearch, legalEntities]);
 
   const [syncDateWithPayment, setSyncDateWithPayment] = useState(false);
 
@@ -203,6 +248,14 @@ export function PaymentModal({
   const caseOwnerClientId = formData.type === 'Expense'
     ? formData.expenseClientId
     : formData.clientId;
+  const caseOwnerLegalEntityId = formData.type === 'Expense'
+    ? formData.expenseLegalEntityId
+    : formData.legalEntityId;
+  const caseOwnerKey = caseOwnerClientId
+    ? `client:${caseOwnerClientId}`
+    : caseOwnerLegalEntityId
+      ? `legal:${caseOwnerLegalEntityId}`
+      : '';
   const selectedPaymentSource = useMemo(
     () => paymentSources.find((source) => String(source.id) === formData.paymentSourceId) ?? null,
     [formData.paymentSourceId, paymentSources],
@@ -234,7 +287,7 @@ export function PaymentModal({
   const invoiceCreateDraft = useMemo<InvoiceEditorDraftState | null>(() => {
     if (!invoiceCreateOpen) return null;
 
-    const clientId = formData.clientId || (defaultClientId ? String(defaultClientId) : '');
+    const clientId = formData.legalEntityId ? '' : formData.clientId || (defaultClientId ? String(defaultClientId) : '');
     const clientCaseId = formData.clientCaseId ? Number(formData.clientCaseId) : null;
     const invoiceDate = formData.accountDate || formData.date || todayYMD();
     const dueDate = formData.date || invoiceDate;
@@ -255,7 +308,9 @@ export function PaymentModal({
         type: formData.type,
         status: formData.status,
         clientId,
+        legalEntityId: formData.legalEntityId,
         expenseClientId: formData.type === 'Expense' ? formData.expenseClientId : '',
+        expenseLegalEntityId: formData.type === 'Expense' ? formData.expenseLegalEntityId : '',
         contractId: formData.contractId || invoiceCreateSeedContractId,
         clientCaseReference: '',
         description,
@@ -275,7 +330,7 @@ export function PaymentModal({
       selectedActs: [],
       selectedClientCaseIds: clientCaseId ? [clientCaseId] : [],
     };
-  }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.contractId, formData.date, formData.description, formData.expenseClientId, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen, invoiceCreateSeedContractId]);
+  }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.contractId, formData.date, formData.description, formData.expenseClientId, formData.expenseLegalEntityId, formData.legalEntityId, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen, invoiceCreateSeedContractId]);
 
   useEffect(() => {
     if (!isOpen || !invoicePickerOpen || hasLockedInvoice) {
@@ -285,10 +340,11 @@ export function PaymentModal({
     }
 
     const clientId = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
-    if (!clientId) {
+    const legalEntityId = formData.legalEntityId ? parseInt(formData.legalEntityId, 10) : undefined;
+    if (!clientId && !legalEntityId) {
       setInvoiceOptions([]);
       setInvoicePickerLoading(false);
-      setInvoicePickerError('Сначала выберите клиента.');
+      setInvoicePickerError('Сначала выберите контрагента.');
       return;
     }
 
@@ -300,6 +356,7 @@ export function PaymentModal({
         const caseId = formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined;
         const response = await apiService.getInvoices({
           clientId,
+          legalEntityId,
           caseId,
           type: formData.type,
           search:
@@ -318,7 +375,7 @@ export function PaymentModal({
       } catch (e) {
         if (!cancelled) {
           setInvoiceOptions([]);
-          setInvoicePickerError(e instanceof Error ? e.message : 'Не удалось загрузить счета клиента.');
+          setInvoicePickerError(e instanceof Error ? e.message : 'Не удалось загрузить счета контрагента.');
         }
       } finally {
         if (!cancelled) {
@@ -335,6 +392,7 @@ export function PaymentModal({
     formData.account,
     formData.clientCaseId,
     formData.clientId,
+    formData.legalEntityId,
     formData.invoiceId,
     formData.type,
     hasLockedInvoice,
@@ -408,6 +466,10 @@ export function PaymentModal({
 
       if (p) {
         const appliedBalanceAmount = getAppliedClientBalanceAmount(p.systemNotes);
+        const resolvedLegalEntityId = linkedInvoice?.legalEntityId ?? p.legalEntityId ?? null;
+        const resolvedClientId = linkedInvoice?.clientId ?? p.clientId ?? defaultClientId ?? null;
+        const resolvedExpenseLegalEntityId = linkedInvoice?.expenseLegalEntityId ?? p.expenseLegalEntityId ?? null;
+        const resolvedExpenseClientId = linkedInvoice?.expenseClientId ?? p.expenseClientId ?? defaultExpenseClientId ?? null;
         setAppliedClientBalanceAmount(appliedBalanceAmount);
         setFormData({
           date: toDateInputValue(p.date) || todayYMD(),
@@ -420,8 +482,10 @@ export function PaymentModal({
           paidDate: toDateInputValue(p.paidDate) || '',
           lastPaymentDate: toDateInputValue(p.lastPaymentDate) || '',
           notes: p.notes || '',
-          clientId: (linkedInvoice?.clientId ?? p.clientId ?? defaultClientId)?.toString() || '',
-          expenseClientId: (linkedInvoice?.expenseClientId ?? p.expenseClientId ?? defaultExpenseClientId)?.toString() || '',
+          clientId: resolvedLegalEntityId ? '' : resolvedClientId?.toString() || '',
+          legalEntityId: resolvedLegalEntityId?.toString() || '',
+          expenseClientId: resolvedExpenseLegalEntityId ? '' : resolvedExpenseClientId?.toString() || '',
+          expenseLegalEntityId: resolvedExpenseLegalEntityId?.toString() || '',
           clientCaseId:
             (p.clientCaseId ?? linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: p.dealTypeId?.toString() || '',
@@ -445,6 +509,10 @@ export function PaymentModal({
         setInvoiceSearch('');
         setInvoicePickerError(null);
       } else {
+        const resolvedLegalEntityId = linkedInvoice?.legalEntityId ?? null;
+        const resolvedClientId = linkedInvoice?.clientId ?? defaultClientId ?? null;
+        const resolvedExpenseLegalEntityId = linkedInvoice?.expenseLegalEntityId ?? null;
+        const resolvedExpenseClientId = linkedInvoice?.expenseClientId ?? defaultExpenseClientId ?? null;
         setAppliedClientBalanceAmount(0);
         setFormData({
           date: todayYMD(),
@@ -457,8 +525,10 @@ export function PaymentModal({
           paidDate: '',
           lastPaymentDate: '',
           notes: '',
-          clientId: (linkedInvoice?.clientId ?? defaultClientId)?.toString() || '',
-          expenseClientId: (linkedInvoice?.expenseClientId ?? defaultExpenseClientId)?.toString() || '',
+          clientId: resolvedLegalEntityId ? '' : resolvedClientId?.toString() || '',
+          legalEntityId: resolvedLegalEntityId?.toString() || '',
+          expenseClientId: resolvedExpenseLegalEntityId ? '' : resolvedExpenseClientId?.toString() || '',
+          expenseLegalEntityId: resolvedExpenseLegalEntityId?.toString() || '',
           clientCaseId: (linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: '',
           incomeTypeId: '',
@@ -582,16 +652,22 @@ export function PaymentModal({
     let cancelled = false;
 
     const currentClientId = caseOwnerClientId
-      || (formData.type === 'Expense' ? '' : (defaultClientId ? String(defaultClientId) : ''));
+      || (caseOwnerLegalEntityId ? '' : (formData.type === 'Expense' ? '' : (defaultClientId ? String(defaultClientId) : '')));
+    const currentLegalEntityId = caseOwnerLegalEntityId;
     const initialCaseId =
       formData.clientCaseId || (defaultClientCaseId ? String(defaultClientCaseId) : '');
     const cidNum = Number(currentClientId);
+    const legalEntityIdNum = Number(currentLegalEntityId);
 
-    const filterPrefetchForClient = (all?: ClientCase[]) =>
-      (all ?? []).filter((c) => String(c.clientId) === String(currentClientId));
+    const filterPrefetchForOwner = (all?: ClientCase[]) =>
+      (all ?? []).filter((c) =>
+        currentClientId
+          ? String(c.clientId) === String(currentClientId)
+          : String(c.legalEntityId) === String(currentLegalEntityId),
+      );
 
     const load = async () => {
-      if (!cidNum) {
+      if (!cidNum && !legalEntityIdNum) {
         if (!cancelled) {
           setCases([]);
           setFallbackCase(null);
@@ -599,11 +675,14 @@ export function PaymentModal({
         return;
       }
 
-      let list: ClientCase[] = filterPrefetchForClient(casesPrefetch);
+      let list: ClientCase[] = filterPrefetchForOwner(casesPrefetch);
 
       if (!list.length) {
         try {
-          list = await apiService.getCases(cidNum);
+          list = await apiService.getCases({
+            clientId: cidNum || undefined,
+            legalEntityId: legalEntityIdNum || undefined,
+          });
         } catch {
           list = [];
         }
@@ -617,13 +696,19 @@ export function PaymentModal({
             const one = await apiService.getCase(Number(initialCaseId));
             if (cancelled) return;
 
-            if (one && String(one.clientId) === String(currentClientId)) {
+            const caseMatchesOwner = one
+              ? currentClientId
+                ? String(one.clientId) === String(currentClientId)
+                : String(one.legalEntityId) === String(currentLegalEntityId)
+              : false;
+
+            if (one && caseMatchesOwner) {
               list = [...list, one];
               setFallbackCase(one);
             } else {
               setFallbackCase(null);
               setFormData((s) => {
-                if (s.clientId !== currentClientId) return s;
+                if (s.clientId !== currentClientId || s.legalEntityId !== currentLegalEntityId) return s;
                 if (s.clientCaseId !== initialCaseId) return s;
                 return { ...s, clientCaseId: '' };
               });
@@ -632,7 +717,7 @@ export function PaymentModal({
             if (!cancelled) {
               setFallbackCase(null);
               setFormData((s) => {
-                if (s.clientId !== currentClientId) return s;
+                if (s.clientId !== currentClientId || s.legalEntityId !== currentLegalEntityId) return s;
                 if (s.clientCaseId !== initialCaseId) return s;
                 return { ...s, clientCaseId: '' };
               });
@@ -655,6 +740,7 @@ export function PaymentModal({
   }, [
     isOpen,
     caseOwnerClientId,
+    caseOwnerLegalEntityId,
     formData.type,
     casesPrefetch,
     formData.clientCaseId,
@@ -912,9 +998,14 @@ export function PaymentModal({
           .join('\n'),
         rescheduleCount: formData.rescheduleCount ?? 0,
         clientId: formData.clientId ? parseInt(formData.clientId, 10) : undefined,
+        legalEntityId: formData.legalEntityId ? parseInt(formData.legalEntityId, 10) : undefined,
         expenseClientId:
           formData.type === 'Expense' && formData.expenseClientId
             ? parseInt(formData.expenseClientId, 10)
+            : undefined,
+        expenseLegalEntityId:
+          formData.type === 'Expense' && formData.expenseLegalEntityId
+            ? parseInt(formData.expenseLegalEntityId, 10)
             : undefined,
         clientCaseId: formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined,
         dealTypeId: formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined,
@@ -979,6 +1070,7 @@ export function PaymentModal({
     }
 
     setClientPickerMode(mode);
+    setClientPickerScope('clients');
     setClientPickerSearch('');
     setClientPickerOpen(true);
   };
@@ -989,6 +1081,7 @@ export function PaymentModal({
         return {
           ...prev,
           expenseClientId: String(client.id),
+          expenseLegalEntityId: '',
           clientCaseId: '',
           invoiceId: hasLockedInvoice ? prev.invoiceId : '',
           account: hasLockedInvoice ? prev.account : '',
@@ -999,6 +1092,38 @@ export function PaymentModal({
       return {
         ...prev,
         clientId: String(client.id),
+        legalEntityId: '',
+        clientCaseId: prev.type === 'Expense' ? prev.clientCaseId : '',
+        contractId: hasLockedInvoice ? prev.contractId : '',
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
+      };
+    });
+    setClientPickerOpen(false);
+    setInvoicePickerOpen(false);
+    setInvoiceSearch('');
+    setInvoicePickerError(null);
+  };
+
+  const handleLegalEntityPick = (entity: LegalEntitySummary) => {
+    setFormData((prev) => {
+      if (clientPickerMode === 'expense') {
+        return {
+          ...prev,
+          expenseClientId: '',
+          expenseLegalEntityId: String(entity.id),
+          clientCaseId: '',
+          invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+          account: hasLockedInvoice ? prev.account : '',
+          accountDate: hasLockedInvoice ? prev.accountDate : '',
+        };
+      }
+
+      return {
+        ...prev,
+        clientId: '',
+        legalEntityId: String(entity.id),
         clientCaseId: prev.type === 'Expense' ? prev.clientCaseId : '',
         contractId: hasLockedInvoice ? prev.contractId : '',
         invoiceId: hasLockedInvoice ? prev.invoiceId : '',
@@ -1013,7 +1138,7 @@ export function PaymentModal({
   };
 
   const openInvoicePicker = () => {
-    if (hasLockedInvoice || !formData.clientId) {
+    if (hasLockedInvoice || (!formData.clientId && !formData.legalEntityId)) {
       return;
     }
 
@@ -1039,10 +1164,17 @@ export function PaymentModal({
       accountDate: toDateInputValue(invoice.date) || prev.accountDate,
       contractId: invoice.contractId ? String(invoice.contractId) : prev.contractId,
       type: invoice.type ?? prev.type,
-      clientId: invoice.clientId ? String(invoice.clientId) : prev.clientId,
+      clientId: invoice.legalEntityId ? '' : invoice.clientId ? String(invoice.clientId) : prev.clientId,
+      legalEntityId: invoice.legalEntityId ? String(invoice.legalEntityId) : invoice.clientId ? '' : prev.legalEntityId,
       expenseClientId: invoice.expenseClientId
+        && !invoice.expenseLegalEntityId
         ? String(invoice.expenseClientId)
         : prev.expenseClientId,
+      expenseLegalEntityId: invoice.expenseLegalEntityId
+        ? String(invoice.expenseLegalEntityId)
+        : invoice.expenseClientId
+          ? ''
+          : prev.expenseLegalEntityId,
       clientCaseId: invoice.clientCaseId ? String(invoice.clientCaseId) : prev.clientCaseId,
     }));
     setInvoicePickerOpen(false);
@@ -1074,13 +1206,14 @@ export function PaymentModal({
     if (hasLockedInvoice) return;
 
     const clientId = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
-    if (!clientId) {
-      toast.error('Сначала выберите клиента, затем можно создать счет из платежа.', 'Создание счета');
+    const legalEntityId = formData.legalEntityId ? parseInt(formData.legalEntityId, 10) : undefined;
+    if (!clientId && !legalEntityId) {
+      toast.error('Сначала выберите контрагента, затем можно создать счет из платежа.', 'Создание счета');
       return;
     }
 
     let seedContractId = formData.contractId;
-    if (!seedContractId) {
+    if (!seedContractId && clientId) {
       try {
         const response = await apiService.getContracts({
           clientId,
@@ -1176,6 +1309,25 @@ export function PaymentModal({
       setFormData((prev) => ({
         ...prev,
         clientId: value,
+        legalEntityId: value ? '' : prev.legalEntityId,
+        clientCaseId: prev.type === 'Expense' ? prev.clientCaseId : '',
+        contractId: hasLockedInvoice ? prev.contractId : '',
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
+      }));
+      setClientPickerOpen(false);
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
+      return;
+    }
+
+    if (name === 'legalEntityId') {
+      setFormData((prev) => ({
+        ...prev,
+        clientId: value ? '' : prev.clientId,
+        legalEntityId: value,
         clientCaseId: prev.type === 'Expense' ? prev.clientCaseId : '',
         contractId: hasLockedInvoice ? prev.contractId : '',
         invoiceId: hasLockedInvoice ? prev.invoiceId : '',
@@ -1193,6 +1345,24 @@ export function PaymentModal({
       setFormData((prev) => ({
         ...prev,
         expenseClientId: value,
+        expenseLegalEntityId: value ? '' : prev.expenseLegalEntityId,
+        clientCaseId: '',
+        invoiceId: hasLockedInvoice ? prev.invoiceId : '',
+        account: hasLockedInvoice ? prev.account : '',
+        accountDate: hasLockedInvoice ? prev.accountDate : '',
+      }));
+      setClientPickerOpen(false);
+      setInvoicePickerOpen(false);
+      setInvoiceSearch('');
+      setInvoicePickerError(null);
+      return;
+    }
+
+    if (name === 'expenseLegalEntityId') {
+      setFormData((prev) => ({
+        ...prev,
+        expenseClientId: value ? '' : prev.expenseClientId,
+        expenseLegalEntityId: value,
         clientCaseId: '',
         invoiceId: hasLockedInvoice ? prev.invoiceId : '',
         account: hasLockedInvoice ? prev.account : '',
@@ -1210,6 +1380,7 @@ export function PaymentModal({
         ...prev,
         type: value as PaymentKind,
         expenseClientId: value === 'Expense' ? prev.expenseClientId : '',
+        expenseLegalEntityId: value === 'Expense' ? prev.expenseLegalEntityId : '',
         clientCaseId: '',
         incomeTypeId: '',
         invoiceId: hasLockedInvoice ? prev.invoiceId : '',
@@ -1781,22 +1952,25 @@ export function PaymentModal({
                     <div className="mb-2 flex gap-2">
                       <input
                         type="text"
-                        value={selectedClient?.name ?? ''}
+                        value={selectedClient?.name ?? (selectedLegalEntity ? getLegalEntityDisplayName(selectedLegalEntity) : '')}
                         readOnly
-                        placeholder={formData.type === 'Expense' ? 'Выберите поставщика' : (t('selectClient') ?? '')}
+                        placeholder={formData.type === 'Expense' ? 'Выберите поставщика или юрлицо' : 'Выберите клиента или юрлицо'}
                         className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900"
                       />
                       <button
                         type="button"
                         onClick={() => openClientPicker('client')}
-                        disabled={hasLockedInvoice || clientsLoading}
+                        disabled={hasLockedInvoice || clientsLoading || legalEntitiesLoading}
                         className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        aria-label={t('selectClient') ?? 'Выбрать клиента'}>
+                        aria-label="Выбрать контрагента">
                         <UserRoundSearch className="h-4 w-4" />
                       </button>
                     </div>
-                    {clientsLoading ? (
+                    {clientsLoading || legalEntitiesLoading ? (
                       <div className="mb-2 text-xs text-gray-500">{t('loading') ?? 'Загрузка...'}</div>
+                    ) : null}
+                    {legalEntitiesError ? (
+                      <div className="mb-2 text-xs text-rose-600">{legalEntitiesError}</div>
                     ) : null}
                     {(selectedClient?.company || selectedClient?.responsibleUserName) ? (
                       <div className="mb-2 space-y-1 rounded-xl border border-gray-100 bg-gray-50 p-2">
@@ -1805,6 +1979,19 @@ export function PaymentModal({
                         ) : null}
                         {selectedClient?.responsibleUserName ? (
                           <div className="text-xs text-gray-500">Ответственный: {selectedClient.responsibleUserName}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {selectedLegalEntity ? (
+                      <div className="mb-2 space-y-1 rounded-xl border border-indigo-100 bg-indigo-50/60 p-2">
+                        <div className="text-xs text-gray-600">Юрлицо: {getLegalEntityDisplayName(selectedLegalEntity)}</div>
+                        {selectedLegalEntity.inn ? (
+                          <div className="text-xs text-gray-500">
+                            ИНН {selectedLegalEntity.inn}{selectedLegalEntity.kpp ? `, КПП ${selectedLegalEntity.kpp}` : ''}
+                          </div>
+                        ) : null}
+                        {selectedLegalEntity.responsibleUserName ? (
+                          <div className="text-xs text-gray-500">Ответственный: {selectedLegalEntity.responsibleUserName}</div>
                         ) : null}
                       </div>
                     ) : null}
@@ -1823,6 +2010,21 @@ export function PaymentModal({
                           {client.company ? ` — ${client.company}` : ''}
                         </option>
                       ))}
+                      </select>
+                    <select
+                      name="legalEntityId"
+                      value={formData.legalEntityId}
+                      onChange={handleChange}
+                      disabled={hasLockedInvoice}
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      className="hidden">
+                      <option value="">Без юрлица</option>
+                      {legalEntities.map((entity) => (
+                        <option key={entity.id} value={entity.id}>
+                          {getLegalEntityDisplayName(entity)}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -1837,17 +2039,17 @@ export function PaymentModal({
                       <div className="mb-2 flex gap-2">
                         <input
                           type="text"
-                          value={selectedExpenseClient?.name ?? ''}
+                          value={selectedExpenseClient?.name ?? (selectedExpenseLegalEntity ? getLegalEntityDisplayName(selectedExpenseLegalEntity) : '')}
                           readOnly
-                          placeholder="Выберите клиента, на которого ложится расход"
+                          placeholder="Выберите клиента или юрлицо, на которое ложится расход"
                           className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-gray-900"
                         />
                         <button
                           type="button"
                           onClick={() => openClientPicker('expense')}
-                          disabled={hasLockedInvoice || clientsLoading}
+                          disabled={hasLockedInvoice || clientsLoading || legalEntitiesLoading}
                           className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                          aria-label="Выбрать клиента расхода">
+                          aria-label="Выбрать контрагента расхода">
                           <UserRoundSearch className="h-4 w-4" />
                         </button>
                       </div>
@@ -1861,9 +2063,19 @@ export function PaymentModal({
                           ) : null}
                         </div>
                       ) : null}
-                      {!formData.expenseClientId ? (
+                      {selectedExpenseLegalEntity ? (
+                        <div className="mb-2 space-y-1 rounded-xl border border-amber-100 bg-amber-50/60 p-2">
+                          <div className="text-xs text-gray-600">Юрлицо: {getLegalEntityDisplayName(selectedExpenseLegalEntity)}</div>
+                          {selectedExpenseLegalEntity.inn ? (
+                            <div className="text-xs text-gray-500">
+                              ИНН {selectedExpenseLegalEntity.inn}{selectedExpenseLegalEntity.kpp ? `, КПП ${selectedExpenseLegalEntity.kpp}` : ''}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {!formData.expenseClientId && !formData.expenseLegalEntityId ? (
                         <div className="text-xs text-amber-700">
-                          Для привязки расхода к делу клиента выберите клиента расхода и затем дело.
+                          Для привязки расхода к делу выберите клиента или юрлицо расхода и затем дело.
                         </div>
                       ) : null}
                       <select
@@ -1882,6 +2094,21 @@ export function PaymentModal({
                           </option>
                         ))}
                       </select>
+                      <select
+                        name="expenseLegalEntityId"
+                        value={formData.expenseLegalEntityId}
+                        onChange={handleChange}
+                        disabled={hasLockedInvoice}
+                        aria-hidden="true"
+                        tabIndex={-1}
+                        className="hidden">
+                        <option value="">Без привязки к юрлицу</option>
+                        {legalEntities.map((entity) => (
+                          <option key={entity.id} value={entity.id}>
+                            {getLegalEntityDisplayName(entity)}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   )}
 
@@ -1891,11 +2118,11 @@ export function PaymentModal({
                         {formData.type === 'Expense' ? 'Дело клиента расхода' : (t('case') ?? 'Дело')}
                       </label>
                       <select
-                        key={(caseOwnerClientId || 'no-client') + ':' + cases.length}
+                        key={(caseOwnerKey || 'no-owner') + ':' + cases.length}
                         name="clientCaseId"
                         value={formData.clientCaseId}
                         onChange={handleChange}
-                        disabled={!caseOwnerClientId}
+                        disabled={!caseOwnerKey}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                         <option value="">{t('selectCase') ?? 'Без дела'}</option>
 
@@ -2016,7 +2243,7 @@ export function PaymentModal({
                           <div>
                             <div className="text-sm font-medium text-gray-800">{'\u0421\u0432\u044f\u0437\u0430\u043d\u043d\u044b\u0439 \u0441\u0447\u0451\u0442'}</div>
                             <div className="text-xs text-gray-500">
-                              {'\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u0439 \u0441\u0447\u0451\u0442 \u043a\u043b\u0438\u0435\u043d\u0442\u0430 \u0438\u043b\u0438 \u0441\u043e\u0437\u0434\u0430\u0439\u0442\u0435 \u043d\u043e\u0432\u044b\u0439 \u0441\u0447\u0451\u0442 \u0438\u0437 \u0442\u0435\u043a\u0443\u0449\u0435\u0433\u043e \u043f\u043b\u0430\u0442\u0435\u0436\u0430.'}
+                              {'Выберите существующий счёт контрагента или создайте новый счёт из текущего платежа.'}
                             </div>
                           </div>
                           {!hasLockedInvoice && (
@@ -2024,14 +2251,14 @@ export function PaymentModal({
                               <button
                                 type="button"
                                 onClick={openInvoicePicker}
-                                disabled={!formData.clientId}
+                                disabled={!formData.clientId && !formData.legalEntityId}
                                 className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60">
                                 {selectedInvoiceSummary ? 'Сменить счёт' : 'Выбрать счёт'}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => void handleCreateInvoiceFromPayment()}
-                                disabled={invoiceCreateSubmitting || !formData.clientId}
+                                disabled={invoiceCreateSubmitting || (!formData.clientId && !formData.legalEntityId)}
                                 className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60">
                                 {invoiceCreateSubmitting ? '\u041e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u043c...' : '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0441\u0447\u0451\u0442'}
                               </button>
@@ -2204,7 +2431,7 @@ export function PaymentModal({
               <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <h3 className="text-base font-semibold text-slate-900">
-                    {clientPickerMode === 'expense' ? 'Выбор клиента расхода' : 'Выбор клиента'}
+                    {clientPickerMode === 'expense' ? 'Выбор контрагента расхода' : 'Выбор контрагента'}
                   </h3>
                   <button
                     type="button"
@@ -2214,21 +2441,48 @@ export function PaymentModal({
                   </button>
                 </div>
 
+                <div className="mb-3 grid grid-cols-2 rounded-lg bg-slate-100 p-1 text-sm font-medium">
+                  <button
+                    type="button"
+                    onClick={() => setClientPickerScope('clients')}
+                    className={`inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 transition ${
+                      clientPickerScope === 'clients'
+                        ? 'bg-white text-blue-700 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}>
+                    <UserRoundSearch className="h-4 w-4" />
+                    Клиенты
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setClientPickerScope('legalEntities')}
+                    className={`inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 transition ${
+                      clientPickerScope === 'legalEntities'
+                        ? 'bg-white text-blue-700 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}>
+                    <Building2 className="h-4 w-4" />
+                    Юрлица
+                  </button>
+                </div>
+
                 <div className="relative mb-3">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
                     value={clientPickerSearch}
                     onChange={(event) => setClientPickerSearch(event.target.value)}
-                    placeholder={clientPickerMode === 'expense'
-                      ? 'Поиск клиента расхода'
-                      : (t('search') ?? 'Поиск')}
+                    placeholder={clientPickerScope === 'legalEntities'
+                      ? 'Поиск по названию, ИНН, КПП или связанному клиенту'
+                      : clientPickerMode === 'expense'
+                        ? 'Поиск клиента расхода'
+                        : (t('search') ?? 'Поиск')}
                     className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   />
                 </div>
 
                 <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
-                  {clientsLoading ? (
+                  {clientPickerScope === 'clients' ? clientsLoading ? (
                     <div className="px-3 py-4 text-sm text-slate-500">{t('loading') ?? 'Загрузка...'}</div>
                   ) : filteredClients.length === 0 ? (
                     <div className="px-3 py-4 text-sm text-slate-500">Подходящие клиенты не найдены.</div>
@@ -2254,6 +2508,42 @@ export function PaymentModal({
                         </div>
                       </button>
                     ))
+                  ) : legalEntitiesLoading ? (
+                    <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-slate-500">
+                      Загрузка юрлиц...
+                    </div>
+                  ) : legalEntitiesError ? (
+                    <div className="px-3 py-6 text-center text-sm text-rose-600">{legalEntitiesError}</div>
+                  ) : filteredLegalEntities.length === 0 ? (
+                    <div className="px-3 py-4 text-sm text-slate-500">Подходящие юрлица не найдены.</div>
+                  ) : (
+                    filteredLegalEntities.map((entity) => {
+                      const linkedClients = entity.clients ?? [];
+                      const displayName = getLegalEntityDisplayName(entity);
+
+                      return (
+                        <button
+                          key={entity.id}
+                          type="button"
+                          onClick={() => handleLegalEntityPick(entity)}
+                          className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-3 text-left last:border-0 hover:bg-slate-50">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-slate-900">{displayName}</div>
+                            <div className="mt-1 truncate text-xs text-slate-500">
+                              {[entity.inn ? `ИНН ${entity.inn}` : '', entity.kpp ? `КПП ${entity.kpp}` : '']
+                                .filter(Boolean)
+                                .join(' • ') || 'Юридическое лицо'}
+                            </div>
+                            {linkedClients.length > 0 ? (
+                              <div className="mt-1 truncate text-xs text-slate-400">
+                                Клиенты: {linkedClients.map((client) => client.name).filter(Boolean).slice(0, 3).join(', ')}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="shrink-0 text-right text-xs text-slate-400">Юрлицо</div>
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -2322,8 +2612,10 @@ export function PaymentModal({
                             ) : null}
                           </div>
                           <div className="shrink-0 text-right">
-                            {invoiceOption.clientName ? (
-                              <div className="max-w-44 truncate text-xs text-slate-500">{invoiceOption.clientName}</div>
+                            {(invoiceOption.legalEntityName || invoiceOption.clientName) ? (
+                              <div className="max-w-44 truncate text-xs text-slate-500">
+                                {invoiceOption.legalEntityName || invoiceOption.clientName}
+                              </div>
                             ) : null}
                           </div>
                         </button>
@@ -2342,7 +2634,7 @@ export function PaymentModal({
                   <button
                     type="button"
                     onClick={() => void handleCreateInvoiceFromPayment()}
-                    disabled={invoiceCreateSubmitting || !formData.clientId}
+                    disabled={invoiceCreateSubmitting || (!formData.clientId && !formData.legalEntityId)}
                     className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60">
                     {invoiceCreateSubmitting ? 'Открываем...' : 'Создать счёт'}
                   </button>
@@ -2370,10 +2662,13 @@ export function PaymentModal({
       submitting={invoiceCreateSubmitting}
       errorMessage={invoiceCreateError}
       clients={clients}
+      legalEntities={legalEntities}
+      legalEntitiesLoading={legalEntitiesLoading}
+      legalEntitiesError={legalEntitiesError}
       responsibles={invoiceCreateResponsibles}
-      lookupsLoading={clientsLoading || invoiceCreateLookupsLoading}
+      lookupsLoading={clientsLoading || legalEntitiesLoading || invoiceCreateLookupsLoading}
       lookupsError={invoiceCreateLookupsError}
-      defaultClientId={formData.clientId ? Number(formData.clientId) : defaultClientId}
+      defaultClientId={formData.legalEntityId ? undefined : formData.clientId ? Number(formData.clientId) : defaultClientId}
       defaultType={formData.type}
     />
   ) : null;

@@ -1791,7 +1791,13 @@ export interface Invoice {
   isPaid: boolean;
   paidDate?: string | null;
   clientId?: number | null;
+  legalEntityId?: number | null;
+  legalEntityName?: string | null;
+  legalEntityInn?: string | null;
   expenseClientId?: number | null;
+  expenseLegalEntityId?: number | null;
+  expenseLegalEntityName?: string | null;
+  expenseLegalEntityInn?: string | null;
   contractId?: number | null;
   documentKind?: DocumentKind;
   clientName?: string | null;

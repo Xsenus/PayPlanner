@@ -20,6 +20,33 @@ vi.mock('../../hooks/useFormRequirements', () => ({
   }),
 }));
 
+vi.mock('../../hooks/useLegalEntities', () => ({
+  useLegalEntities: () => ({
+    legalEntities: [
+      {
+        id: 301,
+        shortName: 'ООО Юрклиент',
+        fullName: 'Общество с ограниченной ответственностью Юрклиент',
+        inn: '5400000001',
+        kpp: '540001001',
+        clients: [],
+        clientsCount: 0,
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+      {
+        id: 302,
+        shortName: 'ООО Поставщик ЮЛ',
+        inn: '5400000002',
+        clients: [],
+        clientsCount: 0,
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+    ],
+    loading: false,
+    error: null,
+  }),
+}));
+
 vi.mock('../../services/api', () => ({
   apiService: {
     getAct: getActMock,
@@ -285,6 +312,45 @@ describe('ActModal integration', () => {
     expect(await screen.findByText('Доступно позиций: 1')).toBeTruthy();
     expect(screen.getByText('Подготовка документов')).toBeTruthy();
     expect(screen.queryByText('У этого счета пока нет строк, поэтому акт можно сохранить только как пустой.')).toBeNull();
+  });
+
+  it('selects a legal entity for a manual act and submits legalEntityId instead of clientId', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ActModal
+        open
+        mode="create"
+        act={null}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createClient(7, 'Иван Иванов')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Справочник' })[0]);
+    fireEvent.click((await screen.findByText('ООО Юрклиент')).closest('button') as HTMLButtonElement);
+    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'LEGAL-ACT-1' } });
+    fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '6400' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = onSubmit.mock.calls[0]?.[0];
+    expect(payload).toMatchObject({
+      number: 'LEGAL-ACT-1',
+      amount: 6400,
+      creationMode: 'Manual',
+      clientId: null,
+      legalEntityId: 301,
+      status: 'Created',
+    });
   });
 
   it('allows creating an empty manual act without inn and invoice id fields', async () => {

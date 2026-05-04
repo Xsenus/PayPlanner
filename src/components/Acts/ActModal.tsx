@@ -12,6 +12,7 @@ import type {
   Client,
   Invoice,
   InvoiceLineItem,
+  LegalEntitySummary,
   PaymentKind,
 } from '../../types';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -21,6 +22,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
 
 interface ActModalProps {
   open: boolean;
@@ -55,6 +57,7 @@ type FormState = {
   status: ActStatus;
   workflowStatus: ActWorkflowStatus;
   clientId: string;
+  legalEntityId: string;
   responsibleId: string;
   comment: string;
 };
@@ -79,9 +82,15 @@ type InvoiceLookupRecord = Pick<
   | 'amount'
   | 'type'
   | 'clientId'
+  | 'legalEntityId'
   | 'expenseClientId'
+  | 'expenseLegalEntityId'
   | 'clientName'
+  | 'legalEntityName'
   | 'expenseClientName'
+  | 'expenseLegalEntityName'
+  | 'legalEntityInn'
+  | 'expenseLegalEntityInn'
   | 'description'
   | 'lineItems'
   | 'acts'
@@ -103,6 +112,22 @@ const MANUAL_LINE_ITEM_UNIT_OPTIONS = ['шт', 'усл.', 'час'];
 const LINE_ITEM_GRID_TEMPLATE =
   'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(8.5rem,0.85fr)_2.75rem]';
 const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[58rem]';
+
+type CounterpartyOwner = {
+  clientId: number | null;
+  legalEntityId: number | null;
+};
+
+function getLegalEntityDisplayName(entity: LegalEntitySummary): string {
+  return entity.shortName?.trim() || entity.fullName?.trim() || `Юр. лицо #${entity.id}`;
+}
+
+function buildOwnerKey(owner: CounterpartyOwner | null): string {
+  if (!owner) return '';
+  if (owner.clientId) return `client:${owner.clientId}`;
+  if (owner.legalEntityId) return `legal:${owner.legalEntityId}`;
+  return '';
+}
 
 function parseDecimalInput(value: string): number | null {
   const normalized = value.replace(/\s+/g, '').replace(',', '.').trim();
@@ -199,16 +224,24 @@ function resolveCounterpartyLabel(type?: PaymentKind | null): string {
   return 'Контрагент';
 }
 
-function resolveCounterpartyClientId(invoice: Invoice | null): number | null {
+function resolveCounterpartyOwner(invoice: Invoice | null): CounterpartyOwner {
   if (!invoice) {
-    return null;
+    return { clientId: null, legalEntityId: null };
   }
 
   if (invoice.type === 'Expense') {
-    return invoice.expenseClientId ?? invoice.clientId ?? null;
+    const legalEntityId = invoice.expenseLegalEntityId ?? invoice.legalEntityId ?? null;
+    return {
+      clientId: legalEntityId ? null : invoice.expenseClientId ?? invoice.clientId ?? null,
+      legalEntityId,
+    };
   }
 
-  return invoice.clientId ?? invoice.expenseClientId ?? null;
+  const legalEntityId = invoice.legalEntityId ?? invoice.expenseLegalEntityId ?? null;
+  return {
+    clientId: legalEntityId ? null : invoice.clientId ?? invoice.expenseClientId ?? null,
+    legalEntityId,
+  };
 }
 
 function resolveCounterpartyName(invoice: Invoice | null): string {
@@ -217,22 +250,38 @@ function resolveCounterpartyName(invoice: Invoice | null): string {
   }
 
   if (invoice.type === 'Expense') {
-    return invoice.expenseClientName?.trim() || invoice.clientName?.trim() || '';
+    return invoice.expenseLegalEntityName?.trim()
+      || invoice.expenseClientName?.trim()
+      || invoice.legalEntityName?.trim()
+      || invoice.clientName?.trim()
+      || '';
   }
 
-  return invoice.clientName?.trim() || invoice.expenseClientName?.trim() || '';
+  return invoice.legalEntityName?.trim()
+    || invoice.clientName?.trim()
+    || invoice.expenseLegalEntityName?.trim()
+    || invoice.expenseClientName?.trim()
+    || '';
 }
 
-function resolveInvoiceLookupCounterpartyClientId(invoice: InvoiceLookupRecord | null): number | null {
+function resolveInvoiceLookupCounterpartyOwner(invoice: InvoiceLookupRecord | null): CounterpartyOwner {
   if (!invoice) {
-    return null;
+    return { clientId: null, legalEntityId: null };
   }
 
   if (invoice.type === 'Expense') {
-    return invoice.expenseClientId ?? invoice.clientId ?? null;
+    const legalEntityId = invoice.expenseLegalEntityId ?? invoice.legalEntityId ?? null;
+    return {
+      clientId: legalEntityId ? null : invoice.expenseClientId ?? invoice.clientId ?? null,
+      legalEntityId,
+    };
   }
 
-  return invoice.clientId ?? invoice.expenseClientId ?? null;
+  const legalEntityId = invoice.legalEntityId ?? invoice.expenseLegalEntityId ?? null;
+  return {
+    clientId: legalEntityId ? null : invoice.clientId ?? invoice.expenseClientId ?? null,
+    legalEntityId,
+  };
 }
 
 function formatInvoiceLookupDate(value?: string | null): string {
@@ -248,8 +297,16 @@ function buildInvoiceLookupLabel(invoice: InvoiceLookupRecord): string {
 
 function buildInvoiceLookupDescription(invoice: InvoiceLookupRecord): string {
   const counterpartyName = invoice.type === 'Expense'
-    ? invoice.expenseClientName?.trim() || invoice.clientName?.trim() || 'Без контрагента'
-    : invoice.clientName?.trim() || invoice.expenseClientName?.trim() || 'Без контрагента';
+    ? invoice.expenseLegalEntityName?.trim()
+      || invoice.expenseClientName?.trim()
+      || invoice.legalEntityName?.trim()
+      || invoice.clientName?.trim()
+      || 'Без контрагента'
+    : invoice.legalEntityName?.trim()
+      || invoice.clientName?.trim()
+      || invoice.expenseLegalEntityName?.trim()
+      || invoice.expenseClientName?.trim()
+      || 'Без контрагента';
   const typeLabel = invoice.type === 'Expense' ? 'Расходный счет' : 'Доходный счет';
   return `${typeLabel} • ${counterpartyName} • ${formatCurrencySmart(invoice.amount ?? 0).full}`;
 }
@@ -266,9 +323,15 @@ function toInvoiceLookupRecord(invoice?: Invoice | null): InvoiceLookupRecord | 
     amount: Number(invoice.amount ?? 0),
     type: invoice.type ?? 'Income',
     clientId: invoice.clientId ?? null,
+    legalEntityId: invoice.legalEntityId ?? null,
     expenseClientId: invoice.expenseClientId ?? null,
+    expenseLegalEntityId: invoice.expenseLegalEntityId ?? null,
     clientName: invoice.clientName ?? null,
+    legalEntityName: invoice.legalEntityName ?? null,
     expenseClientName: invoice.expenseClientName ?? null,
+    expenseLegalEntityName: invoice.expenseLegalEntityName ?? null,
+    legalEntityInn: invoice.legalEntityInn ?? null,
+    expenseLegalEntityInn: invoice.expenseLegalEntityInn ?? null,
     description: invoice.description ?? null,
     lineItems: invoice.lineItems ?? [],
     acts: invoice.acts ?? [],
@@ -332,9 +395,12 @@ function normalizeActToForm(
       workflowStatus: (initialValues?.workflowStatus as ActWorkflowStatus) ?? 'Draft',
       clientId: initialValues?.clientId
         ? String(initialValues.clientId)
-        : defaultClientId
+        : initialValues?.legalEntityId
+          ? ''
+          : defaultClientId
           ? String(defaultClientId)
           : '',
+      legalEntityId: initialValues?.legalEntityId ? String(initialValues.legalEntityId) : '',
       responsibleId: initialValues?.responsibleId
         ? String(initialValues.responsibleId)
         : defaultResponsibleId
@@ -355,7 +421,8 @@ function normalizeActToForm(
     counterpartyInn: act.counterpartyInn ?? '',
     status: act.status,
     workflowStatus: act.workflowStatus ?? 'Draft',
-    clientId: act.clientId ? String(act.clientId) : defaultClientId ? String(defaultClientId) : '',
+    clientId: act.legalEntityId ? '' : act.clientId ? String(act.clientId) : defaultClientId ? String(defaultClientId) : '',
+    legalEntityId: act.legalEntityId ? String(act.legalEntityId) : '',
     responsibleId: act.responsibleId
       ? String(act.responsibleId)
       : defaultResponsibleId
@@ -387,6 +454,7 @@ export function ActModal({
 }: ActModalProps) {
   const { t } = useTranslation();
   const { isRequired } = useFormRequirements('acts', open);
+  const { legalEntities, loading: legalEntitiesLoading, error: legalEntitiesError } = useLegalEntities();
   const [form, setForm] = useState<FormState>(() =>
     normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues),
   );
@@ -456,9 +524,15 @@ export function ActModal({
               amount: invoice.amount,
               type: invoice.type,
               clientId: invoice.clientId,
+              legalEntityId: invoice.legalEntityId,
               expenseClientId: invoice.expenseClientId,
+              expenseLegalEntityId: invoice.expenseLegalEntityId,
               clientName: invoice.clientName,
+              legalEntityName: invoice.legalEntityName,
               expenseClientName: invoice.expenseClientName,
+              expenseLegalEntityName: invoice.expenseLegalEntityName,
+              legalEntityInn: invoice.legalEntityInn,
+              expenseLegalEntityInn: invoice.expenseLegalEntityInn,
               description: invoice.description,
               lineItems: invoice.lineItems ?? [],
               acts: invoice.acts ?? [],
@@ -582,24 +656,29 @@ export function ActModal({
     [act?.type, effectiveInvoiceDetails?.type],
   );
   const counterpartyLabel = useMemo(() => resolveCounterpartyLabel(actType), [actType]);
-  const linkedCounterpartyClientId = useMemo(
-    () => resolveCounterpartyClientId(effectiveInvoiceDetails),
+  const linkedCounterpartyOwner = useMemo(
+    () => resolveCounterpartyOwner(effectiveInvoiceDetails),
     [effectiveInvoiceDetails],
   );
+  const linkedCounterpartyKey = useMemo(() => buildOwnerKey(linkedCounterpartyOwner), [linkedCounterpartyOwner]);
   const linkedCounterpartyName = useMemo(
     () => resolveCounterpartyName(effectiveInvoiceDetails),
     [effectiveInvoiceDetails],
   );
-  const selectedCounterpartyClientId = useMemo(
-    () => (form.clientId ? Number(form.clientId) : null),
-    [form.clientId],
+  const selectedCounterpartyOwner = useMemo<CounterpartyOwner>(
+    () => ({
+      clientId: form.clientId ? Number(form.clientId) : null,
+      legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : null,
+    }),
+    [form.clientId, form.legalEntityId],
   );
+  const selectedCounterpartyKey = useMemo(() => buildOwnerKey(selectedCounterpartyOwner), [selectedCounterpartyOwner]);
   const counterpartyLookupOptions = useMemo<LookupSelectOption[]>(
-    () =>
-      [...clients]
+    () => {
+      const clientOptions = [...clients]
         .sort((left, right) => left.name.localeCompare(right.name, 'ru'))
         .map((client) => ({
-          value: String(client.id),
+          value: `client:${client.id}`,
           label: client.name,
           description: [
             client.clientStatus?.name?.trim() || '',
@@ -610,8 +689,33 @@ export function ActModal({
             client.company ?? '',
             client.clientStatus?.name ?? '',
           ],
-        })),
-    [clients],
+        }));
+      const legalEntityOptions = [...legalEntities]
+        .sort((left, right) =>
+          getLegalEntityDisplayName(left).localeCompare(getLegalEntityDisplayName(right), 'ru', { sensitivity: 'base' }),
+        )
+        .map((entity) => ({
+          value: `legal:${entity.id}`,
+          label: getLegalEntityDisplayName(entity),
+          description: [
+            entity.inn ? `ИНН ${entity.inn}` : '',
+            entity.kpp ? `КПП ${entity.kpp}` : '',
+            entity.responsibleUserName?.trim() || '',
+          ].filter(Boolean).join(' • '),
+          keywords: [
+            entity.shortName,
+            entity.fullName ?? '',
+            entity.inn ?? '',
+            entity.kpp ?? '',
+            entity.ogrn ?? '',
+            entity.responsibleUserName ?? '',
+            ...(entity.clients ?? []).map((client) => client.name ?? ''),
+          ],
+        }));
+
+      return [...clientOptions, ...legalEntityOptions];
+    },
+    [clients, legalEntities],
   );
   const invoiceLookupOptions = useMemo<LookupSelectOption[]>(() => {
     const items = [...invoiceOptions];
@@ -628,17 +732,23 @@ export function ActModal({
         amount: effectiveInvoiceDetails?.amount ?? 0,
         type: effectiveInvoiceDetails?.type ?? 'Income',
         clientId: effectiveInvoiceDetails?.clientId ?? null,
+        legalEntityId: effectiveInvoiceDetails?.legalEntityId ?? null,
         expenseClientId: effectiveInvoiceDetails?.expenseClientId ?? null,
+        expenseLegalEntityId: effectiveInvoiceDetails?.expenseLegalEntityId ?? null,
         clientName: effectiveInvoiceDetails?.clientName ?? null,
+        legalEntityName: effectiveInvoiceDetails?.legalEntityName ?? null,
         expenseClientName: effectiveInvoiceDetails?.expenseClientName ?? null,
+        expenseLegalEntityName: effectiveInvoiceDetails?.expenseLegalEntityName ?? null,
+        legalEntityInn: effectiveInvoiceDetails?.legalEntityInn ?? null,
+        expenseLegalEntityInn: effectiveInvoiceDetails?.expenseLegalEntityInn ?? null,
         description: effectiveInvoiceDetails?.description ?? null,
         lineItems: effectiveInvoiceDetails?.lineItems ?? [],
         acts: effectiveInvoiceDetails?.acts ?? [],
       });
     }
 
-    const filteredItems = selectedCounterpartyClientId
-      ? items.filter((invoice) => resolveInvoiceLookupCounterpartyClientId(invoice) === selectedCounterpartyClientId)
+    const filteredItems = selectedCounterpartyKey
+      ? items.filter((invoice) => buildOwnerKey(resolveInvoiceLookupCounterpartyOwner(invoice)) === selectedCounterpartyKey)
       : items;
 
     return filteredItems.map((invoice) => ({
@@ -648,11 +758,13 @@ export function ActModal({
       keywords: [
         invoice.number,
         invoice.clientName ?? '',
+        invoice.legalEntityName ?? '',
         invoice.expenseClientName ?? '',
+        invoice.expenseLegalEntityName ?? '',
         invoice.type === 'Expense' ? 'расход поставщик' : 'доход клиент',
       ],
     }));
-  }, [effectiveInvoiceDetails, form.invoiceNumber, invoiceOptions, linkedInvoiceId, selectedCounterpartyClientId]);
+  }, [effectiveInvoiceDetails, form.invoiceNumber, invoiceOptions, linkedInvoiceId, selectedCounterpartyKey]);
 
   useEffect(() => {
     if (!open || !effectiveInvoiceDetails) {
@@ -668,8 +780,19 @@ export function ActModal({
         changed = true;
       }
 
-      if (linkedCounterpartyClientId && previous.clientId !== String(linkedCounterpartyClientId)) {
-        next = { ...next, clientId: String(linkedCounterpartyClientId) };
+      if (
+        linkedCounterpartyOwner.clientId
+        && (previous.clientId !== String(linkedCounterpartyOwner.clientId) || previous.legalEntityId)
+      ) {
+        next = { ...next, clientId: String(linkedCounterpartyOwner.clientId), legalEntityId: '' };
+        changed = true;
+      }
+
+      if (
+        linkedCounterpartyOwner.legalEntityId
+        && (previous.legalEntityId !== String(linkedCounterpartyOwner.legalEntityId) || previous.clientId)
+      ) {
+        next = { ...next, clientId: '', legalEntityId: String(linkedCounterpartyOwner.legalEntityId) };
         changed = true;
       }
 
@@ -685,7 +808,7 @@ export function ActModal({
 
       return changed ? next : previous;
     });
-  }, [effectiveInvoiceDetails, linkedCounterpartyClientId, open]);
+  }, [effectiveInvoiceDetails, linkedCounterpartyOwner, open]);
 
   const invoiceLineAvailability = useMemo<InvoiceLineAvailabilityRow[]>(() => {
     const sourceItems = effectiveInvoiceDetails?.lineItems ?? [];
@@ -868,6 +991,10 @@ export function ActModal({
     () => clients.find((client) => String(client.id) === String(form.clientId)) ?? null,
     [clients, form.clientId],
   );
+  const selectedLegalEntity = useMemo(
+    () => legalEntities.find((entity) => String(entity.id) === String(form.legalEntityId)) ?? null,
+    [legalEntities, form.legalEntityId],
+  );
 
   const selectedResponsible = useMemo(
     () => responsibles.find((responsible) => String(responsible.id) === String(form.responsibleId)) ?? null,
@@ -977,7 +1104,10 @@ export function ActModal({
     () => invoiceLineAvailability.filter((item) => item.availableQuantity > 0).length,
     [invoiceLineAvailability],
   );
-  const selectedCounterpartyName = selectedClient?.name || linkedCounterpartyName || 'Не выбран';
+  const selectedCounterpartyName = selectedClient?.name
+    || (selectedLegalEntity ? getLegalEntityDisplayName(selectedLegalEntity) : '')
+    || linkedCounterpartyName
+    || 'Не выбран';
   const selectedResponsibleLabel = selectedResponsible?.fullName
     || (form.responsibleId ? `#${form.responsibleId}` : 'Будет указан автоматически');
   const allAvailableSelected = useMemo(
@@ -1014,10 +1144,13 @@ export function ActModal({
   };
 
   const handleCounterpartySelect = (value: string) => {
-    const nextCounterpartyId = value ? Number(value) : null;
+    const [ownerType, rawOwnerId] = value.split(':');
+    const nextOwnerKey = ownerType && rawOwnerId ? `${ownerType}:${rawOwnerId}` : '';
     const shouldClearInvoice = linkedInvoiceId !== null
-      && linkedCounterpartyClientId !== null
-      && linkedCounterpartyClientId !== nextCounterpartyId;
+      && Boolean(linkedCounterpartyKey)
+      && linkedCounterpartyKey !== nextOwnerKey;
+    const nextClientId = ownerType === 'client' ? rawOwnerId : '';
+    const nextLegalEntityId = ownerType === 'legal' ? rawOwnerId : '';
 
     if (shouldClearInvoice) {
       selectionSeedRef.current = null;
@@ -1028,7 +1161,8 @@ export function ActModal({
 
       setForm((previous) => ({
         ...previous,
-        clientId: value,
+        clientId: nextClientId,
+        legalEntityId: nextLegalEntityId,
         invoiceId: '',
         invoiceNumber: '',
         creationMode: 'Manual',
@@ -1038,7 +1172,8 @@ export function ActModal({
 
     setForm((previous) => ({
       ...previous,
-      clientId: value,
+      clientId: nextClientId,
+      legalEntityId: nextLegalEntityId,
     }));
   };
 
@@ -1060,11 +1195,12 @@ export function ActModal({
     }
 
     const selectedInvoice = invoiceOptions.find((item) => String(item.id) === value) ?? null;
-    const counterpartyClientId = resolveInvoiceLookupCounterpartyClientId(selectedInvoice);
+    const counterpartyOwner = resolveInvoiceLookupCounterpartyOwner(selectedInvoice);
 
     setForm((previous) => ({
       ...previous,
-      clientId: counterpartyClientId ? String(counterpartyClientId) : previous.clientId,
+      clientId: counterpartyOwner.clientId ? String(counterpartyOwner.clientId) : counterpartyOwner.legalEntityId ? '' : previous.clientId,
+      legalEntityId: counterpartyOwner.legalEntityId ? String(counterpartyOwner.legalEntityId) : counterpartyOwner.clientId ? '' : previous.legalEntityId,
       invoiceId: value,
       invoiceNumber: selectedInvoice?.number ?? previous.invoiceNumber,
       creationMode: 'Partial',
@@ -1246,7 +1382,8 @@ export function ActModal({
       counterpartyInn: undefined,
       status: form.status,
       workflowStatus: form.workflowStatus,
-      clientId: form.clientId ? Number(form.clientId) : undefined,
+      clientId: form.clientId ? Number(form.clientId) : null,
+      legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : null,
       responsibleId: form.responsibleId ? Number(form.responsibleId) : undefined,
       comment: form.comment.trim() ? form.comment.trim() : undefined,
       lineItems,
@@ -1456,29 +1593,36 @@ export function ActModal({
                 <div className="space-y-2">
                   <LookupSelect
                     label={counterpartyLabel}
-                    value={form.clientId}
+                    value={selectedCounterpartyKey}
                     options={counterpartyLookupOptions}
                     onChange={handleCounterpartySelect}
                     title="Выбор контрагента"
                     dictionaryLabel="Справочник"
                     placeholder="Выберите контрагента"
-                    searchPlaceholder="Поиск по имени компании, клиенту или статусу"
+                    searchPlaceholder="Поиск по имени, названию юрлица, ИНН или статусу"
                     emptyOptionLabel="Без контрагента"
                     emptyOptionDescription="Оставить акт без выбранного контрагента."
                     helperText={
                       linkedInvoiceId
                         ? 'Контрагент синхронизируется с выбранным счетом. При смене контрагента счет будет сброшен.'
-                        : selectedCounterpartyClientId
+                        : selectedCounterpartyKey
                           ? 'Теперь в справочнике счетов будут показаны только документы этого контрагента.'
                           : 'Сначала можно выбрать контрагента, а потом сузить список счетов.'
                     }
-                    noOptionsText={lookupsLoading ? 'Загружаем контрагентов...' : 'Контрагенты не найдены'}
-                    disabled={lookupsLoading}
+                    noOptionsText={(lookupsLoading || legalEntitiesLoading) ? 'Загружаем контрагентов...' : legalEntitiesError || 'Контрагенты не найдены'}
+                    disabled={lookupsLoading || legalEntitiesLoading}
                   />
 
                   {selectedClient?.clientStatus ? (
                     <div>
                       <ClientStatusBadge status={selectedClient.clientStatus} />
+                    </div>
+                  ) : null}
+                  {selectedLegalEntity ? (
+                    <div className="rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-xs text-slate-600">
+                      Юрлицо: {getLegalEntityDisplayName(selectedLegalEntity)}
+                      {selectedLegalEntity.inn ? `, ИНН ${selectedLegalEntity.inn}` : ''}
+                      {selectedLegalEntity.kpp ? `, КПП ${selectedLegalEntity.kpp}` : ''}
                     </div>
                   ) : null}
                 </div>
@@ -1497,14 +1641,14 @@ export function ActModal({
                   helperText={
                     linkedInvoiceId
                       ? 'Счет, тип акта, контрагент и позиции в акте связаны между собой.'
-                      : selectedCounterpartyClientId
+                      : selectedCounterpartyKey
                         ? 'Показываем только счета выбранного контрагента.'
                         : 'После выбора счета контрагент и позиции подтянутся автоматически.'
                   }
                   noOptionsText={
                     invoiceOptionsLoading
                       ? 'Загружаем счета...'
-                      : selectedCounterpartyClientId
+                      : selectedCounterpartyKey
                         ? 'У выбранного контрагента нет счетов'
                         : 'Счета не найдены'
                   }

@@ -42,6 +42,33 @@ vi.mock('../../hooks/useClients', () => ({
   }),
 }));
 
+vi.mock('../../hooks/useLegalEntities', () => ({
+  useLegalEntities: () => ({
+    legalEntities: [
+      {
+        id: 301,
+        shortName: 'ООО Юрклиент',
+        fullName: 'Общество с ограниченной ответственностью Юрклиент',
+        inn: '5400000001',
+        kpp: '540001001',
+        clients: [],
+        clientsCount: 0,
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+      {
+        id: 302,
+        shortName: 'ООО Поставщик ЮЛ',
+        inn: '5400000002',
+        clients: [],
+        clientsCount: 0,
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+    ],
+    loading: false,
+    error: null,
+  }),
+}));
+
 vi.mock('../../hooks/useDictionaries', () => ({
   useDictionaries: () => ({
     dealTypes: [],
@@ -91,6 +118,7 @@ vi.mock('../Accounts/InvoiceModal', () => ({
         amount?: string;
         date?: string;
         clientId?: string;
+        legalEntityId?: string;
         contractId?: string;
       };
       selectedClientCaseIds?: number[];
@@ -115,6 +143,7 @@ vi.mock('../Accounts/InvoiceModal', () => ({
         <div>{`draft-amount:${props.resumeDraft?.form?.amount ?? ''}`}</div>
         <div>{`draft-date:${props.resumeDraft?.form?.date ?? ''}`}</div>
         <div>{`draft-client:${props.resumeDraft?.form?.clientId ?? ''}`}</div>
+        <div>{`draft-legal:${props.resumeDraft?.form?.legalEntityId ?? ''}`}</div>
         <div>{`draft-contract:${props.resumeDraft?.form?.contractId ?? ''}`}</div>
         <div>{`draft-case-count:${props.resumeDraft?.selectedClientCaseIds?.length ?? 0}`}</div>
         <button
@@ -211,7 +240,7 @@ describe('PaymentModal integration', () => {
     await waitFor(() => expect(screen.getByDisplayValue('24')).toBeTruthy());
     expect(screen.getByDisplayValue('2026-04-02')).toBeTruthy();
     expect(screen.getAllByDisplayValue('Test Client')).not.toHaveLength(0);
-    expect(screen.getByRole('button', { name: 'selectClient' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Выбрать контрагента' })).toHaveProperty('disabled', true);
   });
 
   it('keeps payment fields while replacing stale invoice fields with the linked invoice context during edit', async () => {
@@ -348,6 +377,50 @@ describe('PaymentModal integration', () => {
     const submitPayload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
     expect(submitPayload.account).toBeUndefined();
     expect(submitPayload.accountDate).toBeUndefined();
+  });
+
+  it('selects a legal entity for an income payment and submits legalEntityId instead of clientId', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 777,
+          date: '2026-04-12',
+          plannedDate: '2026-04-12',
+          amount: 12_000,
+          paidAmount: 0,
+          status: 'Pending',
+          description: 'Платеж от юрлица',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 69,
+          type: 'Income',
+          account: '',
+          accountDate: '',
+          documentKind: 'Payment',
+          createdAt: '2026-04-12T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать контрагента' }));
+    fireEvent.click(screen.getByRole('button', { name: /Юрлица/i }));
+    await screen.findAllByText('ООО Юрклиент');
+    fireEvent.click(screen.getAllByText('ООО Юрклиент').at(-1)!.closest('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.legalEntityId).toBe(301);
+    expect(payload.clientId).toBeUndefined();
   });
 
   it('submits expense attribution and payment document details for expense payments', async () => {
