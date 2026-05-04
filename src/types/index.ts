@@ -1076,6 +1076,32 @@ export interface ActStatusReport {
   statuses: ActStatusReportItem[];
 }
 
+export interface ContractStatusReportItem {
+  status: ContractStatus | string;
+  statusLabel: string;
+  contractCount: number;
+  openEndedCount: number;
+  expiringCount: number;
+  totalAmount: number;
+  share: number;
+}
+
+export interface ContractStatusReport {
+  from: string;
+  to: string;
+  contractCount: number;
+  draftCount: number;
+  onSigningCount: number;
+  concludedCount: number;
+  terminatedCount: number;
+  cancelledCount: number;
+  openEndedCount: number;
+  totalAmount: number;
+  activeAmount: number;
+  closedAmount: number;
+  statuses: ContractStatusReportItem[];
+}
+
 export interface PaymentOrderReportItem {
   paymentOrderNumber: string;
   income: number;

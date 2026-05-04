@@ -882,6 +882,81 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task ContractStatuses_GroupsContractsByStatus()
+    {
+        await using var db = await CreateContextAsync();
+        db.Contracts.AddRange(
+            Contract("C-1", ContractStatus.Draft, 1_000m, new DateTime(2026, 5, 1), false, new DateTime(2026, 5, 20)),
+            Contract("C-2", ContractStatus.OnSigning, 2_000m, new DateTime(2026, 5, 2), false, new DateTime(2026, 6, 20)),
+            Contract("C-3", ContractStatus.Concluded, 3_000m, new DateTime(2026, 5, 3), true, null),
+            Contract("C-4", ContractStatus.Terminated, 4_000m, new DateTime(2026, 5, 4), false, new DateTime(2026, 5, 25)),
+            Contract("C-5", ContractStatus.Cancelled, 5_000m, new DateTime(2026, 5, 5), false, null),
+            Contract("C-OLD", ContractStatus.Concluded, 99_999m, new DateTime(2026, 4, 30), false, null));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ContractStatuses(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<ContractStatusReportDto>(ok.Value);
+        Assert.Equal(5, report.ContractCount);
+        Assert.Equal(1, report.DraftCount);
+        Assert.Equal(1, report.OnSigningCount);
+        Assert.Equal(1, report.ConcludedCount);
+        Assert.Equal(1, report.TerminatedCount);
+        Assert.Equal(1, report.CancelledCount);
+        Assert.Equal(1, report.OpenEndedCount);
+        Assert.Equal(15_000m, report.TotalAmount);
+        Assert.Equal(6_000m, report.ActiveAmount);
+        Assert.Equal(9_000m, report.ClosedAmount);
+
+        Assert.Collection(
+            report.Statuses,
+            item =>
+            {
+                Assert.Equal(ContractStatus.OnSigning, item.Status);
+                Assert.Equal("На подписании", item.StatusLabel);
+                Assert.Equal(2_000m, item.TotalAmount);
+                Assert.Equal(0, item.ExpiringCount);
+                Assert.Equal(13.3m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(ContractStatus.Draft, item.Status);
+                Assert.Equal("Черновик", item.StatusLabel);
+                Assert.Equal(1_000m, item.TotalAmount);
+                Assert.Equal(1, item.ExpiringCount);
+                Assert.Equal(6.7m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(ContractStatus.Concluded, item.Status);
+                Assert.Equal("Заключен", item.StatusLabel);
+                Assert.Equal(3_000m, item.TotalAmount);
+                Assert.Equal(1, item.OpenEndedCount);
+                Assert.Equal(20m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(ContractStatus.Terminated, item.Status);
+                Assert.Equal("Расторгнут", item.StatusLabel);
+                Assert.Equal(4_000m, item.TotalAmount);
+                Assert.Equal(1, item.ExpiringCount);
+                Assert.Equal(26.7m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(ContractStatus.Cancelled, item.Status);
+                Assert.Equal("Аннулирован", item.StatusLabel);
+                Assert.Equal(5_000m, item.TotalAmount);
+                Assert.Equal(33.3m, item.Share);
+            });
+    }
+
+    [Fact]
     public async Task PaymentOrders_GroupsFactOperationsByPaymentOrderNumber()
     {
         await using var db = await CreateContextAsync();
@@ -1446,6 +1521,25 @@ public class ReportsControllerTests
             WorkflowStatus = workflowStatus,
             Amount = amount,
             Date = date,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+    private static Contract Contract(
+        string number,
+        string status,
+        decimal amount,
+        DateTime date,
+        bool isOpenEnded,
+        DateTime? validUntil)
+        => new()
+        {
+            Number = number,
+            Status = status,
+            Amount = amount,
+            Date = date,
+            IsOpenEnded = isOpenEnded,
+            ValidUntil = validUntil,
+            BillingMode = ContractBillingMode.Fixed,
             CreatedAt = DateTime.UtcNow,
         };
 

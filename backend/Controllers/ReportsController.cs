@@ -347,6 +347,28 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("contract-statuses")]
+    public async Task<ActionResult<ContractStatusReportDto>> ContractStatuses(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildContractStatusReportAsync(start, end, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     [HttpGet("payment-orders")]
     public async Task<ActionResult<PaymentOrderReportDto>> PaymentOrders(
         [FromQuery] DateTime? from,
@@ -1805,6 +1827,110 @@ public class ReportsController : ControllerBase
             ActWorkflowStatus.OnSigning => "На подписании",
             ActWorkflowStatus.Signed => "Подписан",
             ActWorkflowStatus.Cancelled => "Отменен",
+            _ => status,
+        };
+
+    private async Task<ContractStatusReportDto> BuildContractStatusReportAsync(
+        DateTime from,
+        DateTime to,
+        CancellationToken ct)
+    {
+        var rows = await _db.Contracts
+            .AsNoTracking()
+            .Where(item => item.Date >= from && item.Date <= to)
+            .Select(item => new
+            {
+                item.Status,
+                item.Amount,
+                item.IsOpenEnded,
+                item.ValidUntil,
+            })
+            .ToListAsync(ct);
+
+        var normalizedRows = rows
+            .Select(item => new
+            {
+                Status = NormalizeContractReportStatus(item.Status),
+                Amount = item.Amount ?? 0m,
+                item.IsOpenEnded,
+                item.ValidUntil,
+            })
+            .ToList();
+
+        var totalAmount = normalizedRows.Sum(item => item.Amount);
+        var statuses = normalizedRows
+            .GroupBy(item => item.Status, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var statusTotal = group.Sum(item => item.Amount);
+
+                return new ContractStatusReportItemDto
+                {
+                    Status = group.First().Status,
+                    StatusLabel = FormatContractStatusLabel(group.First().Status),
+                    ContractCount = group.Count(),
+                    OpenEndedCount = group.Count(item => item.IsOpenEnded),
+                    ExpiringCount = group.Count(item =>
+                        !item.IsOpenEnded &&
+                        item.ValidUntil.HasValue &&
+                        item.ValidUntil.Value.Date >= from &&
+                        item.ValidUntil.Value.Date <= to),
+                    TotalAmount = statusTotal,
+                    Share = totalAmount > 0m
+                        ? Math.Round(statusTotal / totalAmount * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderBy(item => ContractStatusSortOrder(item.Status))
+            .ThenByDescending(item => item.TotalAmount)
+            .ToList();
+
+        var activeStatuses = new[] { ContractStatus.Draft, ContractStatus.OnSigning, ContractStatus.Concluded };
+
+        return new ContractStatusReportDto
+        {
+            From = from,
+            To = to,
+            ContractCount = normalizedRows.Count,
+            DraftCount = normalizedRows.Count(item => item.Status == ContractStatus.Draft),
+            OnSigningCount = normalizedRows.Count(item => item.Status == ContractStatus.OnSigning),
+            ConcludedCount = normalizedRows.Count(item => item.Status == ContractStatus.Concluded),
+            TerminatedCount = normalizedRows.Count(item => item.Status == ContractStatus.Terminated),
+            CancelledCount = normalizedRows.Count(item => item.Status == ContractStatus.Cancelled),
+            OpenEndedCount = normalizedRows.Count(item => item.IsOpenEnded),
+            TotalAmount = totalAmount,
+            ActiveAmount = normalizedRows
+                .Where(item => activeStatuses.Contains(item.Status))
+                .Sum(item => item.Amount),
+            ClosedAmount = normalizedRows
+                .Where(item => item.Status is ContractStatus.Terminated or ContractStatus.Cancelled)
+                .Sum(item => item.Amount),
+            Statuses = statuses,
+        };
+    }
+
+    private static string NormalizeContractReportStatus(string? status)
+        => ContractStatus.Normalize(status) ?? ContractStatus.Draft;
+
+    private static int ContractStatusSortOrder(string status)
+        => status switch
+        {
+            ContractStatus.OnSigning => 0,
+            ContractStatus.Draft => 1,
+            ContractStatus.Concluded => 2,
+            ContractStatus.Terminated => 3,
+            ContractStatus.Cancelled => 4,
+            _ => 5,
+        };
+
+    private static string FormatContractStatusLabel(string status)
+        => status switch
+        {
+            ContractStatus.Draft => "Черновик",
+            ContractStatus.OnSigning => "На подписании",
+            ContractStatus.Concluded => "Заключен",
+            ContractStatus.Terminated => "Расторгнут",
+            ContractStatus.Cancelled => "Аннулирован",
             _ => status,
         };
 
