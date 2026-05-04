@@ -833,4 +833,52 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
   });
+
+  it('loads spreadsheet import report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      batchCount: 2,
+      fileCount: 3,
+      totalRows: 32,
+      createdRows: 15,
+      updatedRows: 6,
+      skippedRows: 4,
+      errorRows: 7,
+      rollbackRows: 0,
+      appliedCount: 1,
+      appliedWithErrorsCount: 1,
+      rolledBackCount: 0,
+      rolledBackWithConflictsCount: 0,
+      statuses: [{
+        status: 'AppliedWithErrors',
+        statusLabel: 'Применен с ошибками',
+        batchCount: 1,
+        fileCount: 1,
+        totalRows: 12,
+        createdRows: 5,
+        updatedRows: 2,
+        skippedRows: 2,
+        errorRows: 3,
+        rollbackRows: 0,
+        share: 50,
+      }],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getSpreadsheetImportReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/spreadsheet-imports?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+  });
 });

@@ -1139,6 +1139,77 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task SpreadsheetImports_GroupsBatchesByStatus()
+    {
+        await using var db = await CreateContextAsync();
+        db.SpreadsheetImportBatches.AddRange(
+            SpreadsheetImportBatch("May OK", SpreadsheetImportBatchStatus.Applied, 2, 20, 10, 4, 5, 1, 0, new DateTime(2026, 5, 1, 10, 0, 0)),
+            SpreadsheetImportBatch("May Errors", SpreadsheetImportBatchStatus.AppliedWithErrors, 1, 12, 5, 2, 2, 3, 0, new DateTime(2026, 5, 2, 11, 0, 0)),
+            SpreadsheetImportBatch("May Rolled", SpreadsheetImportBatchStatus.RolledBack, 1, 8, 4, 1, 2, 1, 4, new DateTime(2026, 5, 3, 12, 0, 0)),
+            SpreadsheetImportBatch("May Conflicts", SpreadsheetImportBatchStatus.RolledBackWithConflicts, 3, 6, 2, 1, 1, 2, 2, new DateTime(2026, 5, 4, 13, 0, 0)),
+            SpreadsheetImportBatch("Old", SpreadsheetImportBatchStatus.Applied, 5, 99, 99, 0, 0, 0, 0, new DateTime(2026, 4, 30, 23, 59, 59)));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.SpreadsheetImports(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<SpreadsheetImportReportDto>(ok.Value);
+        Assert.Equal(4, report.BatchCount);
+        Assert.Equal(7, report.FileCount);
+        Assert.Equal(46, report.TotalRows);
+        Assert.Equal(21, report.CreatedRows);
+        Assert.Equal(8, report.UpdatedRows);
+        Assert.Equal(10, report.SkippedRows);
+        Assert.Equal(7, report.ErrorRows);
+        Assert.Equal(6, report.RollbackRows);
+        Assert.Equal(1, report.AppliedCount);
+        Assert.Equal(1, report.AppliedWithErrorsCount);
+        Assert.Equal(1, report.RolledBackCount);
+        Assert.Equal(1, report.RolledBackWithConflictsCount);
+
+        Assert.Collection(
+            report.Statuses,
+            item =>
+            {
+                Assert.Equal(SpreadsheetImportBatchStatus.AppliedWithErrors, item.Status);
+                Assert.Equal("Применен с ошибками", item.StatusLabel);
+                Assert.Equal(1, item.FileCount);
+                Assert.Equal(12, item.TotalRows);
+                Assert.Equal(3, item.ErrorRows);
+                Assert.Equal(25m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(SpreadsheetImportBatchStatus.RolledBackWithConflicts, item.Status);
+                Assert.Equal("Откатан с конфликтами", item.StatusLabel);
+                Assert.Equal(3, item.FileCount);
+                Assert.Equal(6, item.TotalRows);
+                Assert.Equal(2, item.RollbackRows);
+                Assert.Equal(25m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(SpreadsheetImportBatchStatus.Applied, item.Status);
+                Assert.Equal("Применен", item.StatusLabel);
+                Assert.Equal(2, item.FileCount);
+                Assert.Equal(20, item.TotalRows);
+                Assert.Equal(25m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(SpreadsheetImportBatchStatus.RolledBack, item.Status);
+                Assert.Equal("Откатан", item.StatusLabel);
+                Assert.Equal(1, item.FileCount);
+                Assert.Equal(4, item.RollbackRows);
+                Assert.Equal(25m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -1214,6 +1285,40 @@ public class ReportsControllerTests
             ErrorRows = errorRows,
             RollbackRows = rollbackRows,
             CreatedAt = createdAt,
+        };
+
+    private static SpreadsheetImportBatch SpreadsheetImportBatch(
+        string title,
+        string status,
+        int fileCount,
+        int totalRows,
+        int createdRows,
+        int updatedRows,
+        int skippedRows,
+        int errorRows,
+        int rollbackRows,
+        DateTime createdAt)
+        => new()
+        {
+            Title = title,
+            Status = status,
+            TotalRows = totalRows,
+            CreatedRows = createdRows,
+            UpdatedRows = updatedRows,
+            SkippedRows = skippedRows,
+            ErrorRows = errorRows,
+            RollbackRows = rollbackRows,
+            CreatedAt = createdAt,
+            Files = Enumerable.Range(1, fileCount)
+                .Select(index => new SpreadsheetImportBatchFile
+                {
+                    FileName = $"{title}-{index}.xlsx",
+                    FileHash = $"{title}-{index}-hash",
+                    DetectedKind = "mixed",
+                    RowCount = Math.Max(1, totalRows / Math.Max(1, fileCount)),
+                    CreatedAt = createdAt,
+                })
+                .ToList(),
         };
 
     private static CashOrder CashOrder(

@@ -1190,6 +1190,38 @@ export interface BankStatementImportReport {
   statuses: BankStatementImportReportItem[];
 }
 
+export interface SpreadsheetImportReportItem {
+  status: string;
+  statusLabel: string;
+  batchCount: number;
+  fileCount: number;
+  totalRows: number;
+  createdRows: number;
+  updatedRows: number;
+  skippedRows: number;
+  errorRows: number;
+  rollbackRows: number;
+  share: number;
+}
+
+export interface SpreadsheetImportReport {
+  from: string;
+  to: string;
+  batchCount: number;
+  fileCount: number;
+  totalRows: number;
+  createdRows: number;
+  updatedRows: number;
+  skippedRows: number;
+  errorRows: number;
+  rollbackRows: number;
+  appliedCount: number;
+  appliedWithErrorsCount: number;
+  rolledBackCount: number;
+  rolledBackWithConflictsCount: number;
+  statuses: SpreadsheetImportReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

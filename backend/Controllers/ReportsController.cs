@@ -462,6 +462,28 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("spreadsheet-imports")]
+    public async Task<ActionResult<SpreadsheetImportReportDto>> SpreadsheetImports(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildSpreadsheetImportReportAsync(start, end, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -2141,6 +2163,91 @@ public class ReportsController : ControllerBase
             BankStatementImportBatchStatus.AppliedWithErrors => "Применен с ошибками",
             BankStatementImportBatchStatus.RolledBack => "Откатан",
             BankStatementImportBatchStatus.RollbackBlocked => "Откат заблокирован",
+            _ => status,
+        };
+
+    private async Task<SpreadsheetImportReportDto> BuildSpreadsheetImportReportAsync(
+        DateTime from,
+        DateTime to,
+        CancellationToken ct)
+    {
+        var endExclusive = to.AddDays(1);
+        var rows = await _db.SpreadsheetImportBatches
+            .AsNoTracking()
+            .Where(item => item.CreatedAt >= from && item.CreatedAt < endExclusive)
+            .Select(item => new
+            {
+                item.Status,
+                FileCount = item.Files.Count,
+                item.TotalRows,
+                item.CreatedRows,
+                item.UpdatedRows,
+                item.SkippedRows,
+                item.ErrorRows,
+                item.RollbackRows,
+            })
+            .ToListAsync(ct);
+
+        var statuses = rows
+            .GroupBy(item => item.Status)
+            .Select(group => new SpreadsheetImportReportItemDto
+            {
+                Status = group.Key,
+                StatusLabel = FormatSpreadsheetImportStatusLabel(group.Key),
+                BatchCount = group.Count(),
+                FileCount = group.Sum(item => item.FileCount),
+                TotalRows = group.Sum(item => item.TotalRows),
+                CreatedRows = group.Sum(item => item.CreatedRows),
+                UpdatedRows = group.Sum(item => item.UpdatedRows),
+                SkippedRows = group.Sum(item => item.SkippedRows),
+                ErrorRows = group.Sum(item => item.ErrorRows),
+                RollbackRows = group.Sum(item => item.RollbackRows),
+                Share = rows.Count > 0
+                    ? Math.Round((decimal)group.Count() / rows.Count * 100m, 1, MidpointRounding.AwayFromZero)
+                    : 0m,
+            })
+            .OrderBy(item => SpreadsheetImportStatusSortOrder(item.Status))
+            .ThenByDescending(item => item.ErrorRows)
+            .ThenByDescending(item => item.TotalRows)
+            .ToList();
+
+        return new SpreadsheetImportReportDto
+        {
+            From = from,
+            To = to,
+            BatchCount = rows.Count,
+            FileCount = rows.Sum(item => item.FileCount),
+            TotalRows = rows.Sum(item => item.TotalRows),
+            CreatedRows = rows.Sum(item => item.CreatedRows),
+            UpdatedRows = rows.Sum(item => item.UpdatedRows),
+            SkippedRows = rows.Sum(item => item.SkippedRows),
+            ErrorRows = rows.Sum(item => item.ErrorRows),
+            RollbackRows = rows.Sum(item => item.RollbackRows),
+            AppliedCount = rows.Count(item => item.Status == SpreadsheetImportBatchStatus.Applied),
+            AppliedWithErrorsCount = rows.Count(item => item.Status == SpreadsheetImportBatchStatus.AppliedWithErrors),
+            RolledBackCount = rows.Count(item => item.Status == SpreadsheetImportBatchStatus.RolledBack),
+            RolledBackWithConflictsCount = rows.Count(item => item.Status == SpreadsheetImportBatchStatus.RolledBackWithConflicts),
+            Statuses = statuses,
+        };
+    }
+
+    private static int SpreadsheetImportStatusSortOrder(string status)
+        => status switch
+        {
+            SpreadsheetImportBatchStatus.AppliedWithErrors => 0,
+            SpreadsheetImportBatchStatus.RolledBackWithConflicts => 1,
+            SpreadsheetImportBatchStatus.Applied => 2,
+            SpreadsheetImportBatchStatus.RolledBack => 3,
+            _ => 4,
+        };
+
+    private static string FormatSpreadsheetImportStatusLabel(string status)
+        => status switch
+        {
+            SpreadsheetImportBatchStatus.Applied => "Применен",
+            SpreadsheetImportBatchStatus.AppliedWithErrors => "Применен с ошибками",
+            SpreadsheetImportBatchStatus.RolledBack => "Откатан",
+            SpreadsheetImportBatchStatus.RolledBackWithConflicts => "Откатан с конфликтами",
             _ => status,
         };
 
