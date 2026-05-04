@@ -3994,6 +3994,7 @@ export function InvoiceModal({
                 )}
               </section>
 
+              {!linkedMoneyOperationsError && (
               <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                 <header className="mb-3 flex flex-col gap-1">
                   <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -4012,10 +4013,6 @@ export function InvoiceModal({
                   <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t('loading') ?? 'Загрузка...'}
-                  </div>
-                ) : linkedMoneyOperationsError ? (
-                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-5 text-sm text-rose-700">
-                    {linkedMoneyOperationsError}
                   </div>
                 ) : linkedMoneyOperations.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
@@ -4078,6 +4075,7 @@ export function InvoiceModal({
                   </div>
                 )}
               </section>
+              )}
             </div>
 
             <div className="space-y-6">

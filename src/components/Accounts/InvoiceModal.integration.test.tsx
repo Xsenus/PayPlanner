@@ -549,6 +549,46 @@ describe('InvoiceModal integration', () => {
     expect(screen.getByText('ОСНОВНОЙ Банк')).toBeTruthy();
   });
 
+  it('hides the money operations section when linked operations fail to load', async () => {
+    const invoice = {
+      id: 1849,
+      invoiceEntityId: 1849,
+      number: '51',
+      date: '2026-05-03',
+      dueDate: '2026-05-15',
+      amount: 37000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Анализ документов', quantity: 1, unit: 'усл.ед.', price: 37000 }],
+    } as unknown as Invoice;
+
+    vi.mocked(apiService.getMoneyOperationsPaged).mockRejectedValueOnce(new Error('Failed to fetch'));
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledWith({ linkedInvoiceId: 1849, page: 1, pageSize: 20 });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Движения денег')).toBeNull();
+    });
+    expect(screen.queryByText('Не удалось загрузить движения денег по счёту.')).toBeNull();
+  });
+
   it('restores installment summary and badges from related installment payments', async () => {
     const invoice = {
       id: 530,
