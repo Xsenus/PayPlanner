@@ -821,6 +821,67 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task ActStatuses_GroupsActsByWorkflowStatus()
+    {
+        await using var db = await CreateContextAsync();
+        db.Acts.AddRange(
+            Act("ACT-1", ActStatus.Created, ActWorkflowStatus.Draft, 1_000m, new DateTime(2026, 5, 1)),
+            Act("ACT-2", ActStatus.Transferred, ActWorkflowStatus.OnSigning, 2_000m, new DateTime(2026, 5, 2)),
+            Act("ACT-3", ActStatus.Signed, ActWorkflowStatus.Signed, 3_000m, new DateTime(2026, 5, 3)),
+            Act("ACT-4", ActStatus.Terminated, ActWorkflowStatus.Cancelled, 4_000m, new DateTime(2026, 5, 4)),
+            Act("ACT-OLD", ActStatus.Signed, ActWorkflowStatus.Signed, 99_999m, new DateTime(2026, 4, 30)));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ActStatuses(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<ActStatusReportDto>(ok.Value);
+        Assert.Equal(4, report.ActCount);
+        Assert.Equal(1, report.CreatedCount);
+        Assert.Equal(1, report.TransferredCount);
+        Assert.Equal(1, report.SignedCount);
+        Assert.Equal(1, report.TerminatedCount);
+        Assert.Equal(10_000m, report.TotalAmount);
+        Assert.Equal(3_000m, report.SignedAmount);
+        Assert.Equal(7_000m, report.PendingAmount);
+
+        Assert.Collection(
+            report.Statuses,
+            item =>
+            {
+                Assert.Equal(ActWorkflowStatus.OnSigning, item.WorkflowStatus);
+                Assert.Equal("На подписании", item.WorkflowStatusLabel);
+                Assert.Equal(2_000m, item.TotalAmount);
+                Assert.Equal(20m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(ActWorkflowStatus.Draft, item.WorkflowStatus);
+                Assert.Equal("Черновик", item.WorkflowStatusLabel);
+                Assert.Equal(1_000m, item.TotalAmount);
+                Assert.Equal(10m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(ActWorkflowStatus.Signed, item.WorkflowStatus);
+                Assert.Equal("Подписан", item.WorkflowStatusLabel);
+                Assert.Equal(3_000m, item.SignedAmount);
+                Assert.Equal(30m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(ActWorkflowStatus.Cancelled, item.WorkflowStatus);
+                Assert.Equal("Отменен", item.WorkflowStatusLabel);
+                Assert.Equal(4_000m, item.PendingAmount);
+                Assert.Equal(40m, item.Share);
+            });
+    }
+
+    [Fact]
     public async Task PaymentOrders_GroupsFactOperationsByPaymentOrderNumber()
     {
         await using var db = await CreateContextAsync();
@@ -1369,6 +1430,22 @@ public class ReportsControllerTests
             DocumentKind = documentKind,
             InvoiceWorkflowStatus = workflowStatus,
             IsPaid = status == PaymentStatus.Completed,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+    private static Act Act(
+        string number,
+        ActStatus status,
+        string workflowStatus,
+        decimal amount,
+        DateTime date)
+        => new()
+        {
+            Number = number,
+            Status = status,
+            WorkflowStatus = workflowStatus,
+            Amount = amount,
+            Date = date,
             CreatedAt = DateTime.UtcNow,
         };
 

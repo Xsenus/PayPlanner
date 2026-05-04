@@ -1048,6 +1048,34 @@ export interface InvoiceStatusReport {
   statuses: InvoiceStatusReportItem[];
 }
 
+export interface ActStatusReportItem {
+  workflowStatus: ActWorkflowStatus | string;
+  workflowStatusLabel: string;
+  actCount: number;
+  createdCount: number;
+  transferredCount: number;
+  signedCount: number;
+  terminatedCount: number;
+  totalAmount: number;
+  signedAmount: number;
+  pendingAmount: number;
+  share: number;
+}
+
+export interface ActStatusReport {
+  from: string;
+  to: string;
+  actCount: number;
+  createdCount: number;
+  transferredCount: number;
+  signedCount: number;
+  terminatedCount: number;
+  totalAmount: number;
+  signedAmount: number;
+  pendingAmount: number;
+  statuses: ActStatusReportItem[];
+}
+
 export interface PaymentOrderReportItem {
   paymentOrderNumber: string;
   income: number;

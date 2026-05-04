@@ -325,6 +325,28 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("act-statuses")]
+    public async Task<ActionResult<ActStatusReportDto>> ActStatuses(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildActStatusReportAsync(start, end, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     [HttpGet("payment-orders")]
     public async Task<ActionResult<PaymentOrderReportDto>> PaymentOrders(
         [FromQuery] DateTime? from,
@@ -1681,6 +1703,108 @@ public class ReportsController : ControllerBase
             InvoiceWorkflowStatus.PartiallyPaid => "Частично оплачен",
             InvoiceWorkflowStatus.Overdue => "Просрочен",
             InvoiceWorkflowStatus.Cancelled => "Аннулирован",
+            _ => status,
+        };
+
+    private async Task<ActStatusReportDto> BuildActStatusReportAsync(
+        DateTime from,
+        DateTime to,
+        CancellationToken ct)
+    {
+        var rows = await _db.Acts
+            .AsNoTracking()
+            .Where(item => item.Date >= from && item.Date <= to)
+            .Select(item => new
+            {
+                item.Status,
+                WorkflowStatus = item.WorkflowStatus,
+                item.Amount,
+            })
+            .ToListAsync(ct);
+
+        var totalAmount = rows.Sum(item => item.Amount);
+        var enriched = rows
+            .Select(item => new
+            {
+                item.Status,
+                WorkflowStatus = NormalizeActReportWorkflowStatus(item.WorkflowStatus, item.Status),
+                item.Amount,
+            })
+            .ToList();
+
+        var statuses = enriched
+            .GroupBy(item => item.WorkflowStatus, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var statusTotal = group.Sum(item => item.Amount);
+                var signedAmount = group
+                    .Where(item => item.Status == ActStatus.Signed)
+                    .Sum(item => item.Amount);
+
+                return new ActStatusReportItemDto
+                {
+                    WorkflowStatus = group.First().WorkflowStatus,
+                    WorkflowStatusLabel = FormatActWorkflowStatusLabel(group.First().WorkflowStatus),
+                    ActCount = group.Count(),
+                    CreatedCount = group.Count(item => item.Status == ActStatus.Created),
+                    TransferredCount = group.Count(item => item.Status == ActStatus.Transferred),
+                    SignedCount = group.Count(item => item.Status == ActStatus.Signed),
+                    TerminatedCount = group.Count(item => item.Status == ActStatus.Terminated),
+                    TotalAmount = statusTotal,
+                    SignedAmount = signedAmount,
+                    PendingAmount = statusTotal - signedAmount,
+                    Share = totalAmount > 0m
+                        ? Math.Round(statusTotal / totalAmount * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderBy(item => ActWorkflowStatusSortOrder(item.WorkflowStatus))
+            .ThenByDescending(item => item.TotalAmount)
+            .ToList();
+
+        var totalSignedAmount = enriched
+            .Where(item => item.Status == ActStatus.Signed)
+            .Sum(item => item.Amount);
+
+        return new ActStatusReportDto
+        {
+            From = from,
+            To = to,
+            ActCount = enriched.Count,
+            CreatedCount = enriched.Count(item => item.Status == ActStatus.Created),
+            TransferredCount = enriched.Count(item => item.Status == ActStatus.Transferred),
+            SignedCount = enriched.Count(item => item.Status == ActStatus.Signed),
+            TerminatedCount = enriched.Count(item => item.Status == ActStatus.Terminated),
+            TotalAmount = totalAmount,
+            SignedAmount = totalSignedAmount,
+            PendingAmount = totalAmount - totalSignedAmount,
+            Statuses = statuses,
+        };
+    }
+
+    private static string NormalizeActReportWorkflowStatus(string? workflowStatus, ActStatus status)
+    {
+        var normalized = ActWorkflowStatus.Normalize(workflowStatus);
+        return normalized ?? ActWorkflowStatus.FromActStatus(status);
+    }
+
+    private static int ActWorkflowStatusSortOrder(string status)
+        => status switch
+        {
+            ActWorkflowStatus.OnSigning => 0,
+            ActWorkflowStatus.Draft => 1,
+            ActWorkflowStatus.Signed => 2,
+            ActWorkflowStatus.Cancelled => 3,
+            _ => 4,
+        };
+
+    private static string FormatActWorkflowStatusLabel(string status)
+        => status switch
+        {
+            ActWorkflowStatus.Draft => "Черновик",
+            ActWorkflowStatus.OnSigning => "На подписании",
+            ActWorkflowStatus.Signed => "Подписан",
+            ActWorkflowStatus.Cancelled => "Отменен",
             _ => status,
         };
 

@@ -586,6 +586,50 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('to=2026-05-31');
   });
 
+  it('loads act status report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      actCount: 2,
+      createdCount: 1,
+      transferredCount: 0,
+      signedCount: 1,
+      terminatedCount: 0,
+      totalAmount: 4000,
+      signedAmount: 3000,
+      pendingAmount: 1000,
+      statuses: [{
+        workflowStatus: 'Signed',
+        workflowStatusLabel: 'Подписан',
+        actCount: 1,
+        createdCount: 0,
+        transferredCount: 0,
+        signedCount: 1,
+        terminatedCount: 0,
+        totalAmount: 3000,
+        signedAmount: 3000,
+        pendingAmount: 0,
+        share: 75,
+      }],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getActStatusReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/act-statuses?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+  });
+
   it('loads payment order report with filters', async () => {
     const payload = {
       from: '2026-05-01T00:00:00',

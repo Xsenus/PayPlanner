@@ -2280,6 +2280,14 @@ export class ApiService {
     return this.request<InvoiceStatusReport>(`/reports/invoice-statuses${q}`);
   }
 
+  async getActStatusReport(params?: {
+    from?: string;
+    to?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<ActStatusReport>(`/reports/act-statuses${q}`);
+  }
+
   async getPaymentOrderReport(params?: {
     from?: string;
     to?: string;
@@ -2970,6 +2978,7 @@ import type {
   PaidAccountReport,
   PaidInvoiceReport,
   InvoiceStatusReport,
+  ActStatusReport,
   PaymentOrderReport,
   PaymentPurposeReport,
   MatchStatusReport,
