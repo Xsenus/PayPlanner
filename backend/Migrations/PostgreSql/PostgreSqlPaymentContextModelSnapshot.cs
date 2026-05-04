@@ -624,6 +624,107 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("BaseCurrencies");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.CashInventory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccountName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<decimal>("AccountingBalance")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("ActualBalance")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("CorrectionCashOrderId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<decimal>("Difference")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountName")
+                        .HasDatabaseName("IX_CashInventories_AccountName");
+
+                    b.HasIndex("CorrectionCashOrderId")
+                        .HasDatabaseName("IX_CashInventories_CorrectionCashOrderId");
+
+                    b.HasIndex("Date")
+                        .HasDatabaseName("IX_CashInventories_Date");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_CashInventory_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_CashInventory_IsDeleted");
+
+                    b.HasIndex("Number")
+                        .IsUnique()
+                        .HasDatabaseName("IX_CashInventories_Number");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_CashInventory_UpdatedAt_Audit");
+
+                    b.ToTable("CashInventories");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.CashOrder", b =>
                 {
                     b.Property<int>("Id")
@@ -2625,6 +2726,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
+                    b.Property<decimal?>("VatAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("VatRate")
+                        .HasColumnType("decimal(5,2)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AccountingType")
@@ -4500,6 +4607,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Batch");
 
                     b.Navigation("MoneyOperation");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.CashInventory", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.CashOrder", "CorrectionCashOrder")
+                        .WithMany()
+                        .HasForeignKey("CorrectionCashOrderId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("CorrectionCashOrder");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.CashOrder", b =>
