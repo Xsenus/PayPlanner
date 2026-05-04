@@ -22,6 +22,7 @@ public static class InvoiceDocumentTemplateEngine
         "92ca4fb24fbf8673ebc6256a299fdb9580ef9f3a64f78a3e3db7209bc226b18f",
         "af28afb12f128c846dd0261081335eb96d8c4b4770947616f8a4f1b17783f534",
         "6df3df7d4529e7073c7f2293989494b8d31f6107ec08f7ced8eb11cd32e31a9d",
+        "86db923aeb55580e373f983d6c99a48d6734669691ecf3d8004cd8cbaa4c99d3",
     };
 
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
@@ -179,6 +180,9 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "seller.documentDirectorPosition", Category = "Продавец", Description = "Должность подписанта", IsRepeating = false },
             new() { Key = "seller.documentDirectorFullName", Category = "Продавец", Description = "ФИО подписанта", IsRepeating = false },
             new() { Key = "seller.documentDirectorShortName", Category = "Продавец", Description = "Краткая подпись подписанта, например Иванов И. И.", IsRepeating = false },
+            new() { Key = "seller.chiefAccountantPosition", Category = "Продавец", Description = "Должность главного бухгалтера", IsRepeating = false },
+            new() { Key = "seller.chiefAccountantFullName", Category = "Продавец", Description = "ФИО главного бухгалтера", IsRepeating = false },
+            new() { Key = "seller.chiefAccountantShortName", Category = "Продавец", Description = "Краткая подпись главного бухгалтера", IsRepeating = false },
             new() { Key = "seller.logoHtml", Category = "Продавец", Description = "HTML-блок логотипа", IsRepeating = false },
             new() { Key = "seller.sealHtml", Category = "Продавец", Description = "HTML-блок печати", IsRepeating = false },
             new() { Key = "seller.signatureHtml", Category = "Продавец", Description = "HTML-блок подписи", IsRepeating = false },
@@ -236,6 +240,12 @@ public static class InvoiceDocumentTemplateEngine
         var directorPosition = !string.IsNullOrWhiteSpace(director?.Position)
             ? director!.Position!
             : "Предприниматель";
+        var chiefAccountant = ParsePerson(mainCompany?.ChiefAccountantJson);
+        var chiefAccountantFullName = BuildPersonFullName(chiefAccountant, directorFullName);
+        var chiefAccountantShortName = BuildPersonShortName(chiefAccountant, chiefAccountantFullName);
+        var chiefAccountantPosition = !string.IsNullOrWhiteSpace(chiefAccountant?.Position)
+            ? chiefAccountant!.Position!
+            : "Главный (старший) бухгалтер";
         var qrCodeHtml = BuildInvoiceQrCodeHtml(payment, seller, total, invoiceDate, number);
         var hasInstallmentSchedule = !string.IsNullOrWhiteSpace(installmentScheduleHtml);
         var dueDateHtml = !hasInstallmentSchedule && payment.Date.Date != invoiceDate.Date
@@ -283,6 +293,9 @@ public static class InvoiceDocumentTemplateEngine
                 ["seller.documentDirectorPosition"] = Encode(directorPosition),
                 ["seller.documentDirectorFullName"] = Encode(directorFullName),
                 ["seller.documentDirectorShortName"] = Encode(directorShortName),
+                ["seller.chiefAccountantPosition"] = Encode(chiefAccountantPosition),
+                ["seller.chiefAccountantFullName"] = Encode(chiefAccountantFullName),
+                ["seller.chiefAccountantShortName"] = Encode(chiefAccountantShortName),
                 ["seller.logoHtml"] = BuildImageHtml(mainCompany?.LogoDataUrl, "Логотип", "logo"),
                 ["seller.sealHtml"] = includeSignatureAndSeal
                     ? BuildImageHtml(mainCompany?.SealDataUrl, "Печать", "seal")
@@ -1621,17 +1634,32 @@ public static class InvoiceDocumentTemplateEngine
       <table class="signature-table">
         <tbody>
           <tr>
-            <td class="v-al-b" style="width: 20%;">{{seller.documentDirectorPosition}}</td>
+            <td class="v-al-b" style="width: 18%;">Руководитель:</td>
+            <td class="signature-line text-c v-al-b" style="width: 24%;">{{seller.documentDirectorPosition}}</td>
             <td style="width: 4%;"></td>
-            <td class="signature-line text-c" style="width: 34%;">{{seller.signatureHtml}}</td>
+            <td class="signature-line text-c" style="width: 24%;">{{seller.signatureHtml}}</td>
             <td class="seal-slot text-c" style="width: 8%;">{{seller.sealHtml}}</td>
-            <td class="signature-line text-c v-al-b" style="width: 34%;">{{seller.documentDirectorShortName}}</td>
+            <td class="signature-line text-c v-al-b" style="width: 22%;">{{seller.documentDirectorShortName}}</td>
           </tr>
           <tr>
-            <td colspan="2" style="width: 24%;"></td>
-            <td class="text-c signature-caption" style="width: 34%;">подпись</td>
+            <td style="width: 18%;"></td>
+            <td class="text-c signature-caption" style="width: 24%;">должность</td>
+            <td style="width: 4%;"></td>
+            <td class="text-c signature-caption" style="width: 24%;">подпись</td>
             <td style="width: 8%;"></td>
-            <td class="text-c signature-caption" style="width: 34%;">расшифровка подписи</td>
+            <td class="text-c signature-caption" style="width: 22%;">расшифровка подписи</td>
+          </tr>
+          <tr>
+            <td class="v-al-b" colspan="3" style="width: 46%;">{{seller.chiefAccountantPosition}}:</td>
+            <td class="signature-line text-c" style="width: 24%;"></td>
+            <td style="width: 8%;"></td>
+            <td class="signature-line text-c v-al-b" style="width: 22%;">{{seller.chiefAccountantShortName}}</td>
+          </tr>
+          <tr>
+            <td colspan="3" style="width: 46%;"></td>
+            <td class="text-c signature-caption" style="width: 24%;">подпись</td>
+            <td style="width: 8%;"></td>
+            <td class="text-c signature-caption" style="width: 22%;">расшифровка подписи</td>
           </tr>
         </tbody>
       </table>

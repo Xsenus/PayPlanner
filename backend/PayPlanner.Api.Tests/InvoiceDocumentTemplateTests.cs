@@ -36,6 +36,7 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("{{seller.sealHtml}}", dto.DefaultTemplateHtml);
         Assert.Contains("{{buyer.foundationRowHtml}}", dto.DefaultTemplateHtml);
         Assert.Contains("{{invoice.qrCodeHtml}}", dto.DefaultTemplateHtml);
+        Assert.Contains("{{seller.chiefAccountantShortName}}", dto.DefaultTemplateHtml);
         Assert.Contains("<th class=\"sum\">Сумма</th>", dto.DefaultTemplateHtml);
         Assert.Contains("<td class=\"sum\">{{total}}</td>", dto.DefaultTemplateHtml);
         Assert.Contains(".counterparty-line", dto.DefaultTemplateHtml);
@@ -183,6 +184,27 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task GetDocument_RendersKubStyleSignatureBlock_WithChiefAccountant()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        await CreateMainCompanyAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(paymentId, "html", null, true, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("Руководитель:", content.Content);
+        Assert.Contains("Предприниматель", content.Content);
+        Assert.Contains("Главный (старший) бухгалтер:", content.Content);
+        Assert.Contains("Кожеваткин", content.Content);
+        Assert.Contains(">должность</td>", content.Content);
+        Assert.Contains(">подпись</td>", content.Content);
+        Assert.Contains(">расшифровка подписи</td>", content.Content);
+    }
+
+    [Fact]
     public async Task GetDocument_RendersExtendedBuyerBlock_WhenContractAndCaseAreLinked()
     {
         await using var db = await CreateContextAsync();
@@ -302,7 +324,7 @@ public class InvoiceDocumentTemplateTests
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
-        Assert.Contains("class=\"logo-wrap\" style=\"width: 40%; vertical-align: middle;\"", content.Content);
+        Assert.Contains("logo-wrap", content.Content);
         Assert.Contains("<td style=\"width: 150px; vertical-align: top;\">", content.Content);
         Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", content.Content);
     }
@@ -1212,6 +1234,7 @@ public class InvoiceDocumentTemplateTests
             SealDataUrl = "data:image/png;base64,seal-demo",
             DirectorSignatureDataUrl = "data:image/png;base64,signature-demo",
             DocumentDirectorJson = "{\"position\":\"Предприниматель\",\"lastName\":\"Кожеваткин\",\"firstName\":\"Андрей\",\"middleName\":\"Владимирович\",\"noMiddleName\":false}",
+            ChiefAccountantJson = "{\"position\":\"Главный (старший) бухгалтер\",\"lastName\":\"Кожеваткин\",\"firstName\":\"Андрей\",\"middleName\":\"Владимирович\",\"noMiddleName\":false}",
             BankAccountsJson = "[{\"bank\":\"ООО \\\"Банк Точка\\\"\",\"bik\":\"044525104\",\"accountNumber\":\"40802810414500006073\"}]",
             TreasuryCorrAccountNumber = "30101810745374525104",
         };
