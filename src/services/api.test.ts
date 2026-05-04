@@ -789,4 +789,48 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
   });
+
+  it('loads bank statement import report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      batchCount: 2,
+      rowsReadTotal: 22,
+      createdRowsTotal: 15,
+      skippedRowsTotal: 4,
+      errorRowsTotal: 3,
+      rollbackRowsTotal: 0,
+      appliedCount: 1,
+      appliedWithErrorsCount: 1,
+      rolledBackCount: 0,
+      rollbackBlockedCount: 0,
+      statuses: [{
+        status: 'AppliedWithErrors',
+        statusLabel: 'Применен с ошибками',
+        batchCount: 1,
+        rowsRead: 12,
+        createdRows: 7,
+        skippedRows: 2,
+        errorRows: 3,
+        rollbackRows: 0,
+        share: 50,
+      }],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getBankStatementImportReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/bank-statement-imports?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+  });
 });

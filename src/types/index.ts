@@ -1162,6 +1162,34 @@ export interface CashOrderReport {
   statuses: CashOrderReportItem[];
 }
 
+export interface BankStatementImportReportItem {
+  status: string;
+  statusLabel: string;
+  batchCount: number;
+  rowsRead: number;
+  createdRows: number;
+  skippedRows: number;
+  errorRows: number;
+  rollbackRows: number;
+  share: number;
+}
+
+export interface BankStatementImportReport {
+  from: string;
+  to: string;
+  batchCount: number;
+  rowsReadTotal: number;
+  createdRowsTotal: number;
+  skippedRowsTotal: number;
+  errorRowsTotal: number;
+  rollbackRowsTotal: number;
+  appliedCount: number;
+  appliedWithErrorsCount: number;
+  rolledBackCount: number;
+  rollbackBlockedCount: number;
+  statuses: BankStatementImportReportItem[];
+}
+
 export interface BankStatementImportCreatedOperation {
   id: number;
   date: string;

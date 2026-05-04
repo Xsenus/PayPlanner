@@ -2325,6 +2325,14 @@ export class ApiService {
     return this.request<CashOrderReport>(`/reports/cash-orders${q}`);
   }
 
+  async getBankStatementImportReport(params?: {
+    from?: string;
+    to?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<BankStatementImportReport>(`/reports/bank-statement-imports${q}`);
+  }
+
   /** Упрощённый вызов: сводка по клиенту. */
   async getClientSummaryStats(
     clientId: number,
@@ -2918,6 +2926,7 @@ import type {
   SummaryStatus,
   BankStatementAutoImportRunResult,
   BankStatementImportResult,
+  BankStatementImportReport,
   CashBookSummary,
   CashInventory,
   CashInventoryCreateRequest,

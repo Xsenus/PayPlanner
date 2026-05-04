@@ -1073,6 +1073,72 @@ public class ReportsControllerTests
             });
     }
 
+    [Fact]
+    public async Task BankStatementImports_GroupsBatchesByStatus()
+    {
+        await using var db = await CreateContextAsync();
+        db.BankStatementImportBatches.AddRange(
+            BankStatementImportBatch("may-ok.txt", BankStatementImportBatchStatus.Applied, 10, 8, 2, 0, 0, new DateTime(2026, 5, 1, 10, 0, 0)),
+            BankStatementImportBatch("may-errors.txt", BankStatementImportBatchStatus.AppliedWithErrors, 12, 7, 2, 3, 0, new DateTime(2026, 5, 2, 11, 0, 0)),
+            BankStatementImportBatch("may-rolled.txt", BankStatementImportBatchStatus.RolledBack, 5, 5, 0, 0, 5, new DateTime(2026, 5, 3, 12, 0, 0)),
+            BankStatementImportBatch("may-blocked.txt", BankStatementImportBatchStatus.RollbackBlocked, 4, 3, 0, 1, 0, new DateTime(2026, 5, 4, 13, 0, 0)),
+            BankStatementImportBatch("old.txt", BankStatementImportBatchStatus.Applied, 99, 99, 0, 0, 0, new DateTime(2026, 4, 30, 23, 59, 59)));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.BankStatementImports(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<BankStatementImportReportDto>(ok.Value);
+        Assert.Equal(4, report.BatchCount);
+        Assert.Equal(31, report.RowsReadTotal);
+        Assert.Equal(23, report.CreatedRowsTotal);
+        Assert.Equal(4, report.SkippedRowsTotal);
+        Assert.Equal(4, report.ErrorRowsTotal);
+        Assert.Equal(5, report.RollbackRowsTotal);
+        Assert.Equal(1, report.AppliedCount);
+        Assert.Equal(1, report.AppliedWithErrorsCount);
+        Assert.Equal(1, report.RolledBackCount);
+        Assert.Equal(1, report.RollbackBlockedCount);
+
+        Assert.Collection(
+            report.Statuses,
+            item =>
+            {
+                Assert.Equal(BankStatementImportBatchStatus.AppliedWithErrors, item.Status);
+                Assert.Equal("Применен с ошибками", item.StatusLabel);
+                Assert.Equal(12, item.RowsRead);
+                Assert.Equal(3, item.ErrorRows);
+                Assert.Equal(25m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(BankStatementImportBatchStatus.RollbackBlocked, item.Status);
+                Assert.Equal("Откат заблокирован", item.StatusLabel);
+                Assert.Equal(4, item.RowsRead);
+                Assert.Equal(1, item.ErrorRows);
+                Assert.Equal(25m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(BankStatementImportBatchStatus.Applied, item.Status);
+                Assert.Equal("Применен", item.StatusLabel);
+                Assert.Equal(10, item.RowsRead);
+                Assert.Equal(0, item.ErrorRows);
+                Assert.Equal(25m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(BankStatementImportBatchStatus.RolledBack, item.Status);
+                Assert.Equal("Откатан", item.StatusLabel);
+                Assert.Equal(5, item.RollbackRows);
+                Assert.Equal(25m, item.Share);
+            });
+    }
+
     private static MoneyOperation Operation(
         MoneyOperationSource source,
         MoneyOperationDirection direction,
@@ -1125,6 +1191,29 @@ public class ReportsControllerTests
             MatchStatus = matchStatus,
             Currency = currency,
             CreatedAt = DateTime.UtcNow,
+        };
+
+    private static BankStatementImportBatch BankStatementImportBatch(
+        string fileName,
+        string status,
+        int rowsRead,
+        int createdRows,
+        int skippedRows,
+        int errorRows,
+        int rollbackRows,
+        DateTime createdAt)
+        => new()
+        {
+            FileName = fileName,
+            FileHash = $"{fileName}-hash",
+            FileSize = rowsRead * 100,
+            Status = status,
+            RowsRead = rowsRead,
+            CreatedRows = createdRows,
+            SkippedRows = skippedRows,
+            ErrorRows = errorRows,
+            RollbackRows = rollbackRows,
+            CreatedAt = createdAt,
         };
 
     private static CashOrder CashOrder(

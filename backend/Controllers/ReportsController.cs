@@ -440,6 +440,28 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("bank-statement-imports")]
+    public async Task<ActionResult<BankStatementImportReportDto>> BankStatementImports(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildBankStatementImportReportAsync(start, end, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
         DateTime to,
@@ -2041,6 +2063,85 @@ public class ReportsController : ControllerBase
             CashOrderStatus.Posted => "Проведен",
             CashOrderStatus.Cancelled => "Отменен",
             _ => status.ToString(),
+        };
+
+    private async Task<BankStatementImportReportDto> BuildBankStatementImportReportAsync(
+        DateTime from,
+        DateTime to,
+        CancellationToken ct)
+    {
+        var endExclusive = to.AddDays(1);
+        var rows = await _db.BankStatementImportBatches
+            .AsNoTracking()
+            .Where(item => item.CreatedAt >= from && item.CreatedAt < endExclusive)
+            .Select(item => new
+            {
+                item.Status,
+                item.RowsRead,
+                item.CreatedRows,
+                item.SkippedRows,
+                item.ErrorRows,
+                item.RollbackRows,
+            })
+            .ToListAsync(ct);
+
+        var statuses = rows
+            .GroupBy(item => item.Status)
+            .Select(group => new BankStatementImportReportItemDto
+            {
+                Status = group.Key,
+                StatusLabel = FormatBankStatementImportStatusLabel(group.Key),
+                BatchCount = group.Count(),
+                RowsRead = group.Sum(item => item.RowsRead),
+                CreatedRows = group.Sum(item => item.CreatedRows),
+                SkippedRows = group.Sum(item => item.SkippedRows),
+                ErrorRows = group.Sum(item => item.ErrorRows),
+                RollbackRows = group.Sum(item => item.RollbackRows),
+                Share = rows.Count > 0
+                    ? Math.Round((decimal)group.Count() / rows.Count * 100m, 1, MidpointRounding.AwayFromZero)
+                    : 0m,
+            })
+            .OrderBy(item => BankStatementImportStatusSortOrder(item.Status))
+            .ThenByDescending(item => item.ErrorRows)
+            .ThenByDescending(item => item.RowsRead)
+            .ToList();
+
+        return new BankStatementImportReportDto
+        {
+            From = from,
+            To = to,
+            BatchCount = rows.Count,
+            RowsReadTotal = rows.Sum(item => item.RowsRead),
+            CreatedRowsTotal = rows.Sum(item => item.CreatedRows),
+            SkippedRowsTotal = rows.Sum(item => item.SkippedRows),
+            ErrorRowsTotal = rows.Sum(item => item.ErrorRows),
+            RollbackRowsTotal = rows.Sum(item => item.RollbackRows),
+            AppliedCount = rows.Count(item => item.Status == BankStatementImportBatchStatus.Applied),
+            AppliedWithErrorsCount = rows.Count(item => item.Status == BankStatementImportBatchStatus.AppliedWithErrors),
+            RolledBackCount = rows.Count(item => item.Status == BankStatementImportBatchStatus.RolledBack),
+            RollbackBlockedCount = rows.Count(item => item.Status == BankStatementImportBatchStatus.RollbackBlocked),
+            Statuses = statuses,
+        };
+    }
+
+    private static int BankStatementImportStatusSortOrder(string status)
+        => status switch
+        {
+            BankStatementImportBatchStatus.AppliedWithErrors => 0,
+            BankStatementImportBatchStatus.RollbackBlocked => 1,
+            BankStatementImportBatchStatus.Applied => 2,
+            BankStatementImportBatchStatus.RolledBack => 3,
+            _ => 4,
+        };
+
+    private static string FormatBankStatementImportStatusLabel(string status)
+        => status switch
+        {
+            BankStatementImportBatchStatus.Applied => "Применен",
+            BankStatementImportBatchStatus.AppliedWithErrors => "Применен с ошибками",
+            BankStatementImportBatchStatus.RolledBack => "Откатан",
+            BankStatementImportBatchStatus.RollbackBlocked => "Откат заблокирован",
+            _ => status,
         };
 
     private sealed class CashFlowAccountQueryRow
