@@ -391,7 +391,7 @@ export function ContractModal({
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Workflow</span>
+              <span className="font-medium text-slate-700">Статус документа</span>
               <select
                 value={form.status}
                 onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value as ContractStatus }))}

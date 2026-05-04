@@ -23,6 +23,14 @@ describe('extractDisplayErrorMessage', () => {
     expect(message).toBe('Не удалось сохранить профиль');
   });
 
+  it('falls back for browser-level network errors', () => {
+    const error = new Error('Failed to fetch');
+
+    const message = extractDisplayErrorMessage(error, 'Не удалось загрузить данные.');
+
+    expect(message).toBe('Не удалось загрузить данные.');
+  });
+
   it('returns the stripped plain-text payload when it is not JSON', () => {
     const error = new Error('HTTP 409 - Клиент с таким email уже существует');
 

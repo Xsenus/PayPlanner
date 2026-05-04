@@ -2610,7 +2610,7 @@ export function InvoiceModal({
 
       if (action === 'sendToSigning' || action === 'markSigned') {
         if (!invoice?.id) {
-          throw new Error('Сначала сохраните счёт, затем можно менять workflow подписания.');
+          throw new Error('Сначала сохраните счёт, затем можно менять статус подписания.');
         }
 
         const updated = action === 'sendToSigning'
@@ -2626,7 +2626,7 @@ export function InvoiceModal({
           action === 'sendToSigning'
             ? 'Счёт отправлен на подписание.'
             : 'Счёт отмечен подписанным.',
-          'Workflow счёта обновлён',
+          'Статус счёта обновлён',
         );
         return;
       }
@@ -3672,7 +3672,7 @@ export function InvoiceModal({
                               </label>
 
                               <label className="flex flex-col gap-1 text-sm">
-                                <span className="flex min-h-7 items-center font-medium text-slate-700">Workflow</span>
+                                <span className="flex min-h-7 items-center font-medium text-slate-700">Статус документа</span>
                                 <select
                                   value={form.workflowStatus}
                                   onChange={handleChange('workflowStatus')}

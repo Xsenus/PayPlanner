@@ -734,9 +734,9 @@ export function ContractDetailPage({
 
       setContract(updatedContract);
       setAmountInput(formatAmountInput(updatedContract.billingMode === 'Fixed' ? updatedContract.amount : null));
-      toast.success(successMessage, 'Workflow договора обновлён');
+      toast.success(successMessage, 'Статус договора обновлён');
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось обновить workflow договора'), 'Договоры');
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось обновить статус договора'), 'Договоры');
     } finally {
       setWorkflowSaving(false);
     }
@@ -1044,7 +1044,7 @@ export function ContractDetailPage({
           </div>
         </div>
         <div className="rounded border bg-white p-4">
-          <div className="text-xs uppercase tracking-wide text-slate-500">Workflow</div>
+          <div className="text-xs uppercase tracking-wide text-slate-500">Статус документа</div>
           <div className="mt-2 text-xl font-semibold text-slate-900">
             {contractStatusLabels[contract.status ?? 'Draft']}
           </div>

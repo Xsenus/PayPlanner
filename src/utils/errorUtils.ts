@@ -38,6 +38,10 @@ export function extractDisplayErrorMessage(
   fieldLabels?: Record<string, string>,
 ): string {
   const raw = error instanceof Error ? error.message : String(error ?? '');
+  if (/^(failed to fetch|networkerror|load failed)$/i.test(raw.trim())) {
+    return fallback;
+  }
+
   const stripped = stripHttpEnvelope(raw);
   const parsed = tryParseValidationPayload(stripped) ?? tryParseValidationPayload(raw);
 

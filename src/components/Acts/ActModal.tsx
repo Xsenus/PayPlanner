@@ -1360,7 +1360,7 @@ export function ActModal({
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-slate-700">Workflow</span>
+                  <span className="font-medium text-slate-700">Статус документа</span>
                   <select
                     value={form.workflowStatus}
                     onChange={handleChange('workflowStatus')}
