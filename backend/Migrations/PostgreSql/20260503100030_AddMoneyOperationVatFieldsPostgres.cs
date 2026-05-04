@@ -10,17 +10,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<decimal>(
-                name: "VatAmount",
-                table: "MoneyOperations",
-                type: "numeric(18,2)",
-                nullable: true);
-
-            migrationBuilder.AddColumn<decimal>(
-                name: "VatRate",
-                table: "MoneyOperations",
-                type: "numeric(5,2)",
-                nullable: true);
+            migrationBuilder.Sql("""
+                ALTER TABLE "MoneyOperations"
+                    ADD COLUMN IF NOT EXISTS "VatAmount" numeric(18,2),
+                    ADD COLUMN IF NOT EXISTS "VatRate" numeric(5,2);
+                """);
         }
 
         /// <inheritdoc />
