@@ -542,6 +542,50 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('source=Bank');
   });
 
+  it('loads invoice status report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      invoiceCount: 2,
+      incomeCount: 1,
+      expenseCount: 1,
+      paidCount: 1,
+      overdueCount: 0,
+      totalAmount: 5000,
+      paidAmount: 3000,
+      outstandingAmount: 2000,
+      statuses: [{
+        status: 'Paid',
+        statusLabel: 'Оплачен',
+        invoiceCount: 1,
+        incomeCount: 1,
+        expenseCount: 0,
+        paidCount: 1,
+        overdueCount: 0,
+        totalAmount: 3000,
+        paidAmount: 3000,
+        outstandingAmount: 0,
+        share: 60,
+      }],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getInvoiceStatusReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/invoice-statuses?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+  });
+
   it('loads payment order report with filters', async () => {
     const payload = {
       from: '2026-05-01T00:00:00',

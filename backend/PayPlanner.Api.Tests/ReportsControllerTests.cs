@@ -738,6 +738,89 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task InvoiceStatuses_GroupsInvoicesByWorkflowStatus()
+    {
+        await using var db = await CreateContextAsync();
+        db.Payments.AddRange(
+            InvoicePayment("INV-1", PaymentType.Income, PaymentStatus.Pending, InvoiceWorkflowStatus.Draft, 1_000m, 0m, new DateTime(2026, 5, 1)),
+            InvoicePayment("INV-2", PaymentType.Expense, PaymentStatus.Processing, InvoiceWorkflowStatus.OnSigning, 2_000m, 500m, new DateTime(2026, 5, 2)),
+            InvoicePayment("INV-3", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 3_000m, 3_000m, new DateTime(2026, 5, 3)),
+            InvoicePayment("INV-4", PaymentType.Income, PaymentStatus.Pending, InvoiceWorkflowStatus.PartiallyPaid, 4_000m, 1_500m, new DateTime(2026, 5, 4)),
+            InvoicePayment("INV-5", PaymentType.Income, PaymentStatus.Overdue, InvoiceWorkflowStatus.Overdue, 5_000m, 1_000m, new DateTime(2026, 5, 5)),
+            InvoicePayment("INV-6", PaymentType.Expense, PaymentStatus.Cancelled, InvoiceWorkflowStatus.Cancelled, 6_000m, 100m, new DateTime(2026, 5, 6)),
+            InvoicePayment("INV-OLD", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 99_999m, 99_999m, new DateTime(2026, 4, 30)),
+            InvoicePayment("PAY-1", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 88_888m, 88_888m, new DateTime(2026, 5, 7), DocumentKind.Payment));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.InvoiceStatuses(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<InvoiceStatusReportDto>(ok.Value);
+        Assert.Equal(6, report.InvoiceCount);
+        Assert.Equal(4, report.IncomeCount);
+        Assert.Equal(2, report.ExpenseCount);
+        Assert.Equal(1, report.PaidCount);
+        Assert.Equal(1, report.OverdueCount);
+        Assert.Equal(21_000m, report.TotalAmount);
+        Assert.Equal(6_100m, report.PaidAmount);
+        Assert.Equal(14_900m, report.OutstandingAmount);
+
+        Assert.Collection(
+            report.Statuses,
+            item =>
+            {
+                Assert.Equal(InvoiceWorkflowStatus.Overdue, item.Status);
+                Assert.Equal("Просрочен", item.StatusLabel);
+                Assert.Equal(5_000m, item.TotalAmount);
+                Assert.Equal(4_000m, item.OutstandingAmount);
+                Assert.Equal(23.8m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(InvoiceWorkflowStatus.OnSigning, item.Status);
+                Assert.Equal("На подписании", item.StatusLabel);
+                Assert.Equal(2_000m, item.TotalAmount);
+                Assert.Equal(500m, item.PaidAmount);
+                Assert.Equal(9.5m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, item.Status);
+                Assert.Equal("Частично оплачен", item.StatusLabel);
+                Assert.Equal(4_000m, item.TotalAmount);
+                Assert.Equal(2_500m, item.OutstandingAmount);
+                Assert.Equal(19.0m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(InvoiceWorkflowStatus.Draft, item.Status);
+                Assert.Equal("Черновик", item.StatusLabel);
+                Assert.Equal(1_000m, item.TotalAmount);
+                Assert.Equal(4.8m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(InvoiceWorkflowStatus.Paid, item.Status);
+                Assert.Equal("Оплачен", item.StatusLabel);
+                Assert.Equal(3_000m, item.TotalAmount);
+                Assert.Equal(0m, item.OutstandingAmount);
+                Assert.Equal(14.3m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(InvoiceWorkflowStatus.Cancelled, item.Status);
+                Assert.Equal("Аннулирован", item.StatusLabel);
+                Assert.Equal(6_000m, item.TotalAmount);
+                Assert.Equal(5_900m, item.OutstandingAmount);
+                Assert.Equal(28.6m, item.Share);
+            });
+    }
+
+    [Fact]
     public async Task PaymentOrders_GroupsFactOperationsByPaymentOrderNumber()
     {
         await using var db = await CreateContextAsync();
@@ -1261,6 +1344,31 @@ public class ReportsControllerTests
             Purpose = purpose,
             MatchStatus = matchStatus,
             Currency = currency,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+    private static Payment InvoicePayment(
+        string account,
+        PaymentType type,
+        PaymentStatus status,
+        string workflowStatus,
+        decimal amount,
+        decimal paidAmount,
+        DateTime date,
+        DocumentKind documentKind = DocumentKind.Invoice)
+        => new()
+        {
+            Account = account,
+            AccountDate = date,
+            Amount = amount,
+            PaidAmount = paidAmount,
+            Date = date,
+            PlannedDate = date,
+            Status = status,
+            Type = type,
+            DocumentKind = documentKind,
+            InvoiceWorkflowStatus = workflowStatus,
+            IsPaid = status == PaymentStatus.Completed,
             CreatedAt = DateTime.UtcNow,
         };
 

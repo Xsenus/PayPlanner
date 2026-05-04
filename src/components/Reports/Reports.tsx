@@ -36,6 +36,7 @@ import { useAdvanceReport } from '../../hooks/useAdvanceReport';
 import { usePaymentPriorityReport } from '../../hooks/usePaymentPriorityReport';
 import { usePaidAccountReport } from '../../hooks/usePaidAccountReport';
 import { usePaidInvoiceReport } from '../../hooks/usePaidInvoiceReport';
+import { useInvoiceStatusReport } from '../../hooks/useInvoiceStatusReport';
 import { usePaymentOrderReport } from '../../hooks/usePaymentOrderReport';
 import { usePaymentPurposeReport } from '../../hooks/usePaymentPurposeReport';
 import { useMatchStatusReport } from '../../hooks/useMatchStatusReport';
@@ -46,7 +47,7 @@ import { useBankStatementImportReport } from '../../hooks/useBankStatementImport
 import { useSpreadsheetImportReport } from '../../hooks/useSpreadsheetImportReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { AdvanceReport, BankStatementImportReport, CashBookSummary, CashFlowReport, CashOrderReport, CounterpartyReport, CurrencyReport, DirectionReport, JournalStatusReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
+import type { AdvanceReport, BankStatementImportReport, CashBookSummary, CashFlowReport, CashOrderReport, CounterpartyReport, CurrencyReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -2128,6 +2129,137 @@ function PaidInvoiceReportSection({
   );
 }
 
+function InvoiceStatusReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: InvoiceStatusReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const rows = report?.statuses ?? [];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-violet-100 bg-violet-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-violet-700">
+            <CreditCardIcon className="h-3.5 w-3.5" />
+            Статусы счетов
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по статусам счетов</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Сводка счетов по этапам документооборота: сумма, оплачено, остаток, просрочка и распределение входящих и исходящих счетов.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по статусам счетов...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по статусам счетов</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-5">
+            <MetricCard
+              title="Счетов"
+              value={String(report.invoiceCount)}
+              icon={CreditCardIcon}
+              tone="rate"
+              subtitle={`${report.incomeCount} вход. · ${report.expenseCount} исход.`}
+            />
+            <MetricCard
+              title="Сумма"
+              value={formatCurrency(report.totalAmount)}
+              icon={Banknote}
+              tone="rate"
+              subtitle="Все счета периода"
+            />
+            <MetricCard
+              title="Оплачено"
+              value={formatCurrency(report.paidAmount)}
+              icon={CheckCircle2}
+              tone="income"
+              subtitle={`${report.paidCount} счетов закрыто`}
+            />
+            <MetricCard
+              title="Остаток"
+              value={formatCurrency(report.outstandingAmount)}
+              icon={Clock3}
+              tone="profit"
+              subtitle="К оплате по счетам"
+            />
+            <MetricCard
+              title="Просрочено"
+              value={String(report.overdueCount)}
+              icon={AlertTriangle}
+              tone="expense"
+              subtitle="Требуют внимания"
+            />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
+            {rows.length > 0 ? rows.map((row) => (
+              <div key={row.status} className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-950">{row.statusLabel}</h3>
+                    <div className="mt-1 text-sm text-slate-500">
+                      {row.invoiceCount} счетов · {row.share}% суммы
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-slate-500">Сумма</div>
+                    <div className="font-semibold text-slate-950">{formatCurrency(row.totalAmount)}</div>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="text-xs text-emerald-700">Оплачено</div>
+                    <div className="mt-1 font-semibold text-emerald-800">{formatCurrency(row.paidAmount)}</div>
+                  </div>
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="text-xs text-rose-700">Остаток</div>
+                    <div className="mt-1 font-semibold text-rose-800">{formatCurrency(row.outstandingAmount)}</div>
+                  </div>
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="text-xs text-slate-500">Входящие</div>
+                    <div className="mt-1 font-semibold text-slate-900">{row.incomeCount}</div>
+                  </div>
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="text-xs text-slate-500">Исходящие</div>
+                    <div className="mt-1 font-semibold text-slate-900">{row.expenseCount}</div>
+                  </div>
+                </div>
+              </div>
+            )) : (
+              <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500 xl:col-span-3">
+                Нет счетов за выбранный период.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function PaymentOrderReportSection({
   report,
   loading,
@@ -3210,6 +3342,12 @@ export function Reports() {
     reload: reloadPaidInvoiceReport,
   } = usePaidInvoiceReport(cashFlowDates);
   const {
+    report: invoiceStatusReport,
+    loading: invoiceStatusReportLoading,
+    error: invoiceStatusReportError,
+    reload: reloadInvoiceStatusReport,
+  } = useInvoiceStatusReport(cashFlowDates);
+  const {
     report: paymentOrderReport,
     loading: paymentOrderReportLoading,
     error: paymentOrderReportError,
@@ -3667,6 +3805,13 @@ export function Reports() {
               loading={paidInvoiceReportLoading}
               error={paidInvoiceReportError}
               onReload={reloadPaidInvoiceReport}
+            />
+
+            <InvoiceStatusReportSection
+              report={invoiceStatusReport}
+              loading={invoiceStatusReportLoading}
+              error={invoiceStatusReportError}
+              onReload={reloadInvoiceStatusReport}
             />
 
             <PaymentOrderReportSection

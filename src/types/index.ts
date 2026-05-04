@@ -1020,6 +1020,34 @@ export interface PaidInvoiceReport {
   invoices: PaidInvoiceReportItem[];
 }
 
+export interface InvoiceStatusReportItem {
+  status: InvoiceWorkflowStatus | string;
+  statusLabel: string;
+  invoiceCount: number;
+  incomeCount: number;
+  expenseCount: number;
+  paidCount: number;
+  overdueCount: number;
+  totalAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  share: number;
+}
+
+export interface InvoiceStatusReport {
+  from: string;
+  to: string;
+  invoiceCount: number;
+  incomeCount: number;
+  expenseCount: number;
+  paidCount: number;
+  overdueCount: number;
+  totalAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  statuses: InvoiceStatusReportItem[];
+}
+
 export interface PaymentOrderReportItem {
   paymentOrderNumber: string;
   income: number;

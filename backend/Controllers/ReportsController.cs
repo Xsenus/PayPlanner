@@ -303,6 +303,28 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("invoice-statuses")]
+    public async Task<ActionResult<InvoiceStatusReportDto>> InvoiceStatuses(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildInvoiceStatusReportAsync(start, end, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     [HttpGet("payment-orders")]
     public async Task<ActionResult<PaymentOrderReportDto>> PaymentOrders(
         [FromQuery] DateTime? from,
@@ -1550,6 +1572,117 @@ public class ReportsController : ControllerBase
         => string.IsNullOrWhiteSpace(paidInvoiceNumber)
             ? "Без номера счета"
             : paidInvoiceNumber.Trim();
+
+    private async Task<InvoiceStatusReportDto> BuildInvoiceStatusReportAsync(
+        DateTime from,
+        DateTime to,
+        CancellationToken ct)
+    {
+        var rows = await _db.Payments
+            .AsNoTracking()
+            .Where(item => item.DocumentKind == DocumentKind.Invoice && item.Date >= from && item.Date <= to)
+            .Select(item => new
+            {
+                item.Type,
+                item.Status,
+                WorkflowStatus = item.InvoiceWorkflowStatus,
+                item.Amount,
+                item.PaidAmount,
+            })
+            .ToListAsync(ct);
+
+        var totalAmount = rows.Sum(item => item.Amount);
+        var statuses = rows
+            .Select(item => new
+            {
+                item.Type,
+                item.Status,
+                WorkflowStatus = NormalizeInvoiceReportStatus(item.WorkflowStatus, item.Status, item.PaidAmount, item.Amount),
+                item.Amount,
+                PaidAmount = Math.Min(item.PaidAmount, item.Amount),
+                OutstandingAmount = item.Amount > item.PaidAmount
+                    ? Math.Round(item.Amount - item.PaidAmount, 2)
+                    : 0m,
+            })
+            .GroupBy(item => item.WorkflowStatus, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var statusTotal = group.Sum(item => item.Amount);
+
+                return new InvoiceStatusReportItemDto
+                {
+                    Status = group.First().WorkflowStatus,
+                    StatusLabel = FormatInvoiceWorkflowStatusLabel(group.First().WorkflowStatus),
+                    InvoiceCount = group.Count(),
+                    IncomeCount = group.Count(item => item.Type == PaymentType.Income),
+                    ExpenseCount = group.Count(item => item.Type == PaymentType.Expense),
+                    PaidCount = group.Count(item => item.Status == PaymentStatus.Completed),
+                    OverdueCount = group.Count(item => item.Status == PaymentStatus.Overdue),
+                    TotalAmount = statusTotal,
+                    PaidAmount = group.Sum(item => item.PaidAmount),
+                    OutstandingAmount = group.Sum(item => item.OutstandingAmount),
+                    Share = totalAmount > 0m
+                        ? Math.Round(statusTotal / totalAmount * 100m, 1, MidpointRounding.AwayFromZero)
+                        : 0m,
+                };
+            })
+            .OrderBy(item => InvoiceWorkflowStatusSortOrder(item.Status))
+            .ThenByDescending(item => item.TotalAmount)
+            .ToList();
+
+        return new InvoiceStatusReportDto
+        {
+            From = from,
+            To = to,
+            InvoiceCount = rows.Count,
+            IncomeCount = rows.Count(item => item.Type == PaymentType.Income),
+            ExpenseCount = rows.Count(item => item.Type == PaymentType.Expense),
+            PaidCount = rows.Count(item => item.Status == PaymentStatus.Completed),
+            OverdueCount = rows.Count(item => item.Status == PaymentStatus.Overdue),
+            TotalAmount = totalAmount,
+            PaidAmount = rows.Sum(item => Math.Min(item.PaidAmount, item.Amount)),
+            OutstandingAmount = rows.Sum(item => item.Amount > item.PaidAmount
+                ? Math.Round(item.Amount - item.PaidAmount, 2)
+                : 0m),
+            Statuses = statuses,
+        };
+    }
+
+    private static string NormalizeInvoiceReportStatus(
+        string? workflowStatus,
+        PaymentStatus paymentStatus,
+        decimal paidAmount,
+        decimal amount)
+    {
+        var normalized = InvoiceWorkflowStatus.Normalize(workflowStatus);
+        return normalized ?? InvoiceWorkflowStatus.FromPaymentStatus(paymentStatus, paidAmount, amount);
+    }
+
+    private static int InvoiceWorkflowStatusSortOrder(string status)
+        => status switch
+        {
+            InvoiceWorkflowStatus.Overdue => 0,
+            InvoiceWorkflowStatus.OnSigning => 1,
+            InvoiceWorkflowStatus.SignedByClient => 2,
+            InvoiceWorkflowStatus.PartiallyPaid => 3,
+            InvoiceWorkflowStatus.Draft => 4,
+            InvoiceWorkflowStatus.Paid => 5,
+            InvoiceWorkflowStatus.Cancelled => 6,
+            _ => 7,
+        };
+
+    private static string FormatInvoiceWorkflowStatusLabel(string status)
+        => status switch
+        {
+            InvoiceWorkflowStatus.Draft => "Черновик",
+            InvoiceWorkflowStatus.OnSigning => "На подписании",
+            InvoiceWorkflowStatus.SignedByClient => "Подписан клиентом",
+            InvoiceWorkflowStatus.Paid => "Оплачен",
+            InvoiceWorkflowStatus.PartiallyPaid => "Частично оплачен",
+            InvoiceWorkflowStatus.Overdue => "Просрочен",
+            InvoiceWorkflowStatus.Cancelled => "Аннулирован",
+            _ => status,
+        };
 
     private async Task<PaymentOrderReportDto> BuildPaymentOrderReportAsync(
         DateTime from,
