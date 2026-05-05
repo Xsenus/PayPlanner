@@ -128,6 +128,7 @@ public class ClientsControllerTests
         Assert.Equal(1, total);
         Assert.Equal(target.Id, item.Id);
         Assert.Equal(2, item.CasesCount);
+        Assert.Equal(2, item.Cases.Count);
         Assert.Equal(1, item.ContractsCount);
         Assert.Equal(2, item.InvoicesCount);
     }

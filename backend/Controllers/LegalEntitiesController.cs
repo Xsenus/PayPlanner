@@ -1262,10 +1262,9 @@ public class LegalEntitiesController : ControllerBase
             ? new Dictionary<int, int>()
             : await _db.ClientCases
                 .AsNoTracking()
-                .Where(clientCase => clientCase.Client != null
-                    && clientCase.Client.LegalEntityId.HasValue
-                    && itemIds.Contains(clientCase.Client.LegalEntityId.Value))
-                .GroupBy(clientCase => clientCase.Client!.LegalEntityId!.Value)
+                .Where(clientCase => clientCase.LegalEntityId.HasValue
+                    && itemIds.Contains(clientCase.LegalEntityId.Value))
+                .GroupBy(clientCase => clientCase.LegalEntityId!.Value)
                 .Select(group => new { LegalEntityId = group.Key, Count = group.Count() })
                 .ToDictionaryAsync(item => item.LegalEntityId, item => item.Count, ct);
 
@@ -1276,31 +1275,29 @@ public class LegalEntitiesController : ControllerBase
                 .AsNoTracking()
                 .Where(payment => payment.DocumentKind == DocumentKind.Invoice)
                 .Where(payment =>
-                    (payment.Client != null
-                        && payment.Client.LegalEntityId.HasValue
-                        && itemIds.Contains(payment.Client.LegalEntityId.Value)) ||
-                    (payment.ExpenseClient != null
-                        && payment.ExpenseClient.LegalEntityId.HasValue
-                        && itemIds.Contains(payment.ExpenseClient.LegalEntityId.Value)))
+                    (payment.LegalEntityId.HasValue
+                        && itemIds.Contains(payment.LegalEntityId.Value)) ||
+                    (payment.ExpenseLegalEntityId.HasValue
+                        && itemIds.Contains(payment.ExpenseLegalEntityId.Value)))
                 .Select(payment => new
                 {
-                    ClientLegalEntityId = payment.Client != null ? payment.Client.LegalEntityId : null,
-                    ExpenseClientLegalEntityId = payment.ExpenseClient != null ? payment.ExpenseClient.LegalEntityId : null,
+                    payment.LegalEntityId,
+                    payment.ExpenseLegalEntityId,
                 })
                 .ToListAsync(ct);
 
             foreach (var row in invoiceRows)
             {
-                if (row.ClientLegalEntityId.HasValue && itemIds.Contains(row.ClientLegalEntityId.Value))
+                if (row.LegalEntityId.HasValue && itemIds.Contains(row.LegalEntityId.Value))
                 {
-                    invoicesCountByLegalEntity[row.ClientLegalEntityId.Value] = invoicesCountByLegalEntity.GetValueOrDefault(row.ClientLegalEntityId.Value) + 1;
+                    invoicesCountByLegalEntity[row.LegalEntityId.Value] = invoicesCountByLegalEntity.GetValueOrDefault(row.LegalEntityId.Value) + 1;
                 }
 
-                if (row.ExpenseClientLegalEntityId.HasValue
-                    && itemIds.Contains(row.ExpenseClientLegalEntityId.Value)
-                    && row.ExpenseClientLegalEntityId != row.ClientLegalEntityId)
+                if (row.ExpenseLegalEntityId.HasValue
+                    && itemIds.Contains(row.ExpenseLegalEntityId.Value)
+                    && row.ExpenseLegalEntityId != row.LegalEntityId)
                 {
-                    invoicesCountByLegalEntity[row.ExpenseClientLegalEntityId.Value] = invoicesCountByLegalEntity.GetValueOrDefault(row.ExpenseClientLegalEntityId.Value) + 1;
+                    invoicesCountByLegalEntity[row.ExpenseLegalEntityId.Value] = invoicesCountByLegalEntity.GetValueOrDefault(row.ExpenseLegalEntityId.Value) + 1;
                 }
             }
         }
@@ -1341,6 +1338,98 @@ public class LegalEntitiesController : ControllerBase
         }
 
         return Ok(MapDetail(entity));
+    }
+
+    [HttpGet("{id:int}/case-finance-summaries")]
+    public async Task<ActionResult<IEnumerable<ClientCaseFinanceSummaryDto>>> GetCaseFinanceSummaries(int id, CancellationToken ct)
+    {
+        var visibleQuery = await ApplyCompanyVisibilityAsync(_db.LegalEntities.AsQueryable(), ct);
+        var exists = await visibleQuery.AsNoTracking().AnyAsync(entity => entity.Id == id, ct);
+        if (!exists)
+        {
+            return NotFound();
+        }
+
+        var cases = await _db.ClientCases
+            .AsNoTracking()
+            .Where(clientCase => clientCase.LegalEntityId == id)
+            .OrderByDescending(clientCase => clientCase.CreatedAt)
+            .ThenByDescending(clientCase => clientCase.Id)
+            .Select(clientCase => new
+            {
+                clientCase.Id,
+                clientCase.Title,
+                clientCase.Status,
+                clientCase.CreatedAt,
+            })
+            .ToListAsync(ct);
+
+        if (cases.Count == 0)
+        {
+            return Ok(Array.Empty<ClientCaseFinanceSummaryDto>());
+        }
+
+        var caseIds = cases.Select(item => item.Id).ToList();
+        var caseIdSet = caseIds.ToHashSet();
+        var summaries = cases.ToDictionary(
+            item => item.Id,
+            item => new ClientCaseFinanceSummaryDto
+            {
+                CaseId = item.Id,
+                CaseTitle = item.Title,
+                CaseStatus = item.Status.ToString(),
+                CaseCreatedAt = item.CreatedAt,
+            });
+
+        var payments = await _db.Payments
+            .AsNoTracking()
+            .Include(payment => payment.InvoiceClientCases)
+            .Where(payment => payment.Status != PaymentStatus.Cancelled)
+            .Where(payment =>
+                (payment.Type == PaymentType.Income && payment.LegalEntityId == id) ||
+                (payment.Type == PaymentType.Expense &&
+                    (payment.ExpenseLegalEntityId == id ||
+                     (payment.ExpenseLegalEntityId == null && payment.LegalEntityId == id))))
+            .Where(payment =>
+                (payment.ClientCaseId.HasValue && caseIds.Contains(payment.ClientCaseId.Value)) ||
+                payment.InvoiceClientCases.Any(link => caseIds.Contains(link.ClientCaseId)))
+            .ToListAsync(ct);
+
+        var visiblePayments = InvoiceManagedPaymentRules.FilterVisiblePayments(payments);
+
+        foreach (var payment in visiblePayments)
+        {
+            var linkedCaseIds = payment.InvoiceClientCases
+                .Select(link => link.ClientCaseId)
+                .Concat(payment.ClientCaseId.HasValue ? new[] { payment.ClientCaseId.Value } : Array.Empty<int>())
+                .Where(caseIdSet.Contains)
+                .Distinct();
+
+            foreach (var caseId in linkedCaseIds)
+            {
+                var summary = summaries[caseId];
+                var outstanding = payment.Amount > payment.PaidAmount
+                    ? Math.Round(payment.Amount - payment.PaidAmount, 2)
+                    : 0m;
+
+                if (payment.Type == PaymentType.Income)
+                {
+                    summary.IncomeTotal += payment.Amount;
+                    summary.IncomePaid += payment.PaidAmount;
+                    summary.IncomeOutstanding += outstanding;
+                    summary.IncomeCount += 1;
+                }
+                else
+                {
+                    summary.ExpenseTotal += payment.Amount;
+                    summary.ExpensePaid += payment.PaidAmount;
+                    summary.ExpenseOutstanding += outstanding;
+                    summary.ExpenseCount += 1;
+                }
+            }
+        }
+
+        return Ok(caseIds.Select(caseId => summaries[caseId]).ToList());
     }
 
     /// <summary>

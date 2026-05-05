@@ -354,14 +354,14 @@ public class LegalEntitiesControllerCoverageTests
         await db.SaveChangesAsync();
 
         db.ClientCases.AddRange(
-            new ClientCase { ClientId = firstClient.Id, Title = "Case 1" },
-            new ClientCase { ClientId = secondClient.Id, Title = "Case 2" },
-            new ClientCase { ClientId = otherClient.Id, Title = "Other Case" });
+            new ClientCase { LegalEntityId = targetLegalId, Title = "Case 1" },
+            new ClientCase { LegalEntityId = targetLegalId, Title = "Case 2" },
+            new ClientCase { LegalEntityId = otherLegalId, Title = "Other Case" });
 
         db.Payments.AddRange(
             new Payment
             {
-                ClientId = firstClient.Id,
+                LegalEntityId = targetLegalId,
                 DocumentKind = DocumentKind.Invoice,
                 Type = PaymentType.Income,
                 Status = PaymentStatus.Pending,
@@ -370,7 +370,7 @@ public class LegalEntitiesControllerCoverageTests
             },
             new Payment
             {
-                ExpenseClientId = secondClient.Id,
+                ExpenseLegalEntityId = targetLegalId,
                 DocumentKind = DocumentKind.Invoice,
                 Type = PaymentType.Expense,
                 Status = PaymentStatus.Pending,
@@ -379,7 +379,7 @@ public class LegalEntitiesControllerCoverageTests
             },
             new Payment
             {
-                ClientId = firstClient.Id,
+                LegalEntityId = targetLegalId,
                 DocumentKind = DocumentKind.Payment,
                 Type = PaymentType.Income,
                 Status = PaymentStatus.Pending,
@@ -388,7 +388,7 @@ public class LegalEntitiesControllerCoverageTests
             },
             new Payment
             {
-                ClientId = otherClient.Id,
+                LegalEntityId = otherLegalId,
                 DocumentKind = DocumentKind.Invoice,
                 Type = PaymentType.Income,
                 Status = PaymentStatus.Pending,
@@ -410,6 +410,88 @@ public class LegalEntitiesControllerCoverageTests
         Assert.Equal(2, item.ClientsCount);
         Assert.Equal(2, item.CasesCount);
         Assert.Equal(2, item.InvoicesCount);
+    }
+
+    [Fact]
+    public async Task GetCaseFinanceSummaries_ReturnsDirectLegalEntityCaseTotals()
+    {
+        await using var db = await CreateContextAsync();
+        var legalEntityId = await CreateLegalEntityAsync(db, "Alpha Legal", inn: "7700000101");
+        var otherLegalEntityId = await CreateLegalEntityAsync(db, "Beta Legal", inn: "7700000102");
+
+        var firstCase = new ClientCase
+        {
+            LegalEntityId = legalEntityId,
+            Title = "Case 1",
+            Status = ClientCaseStatus.Open,
+        };
+        var secondCase = new ClientCase
+        {
+            LegalEntityId = legalEntityId,
+            Title = "Case 2",
+            Status = ClientCaseStatus.Closed,
+        };
+        var otherCase = new ClientCase
+        {
+            LegalEntityId = otherLegalEntityId,
+            Title = "Other Case",
+            Status = ClientCaseStatus.Open,
+        };
+        db.ClientCases.AddRange(firstCase, secondCase, otherCase);
+        await db.SaveChangesAsync();
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                LegalEntityId = legalEntityId,
+                ClientCaseId = firstCase.Id,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                PlannedDate = DateTime.UtcNow.Date,
+                Amount = 1000m,
+                PaidAmount = 400m,
+            },
+            new Payment
+            {
+                LegalEntityId = otherLegalEntityId,
+                ExpenseLegalEntityId = legalEntityId,
+                ClientCaseId = firstCase.Id,
+                Type = PaymentType.Expense,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                PlannedDate = DateTime.UtcNow.Date,
+                Amount = 250m,
+                PaidAmount = 100m,
+            },
+            new Payment
+            {
+                LegalEntityId = otherLegalEntityId,
+                ClientCaseId = otherCase.Id,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                PlannedDate = DateTime.UtcNow.Date,
+                Amount = 900m,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+
+        var action = await controller.GetCaseFinanceSummaries(legalEntityId, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var summaries = Assert.IsAssignableFrom<IEnumerable<ClientCaseFinanceSummaryDto>>(ok.Value).ToList();
+        var firstSummary = Assert.Single(summaries, item => item.CaseId == firstCase.Id);
+
+        Assert.Equal(2, summaries.Count);
+        Assert.Equal(1000m, firstSummary.IncomeTotal);
+        Assert.Equal(400m, firstSummary.IncomePaid);
+        Assert.Equal(600m, firstSummary.IncomeOutstanding);
+        Assert.Equal(250m, firstSummary.ExpenseTotal);
+        Assert.Equal(100m, firstSummary.ExpensePaid);
+        Assert.Equal(150m, firstSummary.ExpenseOutstanding);
+        Assert.Equal(750m, firstSummary.PlannedMargin);
     }
 
     [Fact]

@@ -92,7 +92,7 @@ namespace PayPlanner.Api.Extensions
 
         public static IQueryable<Payment> ApplyPaymentFilters(
             this IQueryable<Payment> q,
-            DateTime? from, DateTime? to, int? clientId, int? caseId, string? search, string? clientRole = null)
+            DateTime? from, DateTime? to, int? clientId, int? caseId, string? search, string? clientRole = null, int? legalEntityId = null)
         {
             if (from.HasValue)
             {
@@ -116,6 +116,19 @@ namespace PayPlanner.Api.Extensions
                     _ => q.Where(p =>
                         p.ClientId == clientId.Value ||
                         p.ExpenseClientId == clientId.Value),
+                };
+            }
+
+            if (legalEntityId.HasValue)
+            {
+                var normalizedClientRole = NormalizeClientRole(clientRole);
+                q = normalizedClientRole switch
+                {
+                    "counterparty" => q.Where(p => p.LegalEntityId == legalEntityId.Value),
+                    "expenseClient" => q.Where(p => p.ExpenseLegalEntityId == legalEntityId.Value),
+                    _ => q.Where(p =>
+                        p.LegalEntityId == legalEntityId.Value ||
+                        p.ExpenseLegalEntityId == legalEntityId.Value),
                 };
             }
 

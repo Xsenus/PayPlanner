@@ -28,6 +28,7 @@ public class PaymentsController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] int? clientId,
         [FromQuery] int? caseId,
+        [FromQuery] int? legalEntityId = null,
         [FromQuery] bool excludeInstallmentParents = true,
         [FromQuery] string? clientRole = null,
         CancellationToken ct = default)
@@ -35,7 +36,7 @@ public class PaymentsController : ControllerBase
         var q = _db.Payments
             .AsQueryable()
             .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
-            .ApplyPaymentFilters(from, to, clientId, caseId, null, clientRole);
+            .ApplyPaymentFilters(from, to, clientId, caseId, null, clientRole, legalEntityId);
 
         var list = await ProjectPaymentsForRead(q)
             .OrderBy(p => p.Date)

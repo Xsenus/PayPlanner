@@ -6,6 +6,7 @@ type UsePaymentsPagedParams = {
   from?: string;
   to?: string;
   clientId?: number;
+  legalEntityId?: number;
   clientRole?: ClientRole;
   caseId?: number;
   clientIds?: string[];
@@ -46,6 +47,7 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
       from: params.from,
       to: params.to,
       clientId: params.clientId,
+      legalEntityId: params.legalEntityId,
       clientRole: params.clientRole,
       caseId: params.caseId,
       clientIds: params.clientIds?.join(',') || undefined,
@@ -64,6 +66,7 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
       params.caseId,
       params.categoryTokens,
       params.clientId,
+      params.legalEntityId,
       params.clientRole,
       params.clientIds,
       params.from,

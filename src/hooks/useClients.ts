@@ -78,7 +78,23 @@ export function useClients(options?: ClientsListOptions) {
           return;
         }
         const normalized = (response.items as Client[]).map((c) => normalizeClient(c));
-        setClients(normalized);
+        setClients((prev) =>
+          normalized.map((next) => {
+            const current = prev.find((item) => item.id === next.id);
+            if (!current) return next;
+            return {
+              ...next,
+              cases:
+                (next.cases?.length ?? 0) === 0 && (current.cases?.length ?? 0) > 0
+                  ? (current.cases as ClientCase[])
+                  : (next.cases ?? []),
+              contracts:
+                (next.contracts?.length ?? 0) === 0 && (current.contracts?.length ?? 0) > 0
+                  ? current.contracts
+                  : next.contracts,
+            };
+          }),
+        );
         setTotal(response.total ?? 0);
       } else {
         const base = await apiService.getClients();

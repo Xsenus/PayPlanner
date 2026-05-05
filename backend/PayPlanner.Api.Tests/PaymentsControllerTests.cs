@@ -465,6 +465,114 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task PaymentsV2_FiltersByLegalEntityAndRole()
+    {
+        await using var db = await CreateContextAsync();
+
+        var supplier = new LegalEntity { ShortName = "Supplier Legal" };
+        var expenseOwner = new LegalEntity { ShortName = "Expense Legal" };
+        var unrelated = new LegalEntity { ShortName = "Unrelated Legal" };
+        db.LegalEntities.AddRange(supplier, expenseOwner, unrelated);
+        await db.SaveChangesAsync();
+
+        var supplierPayment = CreatePayment(new DateTime(2026, 4, 12), 5_000m, "Legal supplier payment");
+        supplierPayment.Type = PaymentType.Expense;
+        supplierPayment.LegalEntityId = supplier.Id;
+        supplierPayment.ExpenseLegalEntityId = expenseOwner.Id;
+
+        var expenseOwnerPayment = CreatePayment(new DateTime(2026, 4, 13), 7_000m, "Legal expense owner payment");
+        expenseOwnerPayment.Type = PaymentType.Expense;
+        expenseOwnerPayment.LegalEntityId = unrelated.Id;
+        expenseOwnerPayment.ExpenseLegalEntityId = supplier.Id;
+
+        db.Payments.AddRange(supplierPayment, expenseOwnerPayment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsV2Controller(db);
+
+        var allResult = await controller.Get(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            clientId: null,
+            caseId: null,
+            legalEntityId: supplier.Id,
+            contractId: null,
+            excludeInstallmentParents: false,
+            excludeInvoiceDocuments: false,
+            clientIds: null,
+            clientRole: null,
+            categoryTokens: null,
+            type: PaymentType.Expense,
+            status: null,
+            minAmount: null,
+            maxAmount: null,
+            search: null,
+            sortBy: "date",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var allOk = Assert.IsType<OkObjectResult>(allResult.Result);
+        var allResponse = Assert.IsType<PaymentsPageResponse>(allOk.Value);
+        Assert.Equal(new[] { supplierPayment.Id, expenseOwnerPayment.Id }, allResponse.Items.Select(payment => payment.Id).ToArray());
+
+        var supplierResult = await controller.Get(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            clientId: null,
+            caseId: null,
+            legalEntityId: supplier.Id,
+            contractId: null,
+            excludeInstallmentParents: false,
+            excludeInvoiceDocuments: false,
+            clientIds: null,
+            clientRole: "counterparty",
+            categoryTokens: null,
+            type: PaymentType.Expense,
+            status: null,
+            minAmount: null,
+            maxAmount: null,
+            search: null,
+            sortBy: "date",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var supplierOk = Assert.IsType<OkObjectResult>(supplierResult.Result);
+        var supplierResponse = Assert.IsType<PaymentsPageResponse>(supplierOk.Value);
+        Assert.Collection(supplierResponse.Items, payment => Assert.Equal(supplierPayment.Id, payment.Id));
+
+        var expenseResult = await controller.Get(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            clientId: null,
+            caseId: null,
+            legalEntityId: supplier.Id,
+            contractId: null,
+            excludeInstallmentParents: false,
+            excludeInvoiceDocuments: false,
+            clientIds: null,
+            clientRole: "expenseClient",
+            categoryTokens: null,
+            type: PaymentType.Expense,
+            status: null,
+            minAmount: null,
+            maxAmount: null,
+            search: null,
+            sortBy: "date",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var expenseOk = Assert.IsType<OkObjectResult>(expenseResult.Result);
+        var expenseResponse = Assert.IsType<PaymentsPageResponse>(expenseOk.Value);
+        Assert.Collection(expenseResponse.Items, payment => Assert.Equal(expenseOwnerPayment.Id, payment.Id));
+    }
+
+    [Fact]
     public async Task Delete_RemovesOnlyStandalonePayment_WhenPaymentIsNotPartOfInvoiceAggregate()
     {
         await using var db = await CreateContextAsync();

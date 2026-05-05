@@ -99,6 +99,14 @@ function formatDate(d?: string) {
   }
 }
 
+function getClientCaseCount(client: Client) {
+  return Math.max(client.casesCount ?? 0, client.cases?.length ?? 0);
+}
+
+function getClientContractsCount(client: Client) {
+  return Math.max(client.contractsCount ?? 0, client.contracts?.length ?? 0);
+}
+
 function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -1112,12 +1120,12 @@ export function Clients() {
             onClick={() => handleOpenClient(client.id)}
             className="text-sm text-blue-600 hover:underline"
           >
-            {(client.cases ?? []).length}
+            {getClientCaseCount(client)}
           </button>
         );
       case 'contractsCount':
         return (
-          <span className="text-sm text-gray-700 block truncate">{(client.contracts ?? []).length}</span>
+          <span className="text-sm text-gray-700 block truncate">{getClientContractsCount(client)}</span>
         );
       default:
         return null;
@@ -1583,7 +1591,8 @@ export function Clients() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 items-stretch min-h-0">
             {sortedClients.map((client) => {
               const cases = (client.cases ?? []) as ClientCase[];
-              const totalCases = cases.length;
+              const totalCases = getClientCaseCount(client);
+              const hasCasePreviews = cases.length > 0;
 
               const counts = cases.reduce<Record<string, number>>((acc, c) => {
                 const key = (c.status ?? 'unknown').toLowerCase();
@@ -1707,7 +1716,7 @@ export function Clients() {
                         {t('total') || 'Всего'}: {totalCases}
                       </span>
                     </div>
-                    {totalCases > 0 ? (
+                    {hasCasePreviews ? (
                       <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-3">
                         {Object.entries(counts)
                           .sort((a, b) => b[1] - a[1])
@@ -1725,6 +1734,10 @@ export function Clients() {
                               </span>
                             );
                           })}
+                      </div>
+                    ) : totalCases > 0 ? (
+                      <div className="text-xs text-slate-500 mb-3">
+                        Дела есть в карточке клиента: {totalCases}
                       </div>
                     ) : (
                       <div className="text-xs text-slate-500 mb-3">

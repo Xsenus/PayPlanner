@@ -79,7 +79,9 @@ function getLegalEntityDisplayName(entity: LegalEntitySummary): string {
 
 interface PaymentModalProps {
   defaultClientId?: number;
+  defaultLegalEntityId?: number;
   defaultExpenseClientId?: number;
+  defaultExpenseLegalEntityId?: number;
   defaultClientCaseId?: number;
   casesPrefetch?: ClientCase[];
   type?: PaymentKind;
@@ -106,7 +108,9 @@ export function PaymentModal({
   onApplyClientBalance,
   onBalanceApplied,
   defaultClientId,
+  defaultLegalEntityId,
   defaultExpenseClientId,
+  defaultExpenseLegalEntityId,
   defaultClientCaseId,
   casesPrefetch,
   type,
@@ -427,9 +431,9 @@ export function PaymentModal({
 
       if (p) {
         const appliedBalanceAmount = getAppliedClientBalanceAmount(p.systemNotes);
-        const resolvedLegalEntityId = linkedInvoice?.legalEntityId ?? p.legalEntityId ?? null;
+        const resolvedLegalEntityId = linkedInvoice?.legalEntityId ?? p.legalEntityId ?? defaultLegalEntityId ?? null;
         const resolvedClientId = linkedInvoice?.clientId ?? p.clientId ?? defaultClientId ?? null;
-        const resolvedExpenseLegalEntityId = linkedInvoice?.expenseLegalEntityId ?? p.expenseLegalEntityId ?? null;
+        const resolvedExpenseLegalEntityId = linkedInvoice?.expenseLegalEntityId ?? p.expenseLegalEntityId ?? defaultExpenseLegalEntityId ?? null;
         const resolvedExpenseClientId = linkedInvoice?.expenseClientId ?? p.expenseClientId ?? defaultExpenseClientId ?? null;
         setAppliedClientBalanceAmount(appliedBalanceAmount);
         setFormData({
@@ -469,9 +473,9 @@ export function PaymentModal({
         setInvoiceSearch('');
         setInvoicePickerError(null);
       } else {
-        const resolvedLegalEntityId = linkedInvoice?.legalEntityId ?? null;
+        const resolvedLegalEntityId = linkedInvoice?.legalEntityId ?? defaultLegalEntityId ?? null;
         const resolvedClientId = linkedInvoice?.clientId ?? defaultClientId ?? null;
-        const resolvedExpenseLegalEntityId = linkedInvoice?.expenseLegalEntityId ?? null;
+        const resolvedExpenseLegalEntityId = linkedInvoice?.expenseLegalEntityId ?? defaultExpenseLegalEntityId ?? null;
         const resolvedExpenseClientId = linkedInvoice?.expenseClientId ?? defaultExpenseClientId ?? null;
         setAppliedClientBalanceAmount(0);
         setFormData({
@@ -518,7 +522,7 @@ export function PaymentModal({
 
       prevOpenRef.current = true;
     }
-  }, [defaultClientCaseId, defaultClientId, defaultExpenseClientId, isOpen, linkedInvoice, type]);
+  }, [defaultClientCaseId, defaultClientId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultLegalEntityId, isOpen, linkedInvoice, type]);
 
   useEffect(() => {
     if (!isOpen || availableClientBalance !== undefined) return;

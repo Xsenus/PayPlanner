@@ -25,6 +25,7 @@ public class PaymentsV2Controller : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] int? clientId,
         [FromQuery] int? caseId,
+        [FromQuery] int? legalEntityId = null,
         [FromQuery] int? contractId = null,
         [FromQuery] bool excludeInstallmentParents = true,
         [FromQuery] bool excludeInvoiceDocuments = false,
@@ -48,7 +49,7 @@ public class PaymentsV2Controller : ControllerBase
         var query = _db.Payments.AsQueryable()
             .WithPaymentIncludes()
             .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
-            .ApplyPaymentFilters(from, to, clientId, caseId, search, clientRole);
+            .ApplyPaymentFilters(from, to, clientId, caseId, search, clientRole, legalEntityId);
 
         if (contractId.HasValue)
         {

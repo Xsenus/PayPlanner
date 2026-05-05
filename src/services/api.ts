@@ -1529,12 +1529,13 @@ export class ApiService {
     from?: string;
     to?: string;
     clientId?: number;
+    legalEntityId?: number;
     caseId?: number;
     clientRole?: ClientRole;
     excludeInstallmentParents?: boolean;
   }): Promise<Payment[]>;
   async getPayments(
-    a?: string | { from?: string; to?: string; clientId?: number; caseId?: number; clientRole?: ClientRole; excludeInstallmentParents?: boolean },
+    a?: string | { from?: string; to?: string; clientId?: number; legalEntityId?: number; caseId?: number; clientRole?: ClientRole; excludeInstallmentParents?: boolean },
     b?: string,
     c?: number,
   ): Promise<Payment[]> {
@@ -1544,6 +1545,7 @@ export class ApiService {
         from: a?.from,
         to: a?.to,
         clientId: a?.clientId,
+        legalEntityId: a?.legalEntityId,
         caseId: a?.caseId,
         clientRole: a?.clientRole,
         excludeInstallmentParents: a?.excludeInstallmentParents,
@@ -1586,6 +1588,7 @@ export class ApiService {
     from?: string;
     to?: string;
     clientId?: number;
+    legalEntityId?: number;
     caseId?: number;
     clientRole?: ClientRole;
     search?: string;
@@ -1601,6 +1604,7 @@ export class ApiService {
     from?: string;
     to?: string;
     clientId?: number;
+    legalEntityId?: number;
     caseId?: number;
     contractId?: number;
     clientIds?: string;
@@ -1644,6 +1648,10 @@ export class ApiService {
   async getClientCaseFinanceSummaries(id: number, params?: { clientRole?: ClientRole }) {
     const q = buildQuery(params ?? {});
     return this.request<ClientCaseFinanceSummary[]>(`/clients/${id}/case-finance-summaries${q}`);
+  }
+
+  async getLegalEntityCaseFinanceSummaries(id: number) {
+    return this.request<ClientCaseFinanceSummary[]>(`/legal-entities/${id}/case-finance-summaries`);
   }
 
   async getClientBalance(id: number) {

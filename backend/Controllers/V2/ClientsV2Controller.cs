@@ -209,6 +209,13 @@ public class ClientsV2Controller : ControllerBase
                 .Select(g => new { ClientId = g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.ClientId, x => x.Count, ct);
 
+            var casesByClient = await _db.ClientCases
+                .AsNoTracking()
+                .Where(c => c.ClientId.HasValue && itemIds.Contains(c.ClientId.Value))
+                .OrderByDescending(c => c.CreatedAt)
+                .ThenByDescending(c => c.Id)
+                .ToListAsync(ct);
+
             var contractsCountByClient = await _db.ClientContracts
                 .AsNoTracking()
                 .Where(c => itemIds.Contains(c.ClientId))
@@ -244,6 +251,9 @@ public class ClientsV2Controller : ControllerBase
                 item.CasesCount = casesCountByClient.GetValueOrDefault(item.Id);
                 item.ContractsCount = contractsCountByClient.GetValueOrDefault(item.Id);
                 item.InvoicesCount = invoicesCountByClient.GetValueOrDefault(item.Id);
+                item.Cases = casesByClient
+                    .Where(clientCase => clientCase.ClientId == item.Id)
+                    .ToList();
             }
         }
 
