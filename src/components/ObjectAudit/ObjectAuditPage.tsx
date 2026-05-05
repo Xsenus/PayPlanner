@@ -1,5 +1,5 @@
 import { Filter, Loader2, RefreshCw, Search, ShieldCheck } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import {
   apiService,
@@ -8,6 +8,8 @@ import {
 import {
   formatAuditChangeSummary,
   formatAuditValue,
+  formatObjectAuditText,
+  getObjectAuditActorLabel,
   getObjectAuditActionLabel,
   getObjectAuditActionTone,
   getObjectAuditFieldLabel,
@@ -30,9 +32,10 @@ const OBJECT_TYPE_OPTIONS = [
   'contact',
   'user',
   'role',
+  'task-journal-item',
 ] as const;
 
-const ACTION_OPTIONS = ['all', 'created', 'updated', 'deleted', 'restored'] as const;
+const ACTION_OPTIONS = ['all', 'created', 'updated', 'deleted', 'restored', 'datarepair'] as const;
 
 function formatDateTime(value?: string | null) {
   if (!value) {
@@ -54,7 +57,7 @@ function getEventDescription(item: ObjectAuditEventDto) {
     }
   }
 
-  return item.description?.trim() || 'Служебное событие без подробного описания.';
+  return formatObjectAuditText(item.description) || 'Служебное событие без подробного описания.';
 }
 
 export function ObjectAuditPage() {
@@ -362,7 +365,7 @@ export function ObjectAuditPage() {
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">События аудита</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Открывайте карточки событий, чтобы посмотреть зафиксированные изменения по полям.
+                  События показаны в таблице: основные сведения видны сразу, а изменения по полям раскрываются отдельной строкой.
                 </p>
               </div>
               <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
@@ -388,99 +391,125 @@ export function ObjectAuditPage() {
               По текущим фильтрам событий не найдено.
             </div>
           ) : (
-            <div className="space-y-4 px-6 py-5">
-              {items.map((item) => {
-                const detailedChanges = parseAuditFieldChanges(item.metadataJson);
-                const changedFields = parseAuditChangedFields(item.metadataJson).map((fieldName) =>
-                  getObjectAuditFieldLabel(item.objectType, fieldName),
-                );
-                const isExpanded = expandedId === item.id;
-                const canExpand = detailedChanges.length > 0;
+            <div className="overflow-x-auto">
+              <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="w-[140px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Действие
+                    </th>
+                    <th className="w-[150px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Объект
+                    </th>
+                    <th className="w-[180px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Пользователь
+                    </th>
+                    <th className="w-[160px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Дата
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Событие
+                    </th>
+                    <th className="w-[130px] px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Детали
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {items.map((item) => {
+                    const detailedChanges = parseAuditFieldChanges(item.metadataJson);
+                    const changedFields = parseAuditChangedFields(item.metadataJson).map((fieldName) =>
+                      getObjectAuditFieldLabel(item.objectType, fieldName),
+                    );
+                    const isExpanded = expandedId === item.id;
+                    const canExpand = detailedChanges.length > 0;
 
-                return (
-                  <article
-                    key={item.id}
-                    className="rounded-2xl border border-slate-200 bg-slate-50/70 px-5 py-4"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getObjectAuditActionTone(item.action)}`}
-                          >
-                            {getObjectAuditActionLabel(item.action)}
-                          </span>
-                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
-                            {getObjectAuditTypeLabel(item.objectType)} #{item.objectId}
-                          </span>
-                          <span className="text-xs text-slate-400">{formatDateTime(item.createdAt)}</span>
-                        </div>
-
-                        <div className="mt-3 text-sm font-semibold text-slate-900">
-                          {item.actorUserName?.trim() || 'Система'}
-                        </div>
-                        <div className="mt-1 text-sm text-slate-600">{getEventDescription(item)}</div>
-
-                        {changedFields.length > 0 && !canExpand ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {changedFields.map((field) => (
-                              <span
-                                key={`${item.id}-${field}`}
-                                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600"
+                    return (
+                      <Fragment key={item.id}>
+                        <tr className="align-top transition hover:bg-slate-50/80">
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getObjectAuditActionTone(item.action)}`}
+                            >
+                              {getObjectAuditActionLabel(item.action)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <span className="font-medium text-slate-900">{getObjectAuditTypeLabel(item.objectType)}</span>
+                            <span className="ml-1 text-slate-400">#{item.objectId}</span>
+                          </td>
+                          <td className="px-4 py-3 font-medium text-slate-900">
+                            {getObjectAuditActorLabel(item.actorUserName)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-500">{formatDateTime(item.createdAt)}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <div className="line-clamp-2">{getEventDescription(item)}</div>
+                            {changedFields.length > 0 && !canExpand ? (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {changedFields.map((field) => (
+                                  <span
+                                    key={`${item.id}-${field}`}
+                                    className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600"
+                                  >
+                                    {field}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {canExpand ? (
+                              <button
+                                type="button"
+                                onClick={() => setExpandedId((current) => (current === item.id ? null : item.id))}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
                               >
-                                {field}
-                              </span>
-                            ))}
-                          </div>
+                                {isExpanded ? 'Скрыть' : 'Показать'}
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                          </td>
+                        </tr>
+                        {isExpanded ? (
+                          <tr className="bg-slate-50/70">
+                            <td colSpan={6} className="px-4 py-4">
+                              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                                <table className="min-w-full divide-y divide-slate-100 text-sm">
+                                  <thead className="bg-slate-50">
+                                    <tr>
+                                      <th className="w-[240px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                        Поле
+                                      </th>
+                                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                        Было
+                                      </th>
+                                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                        Стало
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {detailedChanges.map((change) => (
+                                      <tr key={`${item.id}-${change.field}`}>
+                                        <td className="px-4 py-3 font-medium text-slate-900">
+                                          {getObjectAuditFieldLabel(item.objectType, change.field)}
+                                        </td>
+                                        <td className="px-4 py-3 text-slate-600">{formatAuditValue(change.oldValue)}</td>
+                                        <td className="px-4 py-3 text-slate-900">{formatAuditValue(change.newValue)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
                         ) : null}
-                      </div>
-
-                      {canExpand ? (
-                        <button
-                          type="button"
-                          onClick={() => setExpandedId((current) => (current === item.id ? null : item.id))}
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-                        >
-                          {isExpanded ? 'Скрыть детали' : 'Показать детали'}
-                        </button>
-                      ) : null}
-                    </div>
-
-                    {isExpanded ? (
-                      <div className="mt-4 space-y-3">
-                        {detailedChanges.map((change) => (
-                          <div
-                            key={`${item.id}-${change.field}`}
-                            className="rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                          >
-                            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                              {getObjectAuditFieldLabel(item.objectType, change.field)}
-                            </div>
-                            <div className="mt-3 grid gap-3 md:grid-cols-2">
-                              <div className="rounded-xl bg-slate-50 px-3 py-3">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                  Было
-                                </div>
-                                <div className="mt-2 text-sm text-slate-700">
-                                  {formatAuditValue(change.oldValue)}
-                                </div>
-                              </div>
-                              <div className="rounded-xl bg-emerald-50 px-3 py-3">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-500">
-                                  Стало
-                                </div>
-                                <div className="mt-2 text-sm text-slate-900">
-                                  {formatAuditValue(change.newValue)}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
 

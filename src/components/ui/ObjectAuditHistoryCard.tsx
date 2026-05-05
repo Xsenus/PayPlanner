@@ -5,6 +5,8 @@ import { apiService, type ObjectAuditEventDto } from '../../services/api';
 import {
   formatAuditChangeSummary,
   formatAuditValue,
+  formatObjectAuditText,
+  getObjectAuditActorLabel,
   getObjectAuditActionLabel,
   getObjectAuditActionTone,
   getObjectAuditFieldLabel,
@@ -45,7 +47,7 @@ function getEventDescription(item: ObjectAuditEventDto): string {
     }
   }
 
-  return item.description?.trim() || 'Служебное событие без подробного описания.';
+  return formatObjectAuditText(item.description) || 'Служебное событие без подробного описания.';
 }
 
 function EmptyState({
@@ -94,7 +96,7 @@ function HistoryTimeline({ items }: { items: ObjectAuditEventDto[] }) {
                 </div>
 
                 <p className="mt-3 break-words text-sm font-semibold text-slate-900">
-                  {item.actorUserName?.trim() || 'Система'}
+                  {getObjectAuditActorLabel(item.actorUserName)}
                 </p>
                 <p className="mt-1 break-words text-sm leading-6 text-slate-600">
                   {getEventDescription(item)}

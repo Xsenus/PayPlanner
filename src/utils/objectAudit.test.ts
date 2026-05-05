@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   formatAuditValue,
   formatAuditChangeSummary,
+  formatObjectAuditText,
+  getObjectAuditActorLabel,
+  getObjectAuditActionLabel,
+  getObjectAuditTypeLabel,
   parseAuditFieldChanges,
   getObjectAuditFieldLabel,
   parseAuditChangedFields,
@@ -59,5 +63,14 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue(null)).toBe('—');
     expect(formatAuditValue('')).toBe('—');
     expect(formatAuditValue('  новое значение  ')).toBe('новое значение');
+  });
+
+  it('translates technical audit labels and hides Codex repair actor', () => {
+    expect(getObjectAuditActionLabel('DataRepair')).toBe('Исправление данных');
+    expect(getObjectAuditTypeLabel('task-journal-item')).toBe('Задача');
+    expect(getObjectAuditActorLabel('Codex data repair')).toBe('Системное исправление');
+    expect(formatObjectAuditText('Codex data repair updated Task Journal Item #1')).toBe(
+      'Системное исправление updated Задача #1',
+    );
   });
 });

@@ -99,6 +99,16 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     Name: 'Название роли',
     Description: 'Описание роли',
   },
+  'task-journal-item': {
+    Title: 'Заголовок задачи',
+    Description: 'Описание задачи',
+    Status: 'Статус задачи',
+    Type: 'Тип задачи',
+    Priority: 'Приоритет',
+    DueAt: 'Срок выполнения',
+    AssigneeUserId: 'Исполнитель',
+    AuthorUserId: 'Автор',
+  },
 };
 
 const OBJECT_TYPE_LABELS: Record<string, string> = {
@@ -113,6 +123,11 @@ const OBJECT_TYPE_LABELS: Record<string, string> = {
   contact: 'Контакт',
   user: 'Пользователь',
   role: 'Роль',
+  'task-journal-item': 'Задача',
+};
+
+const AUDIT_ACTOR_LABELS: Record<string, string> = {
+  'codex data repair': 'Системное исправление',
 };
 
 export interface ParsedAuditFieldChange {
@@ -133,9 +148,22 @@ function prettifyFieldName(fieldName: string): string {
     .trim();
 }
 
+function translateTechnicalWords(value: string): string {
+  return value
+    .replace(/\bCodex data repair\b/gi, 'Системное исправление')
+    .replace(/\bCodex\b/gi, 'Система')
+    .replace(/\bDataRepair\b/gi, 'Исправление данных')
+    .replace(/\bTask Journal Item\b/gi, 'Задача')
+    .replace(/\btask journal item\b/gi, 'Задача');
+}
+
+export function formatObjectAuditText(value: string | null | undefined): string {
+  return translateTechnicalWords(value?.trim() ?? '');
+}
+
 export function getObjectAuditTypeLabel(objectType: string | null | undefined): string {
   const normalizedObjectType = objectType?.trim().toLowerCase() ?? '';
-  return OBJECT_TYPE_LABELS[normalizedObjectType] ?? prettifyFieldName(normalizedObjectType || 'object');
+  return OBJECT_TYPE_LABELS[normalizedObjectType] ?? translateTechnicalWords(prettifyFieldName(normalizedObjectType || 'object'));
 }
 
 export function getObjectAuditActionLabel(action?: string | null): string {
@@ -148,8 +176,11 @@ export function getObjectAuditActionLabel(action?: string | null): string {
       return 'Удаление';
     case 'restored':
       return 'Восстановление';
+    case 'datarepair':
+    case 'data-repair':
+      return 'Исправление данных';
     default:
-      return action || 'Событие';
+      return action ? translateTechnicalWords(action) : 'Событие';
   }
 }
 
@@ -163,9 +194,21 @@ export function getObjectAuditActionTone(action?: string | null): string {
       return 'border-rose-200 bg-rose-50 text-rose-700';
     case 'restored':
       return 'border-teal-200 bg-teal-50 text-teal-700';
+    case 'datarepair':
+    case 'data-repair':
+      return 'border-amber-200 bg-amber-50 text-amber-700';
     default:
       return 'border-slate-200 bg-slate-50 text-slate-700';
   }
+}
+
+export function getObjectAuditActorLabel(actorUserName?: string | null): string {
+  const normalizedActor = actorUserName?.trim();
+  if (!normalizedActor) {
+    return 'Система';
+  }
+
+  return AUDIT_ACTOR_LABELS[normalizedActor.toLowerCase()] ?? translateTechnicalWords(normalizedActor);
 }
 
 export function getObjectAuditFieldLabel(objectType: string | null | undefined, fieldName: string): string {
