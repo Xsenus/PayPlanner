@@ -54,8 +54,9 @@ public class UpsertContractRequest
     [StringLength(1000)]
     public string? CancelledReason { get; set; }
 
-    [MinLength(1, ErrorMessage = "Необходимо выбрать хотя бы одного клиента.")]
     public List<UpsertContractClientRequest> Clients { get; set; } = new();
+
+    public List<UpsertContractLegalEntityRequest> LegalEntities { get; set; } = new();
 
     public List<int> ActIds { get; set; } = new();
 
@@ -67,6 +68,14 @@ public class UpsertContractRequest
 public class UpsertContractClientRequest
 {
     public int ClientId { get; set; }
+
+    [StringLength(1000)]
+    public string? Comment { get; set; }
+}
+
+public class UpsertContractLegalEntityRequest
+{
+    public int LegalEntityId { get; set; }
 
     [StringLength(1000)]
     public string? Comment { get; set; }

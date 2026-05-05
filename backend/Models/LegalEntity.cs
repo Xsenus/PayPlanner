@@ -182,6 +182,8 @@ public class LegalEntity
     public ICollection<ClientCase> Cases { get; set; } = new List<ClientCase>();
     public ICollection<Payment> Payments { get; set; } = new List<Payment>();
     public ICollection<Act> Acts { get; set; } = new List<Act>();
+    public ICollection<LegalEntityContract> LegalEntityContracts { get; set; } = new List<LegalEntityContract>();
+    public ICollection<Contract> Contracts { get; set; } = new List<Contract>();
 
     public ICollection<AddressRecord> Addresses { get; set; } = new List<AddressRecord>();
     public ICollection<UserCompanyAccess> UserCompanyAccesses { get; set; } = new List<UserCompanyAccess>();

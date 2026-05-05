@@ -1600,6 +1600,15 @@ export interface ContractClient {
   comment?: string | null;
 }
 
+export interface ContractLegalEntity {
+  id: number;
+  shortName: string;
+  fullName?: string | null;
+  inn?: string | null;
+  kpp?: string | null;
+  comment?: string | null;
+}
+
 export type ContractBillingMode = 'Fixed' | 'Actual';
 export type ContractStatus = 'Draft' | 'OnSigning' | 'Concluded' | 'Terminated' | 'Cancelled';
 
@@ -1638,6 +1647,7 @@ export interface Contract {
   actAmountTotal: number;
   paymentAmountTotal: number;
   clients: ContractClient[];
+  legalEntities?: ContractLegalEntity[];
   actIds?: number[];
   invoiceIds?: number[];
   paymentIds?: number[];
@@ -1662,6 +1672,7 @@ export interface ContractInput {
   cancelledAt?: string | null;
   cancelledReason?: string | null;
   clients: Array<{ clientId: number; comment?: string | null }>;
+  legalEntities?: Array<{ legalEntityId: number; comment?: string | null }>;
   actIds?: number[];
   invoiceIds?: number[];
   paymentIds?: number[];

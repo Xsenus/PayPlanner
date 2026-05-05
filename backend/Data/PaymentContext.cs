@@ -341,6 +341,25 @@ public class PaymentContext : DbContext
                           join.HasIndex(cc => cc.ClientId).HasDatabaseName("IX_ClientContracts_ClientId");
                       });
 
+            entity.HasMany(e => e.LegalEntities)
+                  .WithMany(e => e.Contracts)
+                  .UsingEntity<LegalEntityContract>(
+                      join => join.HasOne(link => link.LegalEntity)
+                                  .WithMany(entity => entity.LegalEntityContracts)
+                                  .HasForeignKey(link => link.LegalEntityId)
+                                  .OnDelete(DeleteBehavior.Cascade),
+                      join => join.HasOne(link => link.Contract)
+                                  .WithMany(contract => contract.LegalEntityContracts)
+                                  .HasForeignKey(link => link.ContractId)
+                                  .OnDelete(DeleteBehavior.Cascade),
+                      join =>
+                      {
+                          join.HasKey(link => new { link.ContractId, link.LegalEntityId });
+                          join.ToTable("LegalEntityContracts");
+                          join.Property(link => link.Comment).HasMaxLength(1000);
+                          join.HasIndex(link => link.LegalEntityId).HasDatabaseName("IX_LegalEntityContracts_LegalEntityId");
+                      });
+
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Contracts_Number");
             entity.HasIndex(e => e.Date).HasDatabaseName("IX_Contracts_Date");
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_Contracts_Status");
@@ -2132,6 +2151,8 @@ public class PaymentContext : DbContext
     /// Связи клиентов и договоров.
     /// </summary>
     public DbSet<ClientContract> ClientContracts { get; set; }
+
+    public DbSet<LegalEntityContract> LegalEntityContracts { get; set; }
 
     public DbSet<ContractAct> ContractActs { get; set; }
 

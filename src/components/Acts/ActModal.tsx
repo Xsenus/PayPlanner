@@ -22,6 +22,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
+import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 
 interface ActModalProps {
@@ -454,7 +455,7 @@ export function ActModal({
 }: ActModalProps) {
   const { t } = useTranslation();
   const { isRequired } = useFormRequirements('acts', open);
-  const { legalEntities, loading: legalEntitiesLoading, error: legalEntitiesError } = useLegalEntities();
+  const { legalEntities } = useLegalEntities();
   const [form, setForm] = useState<FormState>(() =>
     normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues),
   );
@@ -473,6 +474,7 @@ export function ActModal({
   const [manualLineItems, setManualLineItems] = useState<ManualActLineItemRow[]>([]);
   const manualLineItemsSeedRef = useRef<string | null>(null);
   const [lineItemPickerOpen, setLineItemPickerOpen] = useState(false);
+  const [counterpartyPickerOpen, setCounterpartyPickerOpen] = useState(false);
 
   const isEdit = mode === 'edit';
   const isPageMode = presentation === 'page';
@@ -673,50 +675,6 @@ export function ActModal({
     [form.clientId, form.legalEntityId],
   );
   const selectedCounterpartyKey = useMemo(() => buildOwnerKey(selectedCounterpartyOwner), [selectedCounterpartyOwner]);
-  const counterpartyLookupOptions = useMemo<LookupSelectOption[]>(
-    () => {
-      const clientOptions = [...clients]
-        .sort((left, right) => left.name.localeCompare(right.name, 'ru'))
-        .map((client) => ({
-          value: `client:${client.id}`,
-          label: client.name,
-          description: [
-            client.clientStatus?.name?.trim() || '',
-            client.company?.trim() || '',
-          ].filter(Boolean).join(' • '),
-          keywords: [
-            client.name,
-            client.company ?? '',
-            client.clientStatus?.name ?? '',
-          ],
-        }));
-      const legalEntityOptions = [...legalEntities]
-        .sort((left, right) =>
-          getLegalEntityDisplayName(left).localeCompare(getLegalEntityDisplayName(right), 'ru', { sensitivity: 'base' }),
-        )
-        .map((entity) => ({
-          value: `legal:${entity.id}`,
-          label: getLegalEntityDisplayName(entity),
-          description: [
-            entity.inn ? `ИНН ${entity.inn}` : '',
-            entity.kpp ? `КПП ${entity.kpp}` : '',
-            entity.responsibleUserName?.trim() || '',
-          ].filter(Boolean).join(' • '),
-          keywords: [
-            entity.shortName,
-            entity.fullName ?? '',
-            entity.inn ?? '',
-            entity.kpp ?? '',
-            entity.ogrn ?? '',
-            entity.responsibleUserName ?? '',
-            ...(entity.clients ?? []).map((client) => client.name ?? ''),
-          ],
-        }));
-
-      return [...clientOptions, ...legalEntityOptions];
-    },
-    [clients, legalEntities],
-  );
   const invoiceLookupOptions = useMemo<LookupSelectOption[]>(() => {
     const items = [...invoiceOptions];
 
@@ -995,6 +953,29 @@ export function ActModal({
     () => legalEntities.find((entity) => String(entity.id) === String(form.legalEntityId)) ?? null,
     [legalEntities, form.legalEntityId],
   );
+  const selectedCounterpartyPickerValue = useMemo<CounterpartySelection[]>(() => {
+    if (selectedClient) {
+      return [{
+        kind: 'client',
+        id: selectedClient.id,
+        name: selectedClient.name,
+        subtitle: selectedClient.company ?? null,
+        client: selectedClient,
+      }];
+    }
+
+    if (selectedLegalEntity) {
+      return [{
+        kind: 'legalEntity',
+        id: selectedLegalEntity.id,
+        name: getLegalEntityDisplayName(selectedLegalEntity),
+        subtitle: selectedLegalEntity.inn ? `ИНН ${selectedLegalEntity.inn}` : selectedLegalEntity.fullName ?? null,
+        legalEntity: selectedLegalEntity,
+      }];
+    }
+
+    return [];
+  }, [selectedClient, selectedLegalEntity]);
 
   const selectedResponsible = useMemo(
     () => responsibles.find((responsible) => String(responsible.id) === String(form.responsibleId)) ?? null,
@@ -1175,6 +1156,15 @@ export function ActModal({
       clientId: nextClientId,
       legalEntityId: nextLegalEntityId,
     }));
+  };
+
+  const handleCounterpartyPick = (selection: CounterpartySelection | null) => {
+    if (!selection) {
+      handleCounterpartySelect('');
+      return;
+    }
+
+    handleCounterpartySelect(selection.kind === 'legalEntity' ? `legal:${selection.id}` : `client:${selection.id}`);
   };
 
   const handleInvoiceSelect = (value: string) => {
@@ -1591,27 +1581,42 @@ export function ActModal({
 
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <LookupSelect
-                    label={counterpartyLabel}
-                    value={selectedCounterpartyKey}
-                    options={counterpartyLookupOptions}
-                    onChange={handleCounterpartySelect}
-                    title="Выбор контрагента"
-                    dictionaryLabel="Справочник"
-                    placeholder="Выберите контрагента"
-                    searchPlaceholder="Поиск по имени, названию юрлица, ИНН или статусу"
-                    emptyOptionLabel="Без контрагента"
-                    emptyOptionDescription="Оставить акт без выбранного контрагента."
-                    helperText={
-                      linkedInvoiceId
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-slate-700">{counterpartyLabel}</span>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={selectedCounterpartyKey ? selectedCounterpartyName : ''}
+                        placeholder="Выберите контрагента"
+                        className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        onClick={() => setCounterpartyPickerOpen(true)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setCounterpartyPickerOpen(true)}
+                        className="shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Выбрать
+                      </button>
+                      {selectedCounterpartyKey ? (
+                        <button
+                          type="button"
+                          onClick={() => handleCounterpartyPick(null)}
+                          className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-50"
+                        >
+                          Очистить
+                        </button>
+                      ) : null}
+                    </div>
+                    <span className="text-xs text-slate-500">
+                      {linkedInvoiceId
                         ? 'Контрагент синхронизируется с выбранным счетом. При смене контрагента счет будет сброшен.'
                         : selectedCounterpartyKey
                           ? 'Теперь в справочнике счетов будут показаны только документы этого контрагента.'
-                          : 'Сначала можно выбрать контрагента, а потом сузить список счетов.'
-                    }
-                    noOptionsText={(lookupsLoading || legalEntitiesLoading) ? 'Загружаем контрагентов...' : legalEntitiesError || 'Контрагенты не найдены'}
-                    disabled={lookupsLoading || legalEntitiesLoading}
-                  />
+                          : 'Сначала можно выбрать контрагента, а потом сузить список счетов.'}
+                    </span>
+                  </label>
 
                   {selectedClient?.clientStatus ? (
                     <div>
@@ -2203,12 +2208,35 @@ export function ActModal({
   );
 
   if (isPageMode) {
-    return <div className="w-full px-4 py-6 sm:px-6 lg:px-8">{content}</div>;
+    return (
+      <>
+        <div className="w-full px-4 py-6 sm:px-6 lg:px-8">{content}</div>
+        <CounterpartyPickerModal
+          open={counterpartyPickerOpen}
+          title="Выбор контрагента"
+          allowEmpty
+          selected={selectedCounterpartyPickerValue}
+          initialScope={form.legalEntityId ? 'legalEntity' : 'client'}
+          onClose={() => setCounterpartyPickerOpen(false)}
+          onSelect={handleCounterpartyPick}
+        />
+      </>
+    );
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-8">
       {content}
+      <CounterpartyPickerModal
+        open={counterpartyPickerOpen}
+        title="Выбор контрагента"
+        allowEmpty
+        selected={selectedCounterpartyPickerValue}
+        initialScope={form.legalEntityId ? 'legalEntity' : 'client'}
+        overlayClassName="z-[1600]"
+        onClose={() => setCounterpartyPickerOpen(false)}
+        onSelect={handleCounterpartyPick}
+      />
     </div>
   );
 }

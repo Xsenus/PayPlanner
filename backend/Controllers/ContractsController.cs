@@ -240,7 +240,7 @@ public class ContractsController : ControllerBase
             CreatedAt = DateTime.UtcNow,
         };
 
-        ApplyLinks(contract, normalized.Clients, normalized.ActIds, normalized.InvoiceIds, normalized.PaymentIds);
+        ApplyLinks(contract, normalized.Clients, normalized.LegalEntities, normalized.ActIds, normalized.InvoiceIds, normalized.PaymentIds);
         _db.Contracts.Add(contract);
         await _db.SaveChangesAsync(ct);
         await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
@@ -258,7 +258,8 @@ public class ContractsController : ControllerBase
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
 
         var contract = await _db.Contracts
-            .Include(c => c.ClientContracts).Include(c => c.ContractActs).Include(c => c.ContractInvoices).Include(c => c.ContractPayments)
+            .Include(c => c.ClientContracts).Include(c => c.LegalEntityContracts)
+            .Include(c => c.ContractActs).Include(c => c.ContractInvoices).Include(c => c.ContractPayments)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (contract is null) return NotFound();
 
@@ -289,6 +290,7 @@ public class ContractsController : ControllerBase
         contract.UpdatedAt = DateTime.UtcNow;
 
         SyncClientLinks(contract, normalized.Clients);
+        SyncLegalEntityLinks(contract, normalized.LegalEntities);
         SyncLinks(contract.ContractActs, normalized.ActIds, id, actId => new ContractAct { ContractId = id, ActId = actId }, (l, v) => l.ActId == v);
         SyncLinks(contract.ContractInvoices, normalized.InvoiceIds, id, invoiceId => new ContractInvoice { ContractId = id, InvoiceId = invoiceId }, (l, v) => l.InvoiceId == v);
         SyncLinks(contract.ContractPayments, normalized.PaymentIds, id, paymentId => new ContractPayment { ContractId = id, PaymentId = paymentId }, (l, v) => l.PaymentId == v);
@@ -311,6 +313,7 @@ public class ContractsController : ControllerBase
 
     private IQueryable<Contract> BuildContractsQuery() => _db.Contracts.AsNoTracking()
         .Include(c => c.ClientContracts).ThenInclude(cc => cc.Client)
+        .Include(c => c.LegalEntityContracts).ThenInclude(link => link.LegalEntity)
         .Include(c => c.ContractActs).Include(c => c.ContractInvoices).Include(c => c.ContractPayments);
 
     private IQueryable<Contract> BuildContractsListCountQuery() => _db.Contracts.AsNoTracking();
@@ -357,6 +360,15 @@ public class ContractsController : ControllerBase
             Company = link.Client!.Company,
             Comment = link.Comment,
         }).OrderBy(c => c.Name).ToList(),
+        LegalEntities = contract.LegalEntityContracts.Where(link => link.LegalEntity != null).Select(link => new ContractLegalEntityDto
+        {
+            Id = link.LegalEntityId,
+            ShortName = link.LegalEntity!.ShortName,
+            FullName = link.LegalEntity!.FullName,
+            Inn = link.LegalEntity!.Inn,
+            Kpp = link.LegalEntity!.Kpp,
+            Comment = link.Comment,
+        }).OrderBy(entity => entity.ShortName).ToList(),
         ActIds = contract.ContractActs.Select(x => x.ActId).ToList(),
         InvoiceIds = contract.ContractInvoices.Select(x => x.InvoiceId).ToList(),
         PaymentIds = contract.ContractPayments.Select(x => x.PaymentId).ToList(),
@@ -365,6 +377,7 @@ public class ContractsController : ControllerBase
     private IQueryable<Contract> BuildContractDetailQuery() => _db.Contracts
         .AsSplitQuery()
         .Include(c => c.ClientContracts).ThenInclude(link => link.Client)
+        .Include(c => c.LegalEntityContracts).ThenInclude(link => link.LegalEntity)
         .Include(c => c.ContractActs).ThenInclude(link => link.Act)
         .Include(c => c.ContractInvoices).ThenInclude(link => link.Invoice).ThenInclude(invoice => invoice!.Acts)
         .Include(c => c.ContractPayments).ThenInclude(link => link.Payment)
@@ -461,22 +474,35 @@ public class ContractsController : ControllerBase
                 })
                 .OrderBy(item => item.Name)
                 .ToList(),
+            LegalEntities = contract.LegalEntityContracts
+                .Where(link => link.LegalEntity != null)
+                .Select(link => new ContractLegalEntityDto
+                {
+                    Id = link.LegalEntityId,
+                    ShortName = link.LegalEntity!.ShortName,
+                    FullName = link.LegalEntity!.FullName,
+                    Inn = link.LegalEntity!.Inn,
+                    Kpp = link.LegalEntity!.Kpp,
+                    Comment = link.Comment,
+                })
+                .OrderBy(item => item.ShortName)
+                .ToList(),
             ActIds = contract.ContractActs.Select(link => link.ActId).ToList(),
             InvoiceIds = invoiceIds,
             PaymentIds = paymentIds,
         };
     }
 
-    private async Task<(ActionResult? Error, string? Number, string? BillingMode, bool IsOpenEnded, decimal? Amount, DateTime? ValidUntil, List<(int ClientId, string? Comment)> Clients, List<int> ActIds, List<int> InvoiceIds, List<int> PaymentIds)>
+    private async Task<(ActionResult? Error, string? Number, string? BillingMode, bool IsOpenEnded, decimal? Amount, DateTime? ValidUntil, List<(int ClientId, string? Comment)> Clients, List<(int LegalEntityId, string? Comment)> LegalEntities, List<int> ActIds, List<int> InvoiceIds, List<int> PaymentIds)>
         ValidateAndNormalizePayload(UpsertContractRequest request, int? contractId, CancellationToken ct)
     {
         if (request.Date == default)
         {
-            return (ValidationError(nameof(request.Date), "Дата договора обязательна."), null, null, false, null, null, [], [], [], []);
+            return (ValidationError(nameof(request.Date), "Дата договора обязательна."), null, null, false, null, null, [], [], [], [], []);
         }
         if (!ContractBillingMode.IsValid(request.BillingMode))
         {
-            return (ValidationError(nameof(request.BillingMode), "Некорректный режим договора."), null, null, false, null, null, [], [], [], []);
+            return (ValidationError(nameof(request.BillingMode), "Некорректный режим договора."), null, null, false, null, null, [], [], [], [], []);
         }
         var billingMode = ContractBillingMode.Normalize(request.BillingMode);
         var isOpenEnded = request.IsOpenEnded;
@@ -484,7 +510,7 @@ public class ContractsController : ControllerBase
         var normalizedValidUntil = isOpenEnded ? null : request.ValidUntil?.Date;
         if (billingMode == ContractBillingMode.Fixed && normalizedAmount is null)
         {
-            return (ValidationError(nameof(request.Amount), "Для договора с фиксированной суммой нужно указать сумму."), null, null, false, null, null, [], [], [], []);
+            return (ValidationError(nameof(request.Amount), "Для договора с фиксированной суммой нужно указать сумму."), null, null, false, null, null, [], [], [], [], []);
         }
         var rules = await GetContractRulesSettingsAsync(ct);
         var number = Normalize(request.Number);
@@ -508,24 +534,32 @@ public class ContractsController : ControllerBase
         }
         if (string.IsNullOrEmpty(number))
         {
-            return (ValidationError(nameof(request.Number), "Номер договора обязателен."), null, null, false, null, null, [], [], [], []);
+            return (ValidationError(nameof(request.Number), "Номер договора обязателен."), null, null, false, null, null, [], [], [], [], []);
         }
         var duplicateNumberError = await EnsureContractNumberIsUniqueAsync(number, contractId, ct);
         if (duplicateNumberError is not null)
         {
-            return (duplicateNumberError, null, null, false, null, null, [], [], [], []);
+            return (duplicateNumberError, null, null, false, null, null, [], [], [], [], []);
         }
         var clients = request.Clients?.Where(x => x.ClientId > 0).GroupBy(x => x.ClientId)
             .Select(g => (ClientId: g.Key, Comment: Normalize(g.Last().Comment))).ToList() ?? [];
-        if (clients.Count == 0)
+        var legalEntities = request.LegalEntities?.Where(x => x.LegalEntityId > 0).GroupBy(x => x.LegalEntityId)
+            .Select(g => (LegalEntityId: g.Key, Comment: Normalize(g.Last().Comment))).ToList() ?? [];
+        if (clients.Count == 0 && legalEntities.Count == 0)
         {
-            return (BadRequest("Необходимо выбрать хотя бы одного клиента."), null, null, false, null, null, [], [], [], []);
+            return (BadRequest("Необходимо выбрать хотя бы одного контрагента."), null, null, false, null, null, [], [], [], [], []);
         }
         var clientIds = clients.Select(x => x.ClientId).ToList();
         var existingClients = await _db.Clients.AsNoTracking().Where(c => clientIds.Contains(c.Id)).Select(c => c.Id).ToListAsync(ct);
         if (existingClients.Count != clientIds.Count)
         {
-            return (BadRequest($"Не найдены клиенты: {string.Join(", ", clientIds.Except(existingClients))}"), null, null, false, null, null, [], [], [], []);
+            return (BadRequest($"Не найдены клиенты: {string.Join(", ", clientIds.Except(existingClients))}"), null, null, false, null, null, [], [], [], [], []);
+        }
+        var legalEntityIds = legalEntities.Select(x => x.LegalEntityId).ToList();
+        var existingLegalEntities = await _db.LegalEntities.AsNoTracking().Where(entity => legalEntityIds.Contains(entity.Id)).Select(entity => entity.Id).ToListAsync(ct);
+        if (existingLegalEntities.Count != legalEntityIds.Count)
+        {
+            return (BadRequest($"Не найдены юридические лица: {string.Join(", ", legalEntityIds.Except(existingLegalEntities))}"), null, null, false, null, null, [], [], [], [], []);
         }
         var actIds = NormalizeIds(request.ActIds);
         if (actIds.Count > 0)
@@ -533,7 +567,7 @@ public class ContractsController : ControllerBase
             var existing = await _db.Acts.AsNoTracking().Where(x => actIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
             if (existing.Count != actIds.Count)
             {
-                return (BadRequest($"Не найдены акты: {string.Join(", ", actIds.Except(existing))}"), null, null, false, null, null, [], [], [], []);
+                return (BadRequest($"Не найдены акты: {string.Join(", ", actIds.Except(existing))}"), null, null, false, null, null, [], [], [], [], []);
             }
         }
         var invoiceIds = NormalizeIds(request.InvoiceIds);
@@ -545,7 +579,7 @@ public class ContractsController : ControllerBase
                 .ToListAsync(ct);
             if (existing.Count != invoiceIds.Count)
             {
-                return (BadRequest($"Не найдены счета: {string.Join(", ", invoiceIds.Except(existing))}"), null, null, false, null, null, [], [], [], []);
+                return (BadRequest($"Не найдены счета: {string.Join(", ", invoiceIds.Except(existing))}"), null, null, false, null, null, [], [], [], [], []);
             }
         }
         var paymentIds = NormalizeIds(request.PaymentIds);
@@ -554,7 +588,7 @@ public class ContractsController : ControllerBase
             var existing = await _db.Payments.AsNoTracking().Where(x => paymentIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
             if (existing.Count != paymentIds.Count)
             {
-                return (BadRequest($"Не найдены платежи: {string.Join(", ", paymentIds.Except(existing))}"), null, null, false, null, null, [], [], [], []);
+                return (BadRequest($"Не найдены платежи: {string.Join(", ", paymentIds.Except(existing))}"), null, null, false, null, null, [], [], [], [], []);
             }
         }
         if (billingMode == ContractBillingMode.Fixed && normalizedAmount.HasValue)
@@ -566,10 +600,10 @@ public class ContractsController : ControllerBase
                     .SumAsync(x => (decimal?)x.Amount, ct) ?? 0m;
             if (invoiceAmountTotal > normalizedAmount.Value)
             {
-                return (ValidationError(nameof(request.Amount), "Сумма привязанных счетов превышает сумму договора."), null, null, false, null, null, [], [], [], []);
+                return (ValidationError(nameof(request.Amount), "Сумма привязанных счетов превышает сумму договора."), null, null, false, null, null, [], [], [], [], []);
             }
         }
-        return (null, number, billingMode, isOpenEnded, normalizedAmount, normalizedValidUntil, clients, actIds, invoiceIds, paymentIds);
+        return (null, number, billingMode, isOpenEnded, normalizedAmount, normalizedValidUntil, clients, legalEntities, actIds, invoiceIds, paymentIds);
     }
     private async Task<ActionResult?> EnsureContractNumberIsUniqueAsync(string number, int? excludeId, CancellationToken ct)
     {
@@ -761,9 +795,16 @@ public class ContractsController : ControllerBase
     private static bool ParseBoolSetting(string? value, bool fallback)
         => bool.TryParse(value, out var parsed) ? parsed : fallback;
 
-    private static void ApplyLinks(Contract contract, List<(int ClientId, string? Comment)> clients, List<int> actIds, List<int> invoiceIds, List<int> paymentIds)
+    private static void ApplyLinks(
+        Contract contract,
+        List<(int ClientId, string? Comment)> clients,
+        List<(int LegalEntityId, string? Comment)> legalEntities,
+        List<int> actIds,
+        List<int> invoiceIds,
+        List<int> paymentIds)
     {
         foreach (var client in clients) contract.ClientContracts.Add(new ClientContract { ClientId = client.ClientId, Comment = client.Comment });
+        foreach (var entity in legalEntities) contract.LegalEntityContracts.Add(new LegalEntityContract { LegalEntityId = entity.LegalEntityId, Comment = entity.Comment });
         foreach (var actId in actIds) contract.ContractActs.Add(new ContractAct { ActId = actId });
         foreach (var invoiceId in invoiceIds) contract.ContractInvoices.Add(new ContractInvoice { InvoiceId = invoiceId });
         foreach (var paymentId in paymentIds) contract.ContractPayments.Add(new ContractPayment { PaymentId = paymentId });
@@ -777,6 +818,18 @@ public class ContractsController : ControllerBase
         {
             var existing = contract.ClientContracts.FirstOrDefault(x => x.ClientId == clientId);
             if (existing is null) contract.ClientContracts.Add(new ClientContract { ContractId = contract.Id, ClientId = clientId, Comment = comment });
+            else existing.Comment = comment;
+        }
+    }
+
+    private static void SyncLegalEntityLinks(Contract contract, List<(int LegalEntityId, string? Comment)> legalEntities)
+    {
+        var requested = legalEntities.ToDictionary(x => x.LegalEntityId, x => x.Comment);
+        foreach (var link in contract.LegalEntityContracts.Where(x => !requested.ContainsKey(x.LegalEntityId)).ToList()) contract.LegalEntityContracts.Remove(link);
+        foreach (var (legalEntityId, comment) in requested)
+        {
+            var existing = contract.LegalEntityContracts.FirstOrDefault(x => x.LegalEntityId == legalEntityId);
+            if (existing is null) contract.LegalEntityContracts.Add(new LegalEntityContract { ContractId = contract.Id, LegalEntityId = legalEntityId, Comment = comment });
             else existing.Comment = comment;
         }
     }
@@ -848,7 +901,20 @@ public class ContractsController : ControllerBase
                         (link.Client.Company.ToLower().Contains(term) ||
                          link.Client.Company.Contains(rawTerm) ||
                          link.Client.Company.Contains(upperTerm) ||
-                         link.Client.Company.Contains(titleTerm))))));
+                         link.Client.Company.Contains(titleTerm))))) ||
+                c.LegalEntityContracts.Any(link =>
+                    link.LegalEntity != null &&
+                    (link.LegalEntity.ShortName.ToLower().Contains(term) ||
+                     link.LegalEntity.ShortName.Contains(rawTerm) ||
+                     link.LegalEntity.ShortName.Contains(upperTerm) ||
+                     link.LegalEntity.ShortName.Contains(titleTerm) ||
+                     (link.LegalEntity.FullName != null &&
+                        (link.LegalEntity.FullName.ToLower().Contains(term) ||
+                         link.LegalEntity.FullName.Contains(rawTerm) ||
+                         link.LegalEntity.FullName.Contains(upperTerm) ||
+                         link.LegalEntity.FullName.Contains(titleTerm))) ||
+                     (link.LegalEntity.Inn != null && link.LegalEntity.Inn.Contains(rawTerm)) ||
+                     (link.LegalEntity.Kpp != null && link.LegalEntity.Kpp.Contains(rawTerm)))));
         }
         return query;
     }

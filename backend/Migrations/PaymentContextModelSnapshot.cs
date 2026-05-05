@@ -2422,6 +2422,26 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("LegalEntities");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.LegalEntityContract", b =>
+                {
+                    b.Property<int>("ContractId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ContractId", "LegalEntityId");
+
+                    b.HasIndex("LegalEntityId")
+                        .HasDatabaseName("IX_LegalEntityContracts_LegalEntityId");
+
+                    b.ToTable("LegalEntityContracts", (string)null);
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.MoneyAccount", b =>
                 {
                     b.Property<int>("Id")
@@ -4966,6 +4986,25 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("ResponsibleUser");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.LegalEntityContract", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Contract", "Contract")
+                        .WithMany("LegalEntityContracts")
+                        .HasForeignKey("ContractId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany("LegalEntityContracts")
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Contract");
+
+                    b.Navigation("LegalEntity");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.MoneyOperation", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.BankStatementImportBatch", "BankStatementImportBatch")
@@ -5301,6 +5340,8 @@ namespace PayPlanner.Api.Migrations
 
                     b.Navigation("ContractPayments");
 
+                    b.Navigation("LegalEntityContracts");
+
                     b.Navigation("Payments");
                 });
 
@@ -5330,6 +5371,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Cases");
 
                     b.Navigation("Clients");
+
+                    b.Navigation("LegalEntityContracts");
 
                     b.Navigation("Payments");
 

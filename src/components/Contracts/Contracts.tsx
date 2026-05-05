@@ -273,7 +273,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
           '—'
         );
       case 'clients':
-        return contract.clients.length > 0 ? (
+        return (contract.clients.length + (contract.legalEntities?.length ?? 0)) > 0 ? (
           <div className="flex flex-wrap gap-2">
             {contract.clients.map((client) => (
               <button
@@ -288,6 +288,15 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                 <span className="max-w-[180px] truncate">{client.name}</span>
                 {client.clientStatus ? <ClientStatusBadge status={client.clientStatus} /> : null}
               </button>
+            ))}
+            {(contract.legalEntities ?? []).map((entity) => (
+              <span
+                key={`legal:${entity.id}`}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700"
+              >
+                <span className="max-w-[180px] truncate">{entity.shortName || entity.fullName || `Юрлицо #${entity.id}`}</span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] uppercase text-slate-500">Юрлицо</span>
+              </span>
             ))}
           </div>
         ) : (

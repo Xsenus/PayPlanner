@@ -1,4 +1,4 @@
-import { CalendarDays, CreditCard, Loader2, ReceiptText, Wallet } from 'lucide-react';
+import { CalendarDays, CreditCard, Loader2, ReceiptText, UserRoundSearch, Wallet } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useClientCases } from '../../hooks/useClientCases';
 import { useDialog } from '../../hooks/useDialog';
@@ -14,6 +14,7 @@ import type {
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { cloneInstallmentPlan, createInstallmentPlanInput } from '../../utils/installmentPlan';
+import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 
 type BasePlannerProps = {
   initialPlan?: InstallmentPlanInput | null;
@@ -37,7 +38,8 @@ type CalculatorPlannerProps = BasePlannerProps & {
   clients: Client[];
   onSavePayments: (args: {
     plan: InstallmentPlanInput;
-    clientId: number;
+    clientId?: number;
+    legalEntityId?: number;
     clientCaseId?: number;
     invoiceNumber?: string | null;
     clientName?: string | null;
@@ -180,12 +182,18 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
   const [selectedClientId, setSelectedClientId] = useState<number | undefined>(
     props.mode === 'calculator' ? props.initialClientId : undefined,
   );
+  const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | undefined>(undefined);
+  const [selectedCounterpartyName, setSelectedCounterpartyName] = useState<string | null>(
+    props.mode === 'calculator' ? props.initialClientName ?? null : null,
+  );
+  const [counterpartyPickerOpen, setCounterpartyPickerOpen] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<number | undefined>(
     props.mode === 'calculator' ? props.initialCaseId : undefined,
   );
 
   const { cases, loading: casesLoading } = useClientCases(
     props.mode === 'calculator' ? selectedClientId : undefined,
+    { legalEntityId: props.mode === 'calculator' ? selectedLegalEntityId : undefined },
   );
 
   const clientOptions = useMemo(
@@ -231,7 +239,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
     || calculating
     || submitting
     || calculationDirty
-    || (!isInvoiceMode && !selectedClientId);
+    || (!isInvoiceMode && !selectedClientId && !selectedLegalEntityId);
 
   const calculateButtonLabel = planDraft ? 'Пересчитать график' : 'Рассчитать график';
 
@@ -402,9 +410,24 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
     handleDirtyChange();
   };
 
-  const handleClientChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const nextClientId = Number.parseInt(event.target.value, 10) || undefined;
-    setSelectedClientId(nextClientId);
+  const handleCounterpartySelect = (selection: CounterpartySelection | null) => {
+    if (!selection) {
+      setSelectedClientId(undefined);
+      setSelectedLegalEntityId(undefined);
+      setSelectedCounterpartyName(null);
+      setSelectedCaseId(undefined);
+      return;
+    }
+
+    if (selection.kind === 'client') {
+      setSelectedClientId(selection.id);
+      setSelectedLegalEntityId(undefined);
+    } else {
+      setSelectedClientId(undefined);
+      setSelectedLegalEntityId(selection.id);
+    }
+
+    setSelectedCounterpartyName(selection.name);
     setSelectedCaseId(undefined);
   };
 
@@ -529,8 +552,8 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
       return;
     }
 
-    if (!isInvoiceMode && !selectedClientId) {
-      showInstallmentError('Выберите клиента для сохранения графика.');
+    if (!isInvoiceMode && !selectedClientId && !selectedLegalEntityId) {
+      showInstallmentError('Выберите контрагента для сохранения графика.');
       return;
     }
 
@@ -565,10 +588,11 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
 
       await props.onSavePayments({
         plan: cloneInstallmentPlan(planDraft)!,
-        clientId: selectedClientId!,
+        clientId: selectedClientId,
+        legalEntityId: selectedLegalEntityId,
         clientCaseId: selectedCaseId,
         invoiceNumber: props.initialInvoiceNumber ?? null,
-        clientName: selectedClient?.name ?? props.initialClientName ?? null,
+        clientName: selectedClient?.name ?? selectedCounterpartyName ?? props.initialClientName ?? null,
       });
     } catch (error) {
       showInstallmentError(
@@ -629,28 +653,32 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
           <div className="mt-4 space-y-3.5">
             {props.mode === 'calculator' ? (
               <>
-                <label className="flex flex-col text-sm">
-                  <span className={fieldLabelClass}>Клиент</span>
-                  <select
-                    value={selectedClientId ? String(selectedClientId) : ''}
-                    onChange={handleClientChange}
-                    className={fieldSelectClass}
-                  >
-                    <option value="">Выберите клиента</option>
-                    {clientOptions.map((client) => (
-                      <option key={client.id} value={client.id}>
-                        {client.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
+                <div className="flex flex-col text-sm">
+                  <span className={fieldLabelClass}>Контрагент</span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={selectedCounterpartyName ?? selectedClient?.name ?? ''}
+                      readOnly
+                      placeholder="Выберите контрагента"
+                      className={`${fieldControlClass} min-w-0 flex-1 bg-slate-50`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setCounterpartyPickerOpen(true)}
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-300 text-slate-700 transition hover:bg-slate-50"
+                      aria-label="Выбрать контрагента"
+                    >
+                      <UserRoundSearch className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
                 <label className="flex flex-col text-sm">
                   <span className={fieldLabelClass}>Дело</span>
                   <select
                     value={selectedCaseId ? String(selectedCaseId) : ''}
                     onChange={handleCaseChange}
-                    disabled={!selectedClientId || casesLoading}
+                    disabled={(!selectedClientId && !selectedLegalEntityId) || casesLoading}
                     className={`${fieldSelectClass} disabled:bg-slate-100 disabled:text-slate-400`}
                   >
                     <option value="">{casesLoading ? 'Загрузка дел...' : 'Без дела'}</option>
@@ -888,7 +916,15 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
           </button>
         ) : null}
       </div>
+      {props.mode === 'calculator' ? (
+        <CounterpartyPickerModal
+          open={counterpartyPickerOpen}
+          title="Выбор контрагента"
+          initialScope={selectedLegalEntityId ? 'legalEntity' : 'client'}
+          onClose={() => setCounterpartyPickerOpen(false)}
+          onSelect={handleCounterpartySelect}
+        />
+      ) : null}
     </div>
   );
 }
-

@@ -1,13 +1,12 @@
-import { ArrowLeft, Loader2, Plus, Save, Search, X } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Save, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
-import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
-import type { ContractBillingMode, ContractClient, ContractInput, ContractStatus } from '../../types';
+import type { ContractBillingMode, ContractClient, ContractInput, ContractLegalEntity, ContractStatus } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
-import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
+import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 
 interface ContractCreatePageProps {
   onBack: () => void;
@@ -47,6 +46,18 @@ const createInitialForm = (): FormState => {
 
 const CLIENT_PAGE_SIZE_OPTIONS = [10, 25, 50];
 
+type ContractCounterparty =
+  | ({ kind: 'client' } & ContractClient)
+  | ({ kind: 'legalEntity' } & ContractLegalEntity);
+
+function contractCounterpartyKey(item: Pick<ContractCounterparty, 'kind' | 'id'>): string {
+  return `${item.kind}:${item.id}`;
+}
+
+function legalEntityName(entity: Pick<ContractLegalEntity, 'shortName' | 'fullName' | 'id'>): string {
+  return entity.shortName?.trim() || entity.fullName?.trim() || `Юрлицо #${entity.id}`;
+}
+
 export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProps) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -58,18 +69,10 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
     autoGenerateWhenEmpty: true,
     allowManualNumberEdit: true,
   });
-  const [selectedClients, setSelectedClients] = useState<ContractClient[]>([]);
+  const [selectedCounterparties, setSelectedCounterparties] = useState<ContractCounterparty[]>([]);
   const [selectedPage, setSelectedPage] = useState(1);
   const [selectedPageSize, setSelectedPageSize] = useState(CLIENT_PAGE_SIZE_OPTIONS[0]);
-  const [clientSearch, setClientSearch] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
-  const debouncedClientSearch = useDebouncedValue(clientSearch.trim(), 250);
-  const [clientOptions, setClientOptions] = useState<ContractClient[]>([]);
-  const [clientOptionsLoading, setClientOptionsLoading] = useState(false);
-  const [clientOptionsError, setClientOptionsError] = useState<string | null>(null);
-  const [clientOptionsPage, setClientOptionsPage] = useState(1);
-  const [clientOptionsPageSize, setClientOptionsPageSize] = useState(CLIENT_PAGE_SIZE_OPTIONS[0]);
-  const [clientOptionsTotal, setClientOptionsTotal] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -119,75 +122,59 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
     };
   }, [form.date, numberManuallyEdited]);
 
-  useEffect(() => {
-    if (!pickerOpen) return;
-    let cancelled = false;
-    const fetchClients = async () => {
-      setClientOptionsLoading(true);
-      setClientOptionsError(null);
-      try {
-        const response = await apiService.getClientsV2({
-          search: debouncedClientSearch || undefined,
-          sortBy: 'name',
-          sortDir: 'asc',
-          page: clientOptionsPage,
-          pageSize: clientOptionsPageSize,
-        });
-        if (cancelled) return;
-        setClientOptions(
-          (response.items ?? []).map((client) => ({
-            id: client.id,
-            name: client.name,
-            company: client.company,
-            clientStatusId: client.clientStatusId ?? null,
-            clientStatus: client.clientStatus ?? null,
-            comment: '',
-          })),
-        );
-        setClientOptionsTotal(response.total ?? 0);
-      } catch (error) {
-        if (cancelled) return;
-        const message = extractDisplayErrorMessage(error, 'Не удалось загрузить клиентов');
-        setClientOptions([]);
-        setClientOptionsTotal(0);
-        setClientOptionsError(message);
-        toast.error(message, 'Ошибка загрузки');
-      } finally {
-        if (!cancelled) setClientOptionsLoading(false);
-      }
-    };
-
-    void fetchClients();
-    return () => {
-      cancelled = true;
-    };
-  }, [clientOptionsPage, clientOptionsPageSize, debouncedClientSearch, pickerOpen, toast]);
-
-  useEffect(() => {
-    setClientOptionsPage(1);
-  }, [clientOptionsPageSize, debouncedClientSearch]);
-
-  const selectedClientIds = useMemo(() => new Set(selectedClients.map((x) => x.id)), [selectedClients]);
-  const availableClientOptions = useMemo(
-    () => clientOptions.filter((x) => !selectedClientIds.has(x.id)),
-    [clientOptions, selectedClientIds],
-  );
   const selectedTotalPages = useMemo(
-    () => Math.max(1, Math.ceil(selectedClients.length / selectedPageSize)),
-    [selectedClients.length, selectedPageSize],
+    () => Math.max(1, Math.ceil(selectedCounterparties.length / selectedPageSize)),
+    [selectedCounterparties.length, selectedPageSize],
   );
-  const pagedSelectedClients = useMemo(() => {
+  const pagedSelectedCounterparties = useMemo(() => {
     const offset = (selectedPage - 1) * selectedPageSize;
-    return selectedClients.slice(offset, offset + selectedPageSize);
-  }, [selectedClients, selectedPage, selectedPageSize]);
-  const clientOptionsTotalPages = useMemo(
-    () => Math.max(1, Math.ceil(clientOptionsTotal / clientOptionsPageSize)),
-    [clientOptionsPageSize, clientOptionsTotal],
+    return selectedCounterparties.slice(offset, offset + selectedPageSize);
+  }, [selectedCounterparties, selectedPage, selectedPageSize]);
+  const selectedPickerValue = useMemo<CounterpartySelection[]>(
+    () => selectedCounterparties.map((item) => ({
+      kind: item.kind,
+      id: item.id,
+      name: item.kind === 'client' ? item.name : legalEntityName(item),
+      subtitle: item.kind === 'client'
+        ? item.company ?? null
+        : [item.inn ? `ИНН ${item.inn}` : '', item.kpp ? `КПП ${item.kpp}` : ''].filter(Boolean).join(' · ') || item.fullName || null,
+    })),
+    [selectedCounterparties],
   );
 
   useEffect(() => {
     setSelectedPage((prev) => Math.min(prev, selectedTotalPages));
   }, [selectedTotalPages]);
+
+  const handleApplyCounterparties = (selection: CounterpartySelection[]) => {
+    const previousComments = new Map(selectedCounterparties.map((item) => [contractCounterpartyKey(item), item.comment ?? '']));
+    setSelectedCounterparties(selection.map((item): ContractCounterparty => {
+      const comment = previousComments.get(`${item.kind}:${item.id}`) ?? '';
+      if (item.kind === 'legalEntity') {
+        const entity = item.legalEntity;
+        return {
+          kind: 'legalEntity',
+          id: item.id,
+          shortName: entity?.shortName ?? item.name,
+          fullName: entity?.fullName ?? item.subtitle ?? null,
+          inn: entity?.inn ?? null,
+          kpp: entity?.kpp ?? null,
+          comment,
+        };
+      }
+
+      const client = item.client;
+      return {
+        kind: 'client',
+        id: item.id,
+        name: client?.name ?? item.name,
+        company: client?.company ?? item.subtitle ?? null,
+        clientStatusId: client?.clientStatusId ?? null,
+        clientStatus: client?.clientStatus ?? null,
+        comment,
+      };
+    }));
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -201,8 +188,8 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
       setLocalError('Дата договора обязательна');
       return;
     }
-    if (selectedClients.length === 0) {
-      setLocalError('Выберите хотя бы одного клиента');
+    if (selectedCounterparties.length === 0) {
+      setLocalError('Выберите хотя бы одного контрагента');
       return;
     }
 
@@ -233,7 +220,12 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
       description: form.description.trim() || undefined,
       validUntil: !form.isOpenEnded && form.validUntil ? fromInputToApiDate(form.validUntil) : undefined,
       terminationDate: form.terminationDate ? fromInputToApiDate(form.terminationDate) : undefined,
-      clients: selectedClients.map((client) => ({ clientId: client.id, comment: client.comment ?? undefined })),
+      clients: selectedCounterparties
+        .filter((item): item is Extract<ContractCounterparty, { kind: 'client' }> => item.kind === 'client')
+        .map((client) => ({ clientId: client.id, comment: client.comment ?? undefined })),
+      legalEntities: selectedCounterparties
+        .filter((item): item is Extract<ContractCounterparty, { kind: 'legalEntity' }> => item.kind === 'legalEntity')
+        .map((entity) => ({ legalEntityId: entity.id, comment: entity.comment ?? undefined })),
       actIds: [],
       invoiceIds: [],
       paymentIds: [],
@@ -362,60 +354,69 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
 
           <div className="mt-5 rounded-xl border border-slate-200">
             <div className="flex items-center justify-between border-b px-4 py-3">
-              <h3 className="font-semibold text-slate-900">Клиенты договора</h3>
+              <h3 className="font-semibold text-slate-900">Контрагенты договора</h3>
               <button
                 type="button"
                 onClick={() => setPickerOpen(true)}
                 className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700"
               >
                 <Plus className="h-4 w-4" />
-                Добавить клиента
+                Добавить контрагента
               </button>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full table-fixed divide-y divide-slate-200 text-sm">
                 <colgroup>
+                  <col style={{ width: '28%' }} />
+                  <col style={{ width: '14%' }} />
                   <col style={{ width: '24%' }} />
-                  <col style={{ width: '20%' }} />
-                  <col style={{ width: '40%' }} />
+                  <col style={{ width: '24%' }} />
                   <col style={{ width: '16%' }} />
                 </colgroup>
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                   <tr>
-                    <th className="px-3 py-2 text-left">ФИО</th>
-                    <th className="px-3 py-2 text-left">Компания</th>
+                    <th className="px-3 py-2 text-left">Контрагент</th>
+                    <th className="px-3 py-2 text-left">Тип</th>
+                    <th className="px-3 py-2 text-left">Реквизиты</th>
                     <th className="px-3 py-2 text-left">Комментарий</th>
                     <th className="px-3 py-2 text-right">Действия</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {selectedClients.length === 0 ? (
+                  {selectedCounterparties.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
-                        Клиенты не добавлены
+                      <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
+                        Контрагенты не добавлены
                       </td>
                     </tr>
                   ) : (
-                    pagedSelectedClients.map((client) => (
-                      <tr key={client.id}>
-                        <td className="px-3 py-2">{client.name}</td>
-                        <td className="px-3 py-2">{client.company || '—'}</td>
+                    pagedSelectedCounterparties.map((counterparty) => (
+                      <tr key={contractCounterpartyKey(counterparty)}>
+                        <td className="px-3 py-2">
+                          {counterparty.kind === 'client' ? counterparty.name : legalEntityName(counterparty)}
+                        </td>
+                        <td className="px-3 py-2">{counterparty.kind === 'client' ? 'Клиент' : 'Юрлицо'}</td>
+                        <td className="px-3 py-2">
+                          {counterparty.kind === 'client'
+                            ? counterparty.company || '—'
+                            : [counterparty.inn ? `ИНН ${counterparty.inn}` : '', counterparty.kpp ? `КПП ${counterparty.kpp}` : ''].filter(Boolean).join(', ') || counterparty.fullName || '—'}
+                        </td>
                         <td className="px-3 py-2">
                           <input
-                            value={client.comment ?? ''}
+                            value={counterparty.comment ?? ''}
                             onChange={(e) =>
-                              setSelectedClients((prev) =>
-                                prev.map((x) => (x.id === client.id ? { ...x, comment: e.target.value } : x)),
+                              setSelectedCounterparties((prev) =>
+                                prev.map((x) => (contractCounterpartyKey(x) === contractCounterpartyKey(counterparty) ? { ...x, comment: e.target.value } : x)),
                               )
                             }
                             className="w-full rounded border border-slate-200 px-2 py-1"
-                            placeholder="Комментарий к клиенту"
+                            placeholder="Комментарий к контрагенту"
                           />
                         </td>
                         <td className="px-3 py-2 text-right">
                           <button
                             type="button"
-                            onClick={() => setSelectedClients((prev) => prev.filter((x) => x.id !== client.id))}
+                            onClick={() => setSelectedCounterparties((prev) => prev.filter((x) => contractCounterpartyKey(x) !== contractCounterpartyKey(counterparty)))}
                             className="rounded border border-rose-200 p-1 text-rose-600"
                           >
                             <X className="h-4 w-4" />
@@ -430,7 +431,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
             <TablePagination
               page={selectedPage}
               totalPages={selectedTotalPages}
-              totalItems={selectedClients.length}
+              totalItems={selectedCounterparties.length}
               pageSize={selectedPageSize}
               pageSizeOptions={CLIENT_PAGE_SIZE_OPTIONS}
               onPageChange={setSelectedPage}
@@ -455,93 +456,14 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
         </form>
       </div>
 
-      {pickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <h3 className="text-lg font-semibold">Выбор клиента</h3>
-              <button className="rounded border px-2 py-1 text-sm" onClick={() => setPickerOpen(false)}>
-                Закрыть
-              </button>
-            </div>
-            <div className="p-4">
-              <div className="relative mb-3">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="search"
-                  value={clientSearch}
-                  onChange={(e) => setClientSearch(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 py-2 pl-10 pr-3"
-                  placeholder="Поиск клиента"
-                />
-              </div>
-
-              {clientOptionsError ? (
-                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {clientOptionsError}
-                </div>
-              ) : null}
-
-              <div className="max-h-80 overflow-auto rounded border">
-                <table className="min-w-full table-fixed divide-y text-sm">
-                  <colgroup>
-                    <col style={{ width: '44%' }} />
-                    <col style={{ width: '36%' }} />
-                    <col style={{ width: '20%' }} />
-                  </colgroup>
-                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                    <tr>
-                      <th className="px-3 py-2 text-left">ФИО</th>
-                      <th className="px-3 py-2 text-left">Компания</th>
-                      <th className="px-3 py-2 text-right">Действия</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {clientOptionsLoading ? (
-                      <tr>
-                        <td colSpan={3} className="px-3 py-8 text-center text-slate-500">
-                          Загрузка...
-                        </td>
-                      </tr>
-                    ) : availableClientOptions.length === 0 ? (
-                      <tr>
-                        <td colSpan={3} className="px-3 py-8 text-center text-slate-500">
-                          Клиенты не найдены
-                        </td>
-                      </tr>
-                    ) : (
-                      availableClientOptions.map((client) => (
-                        <tr key={client.id}>
-                          <td className="px-3 py-2">{client.name}</td>
-                          <td className="px-3 py-2">{client.company || '—'}</td>
-                          <td className="px-3 py-2 text-right">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedClients((prev) => [...prev, client])}
-                              className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700"
-                            >
-                              Добавить
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <TablePagination
-                page={clientOptionsPage}
-                totalPages={clientOptionsTotalPages}
-                totalItems={clientOptionsTotal}
-                pageSize={clientOptionsPageSize}
-                pageSizeOptions={CLIENT_PAGE_SIZE_OPTIONS}
-                onPageChange={setClientOptionsPage}
-                onPageSizeChange={setClientOptionsPageSize}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      <CounterpartyPickerModal
+        open={pickerOpen}
+        mode="multiple"
+        title="Выбор контрагентов"
+        selected={selectedPickerValue}
+        onApply={handleApplyCounterparties}
+        onClose={() => setPickerOpen(false)}
+      />
     </div>
   );
 }

@@ -616,6 +616,10 @@ export function ContractDetailPage({
         clientId: client.id,
         comment: client.comment ?? undefined,
       })),
+      legalEntities: (contract.legalEntities ?? []).map((entity) => ({
+        legalEntityId: entity.id,
+        comment: entity.comment ?? undefined,
+      })),
       actIds: contract.actIds ?? [],
       invoiceIds: contract.invoiceIds ?? [],
       paymentIds: contract.paymentIds ?? [],
@@ -1170,10 +1174,10 @@ export function ContractDetailPage({
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {(contract.clients ?? []).length === 0 ? (
+                {((contract.clients ?? []).length + (contract.legalEntities ?? []).length) === 0 ? (
                   <tr>
                     <td colSpan={visibleClientColumns.length + 1} className="px-3 py-6 text-center text-slate-500">
-                      Клиенты не найдены
+                      Контрагенты не найдены
                     </td>
                   </tr>
                 ) : (
@@ -1233,6 +1237,56 @@ export function ContractDetailPage({
                     </tr>
                   ))
                 )}
+                {(contract.legalEntities ?? []).map((entity) => (
+                  <tr key={`legal:${entity.id}`}>
+                    {visibleClientColumns.map((column) => (
+                      <td
+                        key={column.key}
+                        style={{ width: getClientColumnWidth(column.key) }}
+                        className="max-w-0 overflow-hidden px-3 py-2 align-top"
+                      >
+                        {column.key === 'name' ? (
+                          <span className="font-medium text-slate-700">{entity.shortName || entity.fullName || `Юрлицо #${entity.id}`}</span>
+                        ) : column.key === 'company' ? (
+                          [entity.inn ? `ИНН ${entity.inn}` : '', entity.kpp ? `КПП ${entity.kpp}` : ''].filter(Boolean).join(', ') || entity.fullName || '—'
+                        ) : (
+                          <input
+                            disabled={!editMode}
+                            value={entity.comment ?? ''}
+                            onChange={(event) =>
+                              setContract((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      legalEntities: (prev.legalEntities ?? []).map((item) =>
+                                        item.id === entity.id ? { ...item, comment: event.target.value } : item,
+                                      ),
+                                    }
+                                  : prev,
+                              )
+                            }
+                            className="w-full rounded border px-2 py-1"
+                          />
+                        )}
+                      </td>
+                    ))}
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        disabled={!editMode}
+                        onClick={() =>
+                          setContract((prev) =>
+                            prev
+                              ? { ...prev, legalEntities: (prev.legalEntities ?? []).filter((item) => item.id !== entity.id) }
+                              : prev,
+                          )
+                        }
+                        className="rounded border border-rose-200 p-1 text-rose-600 disabled:opacity-60"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

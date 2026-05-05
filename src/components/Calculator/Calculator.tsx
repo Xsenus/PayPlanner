@@ -33,7 +33,8 @@ export function Calculator() {
     clientName,
   }: {
     plan: InstallmentPlanInput;
-    clientId: number;
+    clientId?: number;
+    legalEntityId?: number;
     clientCaseId?: number;
     invoiceNumber?: string | null;
     clientName?: string | null;
@@ -64,6 +65,7 @@ export function Calculator() {
         systemNotes: '',
         rescheduleCount: 0,
         clientId,
+        legalEntityId,
         clientCaseId,
         dealTypeId: undefined,
         incomeTypeId: undefined,

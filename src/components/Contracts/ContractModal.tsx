@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Search, X } from 'lucide-react';
+import { Loader2, Plus, X } from 'lucide-react';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
-import type { Contract, ContractBillingMode, ContractClient, ContractInput, ContractStatus } from '../../types';
+import type { Contract, ContractBillingMode, ContractClient, ContractInput, ContractLegalEntity, ContractStatus } from '../../types';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
-import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 
 interface ContractModalProps {
   open: boolean;
@@ -30,6 +30,30 @@ type FormState = {
   description: string;
   validUntil: string;
 };
+
+type ContractCounterparty =
+  | ({ kind: 'client' } & ContractClient)
+  | ({ kind: 'legalEntity' } & ContractLegalEntity);
+
+function contractCounterpartyKey(item: Pick<ContractCounterparty, 'kind' | 'id'>): string {
+  return `${item.kind}:${item.id}`;
+}
+
+function legalEntityName(entity: Pick<ContractLegalEntity, 'shortName' | 'fullName' | 'id'>): string {
+  return entity.shortName?.trim() || entity.fullName?.trim() || `Юрлицо #${entity.id}`;
+}
+
+function buildInitialCounterparties(contract: Contract | null, defaultClients?: ContractClient[]): ContractCounterparty[] {
+  const clients = (contract?.clients ?? defaultClients ?? []).map((client) => ({
+    ...client,
+    kind: 'client' as const,
+  }));
+  const legalEntities = (contract?.legalEntities ?? []).map((entity) => ({
+    ...entity,
+    kind: 'legalEntity' as const,
+  }));
+  return [...clients, ...legalEntities];
+}
 
 function normalizeContractToForm(contract: Contract | null): FormState {
   if (!contract) {
@@ -84,22 +108,17 @@ export function ContractModal({
     autoGenerateWhenEmpty: true,
     allowManualNumberEdit: true,
   });
-  const [selectedClients, setSelectedClients] = useState<ContractClient[]>(
-    () => contract?.clients ?? defaultClients ?? [],
+  const [selectedCounterparties, setSelectedCounterparties] = useState<ContractCounterparty[]>(
+    () => buildInitialCounterparties(contract, defaultClients),
   );
-  const [clientSearch, setClientSearch] = useState('');
-  const debouncedClientSearch = useDebouncedValue(clientSearch.trim(), 350);
-  const [clientOptions, setClientOptions] = useState<ContractClient[]>([]);
-  const [clientOptionsLoading, setClientOptionsLoading] = useState(false);
-  const [clientOptionsError, setClientOptionsError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
       setForm(normalizeContractToForm(contract));
       setLocalError(null);
-      setSelectedClients(contract?.clients ?? defaultClients ?? []);
-      setClientSearch('');
-      setClientOptionsError(null);
+      setSelectedCounterparties(buildInitialCounterparties(contract, defaultClients));
+      setPickerOpen(false);
       setNumberManuallyEdited(isEdit);
       numberManuallyEditedRef.current = isEdit;
     }
@@ -179,64 +198,50 @@ export function ContractModal({
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
+  const selectedPickerValue = useMemo<CounterpartySelection[]>(
+    () => selectedCounterparties.map((item) => ({
+      kind: item.kind,
+      id: item.id,
+      name: item.kind === 'client' ? item.name : legalEntityName(item),
+      subtitle: item.kind === 'client'
+        ? item.company ?? null
+        : [item.inn ? `ИНН ${item.inn}` : '', item.kpp ? `КПП ${item.kpp}` : ''].filter(Boolean).join(' · ') || item.fullName || null,
+    })),
+    [selectedCounterparties],
+  );
 
-    let cancelled = false;
-    const fetchClients = async () => {
-      setClientOptionsLoading(true);
-      try {
-        const response = await apiService.getClientsV1({
-          search: debouncedClientSearch || undefined,
-          sortBy: 'name',
-          sortDir: 'asc',
-          limit: 20,
-        });
-        if (cancelled) return;
-        const mapped: ContractClient[] = (response ?? []).map((client) => ({
-          id: client.id,
-          name: client.name,
-          company: client.company,
-          clientStatusId: client.clientStatusId ?? null,
-          clientStatus: client.clientStatus ?? null,
-        }));
-        setClientOptions(mapped);
-        setClientOptionsError(null);
-      } catch (error) {
-        if (cancelled) return;
-        const fallback = t('contractsClientsLoadError') ?? 'Не удалось загрузить клиентов';
-        setClientOptions([]);
-        setClientOptionsError(error instanceof Error ? error.message : fallback);
-      } finally {
-        if (!cancelled) {
-          setClientOptionsLoading(false);
-        }
+  const handleApplyCounterparties = (selection: CounterpartySelection[]) => {
+    const previousComments = new Map(selectedCounterparties.map((item) => [contractCounterpartyKey(item), item.comment ?? '']));
+    setSelectedCounterparties(selection.map((item): ContractCounterparty => {
+      const comment = previousComments.get(`${item.kind}:${item.id}`) ?? '';
+      if (item.kind === 'legalEntity') {
+        const entity = item.legalEntity;
+        return {
+          kind: 'legalEntity',
+          id: item.id,
+          shortName: entity?.shortName ?? item.name,
+          fullName: entity?.fullName ?? item.subtitle ?? null,
+          inn: entity?.inn ?? null,
+          kpp: entity?.kpp ?? null,
+          comment,
+        };
       }
-    };
 
-    void fetchClients();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, debouncedClientSearch, t]);
-
-  const availableClientOptions = useMemo(() => {
-    const selectedIds = new Set(selectedClients.map((client) => client.id));
-    return clientOptions.filter((client) => !selectedIds.has(client.id));
-  }, [clientOptions, selectedClients]);
-
-  const handleAddClient = (client: ContractClient) => {
-    setSelectedClients((prev) => {
-      if (prev.some((item) => item.id === client.id)) {
-        return prev;
-      }
-      return [...prev, client];
-    });
+      const client = item.client;
+      return {
+        kind: 'client',
+        id: item.id,
+        name: client?.name ?? item.name,
+        company: client?.company ?? item.subtitle ?? null,
+        clientStatusId: client?.clientStatusId ?? null,
+        clientStatus: client?.clientStatus ?? null,
+        comment,
+      };
+    }));
   };
 
-  const handleRemoveClient = (id: number) => {
-    setSelectedClients((prev) => prev.filter((client) => client.id !== id));
+  const handleRemoveCounterparty = (target: ContractCounterparty) => {
+    setSelectedCounterparties((prev) => prev.filter((item) => contractCounterpartyKey(item) !== contractCounterpartyKey(target)));
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -253,8 +258,8 @@ export function ContractModal({
       return;
     }
 
-    if (selectedClients.length === 0) {
-      setLocalError(t('contractClientsRequired') ?? 'Выберите хотя бы одного клиента');
+    if (selectedCounterparties.length === 0) {
+      setLocalError(t('contractClientsRequired') ?? 'Выберите хотя бы одного контрагента');
       return;
     }
 
@@ -288,7 +293,12 @@ export function ContractModal({
       description: form.description.trim() ? form.description.trim() : undefined,
       amount: form.billingMode === 'Fixed' ? amountValue : undefined,
       validUntil: !form.isOpenEnded && form.validUntil ? fromInputToApiDate(form.validUntil) ?? form.validUntil : undefined,
-      clients: selectedClients.map((client) => ({ clientId: client.id, comment: client.comment ?? undefined })),
+      clients: selectedCounterparties
+        .filter((item): item is Extract<ContractCounterparty, { kind: 'client' }> => item.kind === 'client')
+        .map((client) => ({ clientId: client.id, comment: client.comment ?? undefined })),
+      legalEntities: selectedCounterparties
+        .filter((item): item is Extract<ContractCounterparty, { kind: 'legalEntity' }> => item.kind === 'legalEntity')
+        .map((entity) => ({ legalEntityId: entity.id, comment: entity.comment ?? undefined })),
       actIds: [],
       invoiceIds: [],
       paymentIds: [],
@@ -453,94 +463,48 @@ export function ContractModal({
               <span>До исполнения обязательств</span>
             </label>
         <div className="flex flex-col gap-2 text-sm sm:col-span-2">
-          <div className="flex items-center justify-between">
-            <span className="font-medium text-slate-700">{t('contractClients') ?? 'Клиенты'}</span>
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-medium text-slate-700">{t('contractClients') ?? 'Контрагенты'}</span>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100"
+            >
+              <Plus className="h-4 w-4" />
+              Добавить
+            </button>
           </div>
-          <div className="flex flex-col gap-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="search"
-                value={clientSearch}
-                onChange={(event) => setClientSearch(event.target.value)}
-                placeholder={
-                  t('contractClientsSearchPlaceholder') ?? 'Введите имя или компанию клиента для поиска'
-                }
-                className="w-full rounded-lg border border-slate-200 py-2 pl-10 pr-3 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              />
+          {selectedCounterparties.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-5 text-center text-sm text-slate-500">
+              Контрагенты не добавлены
             </div>
-            {selectedClients.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {selectedClients.map((client) => (
-                  <span
-                    key={client.id}
-                    className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700"
-                  >
-                    <span className="flex flex-col items-start gap-1 sm:flex-row sm:items-center">
-                      <span>
-                        {client.name}
-                        {client.company ? ` · ${client.company}` : ''}
-                      </span>
-                      <ClientStatusBadge status={client.clientStatus} />
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {selectedCounterparties.map((counterparty) => (
+                <span
+                  key={contractCounterpartyKey(counterparty)}
+                  className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700"
+                >
+                  <span className="flex flex-col items-start gap-1 sm:flex-row sm:items-center">
+                    <span>
+                      {counterparty.kind === 'client' ? counterparty.name : legalEntityName(counterparty)}
+                      {' · '}
+                      {counterparty.kind === 'client' ? 'Клиент' : 'Юрлицо'}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveClient(client.id)}
-                      className="rounded-full p-0.5 text-emerald-600 transition hover:bg-emerald-100 hover:text-emerald-800"
-                      aria-label={t('remove') ?? 'Удалить'}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+                    {counterparty.kind === 'client' ? <ClientStatusBadge status={counterparty.clientStatus} /> : null}
                   </span>
-                ))}
-              </div>
-            )}
-            <div className="relative">
-              <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-inner">
-                {clientOptionsError ? (
-                  <div className="px-3 py-4 text-sm text-rose-600">{clientOptionsError}</div>
-                ) : availableClientOptions.length === 0 ? (
-                  <div className="px-3 py-4 text-sm text-slate-500">
-                    {debouncedClientSearch
-                      ? t('contractClientsSearchEmpty') ?? 'По данному запросу ничего не найдено.'
-                      : t('contractClientsSearchHint') ?? 'Начните вводить имя клиента для поиска.'}
-                  </div>
-                ) : (
-                  <ul className="divide-y divide-slate-100">
-                    {availableClientOptions.map((client) => (
-                      <li key={client.id}>
-                        <button
-                          type="button"
-                          onClick={() => handleAddClient(client)}
-                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition hover:bg-emerald-50"
-                        >
-                          <span className="flex flex-col">
-                            <span className="font-medium text-slate-700">{client.name}</span>
-                            {client.company && (
-                              <span className="text-xs text-slate-500">{client.company}</span>
-                            )}
-                            {client.clientStatus?.name && (
-                              <span className="mt-1">
-                                <ClientStatusBadge status={client.clientStatus} />
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
-                            {t('contractClientsAdd') ?? 'Добавить'}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              {clientOptionsLoading && (
-                <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/70">
-                  <Loader2 className="h-5 w-5 animate-spin text-emerald-500" />
-                </div>
-              )}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCounterparty(counterparty)}
+                    className="rounded-full p-0.5 text-emerald-600 transition hover:bg-emerald-100 hover:text-emerald-800"
+                    aria-label={t('remove') ?? 'Удалить'}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
             </div>
-          </div>
+          )}
         </div>
           </div>
 
@@ -570,6 +534,15 @@ export function ContractModal({
           </div>
         </form>
       </div>
+      <CounterpartyPickerModal
+        open={pickerOpen}
+        mode="multiple"
+        title="Выбор контрагентов"
+        selected={selectedPickerValue}
+        overlayClassName="z-[1600]"
+        onApply={handleApplyCounterparties}
+        onClose={() => setPickerOpen(false)}
+      />
     </div>
   );
 }

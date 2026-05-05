@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Trash2, Info, History, Search, UserRoundSearch, Ban, WalletCards, Building2 } from 'lucide-react';
+import { X, Trash2, Info, History, Search, UserRoundSearch, Ban, WalletCards } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useDictionaries } from '../../hooks/useDictionaries';
@@ -30,6 +30,7 @@ import { getAppliedClientBalanceAmount, getVisibleSystemNoteLines } from '../../
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
 import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
+import { CounterpartyPickerModal } from '../ui/CounterpartyPickerModal';
 
 type PaymentKind = 'Income' | 'Expense';
 type LinkedInvoiceContext = {
@@ -186,45 +187,6 @@ export function PaymentModal({
   );
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientPickerMode, setClientPickerMode] = useState<'client' | 'expense'>('client');
-  const [clientPickerScope, setClientPickerScope] = useState<'clients' | 'legalEntities'>('clients');
-  const [clientPickerSearch, setClientPickerSearch] = useState('');
-  const filteredClients = useMemo(() => {
-    const query = clientPickerSearch.trim().toLowerCase();
-    if (!query) {
-      return clients;
-    }
-
-    return clients.filter((client) =>
-      [client.name, client.company, client.email, client.phone]
-        .filter((value): value is string => Boolean(value))
-        .some((value) => value.toLowerCase().includes(query)),
-    );
-  }, [clientPickerSearch, clients]);
-  const filteredLegalEntities = useMemo(() => {
-    const query = clientPickerSearch.trim().toLowerCase();
-    const sorted = [...legalEntities].sort((left, right) =>
-      getLegalEntityDisplayName(left).localeCompare(getLegalEntityDisplayName(right), 'ru', { sensitivity: 'base' }),
-    );
-    if (!query) {
-      return sorted;
-    }
-
-    return sorted.filter((entity) => {
-      const linkedClients = entity.clients ?? [];
-      return [
-        entity.shortName,
-        entity.fullName ?? '',
-        entity.inn ?? '',
-        entity.kpp ?? '',
-        entity.ogrn ?? '',
-        entity.responsibleUserName ?? '',
-        ...linkedClients.map((client) => client.name ?? ''),
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(query);
-    });
-  }, [clientPickerSearch, legalEntities]);
 
   const [syncDateWithPayment, setSyncDateWithPayment] = useState(false);
 
@@ -447,7 +409,6 @@ export function PaymentModal({
       setSyncDateWithPayment(false);
       setDetailsTab('details');
       setClientPickerOpen(false);
-      setClientPickerSearch('');
       setInvoicePickerOpen(false);
       setInvoiceSearch('');
       setInvoicePickerError(null);
@@ -504,7 +465,6 @@ export function PaymentModal({
         });
         setSyncDateWithPayment(Boolean(p.hasPartialPayment && p.lastPaymentDate));
         setClientPickerOpen(false);
-        setClientPickerSearch('');
         setInvoicePickerOpen(false);
         setInvoiceSearch('');
         setInvoicePickerError(null);
@@ -546,7 +506,6 @@ export function PaymentModal({
         });
         setSyncDateWithPayment(false);
         setClientPickerOpen(false);
-        setClientPickerSearch('');
         setInvoicePickerOpen(false);
         setInvoiceSearch('');
         setInvoicePickerError(null);
@@ -1070,8 +1029,6 @@ export function PaymentModal({
     }
 
     setClientPickerMode(mode);
-    setClientPickerScope('clients');
-    setClientPickerSearch('');
     setClientPickerOpen(true);
   };
 
@@ -2426,130 +2383,21 @@ export function PaymentModal({
             </div>
           </form>
 
-          {clientPickerOpen && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 p-4">
-              <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <h3 className="text-base font-semibold text-slate-900">
-                    {clientPickerMode === 'expense' ? 'Выбор контрагента расхода' : 'Выбор контрагента'}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setClientPickerOpen(false)}
-                    className="rounded-full p-1 text-slate-500 transition hover:bg-slate-100">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                <div className="mb-3 grid grid-cols-2 rounded-lg bg-slate-100 p-1 text-sm font-medium">
-                  <button
-                    type="button"
-                    onClick={() => setClientPickerScope('clients')}
-                    className={`inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 transition ${
-                      clientPickerScope === 'clients'
-                        ? 'bg-white text-blue-700 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}>
-                    <UserRoundSearch className="h-4 w-4" />
-                    Клиенты
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setClientPickerScope('legalEntities')}
-                    className={`inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 transition ${
-                      clientPickerScope === 'legalEntities'
-                        ? 'bg-white text-blue-700 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}>
-                    <Building2 className="h-4 w-4" />
-                    Юрлица
-                  </button>
-                </div>
-
-                <div className="relative mb-3">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={clientPickerSearch}
-                    onChange={(event) => setClientPickerSearch(event.target.value)}
-                    placeholder={clientPickerScope === 'legalEntities'
-                      ? 'Поиск по названию, ИНН, КПП или связанному клиенту'
-                      : clientPickerMode === 'expense'
-                        ? 'Поиск клиента расхода'
-                        : (t('search') ?? 'Поиск')}
-                    className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                  />
-                </div>
-
-                <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
-                  {clientPickerScope === 'clients' ? clientsLoading ? (
-                    <div className="px-3 py-4 text-sm text-slate-500">{t('loading') ?? 'Загрузка...'}</div>
-                  ) : filteredClients.length === 0 ? (
-                    <div className="px-3 py-4 text-sm text-slate-500">Подходящие клиенты не найдены.</div>
-                  ) : (
-                    filteredClients.map((client) => (
-                      <button
-                        key={client.id}
-                        type="button"
-                        onClick={() => handleClientPick(client)}
-                        className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-3 text-left last:border-0 hover:bg-slate-50">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-slate-900">{client.name}</div>
-                          {client.company ? (
-                            <div className="mt-1 truncate text-xs text-slate-500">{client.company}</div>
-                          ) : null}
-                        </div>
-                        <div className="shrink-0 text-right">
-                          {client.clientStatus?.name ? (
-                            <div className="text-xs text-slate-500">{client.clientStatus.name}</div>
-                          ) : (
-                            <div className="text-xs text-slate-400">Клиент</div>
-                          )}
-                        </div>
-                      </button>
-                    ))
-                  ) : legalEntitiesLoading ? (
-                    <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-slate-500">
-                      Загрузка юрлиц...
-                    </div>
-                  ) : legalEntitiesError ? (
-                    <div className="px-3 py-6 text-center text-sm text-rose-600">{legalEntitiesError}</div>
-                  ) : filteredLegalEntities.length === 0 ? (
-                    <div className="px-3 py-4 text-sm text-slate-500">Подходящие юрлица не найдены.</div>
-                  ) : (
-                    filteredLegalEntities.map((entity) => {
-                      const linkedClients = entity.clients ?? [];
-                      const displayName = getLegalEntityDisplayName(entity);
-
-                      return (
-                        <button
-                          key={entity.id}
-                          type="button"
-                          onClick={() => handleLegalEntityPick(entity)}
-                          className="flex w-full items-start justify-between gap-3 border-b border-slate-100 px-3 py-3 text-left last:border-0 hover:bg-slate-50">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-slate-900">{displayName}</div>
-                            <div className="mt-1 truncate text-xs text-slate-500">
-                              {[entity.inn ? `ИНН ${entity.inn}` : '', entity.kpp ? `КПП ${entity.kpp}` : '']
-                                .filter(Boolean)
-                                .join(' • ') || 'Юридическое лицо'}
-                            </div>
-                            {linkedClients.length > 0 ? (
-                              <div className="mt-1 truncate text-xs text-slate-400">
-                                Клиенты: {linkedClients.map((client) => client.name).filter(Boolean).slice(0, 3).join(', ')}
-                              </div>
-                            ) : null}
-                          </div>
-                          <div className="shrink-0 text-right text-xs text-slate-400">Юрлицо</div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
+          <CounterpartyPickerModal
+            open={clientPickerOpen}
+            title={clientPickerMode === 'expense' ? 'Выбор контрагента расхода' : 'Выбор контрагента'}
+            initialScope={clientPickerMode === 'expense' && formData.expenseLegalEntityId ? 'legalEntity' : formData.legalEntityId ? 'legalEntity' : 'client'}
+            overlayClassName="z-[1600]"
+            onClose={() => setClientPickerOpen(false)}
+            onSelect={(selection) => {
+              if (!selection) return;
+              if (selection.kind === 'client' && selection.client) {
+                handleClientPick(selection.client);
+              } else if (selection.kind === 'legalEntity' && selection.legalEntity) {
+                handleLegalEntityPick(selection.legalEntity);
+              }
+            }}
+          />
           {invoicePickerOpen && !hasLockedInvoice && (
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 p-4">
               <div className="w-full max-w-3xl rounded-2xl bg-white p-4 shadow-2xl">

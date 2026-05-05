@@ -88,10 +88,14 @@ public class Contract
     /// </summary>
     public ICollection<ClientContract> ClientContracts { get; set; } = new List<ClientContract>();
 
+    public ICollection<LegalEntityContract> LegalEntityContracts { get; set; } = new List<LegalEntityContract>();
+
     /// <summary>
     /// Клиенты, привязанные к договору.
     /// </summary>
     public ICollection<Client> Clients { get; set; } = new List<Client>();
+
+    public ICollection<LegalEntity> LegalEntities { get; set; } = new List<LegalEntity>();
 
     /// <summary>
     /// Ручные привязки актов к договору.
