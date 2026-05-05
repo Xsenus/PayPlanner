@@ -35,6 +35,7 @@ type CounterpartyPickerModalProps = {
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 const DEFAULT_SCOPES: CounterpartyKind[] = ['client', 'legalEntity'];
+const EMPTY_SELECTIONS: CounterpartySelection[] = [];
 
 function selectionKey(selection: Pick<CounterpartySelection, 'kind' | 'id'>): string {
   return `${selection.kind}:${selection.id}`;
@@ -70,7 +71,7 @@ export function CounterpartyPickerModal({
   open,
   title = 'Выбор контрагента',
   mode = 'single',
-  selected = [],
+  selected = EMPTY_SELECTIONS,
   initialScope = 'client',
   allowedScopes = DEFAULT_SCOPES,
   allowEmpty = false,
@@ -162,7 +163,7 @@ export function CounterpartyPickerModal({
 
   const selectedKeys = useMemo(() => new Set(draftSelected.map(selectionKey)), [draftSelected]);
   const disabledKeySet = useMemo(() => new Set(disabledKeys), [disabledKeys]);
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
 
   const pickSingle = (selection: CounterpartySelection | null) => {
     onSelect?.(selection);
@@ -219,7 +220,7 @@ export function CounterpartyPickerModal({
 
   return (
     <div className={`fixed inset-0 ${overlayClassName} flex items-center justify-center bg-slate-900/45 p-4`}>
-      <div className={`flex max-h-[calc(100vh-2rem)] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${className}`}>
+      <div className={`flex h-[calc(100vh-2rem)] max-h-[760px] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${className}`}>
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
           <button
@@ -244,7 +245,7 @@ export function CounterpartyPickerModal({
                   }`}
                 >
                   <UserRoundSearch className="h-4 w-4" />
-                  Клиенты
+                  Физические лица
                 </button>
               ) : null}
               {normalizedScopes.includes('legalEntity') ? (
@@ -256,7 +257,7 @@ export function CounterpartyPickerModal({
                   }`}
                 >
                   <Building2 className="h-4 w-4" />
-                  Юрлица
+                  Юридические лица
                 </button>
               ) : null}
             </div>
@@ -296,12 +297,12 @@ export function CounterpartyPickerModal({
           {error ? (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-4 text-sm text-rose-700">{error}</div>
           ) : loading ? (
-            <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-10 text-sm text-slate-500">
+            <div className="flex h-full min-h-72 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-10 text-sm text-slate-500">
               <Loader2 className="h-5 w-5 animate-spin" />
               Загрузка контрагентов...
             </div>
           ) : items.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-10 text-center text-sm text-slate-500">
+            <div className="flex h-full min-h-72 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-10 text-center text-sm text-slate-500">
               Контрагенты не найдены
             </div>
           ) : (
