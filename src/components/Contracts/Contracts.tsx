@@ -107,6 +107,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<ContractColumnKey>({
     storageKey: `pp.contracts_table_settings.${user?.id ?? 'guest'}.v1`,
@@ -456,7 +457,10 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
 
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] table-fixed">
+            <table
+              className="w-full min-w-[1180px] table-fixed"
+              style={{ width: getTableWidth(120, 1180), minWidth: '100%' }}
+            >
               <colgroup>
                 {orderedVisibleColumns.map((columnKey) => (
                   <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />

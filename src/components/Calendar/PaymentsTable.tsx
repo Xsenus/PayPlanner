@@ -48,6 +48,7 @@ interface PaymentsTableProps {
   onColumnDragEnd?: () => void;
   onResizeStart?: (key: PaymentTableColumnKey, event: ReactMouseEvent<HTMLDivElement>) => void;
   getColumnWidth?: (key: PaymentTableColumnKey) => number;
+  getTableWidth?: (extraWidth?: number, minimumWidth?: number) => number;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -79,6 +80,7 @@ export function PaymentsTable({
   onColumnDragEnd,
   onResizeStart,
   getColumnWidth,
+  getTableWidth,
 }: PaymentsTableProps) {
   const { t, formatDate } = useTranslation();
   const [menuState, setMenuState] = useState<MenuState>(null);
@@ -274,7 +276,10 @@ export function PaymentsTable({
   return (
     <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <table className="min-w-[960px] w-full table-fixed divide-y divide-gray-200">
+        <table
+          className="min-w-[960px] w-full table-fixed divide-y divide-gray-200"
+          style={getTableWidth ? { width: getTableWidth(0, 960), minWidth: '100%' } : undefined}
+        >
           <colgroup>
             {visibleColumns.map((column) => (
               <col

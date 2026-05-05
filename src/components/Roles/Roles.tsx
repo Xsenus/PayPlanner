@@ -113,6 +113,7 @@ export const Roles = () => {
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<RoleColumnKey>({
     storageKey: 'pp.roles_table_settings.v3',
@@ -399,7 +400,10 @@ export const Roles = () => {
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] table-fixed">
+              <table
+                className="w-full min-w-[900px] table-fixed"
+                style={{ width: getTableWidth(170, 900), minWidth: '100%' }}
+              >
                 <colgroup>
                   {orderedVisibleColumns.map((columnKey) => (
                     <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />

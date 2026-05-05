@@ -125,6 +125,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<PaymentTableColumnKey>({
     storageKey: `pp.calendar_table_settings.${user?.id ?? 'guest'}.v1`,
@@ -725,6 +726,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               onColumnDragEnd={handleColumnDragEnd}
               onResizeStart={handleResizeStart}
               getColumnWidth={getColumnWidth}
+              getTableWidth={getTableWidth}
             />
             {tableFilteredPayments.length > 0 ? (
               <TablePagination

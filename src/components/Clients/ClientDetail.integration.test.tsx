@@ -128,6 +128,14 @@ function createPersistedTableSettings(
     handleResizeStart: vi.fn(),
     getColumnWidth: (key: string) =>
       columns.find((column) => column.key === key)?.defaultWidth ?? 180,
+    getTableWidth: (extraWidth = 0, minimumWidth = 0) =>
+      Math.max(
+        minimumWidth,
+        orderedKeys.reduce(
+          (sum, key) => sum + (columns.find((column) => column.key === key)?.defaultWidth ?? 180),
+          extraWidth,
+        ),
+      ),
     resetTableSettings: vi.fn(),
   };
 }

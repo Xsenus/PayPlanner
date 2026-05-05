@@ -122,7 +122,7 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
   const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
-  const { columnOrder, orderedVisibleColumns, visibleColumns, pageSize, setPageSize, draggingColumn, toggleColumn, moveColumn, handleColumnDragStart, handleColumnDragOver, handleColumnDrop, handleColumnDragEnd, handleResizeStart, getColumnWidth, resetTableSettings } = usePersistedTableSettings<InstallmentColumnKey>({
+  const { columnOrder, orderedVisibleColumns, visibleColumns, pageSize, setPageSize, draggingColumn, toggleColumn, moveColumn, handleColumnDragStart, handleColumnDragOver, handleColumnDrop, handleColumnDragEnd, handleResizeStart, getColumnWidth, getTableWidth, resetTableSettings } = usePersistedTableSettings<InstallmentColumnKey>({
     storageKey: `${storagePrefix}.tableSettings.v1`,
     settingsKey: 'installments_table_settings',
     columns: INSTALLMENT_COLUMNS.map((column) => ({ key: column.key, defaultVisible: column.defaultVisible, defaultWidth: column.defaultWidth })),
@@ -396,7 +396,10 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
 
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1220px] table-fixed">
+            <table
+              className="w-full min-w-[1220px] table-fixed"
+              style={{ width: getTableWidth(120, 1220), minWidth: '100%' }}
+            >
               <colgroup>
                 {orderedVisibleColumns.map((columnKey) => <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />)}
                 <col style={{ width: 120 }} />

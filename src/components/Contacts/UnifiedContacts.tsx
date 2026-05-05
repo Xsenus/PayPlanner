@@ -383,6 +383,7 @@ export function UnifiedContacts({
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<ContactColumnKey>({
     storageKey: tableLayoutStorageKey,
@@ -400,11 +401,6 @@ export function UnifiedContacts({
     () => orderedVisibleColumns.map((key) => columnsByKey[key]).filter(Boolean),
     [columnsByKey, orderedVisibleColumns],
   );
-  const tableWidth = useMemo(
-    () => orderedTableColumns.reduce((sum, column) => sum + getColumnWidth(column.key), 0),
-    [getColumnWidth, orderedTableColumns],
-  );
-
   useEffect(() => {
     setKind(initialKind);
   }, [initialKind]);
@@ -979,7 +975,7 @@ export function UnifiedContacts({
           <div className="overflow-x-auto">
             <table
               className="table-fixed divide-y divide-slate-200 text-sm"
-              style={{ minWidth: tableWidth, width: '100%' }}
+              style={{ width: getTableWidth(), minWidth: '100%' }}
             >
               <colgroup>
                 {orderedTableColumns.map((column) => (

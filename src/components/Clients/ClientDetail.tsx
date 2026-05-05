@@ -1914,6 +1914,7 @@ export function ClientDetail({
     handleColumnDragEnd: handlePaymentColumnDragEnd,
     handleResizeStart: handlePaymentResizeStart,
     getColumnWidth: getPaymentColumnWidth,
+    getTableWidth: getPaymentTableWidth,
     resetTableSettings: resetPaymentTableSettings,
   } = usePersistedTableSettings<PaymentTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.payments.${user?.id ?? "guest"}.v1`,
@@ -1969,6 +1970,7 @@ export function ClientDetail({
     handleColumnDragEnd: handleActColumnDragEnd,
     handleResizeStart: handleActResizeStart,
     getColumnWidth: getActColumnWidth,
+    getTableWidth: getActTableWidth,
     resetTableSettings: resetActTableSettings,
   } = usePersistedTableSettings<ActTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.acts.${user?.id ?? "guest"}.v1`,
@@ -2035,6 +2037,7 @@ export function ClientDetail({
     handleColumnDragEnd: handleInvoiceColumnDragEnd,
     handleResizeStart: handleInvoiceResizeStart,
     getColumnWidth: getInvoiceColumnWidth,
+    getTableWidth: getInvoiceTableWidth,
     resetTableSettings: resetInvoiceTableSettings,
   } = usePersistedTableSettings<InvoiceTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.invoices.${user?.id ?? "guest"}.v2`,
@@ -2102,6 +2105,7 @@ export function ClientDetail({
     handleColumnDragEnd: handleContractColumnDragEnd,
     handleResizeStart: handleContractResizeStart,
     getColumnWidth: getContractColumnWidth,
+    getTableWidth: getContractTableWidth,
     resetTableSettings: resetContractTableSettings,
   } = usePersistedTableSettings<ContractTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.contracts.${user?.id ?? "guest"}.v1`,
@@ -7316,7 +7320,13 @@ export function ClientDetail({
                   ) : (
                     <>
                       <div className="overflow-x-auto">
-                        <table className="min-w-full table-fixed divide-y divide-gray-200 text-sm">
+                        <table
+                          className="min-w-full table-fixed divide-y divide-gray-200 text-sm"
+                          style={{
+                            width: getPaymentTableWidth(clientPermissions.canEdit || clientPermissions.canDelete ? 144 : 0),
+                            minWidth: "100%",
+                          }}
+                        >
                           <colgroup>
                             {visiblePaymentTableColumns.map((column) => (
                               <col
@@ -7871,7 +7881,10 @@ export function ClientDetail({
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="min-w-full table-fixed divide-y divide-gray-200">
+                      <table
+                        className="min-w-full table-fixed divide-y divide-gray-200"
+                        style={{ width: getInvoiceTableWidth(110), minWidth: "100%" }}
+                      >
                         <colgroup>
                           {visibleInvoiceTableColumns.map((column) => (
                             <col
@@ -8380,7 +8393,10 @@ export function ClientDetail({
 
                   <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
                     <div className="overflow-x-auto">
-                      <table className="min-w-full table-fixed divide-y divide-gray-200">
+                      <table
+                        className="min-w-full table-fixed divide-y divide-gray-200"
+                        style={{ width: getActTableWidth(110), minWidth: "100%" }}
+                      >
                         <colgroup>
                           {visibleActTableColumns.map((column) => (
                             <col
@@ -8802,7 +8818,10 @@ export function ClientDetail({
                   ) : (
                     <>
                       <div className="overflow-x-auto">
-                        <table className="min-w-full table-fixed divide-y divide-gray-200 text-sm">
+                        <table
+                          className="min-w-full table-fixed divide-y divide-gray-200 text-sm"
+                          style={{ width: getContractTableWidth(110), minWidth: "100%" }}
+                        >
                           <colgroup>
                             {visibleContractTableColumns.map((column) => (
                               <col

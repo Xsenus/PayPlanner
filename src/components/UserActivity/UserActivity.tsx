@@ -109,6 +109,7 @@ export const UserActivity = () => {
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<UserActivityColumnKey>({
     storageKey: `pp.user_activity_table_settings.${user?.id ?? 'guest'}.v1`,
@@ -618,7 +619,10 @@ export const UserActivity = () => {
 
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="min-w-[1280px] w-full table-fixed text-sm">
+              <table
+                className="min-w-[1280px] w-full table-fixed text-sm"
+                style={{ width: getTableWidth(120, 1280), minWidth: '100%' }}
+              >
                 <colgroup>
                   {orderedVisibleColumns.map((columnKey) => (
                     <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />

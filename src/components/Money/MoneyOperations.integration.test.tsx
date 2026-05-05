@@ -132,6 +132,7 @@ vi.mock('../../hooks/usePersistedTableSettings', () => ({
     handleColumnDragEnd: vi.fn(),
     handleResizeStart: vi.fn(),
     getColumnWidth: () => 160,
+    getTableWidth: (extraWidth = 0, minimumWidth = 0) => Math.max(minimumWidth, extraWidth + 8 * 160),
     resetTableSettings: vi.fn(),
   }),
 }));

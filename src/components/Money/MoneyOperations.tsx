@@ -2188,6 +2188,7 @@ export function MoneyOperations({
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<MoneyOperationColumnKey>({
     storageKey: `pp.money_operations_table_settings.${user?.id ?? 'guest'}.v2`,
@@ -5044,7 +5045,10 @@ export function MoneyOperations({
         )}
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1500px] table-fixed text-sm">
+          <table
+            className="w-full min-w-[1500px] table-fixed text-sm"
+            style={{ width: getTableWidth((selectionEnabled ? 48 : 0) + 140, 1500), minWidth: '100%' }}
+          >
             <colgroup>
               {selectionEnabled && <col style={{ width: 48 }} />}
               {orderedVisibleColumns.map((columnKey) => (

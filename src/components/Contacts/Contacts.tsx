@@ -132,6 +132,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<ContactColumnKey>({
     storageKey: 'pp.contacts_table_settings.v1',
@@ -684,7 +685,10 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1120px] table-fixed divide-y divide-slate-200">
+              <table
+                className="w-full min-w-[1120px] table-fixed divide-y divide-slate-200"
+                style={{ width: getTableWidth(140, 1120), minWidth: '100%' }}
+              >
                 <colgroup>
                   {orderedVisibleColumns.map((columnKey) => (
                     <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />

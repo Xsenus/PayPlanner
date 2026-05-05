@@ -117,6 +117,7 @@ export function LegalEntities() {
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<LegalEntityColumnKey>({
     storageKey: 'pp.legal_entities_table_settings.v1',
@@ -643,7 +644,10 @@ export function LegalEntities() {
       ) : (
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] table-fixed">
+            <table
+              className="w-full min-w-[1180px] table-fixed"
+              style={{ width: getTableWidth(160, 1180), minWidth: '100%' }}
+            >
               <colgroup>
                 {orderedVisibleColumns.map((columnKey) => (
                   <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />

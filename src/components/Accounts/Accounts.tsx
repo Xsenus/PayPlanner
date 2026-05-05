@@ -431,6 +431,7 @@ export function Accounts({
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<ColumnKey>({
     storageKey: `${storagePrefix}.tableSettings.v2`,
@@ -2297,7 +2298,10 @@ export function Accounts({
 
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="min-w-full table-fixed divide-y divide-gray-200">
+            <table
+              className="min-w-full table-fixed divide-y divide-gray-200"
+              style={{ width: getTableWidth(52 + (canEdit || canDelete ? 148 : 0)), minWidth: '100%' }}
+            >
               <colgroup>
                 <col style={{ width: 52 }} />
                 {orderedVisibleColumns

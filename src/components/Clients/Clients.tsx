@@ -377,6 +377,7 @@ export function Clients() {
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<ColumnId>({
     storageKey: tableLayoutStorageKey,
@@ -1472,7 +1473,10 @@ export function Clients() {
         ) : viewMode === 'table' ? (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="min-w-full table-fixed">
+              <table
+                className="min-w-full table-fixed"
+                style={{ width: getTableWidth(52 + 140), minWidth: '100%' }}
+              >
                 <colgroup>
                   <col style={{ width: 52 }} />
                   {visibleColumnIds.map((columnId) => (

@@ -142,6 +142,7 @@ export function Acts({
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<ActColumnKey>({
     storageKey: `${storagePrefix}.tableSettings.v1`,
@@ -736,7 +737,10 @@ export function Acts({
             </div>
           )}
           <div className="overflow-x-auto">
-            <table className="min-w-full table-fixed divide-y divide-slate-200">
+            <table
+              className="min-w-full table-fixed divide-y divide-slate-200"
+              style={{ width: getTableWidth(), minWidth: '100%' }}
+            >
               <colgroup>
                 {orderedVisibleColumnKeys.map((columnKey) => (
                   <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />

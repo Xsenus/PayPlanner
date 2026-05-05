@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -362,9 +363,18 @@ export function usePersistedTableSettings<K extends string>({
     [columnOrder, visibleColumns],
   );
 
-  const getColumnWidth = (key: K) => {
+  const getColumnWidth = useCallback((key: K) => {
     return columnWidths[key] ?? defaultColumnWidths[key] ?? minColumnWidth;
-  };
+  }, [columnWidths, defaultColumnWidths, minColumnWidth]);
+
+  const getTableWidth = useCallback(
+    (extraWidth = 0, minimumWidth = 0) =>
+      Math.max(
+        minimumWidth,
+        orderedVisibleColumns.reduce((sum, key) => sum + getColumnWidth(key), extraWidth),
+      ),
+    [getColumnWidth, orderedVisibleColumns],
+  );
 
   const resetTableSettings = () => {
     const normalized = normalizeSettings(null);
@@ -395,6 +405,7 @@ export function usePersistedTableSettings<K extends string>({
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   };
 }

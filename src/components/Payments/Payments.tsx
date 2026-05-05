@@ -275,6 +275,7 @@ export function Payments({
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
+    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<PaymentTableColumnKey>({
     storageKey: `pp.payments_table_settings.${user?.id ?? 'guest'}.v1`,
@@ -1305,6 +1306,7 @@ export function Payments({
                 onColumnDragEnd={handleColumnDragEnd}
                 onResizeStart={handleResizeStart}
                 getColumnWidth={getColumnWidth}
+                getTableWidth={getTableWidth}
               />
               <TablePagination
                 page={page}

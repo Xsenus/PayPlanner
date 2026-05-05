@@ -176,6 +176,7 @@ export function ContractDetailPage({
     handleColumnDragEnd: handleClientColumnDragEnd,
     handleResizeStart: handleClientResizeStart,
     getColumnWidth: getClientColumnWidth,
+    getTableWidth: getClientTableWidth,
     resetTableSettings: resetClientTableSettings,
   } = usePersistedTableSettings<ClientTableColumnKey>({
     storageKey: `${TABLE_STORAGE_PREFIX}.clients.${user?.id ?? 'guest'}.v1`,
@@ -204,6 +205,7 @@ export function ContractDetailPage({
     handleColumnDragEnd: handleInvoiceColumnDragEnd,
     handleResizeStart: handleInvoiceResizeStart,
     getColumnWidth: getInvoiceColumnWidth,
+    getTableWidth: getInvoiceTableWidth,
     resetTableSettings: resetInvoiceTableSettings,
   } = usePersistedTableSettings<InvoiceTableColumnKey>({
     storageKey: `${TABLE_STORAGE_PREFIX}.invoices.${user?.id ?? 'guest'}.v1`,
@@ -232,6 +234,7 @@ export function ContractDetailPage({
     handleColumnDragEnd: handleActColumnDragEnd,
     handleResizeStart: handleActResizeStart,
     getColumnWidth: getActColumnWidth,
+    getTableWidth: getActTableWidth,
     resetTableSettings: resetActTableSettings,
   } = usePersistedTableSettings<ActTableColumnKey>({
     storageKey: `${TABLE_STORAGE_PREFIX}.acts.${user?.id ?? 'guest'}.v1`,
@@ -260,6 +263,7 @@ export function ContractDetailPage({
     handleColumnDragEnd: handlePaymentColumnDragEnd,
     handleResizeStart: handlePaymentResizeStart,
     getColumnWidth: getPaymentColumnWidth,
+    getTableWidth: getPaymentTableWidth,
     resetTableSettings: resetPaymentTableSettings,
   } = usePersistedTableSettings<PaymentTableColumnKey>({
     storageKey: `${TABLE_STORAGE_PREFIX}.payments.${user?.id ?? 'guest'}.v1`,
@@ -1112,7 +1116,10 @@ export function ContractDetailPage({
             </div>
           ) : null}
           <div className="overflow-x-auto">
-            <table className="min-w-full table-fixed divide-y text-sm">
+            <table
+              className="min-w-full table-fixed divide-y text-sm"
+              style={{ width: getClientTableWidth(110), minWidth: '100%' }}
+            >
               <colgroup>
                 {visibleClientColumns.map((column) => (
                   <col key={column.key} style={{ width: getClientColumnWidth(column.key) }} />
@@ -1352,7 +1359,10 @@ export function ContractDetailPage({
             </div>
           ) : null}
           <div className="overflow-x-auto">
-            <table className="min-w-full table-fixed divide-y text-sm">
+            <table
+              className="min-w-full table-fixed divide-y text-sm"
+              style={{ width: getInvoiceTableWidth(120), minWidth: '100%' }}
+            >
               <colgroup>
                 {visibleInvoiceColumns.map((column) => (
                   <col key={column.key} style={{ width: getInvoiceColumnWidth(column.key) }} />
@@ -1551,7 +1561,10 @@ export function ContractDetailPage({
             </div>
           ) : null}
           <div className="overflow-x-auto">
-            <table className="min-w-full table-fixed divide-y text-sm">
+            <table
+              className="min-w-full table-fixed divide-y text-sm"
+              style={{ width: getActTableWidth(120), minWidth: '100%' }}
+            >
               <colgroup>
                 {visibleActColumns.map((column) => (
                   <col key={column.key} style={{ width: getActColumnWidth(column.key) }} />
@@ -1731,7 +1744,10 @@ export function ContractDetailPage({
             </div>
           ) : null}
           <div className="overflow-x-auto">
-            <table className="min-w-full table-fixed divide-y text-sm">
+            <table
+              className="min-w-full table-fixed divide-y text-sm"
+              style={{ width: getPaymentTableWidth(120), minWidth: '100%' }}
+            >
               <colgroup>
                 {visiblePaymentColumns.map((column) => (
                   <col key={column.key} style={{ width: getPaymentColumnWidth(column.key) }} />
