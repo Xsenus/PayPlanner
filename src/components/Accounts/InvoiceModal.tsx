@@ -41,7 +41,7 @@ import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getContractBillingModeLabel, getContractEffectiveAmount } from '../../utils/contracts';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
-import { CounterpartyPickerModal } from '../ui/CounterpartyPickerModal';
+import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import {
   filterRepresentativeInvoiceWhenInstallmentsExist,
   getStatusSourcePaymentsForInvoice,
@@ -88,6 +88,8 @@ type DraftActForm = {
   amount: string;
   comment: string;
 };
+
+type InvoiceCounterpartyPickerMode = 'main' | 'expense';
 
 type LineItemLookupState = { lineItemId: string } | null;
 
@@ -803,6 +805,7 @@ export function InvoiceModal({
   const [lineItemLookupQuery, setLineItemLookupQuery] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
+  const [clientPickerMode, setClientPickerMode] = useState<InvoiceCounterpartyPickerMode>('main');
   const [selectedActs, setSelectedActs] = useState<ActOption[]>(() => normalizeInvoiceActs(invoice));
   const [actOptions, setActOptions] = useState<ActOption[]>(() => normalizeInvoiceActs(invoice));
   const [clientCaseOptions, setClientCaseOptions] = useState<ClientCaseOption[]>(() => normalizeInvoiceClientCases(invoice));
@@ -1242,24 +1245,63 @@ export function InvoiceModal({
     ? selectedClient
     : (selectedExpenseClient ?? selectedClient);
   const selectedCounterpartyName = selectedClient?.name ?? (selectedLegalEntity ? getLegalEntityDisplayName(selectedLegalEntity) : '');
+  const selectedExpenseCounterpartyName = selectedExpenseClient?.name
+    ?? (selectedExpenseLegalEntity ? getLegalEntityDisplayName(selectedExpenseLegalEntity) : '');
+  const selectedCounterpartyPickerValue = useMemo<CounterpartySelection[]>(() => {
+    if (clientPickerMode === 'expense') {
+      if (selectedExpenseClient) {
+        return [{
+          kind: 'client',
+          id: selectedExpenseClient.id,
+          name: selectedExpenseClient.name,
+          subtitle: selectedExpenseClient.company ?? null,
+          client: selectedExpenseClient,
+        }];
+      }
+
+      if (selectedExpenseLegalEntity) {
+        return [{
+          kind: 'legalEntity',
+          id: selectedExpenseLegalEntity.id,
+          name: getLegalEntityDisplayName(selectedExpenseLegalEntity),
+          subtitle: [selectedExpenseLegalEntity.inn ? `ИНН ${selectedExpenseLegalEntity.inn}` : '', selectedExpenseLegalEntity.kpp ? `КПП ${selectedExpenseLegalEntity.kpp}` : '']
+            .filter(Boolean)
+            .join(' · ') || selectedExpenseLegalEntity.fullName || null,
+          legalEntity: selectedExpenseLegalEntity,
+        }];
+      }
+
+      return [];
+    }
+
+    if (selectedClient) {
+      return [{
+        kind: 'client',
+        id: selectedClient.id,
+        name: selectedClient.name,
+        subtitle: selectedClient.company ?? null,
+        client: selectedClient,
+      }];
+    }
+
+    if (selectedLegalEntity) {
+      return [{
+        kind: 'legalEntity',
+        id: selectedLegalEntity.id,
+        name: getLegalEntityDisplayName(selectedLegalEntity),
+        subtitle: [selectedLegalEntity.inn ? `ИНН ${selectedLegalEntity.inn}` : '', selectedLegalEntity.kpp ? `КПП ${selectedLegalEntity.kpp}` : '']
+          .filter(Boolean)
+          .join(' · ') || selectedLegalEntity.fullName || null,
+        legalEntity: selectedLegalEntity,
+      }];
+    }
+
+    return [];
+  }, [clientPickerMode, selectedClient, selectedExpenseClient, selectedExpenseLegalEntity, selectedLegalEntity]);
   const counterpartyLabel = isIncome ? 'Клиент' : 'Поставщик';
   const counterpartyBlockTitle = isIncome ? 'Клиент и договор' : 'Поставщик и договор';
   const counterpartyPlaceholder = isIncome ? 'Выберите клиента' : 'Выберите поставщика';
   const counterpartyOpenCardLabel = isIncome ? 'Открыть карточку клиента' : 'Открыть карточку поставщика';
-  const clientLookupOptions = useMemo(
-    () =>
-      clients.map((client) => ({
-        value: String(client.id),
-        label: client.name,
-        description: [
-          client.company,
-          client.clientStatus?.name,
-          client.responsibleUserName ? `Ответственный: ${client.responsibleUserName}` : null,
-        ].filter(Boolean).join(' · '),
-        keywords: [client.company ?? '', client.clientStatus?.name ?? '', client.phone ?? '', client.email ?? ''],
-      })),
-    [clients],
-  );
   const relatedInstallmentPlan = useMemo(
     () => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(visibleRelatedPayments)),
     [visibleRelatedPayments],
@@ -1951,7 +1993,8 @@ export function InvoiceModal({
     }));
   };
 
-  const openClientPicker = () => {
+  const openClientPicker = (mode: InvoiceCounterpartyPickerMode = 'main') => {
+    setClientPickerMode(mode);
     setClientPickerOpen(true);
   };
 
@@ -2016,6 +2059,41 @@ export function InvoiceModal({
       expenseClientId: nextClientId,
       expenseLegalEntityId: nextClientId ? '' : prev.expenseLegalEntityId,
     }));
+  };
+
+  const handleExpenseLegalEntityPick = (entity: LegalEntitySummary | null) => {
+    const nextLegalEntityId = entity ? String(entity.id) : '';
+    const nextCaseOwnerKey = nextLegalEntityId ? `legal:${nextLegalEntityId}` : '';
+
+    if ((form.expenseLegalEntityId !== nextLegalEntityId || form.expenseClientId) && nextCaseOwnerKey !== caseOwnerKey) {
+      setSelectedClientCaseIds([]);
+      setClientCaseOptions([]);
+      setCaseDropdownOpen(false);
+      setCreateCaseOpen(false);
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      expenseClientId: '',
+      expenseLegalEntityId: nextLegalEntityId,
+    }));
+    setClientPickerOpen(false);
+  };
+
+  const clearExpenseCounterparty = () => {
+    if (form.expenseClientId || form.expenseLegalEntityId) {
+      setSelectedClientCaseIds([]);
+      setClientCaseOptions([]);
+      setCaseDropdownOpen(false);
+      setCreateCaseOpen(false);
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      expenseClientId: '',
+      expenseLegalEntityId: '',
+    }));
+    setClientPickerOpen(false);
   };
 
   const handleClientCaseSelect = (clientCase: ClientCaseOption) => {
@@ -4242,7 +4320,7 @@ export function InvoiceModal({
                                 <button
                                   type="button"
                                   aria-label={`Открыть выбор: ${counterpartyLabel.toLocaleLowerCase('ru')}`}
-                                  onClick={openClientPicker}
+                                  onClick={() => openClientPicker('main')}
                                   className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
                                 >
                                   <UserRoundSearch className="h-4 w-4" />
@@ -4288,33 +4366,48 @@ export function InvoiceModal({
 
                             {!isIncome && (
                               <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-                                <LookupSelect
-                                  label="Клиент и дело расхода"
-                                  value={form.expenseClientId}
-                                  onChange={handleExpenseClientChange}
-                                  options={clientLookupOptions}
-                                  placeholder="Выберите клиента, к делу которого относится расход"
-                                  title="Выбор клиента для расхода"
-                                  dictionaryLabel="Справочник"
-                                  searchPlaceholder="Поиск клиента"
-                                  emptyOptionLabel="Без привязки к клиенту"
-                                  emptyOptionDescription="Использовать для общих расходов без конкретного дела"
-                                  helperText="Эта привязка нужна для аналитики расходов, долгов и рентабельности дела."
-                                  disabled={lookupsLoading}
-                                  buttonClassName="bg-white"
-                                />
-                                {(selectedExpenseClient?.clientStatus || selectedExpenseClient?.responsibleUserName) && (
+                                <label className="flex flex-col gap-1 text-sm">
+                                  <span className="font-medium text-slate-700">Контрагент и дело расхода</span>
+                                  <div className="flex gap-2">
+                                    <input
+                                      type="text"
+                                      value={selectedExpenseCounterpartyName}
+                                      readOnly
+                                      className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                                      placeholder="Выберите клиента или юрлицо, к делу которого относится расход"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => openClientPicker('expense')}
+                                      disabled={lookupsLoading}
+                                      className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                      aria-label="Открыть выбор контрагента расхода"
+                                    >
+                                      <UserRoundSearch className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                  <span className="text-xs text-slate-500">
+                                    Эта привязка нужна для аналитики расходов, долгов и рентабельности дела.
+                                  </span>
+                                </label>
+                                {(selectedExpenseClient?.clientStatus || selectedExpenseClient?.responsibleUserName || selectedExpenseLegalEntity) && (
                                   <div className="mt-2 space-y-1 rounded-xl border border-amber-100 bg-white/80 p-2">
-                                    {selectedExpenseClient.clientStatus && (
-                                      <ClientStatusBadge status={selectedExpenseClient.clientStatus} />
-                                    )}
-                                    {selectedExpenseClient.responsibleUserName && (
+                                    {selectedExpenseLegalEntity && (
                                       <p className="text-xs text-slate-600">
-                                        Ответственный: {selectedExpenseClient.responsibleUserName}
+                                        Юрлицо: {getLegalEntityDisplayName(selectedExpenseLegalEntity)}
+                                        {selectedExpenseLegalEntity.inn ? `, ИНН ${selectedExpenseLegalEntity.inn}` : ''}
                                       </p>
                                     )}
-                                    {selectedExpenseClient.clientStatus?.description && (
-                                      <p className="text-xs text-slate-500">{selectedExpenseClient.clientStatus.description}</p>
+                                    {selectedExpenseClient?.clientStatus && (
+                                      <ClientStatusBadge status={selectedExpenseClient.clientStatus} />
+                                    )}
+                                    {selectedExpenseClient?.responsibleUserName && (
+                                      <p className="text-xs text-slate-600">
+                                        Ответственный: {selectedExpenseClient?.responsibleUserName}
+                                      </p>
+                                    )}
+                                    {selectedExpenseClient?.clientStatus?.description && (
+                                      <p className="text-xs text-slate-500">{selectedExpenseClient?.clientStatus?.description}</p>
                                     )}
                                   </div>
                                 )}
@@ -4745,13 +4838,32 @@ export function InvoiceModal({
 
       <CounterpartyPickerModal
         open={clientPickerOpen}
-        title={`Выбор ${counterpartyLabel.toLocaleLowerCase('ru')}`}
-        initialScope={form.legalEntityId ? 'legalEntity' : 'client'}
+        title={clientPickerMode === 'expense' ? 'Выбор контрагента расхода' : `Выбор ${counterpartyLabel.toLocaleLowerCase('ru')}`}
+        initialScope={
+          clientPickerMode === 'expense'
+            ? (form.expenseLegalEntityId ? 'legalEntity' : 'client')
+            : (form.legalEntityId ? 'legalEntity' : 'client')
+        }
+        selected={selectedCounterpartyPickerValue}
+        allowEmpty={clientPickerMode === 'expense'}
+        emptyLabel="Без контрагента расхода"
         overlayClassName="z-[1600]"
         onClose={() => setClientPickerOpen(false)}
         onSelect={(selection) => {
-          if (!selection) return;
-          if (selection.kind === 'client' && selection.client) {
+          if (!selection) {
+            if (clientPickerMode === 'expense') {
+              clearExpenseCounterparty();
+            }
+            return;
+          }
+          if (clientPickerMode === 'expense') {
+            if (selection.kind === 'client') {
+              handleExpenseClientChange(String(selection.id));
+              setClientPickerOpen(false);
+            } else if (selection.kind === 'legalEntity' && selection.legalEntity) {
+              handleExpenseLegalEntityPick(selection.legalEntity);
+            }
+          } else if (selection.kind === 'client' && selection.client) {
             handleClientPick(selection.client);
           } else if (selection.kind === 'legalEntity' && selection.legalEntity) {
             handleLegalEntityPick(selection.legalEntity);

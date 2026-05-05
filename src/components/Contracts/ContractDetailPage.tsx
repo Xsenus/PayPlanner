@@ -1,10 +1,9 @@
-import { AlertTriangle, ArrowLeft, Ban, Check, FileX, GripVertical, Loader2, Pencil, Plus, Save, Search, Send, Settings2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Ban, Check, FileX, GripVertical, Loader2, Pencil, Plus, Save, Send, Settings2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
-import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
-import type { Act, Client, Contract, ContractClient, ContractInput, Invoice, Payment } from '../../types';
+import type { Act, Contract, ContractInput, ContractLegalEntity, Invoice, Payment } from '../../types';
 import {
   getContractBillingModeLabel,
   getContractEffectiveAmount,
@@ -17,6 +16,7 @@ import { useToast } from '../../hooks/useToast';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 
 interface Props {
   contractId: number;
@@ -43,7 +43,6 @@ type TabListState<T> = {
 };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
-const PICKER_PAGE_SIZE_OPTIONS = [10, 25, 50];
 const TABLE_STORAGE_PREFIX = 'pp.contract_detail_table';
 
 type DetailTableColumn<K extends string> = {
@@ -55,8 +54,8 @@ type DetailTableColumn<K extends string> = {
 };
 
 const CLIENT_TABLE_COLUMNS: DetailTableColumn<ClientTableColumnKey>[] = [
-  { key: 'name', label: 'ФИО', defaultWidth: 260 },
-  { key: 'company', label: 'Компания', defaultWidth: 220 },
+  { key: 'name', label: 'Контрагент', defaultWidth: 260 },
+  { key: 'company', label: 'Компания / реквизиты', defaultWidth: 220 },
   { key: 'comment', label: 'Комментарий', defaultWidth: 320 },
 ];
 
@@ -96,7 +95,7 @@ function mapVisibleColumns<K extends string>(
 }
 
 const tabLabels: Record<Tab, string> = {
-  clients: 'Клиенты',
+  clients: 'Контрагенты',
   invoices: 'Счета',
   acts: 'Акты',
   money: 'Деньги',
@@ -135,6 +134,10 @@ function parseAmountInput(value: string): number | null | undefined {
   return parsed;
 }
 
+function getContractLegalEntityName(entity: Pick<ContractLegalEntity, 'id' | 'shortName' | 'fullName'>): string {
+  return entity.shortName?.trim() || entity.fullName?.trim() || `Юрлицо #${entity.id}`;
+}
+
 export function ContractDetailPage({
   contractId,
   onBack,
@@ -159,14 +162,6 @@ export function ContractDetailPage({
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerSearch, setPickerSearch] = useState('');
-  const debouncedPickerSearch = useDebouncedValue(pickerSearch.trim(), 250);
-  const [pickerClients, setPickerClients] = useState<Client[]>([]);
-  const [pickerLoading, setPickerLoading] = useState(false);
-  const [pickerError, setPickerError] = useState<string | null>(null);
-  const [pickerPage, setPickerPage] = useState(1);
-  const [pickerPageSize, setPickerPageSize] = useState(PICKER_PAGE_SIZE_OPTIONS[0]);
-  const [pickerTotal, setPickerTotal] = useState(0);
 
   const {
     columnOrder: clientColumnOrder,
@@ -504,65 +499,32 @@ export function ContractDetailPage({
     };
   }, [activeTab, contract?.id, paymentPage, paymentPageSize]);
 
-  const selectedClientIds = useMemo(
-    () => new Set((contract?.clients ?? []).map((item) => item.id)),
-    [contract],
-  );
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    let cancel = false;
-
-    const loadPickerClients = async () => {
-      setPickerLoading(true);
-      setPickerError(null);
-      try {
-        const response = await apiService.getClientsV2({
-          search: debouncedPickerSearch || undefined,
-          sortBy: 'name',
-          sortDir: 'asc',
-          page: pickerPage,
-          pageSize: pickerPageSize,
-        });
-
-        if (cancel) return;
-
-        setPickerClients(response.items ?? []);
-        setPickerTotal(response.total ?? 0);
-      } catch (error) {
-        if (cancel) return;
-
-        const message = extractDisplayErrorMessage(error, 'Не удалось загрузить клиентов');
-        setPickerClients([]);
-        setPickerTotal(0);
-        setPickerError(message);
-        toast.error(message, 'Ошибка загрузки');
-      } finally {
-        if (!cancel) {
-          setPickerLoading(false);
-        }
-      }
-    };
-
-    void loadPickerClients();
-    return () => {
-      cancel = true;
-    };
-  }, [debouncedPickerSearch, pickerOpen, pickerPage, pickerPageSize, toast]);
-
-  useEffect(() => {
-    setPickerPage(1);
-  }, [debouncedPickerSearch, pickerPageSize]);
-
-  const availableClients = useMemo(
-    () => pickerClients.filter((client) => !selectedClientIds.has(client.id)),
-    [pickerClients, selectedClientIds],
+  const selectedPickerValue = useMemo<CounterpartySelection[]>(
+    () => [
+      ...(contract?.clients ?? []).map((client) => ({
+        kind: 'client' as const,
+        id: client.id,
+        name: client.name,
+        subtitle: client.company ?? null,
+      })),
+      ...(contract?.legalEntities ?? []).map((entity) => ({
+        kind: 'legalEntity' as const,
+        id: entity.id,
+        name: getContractLegalEntityName(entity),
+        subtitle:
+          [entity.inn ? `ИНН ${entity.inn}` : '', entity.kpp ? `КПП ${entity.kpp}` : '']
+            .filter(Boolean)
+            .join(' · ') ||
+          entity.fullName ||
+          null,
+      })),
+    ],
+    [contract?.clients, contract?.legalEntities],
   );
 
   const invoiceTotalPages = Math.max(1, Math.ceil(invoiceState.total / invoicePageSize || 1));
   const actTotalPages = Math.max(1, Math.ceil(actState.total / actPageSize || 1));
   const paymentTotalPages = Math.max(1, Math.ceil(paymentState.total / paymentPageSize || 1));
-  const pickerTotalPages = Math.max(1, Math.ceil(pickerTotal / pickerPageSize || 1));
 
   const visibleClientColumns = useMemo(
     () => mapVisibleColumns(CLIENT_TABLE_COLUMNS, clientOrderedVisibleColumns),
@@ -656,20 +618,38 @@ export function ContractDetailPage({
     });
   };
 
-  const addClient = (client: Client) => {
+  const handleApplyCounterparties = (selection: CounterpartySelection[]) => {
     setContract((prev) => {
       if (!prev) return prev;
 
-      const nextClient: ContractClient = {
-        id: client.id,
-        name: client.name,
-        company: client.company,
-        clientStatus: client.clientStatus,
-        clientStatusId: client.clientStatusId,
-        comment: '',
-      };
+      const previousClientComments = new Map((prev.clients ?? []).map((client) => [client.id, client.comment ?? '']));
+      const previousLegalEntityComments = new Map(
+        (prev.legalEntities ?? []).map((entity) => [entity.id, entity.comment ?? '']),
+      );
 
-      return { ...prev, clients: [...prev.clients, nextClient] };
+      return {
+        ...prev,
+        clients: selection
+          .filter((item) => item.kind === 'client')
+          .map((item) => ({
+            id: item.id,
+            name: item.client?.name ?? item.name,
+            company: item.client?.company ?? item.subtitle ?? null,
+            clientStatus: item.client?.clientStatus ?? null,
+            clientStatusId: item.client?.clientStatusId ?? null,
+            comment: previousClientComments.get(item.id) ?? '',
+          })),
+        legalEntities: selection
+          .filter((item) => item.kind === 'legalEntity')
+          .map((item) => ({
+            id: item.id,
+            shortName: item.legalEntity?.shortName ?? item.name,
+            fullName: item.legalEntity?.fullName ?? item.subtitle ?? null,
+            inn: item.legalEntity?.inn ?? null,
+            kpp: item.legalEntity?.kpp ?? null,
+            comment: previousLegalEntityComments.get(item.id) ?? '',
+          })),
+      };
     });
   };
 
@@ -1091,7 +1071,7 @@ export function ContractDetailPage({
       {activeTab === 'clients' && (
         <div className="rounded border bg-white">
           <div className="flex items-center justify-between border-b px-4 py-3">
-            <h3 className="font-semibold">Клиенты договора</h3>
+            <h3 className="font-semibold">Контрагенты договора</h3>
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -1107,7 +1087,7 @@ export function ContractDetailPage({
                 className="inline-flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700 disabled:opacity-60"
               >
                 <Plus className="h-4 w-4" />
-                Добавить клиента
+                Добавить контрагента
               </button>
             </div>
           </div>
@@ -1871,91 +1851,14 @@ export function ContractDetailPage({
         </div>
       )}
 
-      {pickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <h3 className="text-lg font-semibold">Выбор клиента</h3>
-              <button className="rounded border px-2 py-1 text-sm" onClick={() => setPickerOpen(false)}>
-                Закрыть
-              </button>
-            </div>
-            <div className="p-4">
-              <div className="relative mb-3">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="search"
-                  value={pickerSearch}
-                  onChange={(event) => setPickerSearch(event.target.value)}
-                  className="w-full rounded-lg border border-slate-200 py-2 pl-10 pr-3"
-                  placeholder="Поиск клиента"
-                />
-              </div>
-
-              {pickerError ? (
-                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {pickerError}
-                </div>
-              ) : null}
-
-              <div className="max-h-80 overflow-auto rounded border">
-                <table className="min-w-full table-fixed divide-y text-sm">
-                  <colgroup>
-                    <col style={{ width: '44%' }} />
-                    <col style={{ width: '36%' }} />
-                    <col style={{ width: '20%' }} />
-                  </colgroup>
-                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                    <tr>
-                      <th className="px-3 py-2 text-left">ФИО</th>
-                      <th className="px-3 py-2 text-left">Компания</th>
-                      <th className="px-3 py-2 text-right">Действие</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {pickerLoading ? (
-                      <tr>
-                        <td colSpan={3} className="px-3 py-8 text-center text-slate-500">
-                          Загрузка...
-                        </td>
-                      </tr>
-                    ) : availableClients.map((client) => (
-                      <tr key={client.id}>
-                        <td className="px-3 py-2">{client.name}</td>
-                        <td className="px-3 py-2">{client.company || '—'}</td>
-                        <td className="px-3 py-2 text-right">
-                          <button
-                            className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700"
-                            onClick={() => addClient(client)}
-                          >
-                            Добавить
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {!pickerLoading && availableClients.length === 0 && (
-                      <tr>
-                        <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
-                          Нет доступных клиентов
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <TablePagination
-                page={pickerPage}
-                totalPages={pickerTotalPages}
-                totalItems={pickerTotal}
-                pageSize={pickerPageSize}
-                pageSizeOptions={PICKER_PAGE_SIZE_OPTIONS}
-                onPageChange={setPickerPage}
-                onPageSizeChange={setPickerPageSize}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      <CounterpartyPickerModal
+        open={pickerOpen}
+        mode="multiple"
+        title="Выбор контрагентов"
+        selected={selectedPickerValue}
+        onApply={handleApplyCounterparties}
+        onClose={() => setPickerOpen(false)}
+      />
     </div>
   );
 }
