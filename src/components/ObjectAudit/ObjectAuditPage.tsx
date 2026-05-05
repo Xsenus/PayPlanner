@@ -495,8 +495,12 @@ export function ObjectAuditPage() {
                                         <td className="px-4 py-3 font-medium text-slate-900">
                                           {getObjectAuditFieldLabel(item.objectType, change.field)}
                                         </td>
-                                        <td className="px-4 py-3 text-slate-600">{formatAuditValue(change.oldValue)}</td>
-                                        <td className="px-4 py-3 text-slate-900">{formatAuditValue(change.newValue)}</td>
+                                        <td className="px-4 py-3 text-slate-600">
+                                          {formatAuditValue(change.oldValue, item.objectType, change.field)}
+                                        </td>
+                                        <td className="px-4 py-3 text-slate-900">
+                                          {formatAuditValue(change.newValue, item.objectType, change.field)}
+                                        </td>
                                       </tr>
                                     ))}
                                   </tbody>

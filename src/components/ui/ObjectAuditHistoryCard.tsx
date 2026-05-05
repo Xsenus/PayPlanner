@@ -118,7 +118,7 @@ function HistoryTimeline({ items }: { items: ObjectAuditEventDto[] }) {
                               Было
                             </p>
                             <p className="mt-2 break-words text-sm leading-6 text-slate-700">
-                              {formatAuditValue(change.oldValue)}
+                              {formatAuditValue(change.oldValue, item.objectType, change.field)}
                             </p>
                           </div>
                           <div className="rounded-xl bg-emerald-50/80 px-3 py-3">
@@ -126,7 +126,7 @@ function HistoryTimeline({ items }: { items: ObjectAuditEventDto[] }) {
                               Стало
                             </p>
                             <p className="mt-2 break-words text-sm leading-6 text-slate-900">
-                              {formatAuditValue(change.newValue)}
+                              {formatAuditValue(change.newValue, item.objectType, change.field)}
                             </p>
                           </div>
                         </div>

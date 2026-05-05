@@ -1,4 +1,5 @@
 const COMMON_FIELD_LABELS: Record<string, string> = {
+  Id: 'ID',
   Name: 'Название',
   FullName: 'Полное имя',
   Description: 'Описание',
@@ -7,6 +8,7 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   Status: 'Статус',
   Amount: 'Сумма',
   Number: 'Номер',
+  Date: 'Дата',
   Email: 'Email',
   Phone: 'Телефон',
   Phones: 'Телефоны',
@@ -23,17 +25,54 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   Address: 'Адрес',
   AddressLine: 'Адрес',
   ResponsibleUserId: 'Ответственный',
+  ResponsibleId: 'Ответственный',
+  ResponsibleName: 'Ответственный',
+  Responsibles: 'Ответственные',
   CounterpartyName: 'Контрагент',
   ClientId: 'Клиент',
+  ClientName: 'Клиент',
   ExpenseClientId: 'Клиент расхода',
+  ExpenseClientName: 'Клиент расхода',
+  LegalEntityId: 'Юридическое лицо',
+  LegalEntityName: 'Юридическое лицо',
+  ExpenseLegalEntityId: 'Юрлицо расхода',
+  ExpenseLegalEntityName: 'Юрлицо расхода',
   ClientCaseId: 'Дело',
+  ClientCaseReference: 'Дело',
+  ClientCaseName: 'Дело',
+  InvoiceClientCases: 'Дела счета',
   ContractId: 'Договор',
+  ContractNumber: 'Договор',
   ActId: 'Акт',
+  ActReference: 'Акт',
   InvoiceId: 'Счет',
+  InvoiceNumber: 'Счет',
+  Account: 'Счет / касса',
+  AccountId: 'Счет / касса',
+  AccountName: 'Счет / касса',
+  AccountDate: 'Дата операции',
+  PaymentSourceId: 'Источник платежа',
+  PaymentSourceName: 'Источник платежа',
+  ServiceId: 'Услуга',
+  ServiceName: 'Услуга',
+  IncomeTypeId: 'Тип дохода',
+  IncomeTypeName: 'Тип дохода',
+  ExpenseTypeId: 'Тип расхода',
+  ExpenseTypeName: 'Тип расхода',
+  DealTypeId: 'Тип дела',
+  DealTypeName: 'Тип дела',
+  PaymentStatusId: 'Статус оплаты',
+  PaymentStatusName: 'Статус оплаты',
   DueDate: 'Срок оплаты',
   IssueDate: 'Дата выставления',
   PaymentDate: 'Дата оплаты',
   PaidDate: 'Дата оплаты',
+  LastPaymentDate: 'Дата последней оплаты',
+  PlannedDate: 'Плановая дата',
+  IsPaid: 'Оплачен',
+  PaidAmount: 'Оплачено',
+  OutstandingAmount: 'Долг',
+  RescheduleCount: 'Количество переносов',
   StartDate: 'Дата начала',
   EndDate: 'Дата окончания',
   CreatedAt: 'Дата создания',
@@ -130,6 +169,28 @@ const AUDIT_ACTOR_LABELS: Record<string, string> = {
   'codex data repair': 'Системное исправление',
 };
 
+const VALUE_LABELS: Record<string, string> = {
+  true: 'Да',
+  false: 'Нет',
+  income: 'Доходный',
+  expense: 'Расходный',
+  pending: 'Ожидает оплаты',
+  completed: 'Оплачено',
+  overdue: 'Просрочено',
+  processing: 'Частично оплачено',
+  cancelled: 'Отменено',
+  canceled: 'Отменено',
+  paid: 'Оплачено',
+  draft: 'Черновик',
+  signed: 'Подписан',
+  notsigned: 'Не подписан',
+  onsigning: 'На подписании',
+  open: 'Открыто',
+  closed: 'Закрыто',
+  active: 'Активен',
+  inactive: 'Неактивен',
+};
+
 export interface ParsedAuditFieldChange {
   field: string;
   oldValue: string | null;
@@ -146,6 +207,93 @@ function prettifyFieldName(fieldName: string): string {
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .trim();
+}
+
+function normalizeLookupKey(value: string): string {
+  return value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+
+function findLabel(labels: Record<string, string> | undefined, fieldName: string): string | null {
+  if (!labels) return null;
+  if (labels[fieldName]) return labels[fieldName];
+
+  const lookupKey = normalizeLookupKey(fieldName);
+  const matchedKey = Object.keys(labels).find((key) => normalizeLookupKey(key) === lookupKey);
+  return matchedKey ? labels[matchedKey] : null;
+}
+
+function looksLikeDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2})?)?/u.test(value.trim());
+}
+
+function formatDateValue(value: string): string {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/u);
+  if (!match) return value.trim();
+
+  const [, year, month, day, hour, minute, second] = match;
+  const datePart = `${day}.${month}.${year}`;
+  if (!hour || (hour === '00' && minute === '00' && (!second || second === '00'))) {
+    return datePart;
+  }
+
+  return `${datePart} ${hour}:${minute}`;
+}
+
+function shouldFormatAsMoney(fieldName?: string | null): boolean {
+  const lookupKey = normalizeLookupKey(fieldName ?? '');
+  return Boolean(lookupKey) && (
+    lookupKey.includes('amount')
+    || lookupKey.includes('sum')
+    || lookupKey.includes('price')
+    || lookupKey.includes('total')
+    || lookupKey.includes('paid')
+    || lookupKey.includes('outstanding')
+    || lookupKey.includes('debt')
+  );
+}
+
+function shouldFormatAsBoolean(fieldName?: string | null): boolean {
+  const lookupKey = normalizeLookupKey(fieldName ?? '');
+  return lookupKey.startsWith('is') || lookupKey.startsWith('has') || lookupKey.startsWith('can');
+}
+
+function shouldFormatAsIdentifier(fieldName?: string | null): boolean {
+  const lookupKey = normalizeLookupKey(fieldName ?? '');
+  return lookupKey.endsWith('id') && lookupKey !== 'id';
+}
+
+function formatMoneyLikeValue(value: string): string | null {
+  const normalized = value.trim().replace(/\s+/g, '').replace(',', '.');
+  if (!/^-?\d+(?:\.\d+)?$/u.test(normalized)) return null;
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount)) return null;
+
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'RUB',
+    maximumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+  }).format(amount);
+}
+
+function formatJsonValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 0) return 'Пустой список';
+      return `Список: ${parsed.length}`;
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      return 'Структурированные данные';
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function translateTechnicalWords(value: string): string {
@@ -214,13 +362,11 @@ export function getObjectAuditActorLabel(actorUserName?: string | null): string 
 export function getObjectAuditFieldLabel(objectType: string | null | undefined, fieldName: string): string {
   const normalizedObjectType = objectType?.trim().toLowerCase() ?? '';
   const objectOverrides = OBJECT_TYPE_FIELD_OVERRIDES[normalizedObjectType];
-  if (objectOverrides?.[fieldName]) {
-    return objectOverrides[fieldName];
-  }
+  const objectLabel = findLabel(objectOverrides, fieldName);
+  if (objectLabel) return objectLabel;
 
-  if (COMMON_FIELD_LABELS[fieldName]) {
-    return COMMON_FIELD_LABELS[fieldName];
-  }
+  const commonLabel = findLabel(COMMON_FIELD_LABELS, fieldName);
+  if (commonLabel) return commonLabel;
 
   return prettifyFieldName(fieldName);
 }
@@ -293,8 +439,38 @@ export function parseAuditFieldChanges(metadataJson: string | null | undefined):
   }
 }
 
-export function formatAuditValue(value: string | null | undefined): string {
-  return value?.trim() ? value.trim() : '—';
+export function formatAuditValue(
+  value: string | null | undefined,
+  objectType?: string | null,
+  fieldName?: string | null,
+): string {
+  void objectType;
+  const trimmed = value?.trim();
+  if (!trimmed) return '—';
+
+  const normalizedValueKey = normalizeLookupKey(trimmed);
+  if (VALUE_LABELS[normalizedValueKey]) {
+    return VALUE_LABELS[normalizedValueKey];
+  }
+
+  if (shouldFormatAsBoolean(fieldName)) {
+    if (trimmed === '1') return 'Да';
+    if (trimmed === '0') return 'Нет';
+  }
+
+  if (looksLikeDate(trimmed)) {
+    return formatDateValue(trimmed);
+  }
+
+  if (shouldFormatAsMoney(fieldName)) {
+    return formatMoneyLikeValue(trimmed) ?? trimmed;
+  }
+
+  if (shouldFormatAsIdentifier(fieldName) && /^-?\d+$/u.test(trimmed)) {
+    return `ID ${trimmed}`;
+  }
+
+  return formatJsonValue(trimmed) ?? translateTechnicalWords(trimmed);
 }
 
 export function formatAuditChangeSummary(objectType: string | null | undefined, metadataJson: string | null | undefined): string | null {
