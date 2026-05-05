@@ -3614,7 +3614,7 @@ public class MoneyOperationsControllerTests
         var refreshedSecondPayment = await db.Payments.SingleAsync(item => item.Id == secondPayment.Id);
         Assert.Equal(1_500m, refreshedSecondPayment.PaidAmount);
         Assert.Equal(PaymentStatus.Overdue, refreshedSecondPayment.Status);
-        Assert.Contains("Зачтено с баланса клиента", refreshedSecondPayment.SystemNotes);
+        Assert.Contains("Зачтено с баланса контрагента", refreshedSecondPayment.SystemNotes);
 
         var balanceTransactions = await db.ClientBalanceTransactions
             .OrderBy(item => item.Id)

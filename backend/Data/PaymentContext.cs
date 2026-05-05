@@ -733,6 +733,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ClientId)
                   .OnDelete(DeleteBehavior.Cascade);
 
+            entity.HasOne(e => e.LegalEntity)
+                  .WithMany()
+                  .HasForeignKey(e => e.LegalEntityId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
             entity.HasOne(e => e.Invoice)
                   .WithMany()
                   .HasForeignKey(e => e.InvoiceId)
@@ -744,9 +749,13 @@ public class PaymentContext : DbContext
                   .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasIndex(e => new { e.ClientId, e.CreatedAt }).HasDatabaseName("IX_ClientBalanceTransactions_ClientId_CreatedAt");
+            entity.HasIndex(e => new { e.LegalEntityId, e.CreatedAt }).HasDatabaseName("IX_ClientBalanceTransactions_LegalEntityId_CreatedAt");
             entity.HasIndex(e => e.PaymentId).HasDatabaseName("IX_ClientBalanceTransactions_PaymentId");
             entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_ClientBalanceTransactions_InvoiceId");
             entity.HasIndex(e => e.ExternalKey).IsUnique().HasDatabaseName("IX_ClientBalanceTransactions_ExternalKey");
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_ClientBalanceTransactions_Owner",
+                "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)"));
         });
 
         // ------------------ MoneyAccount ------------------

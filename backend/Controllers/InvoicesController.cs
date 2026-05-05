@@ -363,6 +363,7 @@ public class InvoicesController : ControllerBase
         var payment = await _db.Payments
             .Include(p => p.Invoice)
             .Include(p => p.Client)
+            .Include(p => p.LegalEntity)
             .Include(p => p.PaymentSource)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
@@ -401,9 +402,9 @@ public class InvoicesController : ControllerBase
                 return BadRequest("Нельзя аннулировать счёт с уже полученной оплатой без сценария возврата, зачёта или переноса в аванс.");
             }
 
-            if (payment.Type != PaymentType.Income || !payment.ClientId.HasValue || payment.ClientId.Value <= 0)
+            if (payment.Type != PaymentType.Income || !HasSingleCounterpartyOwner(payment.ClientId, payment.LegalEntityId))
             {
-                return BadRequest("Обработать оплату можно только по входящему счёту с указанным клиентом.");
+                return BadRequest("Обработать оплату можно только по входящему счёту с указанным клиентом или юридическим лицом.");
             }
 
             if (receivedAmount <= 0m)
@@ -437,9 +438,9 @@ public class InvoicesController : ControllerBase
                 return BadRequest("Зачесть оплату можно только на другой входящий счёт.");
             }
 
-            if (reallocationTarget.ClientId != payment.ClientId)
+            if (reallocationTarget.ClientId != payment.ClientId || reallocationTarget.LegalEntityId != payment.LegalEntityId)
             {
-                return BadRequest("Зачесть оплату можно только на счёт того же клиента.");
+                return BadRequest("Зачесть оплату можно только на счёт того же контрагента.");
             }
 
             if (reallocationTarget.Status == PaymentStatus.Cancelled)
@@ -502,12 +503,13 @@ public class InvoicesController : ControllerBase
         }
 
         decimal reallocatedAmount = 0m;
-        if (reallocationTarget is not null && payment.ClientId.HasValue)
+        if (reallocationTarget is not null)
         {
             await _db.SaveChangesAsync(ct);
-            var reallocationResult = await ClientBalanceService.ApplyCreditAsync(
+            var reallocationResult = await ClientBalanceService.ApplyCounterpartyCreditAsync(
                 _db,
-                payment.ClientId.Value,
+                payment.ClientId,
+                payment.LegalEntityId,
                 reallocationTarget.Id,
                 receivedAmount,
                 now,
@@ -542,7 +544,7 @@ public class InvoicesController : ControllerBase
             : hasReceivedMoney && reallocatedAmount > 0m
             ? $" Полученная оплата зачтена на счёт #{reallocationTarget!.Id}: {reallocatedAmount:N2}. Остаток в авансе: {Math.Max(receivedAmount - reallocatedAmount, 0m):N2}."
             : hasReceivedMoney
-                ? $" Полученная оплата перенесена в аванс клиента: {receivedAmount:N2}."
+                ? $" Полученная оплата перенесена в аванс контрагента: {receivedAmount:N2}."
                 : string.Empty;
         PaymentDomainService.AppendSystemNote(payment, $"Счёт аннулирован. Причина: {reason}{advanceNote}", now, actor);
 
@@ -843,6 +845,7 @@ public class InvoicesController : ControllerBase
                 resolvedDueDate,
                 request,
                 resolvedExpenseClientId,
+                resolvedExpenseLegalEntityId,
                 resolvedClientCaseId,
                 ct))
         {
@@ -958,6 +961,7 @@ public class InvoicesController : ControllerBase
         DateTime dueDate,
         UpsertInvoiceRequest request,
         int? resolvedExpenseClientId,
+        int? resolvedExpenseLegalEntityId,
         int? resolvedClientCaseId,
         CancellationToken ct)
     {
@@ -1009,7 +1013,9 @@ public class InvoicesController : ControllerBase
             || payment.InvoiceWorkflowStatus != (ResolveInvoiceWorkflowStatus(request) ?? payment.InvoiceWorkflowStatus)
             || payment.Type != request.Type
             || payment.ClientId != request.ClientId
+            || payment.LegalEntityId != request.LegalEntityId
             || payment.ExpenseClientId != resolvedExpenseClientId
+            || payment.ExpenseLegalEntityId != resolvedExpenseLegalEntityId
             || payment.ContractId != request.ContractId
             || payment.ClientCaseId != resolvedClientCaseId
             || !Nullable.Equals(payment.PaidDate?.Date, request.PaidDate?.Date))
@@ -2849,7 +2855,8 @@ public class InvoicesController : ControllerBase
         }
 
         var foreignClientActIds = acts
-            .Where(x => x.ClientId != clientId || x.LegalEntityId != legalEntityId)
+            .Where(x => !(invoiceId.HasValue && x.InvoiceId == invoiceId.Value)
+                && (x.ClientId != clientId || x.LegalEntityId != legalEntityId))
             .Select(x => x.Id)
             .OrderBy(x => x)
             .ToList();
@@ -3572,7 +3579,10 @@ public class InvoicesController : ControllerBase
         var sourcePayment = paymentsToCancel.FirstOrDefault(HasReceivedMoney) ?? payment;
         var refundDate = (request.RefundDate ?? now).Date;
         var refundSource = request.RefundSource ?? ResolveMoneyOperationSource(sourcePayment.PaymentSource?.Name);
-        var counterpartyName = payment.Client?.Name ?? payment.CounterpartyName;
+        var counterpartyName = payment.Client?.Name
+            ?? payment.LegalEntity?.ShortName
+            ?? payment.LegalEntity?.FullName
+            ?? payment.CounterpartyName;
         var invoiceNumber = string.IsNullOrWhiteSpace(payment.Account) ? payment.Invoice?.Number : payment.Account;
         var purpose = $"Возврат оплаты по аннулированному счёту №{invoiceNumber}. Причина: {reason}";
 
@@ -3670,6 +3680,10 @@ public class InvoicesController : ControllerBase
            || payment.PaidDate.HasValue
            || payment.LastPaymentDate.HasValue
            || payment.Status is PaymentStatus.Completed or PaymentStatus.Processing;
+
+    private static bool HasSingleCounterpartyOwner(int? clientId, int? legalEntityId)
+        => (clientId.HasValue && clientId.Value > 0 && !legalEntityId.HasValue)
+            || (legalEntityId.HasValue && legalEntityId.Value > 0 && !clientId.HasValue);
 
     private static bool ShouldReplaceInstallmentPlan(UpsertInvoiceRequest request)
     {
@@ -4251,6 +4265,7 @@ public class InvoicesController : ControllerBase
                 || (a.InvoiceId == null && a.InvoiceNumber != null && invoiceNumbers.Contains(a.InvoiceNumber)))
             .ToListAsync(ct);
 
+        var now = DateTime.UtcNow;
         foreach (var act in currentActs.Where(a => !targetIds.Contains(a.Id)))
         {
             act.InvoiceId = null;
@@ -4258,7 +4273,7 @@ public class InvoicesController : ControllerBase
             {
                 act.InvoiceNumber = null;
             }
-            act.UpdatedAt = DateTime.UtcNow;
+            act.UpdatedAt = now;
         }
 
         if (targetIds.Count == 0)
@@ -4274,7 +4289,9 @@ public class InvoicesController : ControllerBase
         {
             act.InvoiceId = payment.Id;
             act.InvoiceNumber = normalizedCurrentNumber;
-            act.UpdatedAt = DateTime.UtcNow;
+            act.ClientId = payment.ClientId;
+            act.LegalEntityId = payment.LegalEntityId;
+            act.UpdatedAt = now;
         }
     }
 

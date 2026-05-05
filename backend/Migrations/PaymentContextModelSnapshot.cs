@@ -988,7 +988,7 @@ namespace PayPlanner.Api.Migrations
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<int>("ClientId")
+                    b.Property<int?>("ClientId")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedAt")
@@ -1017,6 +1017,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("InvoiceId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("PaymentId")
                         .HasColumnType("INTEGER");
 
@@ -1039,7 +1042,13 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("ClientId", "CreatedAt")
                         .HasDatabaseName("IX_ClientBalanceTransactions_ClientId_CreatedAt");
 
-                    b.ToTable("ClientBalanceTransactions");
+                    b.HasIndex("LegalEntityId", "CreatedAt")
+                        .HasDatabaseName("IX_ClientBalanceTransactions_LegalEntityId_CreatedAt");
+
+                    b.ToTable("ClientBalanceTransactions", t =>
+                        {
+                            t.HasCheckConstraint("CK_ClientBalanceTransactions_Owner", "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
@@ -4753,13 +4762,17 @@ namespace PayPlanner.Api.Migrations
                     b.HasOne("PayPlanner.Api.Models.Client", "Client")
                         .WithMany()
                         .HasForeignKey("ClientId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("PayPlanner.Api.Models.Invoice", "Invoice")
                         .WithMany()
                         .HasForeignKey("InvoiceId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("PayPlanner.Api.Models.Payment", "Payment")
                         .WithMany()
@@ -4769,6 +4782,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Client");
 
                     b.Navigation("Invoice");
+
+                    b.Navigation("LegalEntity");
 
                     b.Navigation("Payment");
                 });

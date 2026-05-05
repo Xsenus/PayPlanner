@@ -20,8 +20,10 @@ public enum ClientBalanceDirection
 public class ClientBalanceTransaction
 {
     public int Id { get; set; }
-    public int ClientId { get; set; }
+    public int? ClientId { get; set; }
     public Client? Client { get; set; }
+    public int? LegalEntityId { get; set; }
+    public LegalEntity? LegalEntity { get; set; }
     public int? InvoiceId { get; set; }
     public Invoice? Invoice { get; set; }
     public int? PaymentId { get; set; }

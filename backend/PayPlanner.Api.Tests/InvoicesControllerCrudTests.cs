@@ -494,7 +494,7 @@ public class InvoicesControllerCrudTests
         Assert.False(storedPayment.IsPaid);
         Assert.Null(storedPayment.PaidDate);
         Assert.Null(storedPayment.LastPaymentDate);
-        Assert.Contains("аванс клиента", storedPayment.SystemNotes, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("аванс контрагента", storedPayment.SystemNotes, StringComparison.OrdinalIgnoreCase);
 
         var balanceTransaction = await db.ClientBalanceTransactions.AsNoTracking().SingleAsync();
         Assert.Equal(clientId, balanceTransaction.ClientId);
@@ -507,6 +507,56 @@ public class InvoicesControllerCrudTests
         Assert.Contains("Ошибочный счёт", balanceTransaction.Description, StringComparison.Ordinal);
 
         var balance = await ClientBalanceService.GetBalanceAsync(db, clientId);
+        Assert.Equal(12_000m, balance);
+    }
+
+    [Fact]
+    public async Task Cancel_PaidLegalEntityInvoiceWithAdvanceAction_CreatesLegalEntityBalanceCredit()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var legalEntityId = await CreateLegalEntityAsync(db, "Legal Entity Advance");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateLegalEntityRequest("INV-CANCEL-LEGAL-ADV", legalEntityId, new DateTime(2026, 4, 20), 12_000m);
+        request.Status = PaymentStatus.Completed;
+        request.PaidDate = new DateTime(2026, 4, 21);
+
+        var createAction = await controller.Create(request, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var cancelAction = await controller.Cancel(
+            createdDto.Id,
+            new CancelInvoiceRequest
+            {
+                Reason = "Legal entity advance",
+                ReceivedMoneyAction = InvoiceCancellationMoneyAction.LeaveAsAdvance,
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(cancelAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(PaymentStatus.Cancelled, dto.Status);
+        Assert.Equal(0m, dto.PaidAmount);
+
+        db.ChangeTracker.Clear();
+        var storedPayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Null(storedPayment.ClientId);
+        Assert.Equal(legalEntityId, storedPayment.LegalEntityId);
+        Assert.Equal(PaymentStatus.Cancelled, storedPayment.Status);
+
+        var balanceTransaction = await db.ClientBalanceTransactions.AsNoTracking().SingleAsync();
+        Assert.Null(balanceTransaction.ClientId);
+        Assert.Equal(legalEntityId, balanceTransaction.LegalEntityId);
+        Assert.Equal(storedPayment.InvoiceId, balanceTransaction.InvoiceId);
+        Assert.Equal(createdDto.Id, balanceTransaction.PaymentId);
+        Assert.Equal(12_000m, balanceTransaction.Amount);
+        Assert.Equal(ClientBalanceTransactionType.AdvanceFromCancelledInvoice, balanceTransaction.Type);
+        Assert.Equal(ClientBalanceDirection.Credit, balanceTransaction.Direction);
+
+        var balance = await ClientBalanceService.GetLegalEntityBalanceAsync(db, legalEntityId);
         Assert.Equal(12_000m, balance);
     }
 
@@ -645,6 +695,84 @@ public class InvoicesControllerCrudTests
             });
 
         var balance = await ClientBalanceService.GetBalanceAsync(db, clientId);
+        Assert.Equal(0m, balance);
+    }
+
+    [Fact]
+    public async Task Cancel_PaidLegalEntityInvoiceWithReallocateAction_AppliesCreditToLegalEntityTarget()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var legalEntityId = await CreateLegalEntityAsync(db, "Legal Entity Reallocate");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var sourceRequest = CreateLegalEntityRequest("INV-CANCEL-LEGAL-REALLOC-SRC", legalEntityId, new DateTime(2026, 4, 20), 12_000m);
+        sourceRequest.Status = PaymentStatus.Completed;
+        sourceRequest.PaidDate = new DateTime(2026, 4, 21);
+        var sourceAction = await controller.Create(sourceRequest, CancellationToken.None);
+        var sourceCreated = Assert.IsType<CreatedResult>(sourceAction.Result);
+        var sourceDto = Assert.IsType<InvoiceDto>(sourceCreated.Value);
+
+        var targetAction = await controller.Create(
+            CreateLegalEntityRequest("INV-CANCEL-LEGAL-REALLOC-DST", legalEntityId, new DateTime(2026, 4, 22), 12_000m),
+            CancellationToken.None);
+        var targetCreated = Assert.IsType<CreatedResult>(targetAction.Result);
+        var targetDto = Assert.IsType<InvoiceDto>(targetCreated.Value);
+
+        var cancelAction = await controller.Cancel(
+            sourceDto.Id,
+            new CancelInvoiceRequest
+            {
+                Reason = "Legal entity reallocate",
+                ReceivedMoneyAction = InvoiceCancellationMoneyAction.Reallocate,
+                TargetPaymentId = targetDto.Id,
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(cancelAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(PaymentStatus.Cancelled, dto.Status);
+
+        db.ChangeTracker.Clear();
+        var storedSource = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == sourceDto.Id);
+        var storedTarget = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == targetDto.Id);
+        Assert.Null(storedSource.ClientId);
+        Assert.Equal(legalEntityId, storedSource.LegalEntityId);
+        Assert.Null(storedTarget.ClientId);
+        Assert.Equal(legalEntityId, storedTarget.LegalEntityId);
+        Assert.Equal(PaymentStatus.Cancelled, storedSource.Status);
+        Assert.Equal(0m, storedSource.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, storedTarget.Status);
+        Assert.Equal(12_000m, storedTarget.PaidAmount);
+
+        var balanceTransactions = await db.ClientBalanceTransactions
+            .AsNoTracking()
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Collection(
+            balanceTransactions,
+            credit =>
+            {
+                Assert.Null(credit.ClientId);
+                Assert.Equal(legalEntityId, credit.LegalEntityId);
+                Assert.Equal(ClientBalanceTransactionType.AdvanceFromCancelledInvoice, credit.Type);
+                Assert.Equal(ClientBalanceDirection.Credit, credit.Direction);
+                Assert.Equal(12_000m, credit.Amount);
+                Assert.Equal(sourceDto.Id, credit.PaymentId);
+            },
+            debit =>
+            {
+                Assert.Null(debit.ClientId);
+                Assert.Equal(legalEntityId, debit.LegalEntityId);
+                Assert.Equal(ClientBalanceTransactionType.CreditApplied, debit.Type);
+                Assert.Equal(ClientBalanceDirection.Debit, debit.Direction);
+                Assert.Equal(12_000m, debit.Amount);
+                Assert.Equal(targetDto.Id, debit.PaymentId);
+            });
+
+        var balance = await ClientBalanceService.GetLegalEntityBalanceAsync(db, legalEntityId);
         Assert.Equal(0m, balance);
     }
 
@@ -1272,6 +1400,66 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Update_ToLegalEntity_CascadesOwnerToActsAndInstallments()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Owner Before");
+        var legalEntityId = await CreateLegalEntityAsync(db, "Legal Entity Owner After");
+        var actId = await CreateActAsync(db, clientId, "ACT-LEGAL-CASCADE");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createRequest = CreateRequest("INV-LEGAL-CASCADE", clientId, new DateTime(2026, 4, 10), 18_000m);
+        createRequest.ActIds = [actId];
+        createRequest.InstallmentPlan = CreateInstallmentPlanRequest(
+            total: 18_000m,
+            startDate: new DateTime(2026, 4, 10),
+            new DateTime(2026, 5, 10),
+            new DateTime(2026, 6, 10));
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var updateRequest = CreateLegalEntityRequest("INV-LEGAL-CASCADE", legalEntityId, new DateTime(2026, 4, 10), 18_000m);
+        updateRequest.ActIds = [actId];
+        updateRequest.InstallmentPlan = CreateInstallmentPlanRequest(
+            total: 18_000m,
+            startDate: new DateTime(2026, 4, 10),
+            new DateTime(2026, 5, 10),
+            new DateTime(2026, 6, 10));
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var updatedDto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Null(updatedDto.ClientId);
+        Assert.Equal(legalEntityId, updatedDto.LegalEntityId);
+
+        db.ChangeTracker.Clear();
+        var parent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        var aggregatePayments = await db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.Id == createdDto.Id || payment.InvoiceId == parent.InvoiceId)
+            .OrderBy(payment => payment.Id)
+            .ToListAsync();
+        Assert.Equal(3, aggregatePayments.Count);
+        Assert.All(aggregatePayments, payment =>
+        {
+            Assert.Null(payment.ClientId);
+            Assert.Equal(legalEntityId, payment.LegalEntityId);
+        });
+
+        var linkedAct = await db.Acts.AsNoTracking().SingleAsync(act => act.Id == actId);
+        Assert.Null(linkedAct.ClientId);
+        Assert.Equal(legalEntityId, linkedAct.LegalEntityId);
+        Assert.Equal(createdDto.Id, linkedAct.InvoiceId);
+        Assert.Equal("INV-LEGAL-CASCADE", linkedAct.InvoiceNumber);
+    }
+
+    [Fact]
     public async Task Update_RejectsChangingProtectedInstallmentPayment()
     {
         await using var db = await CreateContextAsync();
@@ -1573,6 +1761,14 @@ public class InvoicesControllerCrudTests
         };
     }
 
+    private static UpsertInvoiceRequest CreateLegalEntityRequest(string number, int legalEntityId, DateTime date, decimal amount)
+    {
+        var request = CreateRequest(number, 0, date, amount);
+        request.ClientId = null;
+        request.LegalEntityId = legalEntityId;
+        return request;
+    }
+
     private static InvoiceInstallmentPlanRequest CreateInstallmentPlanRequest(decimal total, DateTime startDate, params DateTime[] dates)
     {
         var paymentAmount = dates.Length > 0 ? decimal.Round(total / dates.Length, 2) : total;
@@ -1663,6 +1859,20 @@ public class InvoicesControllerCrudTests
         db.Clients.Add(client);
         await db.SaveChangesAsync();
         return client.Id;
+    }
+
+    private static async Task<int> CreateLegalEntityAsync(PaymentContext db, string shortName)
+    {
+        var legalEntity = new LegalEntity
+        {
+            ShortName = shortName,
+            FullName = shortName,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(legalEntity);
+        await db.SaveChangesAsync();
+        return legalEntity.Id;
     }
 
     private static async Task<int> CreateContractAsync(PaymentContext db, int clientId, string number)

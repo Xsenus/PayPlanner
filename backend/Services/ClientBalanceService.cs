@@ -11,9 +11,15 @@ public static class ClientBalanceService
     private const decimal AmountEpsilon = 0.009m;
 
     public static Task<decimal> GetBalanceAsync(PaymentContext db, int clientId, CancellationToken ct = default)
+        => GetBalanceAsync(db, clientId, null, ct);
+
+    public static Task<decimal> GetLegalEntityBalanceAsync(PaymentContext db, int legalEntityId, CancellationToken ct = default)
+        => GetBalanceAsync(db, null, legalEntityId, ct);
+
+    private static Task<decimal> GetBalanceAsync(PaymentContext db, int? clientId, int? legalEntityId, CancellationToken ct = default)
         => db.ClientBalanceTransactions
             .AsNoTracking()
-            .Where(item => item.ClientId == clientId)
+            .Where(item => item.ClientId == clientId && item.LegalEntityId == legalEntityId)
             .SumAsync(item => item.Direction == ClientBalanceDirection.Credit ? item.Amount : -item.Amount, ct);
 
     public static Task<decimal> GetAppliedCreditAmountAsync(PaymentContext db, int paymentId, CancellationToken ct = default)
@@ -33,7 +39,7 @@ public static class ClientBalanceService
         HttpContext? httpContext,
         CancellationToken ct = default)
     {
-        if (!payment.ClientId.HasValue || payment.ClientId.Value <= 0 || payment.Type != PaymentType.Income)
+        if (!HasValidCounterpartyOwner(payment) || payment.Type != PaymentType.Income)
         {
             return;
         }
@@ -60,7 +66,8 @@ public static class ClientBalanceService
         {
             db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
             {
-                ClientId = payment.ClientId.Value,
+                ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
                 InvoiceId = payment.InvoiceId,
                 PaymentId = payment.Id,
                 Amount = overpaymentAmount,
@@ -75,7 +82,8 @@ public static class ClientBalanceService
             return;
         }
 
-        existing.ClientId = payment.ClientId.Value;
+        existing.ClientId = payment.ClientId;
+        existing.LegalEntityId = payment.LegalEntityId;
         existing.InvoiceId = payment.InvoiceId;
         existing.PaymentId = payment.Id;
         existing.Amount = overpaymentAmount;
@@ -92,7 +100,33 @@ public static class ClientBalanceService
         DateTime utcNow,
         HttpContext? httpContext,
         CancellationToken ct = default)
+        => await ApplyCounterpartyCreditAsync(db, clientId, null, paymentId, requestedAmount, utcNow, httpContext, ct);
+
+    public static async Task<(bool Success, string? Error, decimal AppliedAmount)> ApplyLegalEntityCreditAsync(
+        PaymentContext db,
+        int legalEntityId,
+        int paymentId,
+        decimal requestedAmount,
+        DateTime utcNow,
+        HttpContext? httpContext,
+        CancellationToken ct = default)
+        => await ApplyCounterpartyCreditAsync(db, null, legalEntityId, paymentId, requestedAmount, utcNow, httpContext, ct);
+
+    public static async Task<(bool Success, string? Error, decimal AppliedAmount)> ApplyCounterpartyCreditAsync(
+        PaymentContext db,
+        int? clientId,
+        int? legalEntityId,
+        int paymentId,
+        decimal requestedAmount,
+        DateTime utcNow,
+        HttpContext? httpContext,
+        CancellationToken ct = default)
     {
+        if (!HasSingleOwner(clientId, legalEntityId))
+        {
+            return (false, "Counterparty owner is required.", 0m);
+        }
+
         var amount = NormalizeAmount(requestedAmount);
         if (amount <= AmountEpsilon)
         {
@@ -105,9 +139,9 @@ public static class ClientBalanceService
             return (false, "Payment not found.", 0m);
         }
 
-        if (payment.ClientId != clientId)
+        if (payment.ClientId != clientId || payment.LegalEntityId != legalEntityId)
         {
-            return (false, "Payment does not belong to this client.", 0m);
+            return (false, "Payment does not belong to this counterparty.", 0m);
         }
 
         PaymentDomainService.Normalize(payment);
@@ -117,10 +151,10 @@ public static class ClientBalanceService
             return (false, "Payment is already paid.", 0m);
         }
 
-        var balance = await GetBalanceAsync(db, clientId, ct);
+        var balance = await GetBalanceAsync(db, clientId, legalEntityId, ct);
         if (balance <= AmountEpsilon)
         {
-            return (false, "Client balance is empty.", 0m);
+            return (false, "Counterparty balance is empty.", 0m);
         }
 
         var applied = Math.Min(amount, Math.Min(balance, outstanding));
@@ -139,6 +173,7 @@ public static class ClientBalanceService
         db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
         {
             ClientId = clientId,
+            LegalEntityId = legalEntityId,
             InvoiceId = payment.InvoiceId,
             PaymentId = payment.Id,
             Amount = applied,
@@ -152,7 +187,7 @@ public static class ClientBalanceService
 
         PaymentDomainService.AppendSystemNote(
             payment,
-            $"Зачтено с баланса клиента: {applied:N2}",
+            $"Зачтено с баланса контрагента: {applied:N2}",
             utcNow,
             actor);
 
@@ -168,7 +203,7 @@ public static class ClientBalanceService
         HttpContext? httpContext,
         CancellationToken ct = default)
     {
-        if (!payment.ClientId.HasValue || payment.ClientId.Value <= 0 || payment.Type != PaymentType.Income)
+        if (!HasValidCounterpartyOwner(payment) || payment.Type != PaymentType.Income)
         {
             return;
         }
@@ -191,7 +226,8 @@ public static class ClientBalanceService
         {
             db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
             {
-                ClientId = payment.ClientId.Value,
+                ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
                 InvoiceId = payment.InvoiceId,
                 PaymentId = payment.Id,
                 Amount = amount,
@@ -206,7 +242,8 @@ public static class ClientBalanceService
             return;
         }
 
-        existing.ClientId = payment.ClientId.Value;
+        existing.ClientId = payment.ClientId;
+        existing.LegalEntityId = payment.LegalEntityId;
         existing.InvoiceId = payment.InvoiceId;
         existing.PaymentId = payment.Id;
         existing.Amount = amount;
@@ -221,4 +258,11 @@ public static class ClientBalanceService
 
     private static decimal NormalizeAmount(decimal value)
         => Math.Round(value, 2, MidpointRounding.AwayFromZero);
+
+    private static bool HasValidCounterpartyOwner(Payment payment)
+        => HasSingleOwner(payment.ClientId, payment.LegalEntityId);
+
+    private static bool HasSingleOwner(int? clientId, int? legalEntityId)
+        => (clientId.HasValue && clientId.Value > 0 && !legalEntityId.HasValue)
+            || (legalEntityId.HasValue && legalEntityId.Value > 0 && !clientId.HasValue);
 }

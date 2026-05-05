@@ -53,6 +53,7 @@ public class ClientBalancesController : ControllerBase
             {
                 Id = item.Id,
                 ClientId = item.ClientId,
+                LegalEntityId = item.LegalEntityId,
                 InvoiceId = item.InvoiceId,
                 PaymentId = item.PaymentId,
                 Amount = item.Amount,

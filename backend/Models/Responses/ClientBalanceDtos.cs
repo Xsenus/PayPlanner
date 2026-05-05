@@ -12,7 +12,8 @@ public sealed class ClientBalanceSummaryDto
 public sealed class ClientBalanceTransactionDto
 {
     public int Id { get; set; }
-    public int ClientId { get; set; }
+    public int? ClientId { get; set; }
+    public int? LegalEntityId { get; set; }
     public int? InvoiceId { get; set; }
     public int? PaymentId { get; set; }
     public decimal Amount { get; set; }
