@@ -843,6 +843,7 @@ public class InvoicesController : ControllerBase
             ? clientCaseValidation.ClientCaseIds[0]
             : null;
 
+        int? preservedProtectedPaymentId = null;
         if (await ShouldForkProtectedRepresentativeInvoicePaymentAsync(
                 payment,
                 number,
@@ -854,6 +855,7 @@ public class InvoicesController : ControllerBase
                 resolvedClientCaseId,
                 ct))
         {
+            preservedProtectedPaymentId = payment.Id;
             payment = await ForkProtectedRepresentativeInvoicePaymentAsync(payment, ct);
         }
 
@@ -945,6 +947,7 @@ public class InvoicesController : ControllerBase
         await SyncInvoiceLineItemsAsync(payment, request.LineItems, ct);
         await SyncInvoiceClientCasesAsync(payment, clientCaseValidation.ClientCaseIds, ct);
         await SyncInvoiceActsAsync(payment, actValidation.ActIds, number, ct, previousInvoiceNumber);
+        await SyncLinkedPaymentBindingsAsync(payment, clientCaseValidation.ClientCaseIds, responsibleIds, preservedProtectedPaymentId, ct);
         var installmentSyncError = await SyncInstallmentPaymentsAsync(payment, request, responsibleIds, ct);
         if (installmentSyncError is not null)
         {
@@ -3514,6 +3517,58 @@ public class InvoicesController : ControllerBase
         return null;
     }
 
+    private async Task SyncLinkedPaymentBindingsAsync(
+        Payment invoicePayment,
+        IReadOnlyCollection<int> clientCaseIds,
+        IReadOnlyCollection<int> responsibleIds,
+        int? preservedProtectedPaymentId,
+        CancellationToken ct)
+    {
+        var invoiceEntityId = invoicePayment.InvoiceId ?? invoicePayment.Invoice?.Id;
+        if (!invoiceEntityId.HasValue || invoiceEntityId.Value <= 0)
+        {
+            return;
+        }
+
+        var linkedPayments = await _db.Payments
+            .Include(payment => payment.Responsibles)
+            .Where(payment =>
+                payment.InvoiceId == invoiceEntityId.Value
+                && payment.Id != invoicePayment.Id
+                && (!preservedProtectedPaymentId.HasValue || payment.Id != preservedProtectedPaymentId.Value)
+                && payment.DocumentKind != DocumentKind.Invoice
+                && (payment.SystemNotes == null
+                    || !payment.SystemNotes.Contains(InstallmentPaymentMarker)))
+            .ToListAsync(ct);
+
+        foreach (var linkedPayment in linkedPayments)
+        {
+            SyncPaymentBindingsFromInvoice(linkedPayment, invoicePayment);
+            await SyncInvoiceClientCasesAsync(linkedPayment, clientCaseIds, ct);
+            SyncPaymentResponsibles(linkedPayment, responsibleIds);
+            PaymentDomainService.Normalize(linkedPayment);
+        }
+    }
+
+    private static void SyncPaymentBindingsFromInvoice(Payment payment, Payment invoicePayment)
+    {
+        payment.Account = invoicePayment.Account;
+        payment.AccountDate = invoicePayment.AccountDate;
+        payment.Type = invoicePayment.Type;
+        payment.ClientId = invoicePayment.ClientId;
+        payment.LegalEntityId = invoicePayment.LegalEntityId;
+        payment.ExpenseClientId = invoicePayment.ExpenseClientId;
+        payment.ExpenseLegalEntityId = invoicePayment.ExpenseLegalEntityId;
+        payment.ContractId = invoicePayment.ContractId;
+        payment.ClientCaseId = invoicePayment.ClientCaseId;
+        payment.ClientCaseReference = invoicePayment.ClientCaseReference;
+        payment.PaymentSourceId = invoicePayment.PaymentSourceId;
+        payment.ServiceId = invoicePayment.ServiceId;
+        payment.IncomeTypeId = invoicePayment.IncomeTypeId;
+        payment.DealTypeId = invoicePayment.DealTypeId;
+        payment.PaymentStatusId = invoicePayment.PaymentStatusId;
+    }
+
     private void SyncGeneratedInstallmentBindings(
         Payment invoicePayment,
         IReadOnlyCollection<Payment> generatedInstallments,
@@ -3521,22 +3576,7 @@ public class InvoicesController : ControllerBase
     {
         foreach (var installment in generatedInstallments)
         {
-            installment.Account = invoicePayment.Account;
-            installment.AccountDate = invoicePayment.AccountDate;
-            installment.Type = invoicePayment.Type;
-            installment.ClientId = invoicePayment.ClientId;
-            installment.LegalEntityId = invoicePayment.LegalEntityId;
-            installment.ExpenseClientId = invoicePayment.ExpenseClientId;
-            installment.ExpenseLegalEntityId = invoicePayment.ExpenseLegalEntityId;
-            installment.ContractId = invoicePayment.ContractId;
-            installment.ClientCaseId = invoicePayment.ClientCaseId;
-            installment.ClientCaseReference = invoicePayment.ClientCaseReference;
-            installment.PaymentSourceId = invoicePayment.PaymentSourceId;
-            installment.ServiceId = invoicePayment.ServiceId;
-            installment.IncomeTypeId = invoicePayment.IncomeTypeId;
-            installment.DealTypeId = invoicePayment.DealTypeId;
-            installment.PaymentStatusId = invoicePayment.PaymentStatusId;
-
+            SyncPaymentBindingsFromInvoice(installment, invoicePayment);
             SyncPaymentResponsibles(installment, responsibleIds);
         }
     }

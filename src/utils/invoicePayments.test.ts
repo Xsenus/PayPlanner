@@ -157,6 +157,28 @@ describe('invoicePayments utilities', () => {
     expect(result.map((payment) => payment.id)).toEqual([548]);
   });
 
+  it('hides the representative invoice row when regular linked payments exist', () => {
+    const representativeInvoice = createPayment({
+      id: 547,
+      documentKind: 'Invoice',
+      invoiceId: 30,
+      amount: 135_000,
+    });
+    const linkedPayment = createPayment({
+      id: 548,
+      documentKind: 'Payment',
+      invoiceId: 30,
+      amount: 35_000,
+    });
+
+    const result = filterRepresentativeInvoiceWhenInstallmentsExist([
+      representativeInvoice,
+      linkedPayment,
+    ]);
+
+    expect(result.map((payment) => payment.id)).toEqual([548]);
+  });
+
   it('keeps the representative row when converted legacy installments exceed it', () => {
     const firstInstallment = createPayment({
       id: 548,

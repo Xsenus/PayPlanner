@@ -170,8 +170,8 @@ public class AccountsControllerTests
         var row = Assert.Single(payload.Items);
 
         Assert.Equal("24", row.AccountNumber);
-        Assert.Equal(2, row.Payments.Count);
-        Assert.Equal(new[] { 3_000m, 10_000m }, row.Payments.Select(payment => payment.Amount).OrderBy(value => value).ToArray());
+        var payment = Assert.Single(row.Payments);
+        Assert.Equal(3_000m, payment.Amount);
         Assert.Equal(new DateTime(2026, 4, 4), row.DueDate);
     }
 

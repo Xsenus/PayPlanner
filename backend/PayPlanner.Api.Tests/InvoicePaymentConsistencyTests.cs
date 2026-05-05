@@ -140,9 +140,8 @@ public class InvoicePaymentConsistencyTests
 
         Assert.Equal("25", registryRow.AccountNumber);
         Assert.Equal(aggregate.InvoicePaymentId, registryRow.Invoice?.Id);
-        Assert.Equal(
-            new[] { aggregate.InvoicePaymentId, aggregate.SiblingPaymentId },
-            registryRow.Payments.Select(payment => payment.Id).OrderBy(id => id).ToArray());
+        var registryPayment = Assert.Single(registryRow.Payments);
+        Assert.Equal(aggregate.SiblingPaymentId, registryPayment.Id);
 
         var paymentsResult = await paymentsController.Get(
             from: new DateTime(2026, 4, 1),
@@ -424,9 +423,8 @@ public class InvoicePaymentConsistencyTests
         Assert.Equal("26", registryRow.AccountNumber);
         Assert.Equal(aggregate.InvoicePaymentId, registryRow.Invoice?.Id);
         Assert.Equal(aggregate.InvoiceEntityId, registryRow.Invoice?.InvoiceEntityId);
-        Assert.Equal(
-            new[] { aggregate.InvoicePaymentId, aggregate.SiblingPaymentId },
-            registryRow.Payments.Select(payment => payment.Id).OrderBy(id => id).ToArray());
+        var registryPayment = Assert.Single(registryRow.Payments);
+        Assert.Equal(aggregate.SiblingPaymentId, registryPayment.Id);
 
         var paymentsResult = await paymentsController.Get(
             from: new DateTime(2026, 4, 1),
@@ -542,9 +540,8 @@ public class InvoicePaymentConsistencyTests
         Assert.Equal("24", registryRow.AccountNumber);
         Assert.Equal(aggregate.InvoicePaymentId, registryRow.Invoice?.Id);
         Assert.Equal(aggregate.InvoiceEntityId, registryRow.Invoice?.InvoiceEntityId);
-        Assert.Equal(
-            new[] { aggregate.InvoicePaymentId, createdPayment.Id },
-            registryRow.Payments.Select(payment => payment.Id).OrderBy(id => id).ToArray());
+        var registryPayment = Assert.Single(registryRow.Payments);
+        Assert.Equal(createdPayment.Id, registryPayment.Id);
 
         var paymentsResult = await paymentsController.Get(
             from: new DateTime(2026, 4, 1),

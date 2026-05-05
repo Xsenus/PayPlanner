@@ -1148,6 +1148,120 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Update_ToLegalEntity_PropagatesToRegularLinkedPayments()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var originalClientId = await CreateClientAsync(db, "Original Client");
+        var legalEntityId = await CreateLegalEntityAsync(db, "Lada Lux");
+        var responsibleId1 = await CreateUserAsync(db, "Original Responsible");
+        var responsibleId2 = await CreateUserAsync(db, "Updated Responsible");
+        var paymentSourceId = await CreatePaymentSourceAsync(db, "Bank");
+        var serviceId = await CreateServiceAsync(db, "Legal Service");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createRequest = CreateRequest("INV-LINKED-OWNER", originalClientId, new DateTime(2026, 4, 10), 50_000m);
+        createRequest.ResponsibleIds = [responsibleId1];
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var createdParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        var firstLinkedPayment = new Payment
+        {
+            InvoiceId = createdParent.InvoiceId,
+            Account = createdParent.Account,
+            AccountDate = createdParent.AccountDate,
+            Date = new DateTime(2026, 5, 10),
+            PlannedDate = new DateTime(2026, 5, 10),
+            Amount = 35_000m,
+            PaidAmount = 0m,
+            Status = PaymentStatus.Overdue,
+            Type = PaymentType.Income,
+            ClientId = originalClientId,
+            Description = "First linked payment",
+            DocumentKind = DocumentKind.Payment,
+            CreatedAt = DateTime.UtcNow,
+        };
+        firstLinkedPayment.Responsibles.Add(new PaymentResponsible { UserId = responsibleId1 });
+
+        var secondLinkedPayment = new Payment
+        {
+            InvoiceId = createdParent.InvoiceId,
+            Account = createdParent.Account,
+            AccountDate = createdParent.AccountDate,
+            Date = new DateTime(2026, 6, 10),
+            PlannedDate = new DateTime(2026, 6, 10),
+            Amount = 50_000m,
+            PaidAmount = 50_000m,
+            PaidDate = new DateTime(2026, 5, 15),
+            LastPaymentDate = new DateTime(2026, 5, 15),
+            IsPaid = true,
+            Status = PaymentStatus.Completed,
+            Type = PaymentType.Income,
+            ClientId = originalClientId,
+            Description = "Second linked payment",
+            DocumentKind = DocumentKind.Payment,
+            CreatedAt = DateTime.UtcNow,
+        };
+        secondLinkedPayment.Responsibles.Add(new PaymentResponsible { UserId = responsibleId1 });
+
+        db.Payments.AddRange(firstLinkedPayment, secondLinkedPayment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var updateRequest = CreateLegalEntityRequest("INV-LINKED-OWNER", legalEntityId, new DateTime(2026, 4, 10), 135_000m);
+        updateRequest.ResponsibleIds = [responsibleId2];
+        updateRequest.PaymentSourceId = paymentSourceId;
+        updateRequest.ServiceId = serviceId;
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        _ = Assert.IsType<InvoiceDto>(ok.Value);
+
+        db.ChangeTracker.Clear();
+        var updatedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Null(updatedParent.ClientId);
+        Assert.Equal(legalEntityId, updatedParent.LegalEntityId);
+        Assert.Equal(135_000m, updatedParent.Amount);
+
+        var linkedPayments = await db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.InvoiceId == updatedParent.InvoiceId && payment.DocumentKind == DocumentKind.Payment)
+            .ToListAsync();
+        linkedPayments = linkedPayments.OrderBy(payment => payment.Amount).ToList();
+        Assert.Equal(2, linkedPayments.Count);
+        Assert.Equal(new[] { 35_000m, 50_000m }, linkedPayments.Select(payment => payment.Amount).ToArray());
+        Assert.Equal(0m, linkedPayments[0].PaidAmount);
+        Assert.Equal(50_000m, linkedPayments[1].PaidAmount);
+        Assert.True(linkedPayments[1].IsPaid);
+        Assert.Equal(PaymentStatus.Completed, linkedPayments[1].Status);
+        Assert.Equal(new DateTime(2026, 5, 15), linkedPayments[1].PaidDate);
+        Assert.Equal(new DateTime(2026, 5, 15), linkedPayments[1].LastPaymentDate);
+        Assert.All(linkedPayments, payment =>
+        {
+            Assert.Null(payment.ClientId);
+            Assert.Equal(legalEntityId, payment.LegalEntityId);
+            Assert.Equal("INV-LINKED-OWNER", payment.Account);
+            Assert.Equal(new DateTime(2026, 4, 10), payment.AccountDate);
+            Assert.Equal(paymentSourceId, payment.PaymentSourceId);
+            Assert.Equal(serviceId, payment.ServiceId);
+        });
+
+        var linkedResponsibleIds = await db.Set<PaymentResponsible>()
+            .AsNoTracking()
+            .Where(item => linkedPayments.Select(payment => payment.Id).Contains(item.PaymentId))
+            .Select(item => item.UserId)
+            .Distinct()
+            .ToListAsync();
+        Assert.Equal(new[] { responsibleId2 }, linkedResponsibleIds);
+    }
+
+    [Fact]
     public async Task Update_ForksProtectedRepresentativePayment_WhenInvoiceWouldOverwriteLegacyAdvance()
     {
         await using var db = await CreateContextAsync();

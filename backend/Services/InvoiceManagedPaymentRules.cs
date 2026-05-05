@@ -58,7 +58,8 @@ public static class InvoiceManagedPaymentRules
             return false;
         }
 
-        return snapshot.Any(IsGeneratedInstallmentPayment)
+        return snapshot.Any(payment => payment.DocumentKind != DocumentKind.Invoice)
+            || snapshot.Any(IsGeneratedInstallmentPayment)
             || IsLegacyBrokenInstallmentAggregate(snapshot);
     }
 

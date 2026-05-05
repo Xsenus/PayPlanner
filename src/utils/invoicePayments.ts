@@ -239,7 +239,10 @@ export function filterRepresentativeInvoiceWhenInstallmentsExist(payments: Payme
     return payments;
   }
 
-  if (!payments.some(isGeneratedInstallmentPayment) && !isLegacyBrokenInstallmentAggregate(payments)) {
+  const hasLinkedPaymentRows = payments.some(
+    (payment) => payment.id !== representativeInvoice.id && payment.documentKind !== 'Invoice',
+  );
+  if (!hasLinkedPaymentRows && !payments.some(isGeneratedInstallmentPayment) && !isLegacyBrokenInstallmentAggregate(payments)) {
     return payments;
   }
 
