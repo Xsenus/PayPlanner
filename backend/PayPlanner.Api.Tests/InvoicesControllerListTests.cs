@@ -187,6 +187,94 @@ public class InvoicesControllerListTests
         Assert.Collection(expenseClientItems, item => Assert.Equal("EXP-CLIENT", item.Number));
     }
 
+    [Fact]
+    public async Task Get_FiltersInvoicesByLegalEntityAndRole()
+    {
+        await using var db = await CreateContextAsync();
+        var target = await CreateLegalEntityAsync(db, "ООО Цель");
+        var supplier = await CreateLegalEntityAsync(db, "ООО Поставщик");
+
+        var incomeInvoice = await CreateInvoiceDocumentAsync(db, "LE-INCOME", new DateTime(2026, 4, 13), 10_000m);
+        incomeInvoice.LegalEntityId = target.Id;
+
+        var expenseInvoice = await CreateInvoiceDocumentAsync(db, "LE-EXPENSE", new DateTime(2026, 4, 14), 11_000m);
+        expenseInvoice.Type = PaymentType.Expense;
+        expenseInvoice.LegalEntityId = supplier.Id;
+        expenseInvoice.ExpenseLegalEntityId = target.Id;
+
+        var outsideInvoice = await CreateInvoiceDocumentAsync(db, "LE-OUTSIDE", new DateTime(2026, 4, 15), 12_000m);
+        outsideInvoice.LegalEntityId = supplier.Id;
+
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var allRolesResult = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: "number",
+            sortDir: "asc",
+            legalEntityId: target.Id,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var allRoleItems = ExtractInvoiceItems(Assert.IsType<OkObjectResult>(allRolesResult));
+        Assert.Equal(new[] { "LE-EXPENSE", "LE-INCOME" }, allRoleItems.Select(item => item.Number).ToArray());
+        Assert.DoesNotContain(allRoleItems, item => item.Id == outsideInvoice.Id);
+
+        var counterpartyResult = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: "number",
+            sortDir: "asc",
+            clientRole: "counterparty",
+            legalEntityId: target.Id,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var counterpartyItems = ExtractInvoiceItems(Assert.IsType<OkObjectResult>(counterpartyResult));
+        Assert.Collection(counterpartyItems, item => Assert.Equal("LE-INCOME", item.Number));
+
+        var expenseClientResult = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: "number",
+            sortDir: "asc",
+            clientRole: "expenseClient",
+            legalEntityId: target.Id,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var expenseClientItems = ExtractInvoiceItems(Assert.IsType<OkObjectResult>(expenseClientResult));
+        Assert.Collection(expenseClientItems, item => Assert.Equal("LE-EXPENSE", item.Number));
+    }
+
     private static List<InvoiceDto> ExtractInvoiceItems(OkObjectResult ok)
     {
         var itemsProperty = ok.Value?.GetType().GetProperty("items");
@@ -286,6 +374,20 @@ public class InvoicesControllerListTests
         db.Clients.Add(client);
         await db.SaveChangesAsync();
         return client;
+    }
+
+    private static async Task<LegalEntity> CreateLegalEntityAsync(PaymentContext db, string shortName)
+    {
+        var legalEntity = new LegalEntity
+        {
+            ShortName = shortName,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.LegalEntities.Add(legalEntity);
+        await db.SaveChangesAsync();
+        return legalEntity;
     }
 
     private static async Task<int> CreateLegacyInvoiceAggregateWithoutInvoiceDocumentAsync(PaymentContext db)

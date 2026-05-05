@@ -70,6 +70,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] string? clientRole = null,
+        [FromQuery] int? legalEntityId = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default,
@@ -95,6 +96,7 @@ public class InvoicesController : ControllerBase
                 from,
                 to,
                 clientId,
+                legalEntityId,
                 ParseIntList(clientIds),
                 contractId,
                 caseId,
@@ -133,6 +135,7 @@ public class InvoicesController : ControllerBase
             to,
             null,
             clientId,
+            legalEntityId,
             contractId,
             caseId,
             effectiveResponsibleId,
@@ -178,6 +181,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] string? search,
         [FromQuery] PaymentType? type,
         [FromQuery] string? clientRole = null,
+        [FromQuery] int? legalEntityId = null,
         CancellationToken ct = default,
         [FromQuery] string? workflowStatus = null)
     {
@@ -198,6 +202,7 @@ public class InvoicesController : ControllerBase
             from,
             to,
             clientId,
+            legalEntityId,
             clientIds: null,
             contractId: null,
             caseId,
@@ -2150,6 +2155,7 @@ public class InvoicesController : ControllerBase
         DateTime? to,
         PaymentStatus? status,
         int? clientId,
+        int? legalEntityId,
         int? contractId,
         int? caseId,
         int? responsibleId,
@@ -2200,6 +2206,19 @@ public class InvoicesController : ControllerBase
                 _ => query.Where(x =>
                     (x.Payment.ClientId.HasValue && clientIds.Contains(x.Payment.ClientId.Value))
                     || (x.Payment.ExpenseClientId.HasValue && clientIds.Contains(x.Payment.ExpenseClientId.Value))),
+            };
+        }
+
+        if (legalEntityId.HasValue)
+        {
+            var normalizedClientRole = NormalizeClientRole(clientRole);
+            query = normalizedClientRole switch
+            {
+                "counterparty" => query.Where(x => x.Payment.LegalEntityId == legalEntityId.Value),
+                "expenseClient" => query.Where(x => x.Payment.ExpenseLegalEntityId == legalEntityId.Value),
+                _ => query.Where(x =>
+                    x.Payment.LegalEntityId == legalEntityId.Value
+                    || x.Payment.ExpenseLegalEntityId == legalEntityId.Value),
             };
         }
 
@@ -3085,6 +3104,7 @@ public class InvoicesController : ControllerBase
         DateTime? from,
         DateTime? to,
         int? clientId,
+        int? legalEntityId,
         IReadOnlySet<int>? clientIds,
         int? contractId,
         int? caseId,
@@ -3097,7 +3117,7 @@ public class InvoicesController : ControllerBase
         CancellationToken ct)
     {
         var query = BuildInvoiceQuery();
-        query = ApplyFilters(query, from, to, null, clientId, contractId, caseId, responsibleId, search, type, clientRole, clientIds);
+        query = ApplyFilters(query, from, to, null, clientId, legalEntityId, contractId, caseId, responsibleId, search, type, clientRole, clientIds);
         if (!string.IsNullOrWhiteSpace(workflowStatus))
         {
             query = query.Where(x => x.Payment.InvoiceWorkflowStatus == workflowStatus);

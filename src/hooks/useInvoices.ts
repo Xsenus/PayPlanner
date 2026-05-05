@@ -20,6 +20,8 @@ export interface InvoicesFilters {
   status?: PaymentStatus;
   workflowStatus?: InvoiceWorkflowStatus;
   clientId?: number;
+  legalEntityId?: number;
+  caseId?: number;
   clientRole?: InvoiceClientRole;
   responsibleId?: number;
   search?: string;
@@ -57,6 +59,8 @@ function makeSummaryKey(filters: InvoicesFilters): string {
     to: filters.to ?? null,
     status: filters.status ?? null,
     clientId: filters.clientId ?? null,
+    legalEntityId: filters.legalEntityId ?? null,
+    caseId: filters.caseId ?? null,
     clientRole: filters.clientRole ?? null,
     responsibleId: filters.responsibleId ?? null,
     search: filters.search ?? null,
@@ -108,6 +112,8 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           to: filters.to,
           status: filters.status,
           clientId: filters.clientId,
+          legalEntityId: filters.legalEntityId,
+          caseId: filters.caseId,
           clientRole: filters.clientRole,
           responsibleId: filters.responsibleId,
           search: filters.search,
@@ -144,6 +150,8 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.to,
       filters.status,
       filters.clientId,
+      filters.legalEntityId,
+      filters.caseId,
       filters.clientRole,
       filters.responsibleId,
       filters.search,
@@ -174,6 +182,8 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           to: filters.to,
           status: filters.status,
           clientId: filters.clientId,
+          legalEntityId: filters.legalEntityId,
+          caseId: filters.caseId,
           clientRole: filters.clientRole,
           responsibleId: filters.responsibleId,
           search: filters.search,
@@ -196,6 +206,8 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.to,
       filters.status,
       filters.clientId,
+      filters.legalEntityId,
+      filters.caseId,
       filters.clientRole,
       filters.responsibleId,
       filters.search,

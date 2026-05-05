@@ -64,7 +64,8 @@ public class ActsController : ControllerBase
         CancellationToken ct = default,
         [FromQuery] bool includeLineItems = false,
         [FromQuery] string? workflowStatus = null,
-        [FromQuery] int? legalEntityId = null)
+        [FromQuery] int? legalEntityId = null,
+        [FromQuery] int? caseId = null)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
@@ -82,6 +83,16 @@ public class ActsController : ControllerBase
         if (legalEntityId.HasValue)
         {
             query = query.Where(act => act.LegalEntityId == legalEntityId.Value);
+        }
+
+        if (caseId.HasValue)
+        {
+            query = query.Where(act =>
+                act.InvoiceId.HasValue
+                && _db.Payments.Any(invoice =>
+                    invoice.Id == act.InvoiceId.Value
+                    && (invoice.ClientCaseId == caseId.Value
+                        || invoice.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value))));
         }
 
         if (normalizedWorkflowStatus is not null)
@@ -259,7 +270,8 @@ public class ActsController : ControllerBase
         [FromQuery] string? search,
         CancellationToken ct = default,
         [FromQuery] string? workflowStatus = null,
-        [FromQuery] int? legalEntityId = null)
+        [FromQuery] int? legalEntityId = null,
+        [FromQuery] int? caseId = null)
     {
         var normalizedWorkflowStatus = NormalizeActWorkflowStatusOrNull(workflowStatus);
         if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
@@ -273,6 +285,16 @@ public class ActsController : ControllerBase
         if (legalEntityId.HasValue)
         {
             query = query.Where(act => act.LegalEntityId == legalEntityId.Value);
+        }
+
+        if (caseId.HasValue)
+        {
+            query = query.Where(act =>
+                act.InvoiceId.HasValue
+                && _db.Payments.Any(invoice =>
+                    invoice.Id == act.InvoiceId.Value
+                    && (invoice.ClientCaseId == caseId.Value
+                        || invoice.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value))));
         }
 
         if (normalizedWorkflowStatus is not null)

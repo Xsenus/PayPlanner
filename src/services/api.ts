@@ -758,6 +758,8 @@ export class ApiService {
     workflowStatus?: ActWorkflowStatus;
     type?: PaymentKind;
     clientId?: number;
+    legalEntityId?: number;
+    caseId?: number;
     contractId?: number;
     clientIds?: string;
     responsibleId?: number;
@@ -783,6 +785,8 @@ export class ApiService {
     workflowStatus?: ActWorkflowStatus;
     type?: PaymentKind;
     clientId?: number;
+    legalEntityId?: number;
+    caseId?: number;
     responsibleId?: number;
     search?: string;
   }) {
@@ -1213,6 +1217,7 @@ export class ApiService {
     workflowStatus?: InvoiceWorkflowStatus;
     clientId?: number;
     clientRole?: InvoiceClientRole;
+    legalEntityId?: number;
     caseId?: number;
     responsibleId?: number;
     search?: string;

@@ -22,6 +22,8 @@ export interface ActsFilters {
   workflowStatus?: ActWorkflowStatus;
   type?: PaymentKind;
   clientId?: number;
+  legalEntityId?: number;
+  caseId?: number;
   responsibleId?: number;
   search?: string;
   sortBy?: ActsSortKey;
@@ -58,6 +60,8 @@ function makeSummaryKey(filters: ActsFilters): string {
     status: filters.status ?? null,
     type: filters.type ?? null,
     clientId: filters.clientId ?? null,
+    legalEntityId: filters.legalEntityId ?? null,
+    caseId: filters.caseId ?? null,
     responsibleId: filters.responsibleId ?? null,
     search: filters.search ?? null,
   });
@@ -108,6 +112,8 @@ export function useActs(filters: ActsFilters): UseActsResult {
           status: filters.status,
           type: filters.type,
           clientId: filters.clientId,
+          legalEntityId: filters.legalEntityId,
+          caseId: filters.caseId,
           responsibleId: filters.responsibleId,
           search: filters.search,
           sortBy: filters.sortBy,
@@ -137,7 +143,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.responsibleId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
+    [enabled, filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.legalEntityId, filters.caseId, filters.responsibleId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
   );
 
   const fetchSummary = useCallback(
@@ -159,6 +165,8 @@ export function useActs(filters: ActsFilters): UseActsResult {
           status: filters.status,
           type: filters.type,
           clientId: filters.clientId,
+          legalEntityId: filters.legalEntityId,
+          caseId: filters.caseId,
           responsibleId: filters.responsibleId,
           search: filters.search,
         });
@@ -174,7 +182,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.responsibleId, filters.search],
+    [enabled, filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.legalEntityId, filters.caseId, filters.responsibleId, filters.search],
   );
 
   useEffect(() => {

@@ -59,7 +59,13 @@ vi.mock('../../hooks/useFormRequirements', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getActResponsibles: vi.fn().mockResolvedValue([]),
+    getActs: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
+    getActsSummary: vi.fn().mockResolvedValue(null),
+    getCasesV1: vi.fn().mockResolvedValue([]),
     getClientsV2: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    getInvoices: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
+    getInvoicesSummary: vi.fn().mockResolvedValue(null),
+    getLegalEntities: vi.fn().mockResolvedValue([]),
     suggestClientAddresses: vi.fn().mockResolvedValue([]),
     cleanAddress: vi.fn().mockResolvedValue({ result: '' }),
   },

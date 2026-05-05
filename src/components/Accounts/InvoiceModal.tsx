@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Ban, Building2, Check, ChevronDown, Copy, Download, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
+import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
   ActInput,
@@ -225,7 +225,10 @@ interface InvoiceModalProps {
   lookupsLoading: boolean;
   lookupsError?: string | null;
   defaultClientId?: number;
+  defaultLegalEntityId?: number;
   defaultExpenseClientId?: number;
+  defaultExpenseLegalEntityId?: number;
+  defaultClientCaseId?: number;
   defaultResponsibleId?: number;
   defaultType?: PaymentKind;
   lockType?: boolean;
@@ -246,9 +249,11 @@ interface InvoiceModalProps {
 function normalizeInvoiceToForm(
   invoice: Invoice | null,
   defaultClientId?: number,
+  defaultLegalEntityId?: number,
   defaultResponsibleId?: number,
   defaultType?: PaymentKind,
   defaultExpenseClientId?: number,
+  defaultExpenseLegalEntityId?: number,
 ): FormState {
   const today = formatLocalYMD(new Date());
   const resolvedType: PaymentKind = defaultType ?? 'Income';
@@ -261,10 +266,10 @@ function normalizeInvoiceToForm(
       type: resolvedType,
       status: 'Pending',
       workflowStatus: 'Draft',
-      clientId: defaultClientId ? String(defaultClientId) : '',
-      legalEntityId: '',
+      clientId: defaultLegalEntityId ? '' : defaultClientId ? String(defaultClientId) : '',
+      legalEntityId: defaultLegalEntityId ? String(defaultLegalEntityId) : '',
       expenseClientId: resolvedType === 'Expense' && defaultExpenseClientId ? String(defaultExpenseClientId) : '',
-      expenseLegalEntityId: '',
+      expenseLegalEntityId: resolvedType === 'Expense' && defaultExpenseLegalEntityId ? String(defaultExpenseLegalEntityId) : '',
       contractId: '',
       clientCaseReference: '',
       description: '',
@@ -283,14 +288,16 @@ function normalizeInvoiceToForm(
     type: invoice.type ?? resolvedType,
     status: invoice.status ?? 'Pending',
     workflowStatus: invoice.workflowStatus ?? 'Draft',
-    clientId: invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
-    legalEntityId: invoice.legalEntityId ? String(invoice.legalEntityId) : '',
+    clientId: invoice.legalEntityId || defaultLegalEntityId ? '' : invoice.clientId ? String(invoice.clientId) : defaultClientId ? String(defaultClientId) : '',
+    legalEntityId: invoice.legalEntityId ? String(invoice.legalEntityId) : defaultLegalEntityId ? String(defaultLegalEntityId) : '',
     expenseClientId: invoice.expenseClientId
       ? String(invoice.expenseClientId)
-      : (invoice.type ?? resolvedType) === 'Expense' && defaultExpenseClientId
-        ? String(defaultExpenseClientId)
-        : '',
-    expenseLegalEntityId: invoice.expenseLegalEntityId ? String(invoice.expenseLegalEntityId) : '',
+      : invoice.expenseLegalEntityId || defaultExpenseLegalEntityId
+        ? ''
+        : (invoice.type ?? resolvedType) === 'Expense' && defaultExpenseClientId
+          ? String(defaultExpenseClientId)
+          : '',
+    expenseLegalEntityId: invoice.expenseLegalEntityId ? String(invoice.expenseLegalEntityId) : (invoice.type ?? resolvedType) === 'Expense' && defaultExpenseLegalEntityId ? String(defaultExpenseLegalEntityId) : '',
     contractId: invoice.contractId ? String(invoice.contractId) : '',
     clientCaseReference: invoice.clientCaseReference ?? '',
     description: invoice.description ?? '',
@@ -301,12 +308,14 @@ function normalizeInvoiceToForm(
   };
 }
 
-function normalizeInvoiceClientCaseIds(invoice: Invoice | null): number[] {
+function normalizeInvoiceClientCaseIds(invoice: Invoice | null, defaultClientCaseId?: number): number[] {
   const rawIds = invoice?.clientCaseIds?.length
     ? invoice.clientCaseIds
     : invoice?.clientCaseId
       ? [invoice.clientCaseId]
-      : [];
+      : defaultClientCaseId
+        ? [defaultClientCaseId]
+        : [];
 
   return Array.from(new Set(rawIds.filter((value): value is number => typeof value === 'number' && value > 0)));
 }
@@ -767,14 +776,14 @@ export function InvoiceModal({
   errorMessage,
   clients,
   legalEntities = [],
-  legalEntitiesLoading = false,
-  legalEntitiesError,
-  onClientCreated,
   responsibles = [],
   lookupsLoading,
   lookupsError,
   defaultClientId,
+  defaultLegalEntityId,
   defaultExpenseClientId,
+  defaultExpenseLegalEntityId,
+  defaultClientCaseId,
   defaultResponsibleId,
   defaultType,
   lockType = false,
@@ -798,7 +807,7 @@ export function InvoiceModal({
   };
   const isTypeLocked = lockType && mode === 'create';
   const [form, setForm] = useState<FormState>(() =>
-    normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType, defaultExpenseClientId),
+    normalizeInvoiceToForm(invoice, defaultClientId, defaultLegalEntityId, defaultResponsibleId, defaultType, defaultExpenseClientId, defaultExpenseLegalEntityId),
   );
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [lineItemLookupState, setLineItemLookupState] = useState<LineItemLookupState>(null);
@@ -809,7 +818,7 @@ export function InvoiceModal({
   const [selectedActs, setSelectedActs] = useState<ActOption[]>(() => normalizeInvoiceActs(invoice));
   const [actOptions, setActOptions] = useState<ActOption[]>(() => normalizeInvoiceActs(invoice));
   const [clientCaseOptions, setClientCaseOptions] = useState<ClientCaseOption[]>(() => normalizeInvoiceClientCases(invoice));
-  const [selectedClientCaseIds, setSelectedClientCaseIds] = useState<number[]>(() => normalizeInvoiceClientCaseIds(invoice));
+  const [selectedClientCaseIds, setSelectedClientCaseIds] = useState<number[]>(() => normalizeInvoiceClientCaseIds(invoice, defaultClientCaseId));
   const [caseDropdownOpen, setCaseDropdownOpen] = useState(false);
   const [createCaseOpen, setCreateCaseOpen] = useState(false);
   const [createActOpen, setCreateActOpen] = useState(false);
@@ -1213,27 +1222,6 @@ export function InvoiceModal({
     () => legalEntities.find((entity) => String(entity.id) === form.expenseLegalEntityId) ?? null,
     [legalEntities, form.expenseLegalEntityId],
   );
-  const clientsById = useMemo(() => {
-    const map = new Map<number, Client>();
-    for (const client of clients) {
-      map.set(client.id, client);
-    }
-    return map;
-  }, [clients]);
-  const clientsByLegalEntityId = useMemo(() => {
-    const map = new Map<number, Client[]>();
-    for (const client of clients) {
-      if (!client.legalEntityId) continue;
-      const bucket = map.get(client.legalEntityId);
-      if (bucket) {
-        bucket.push(client);
-      } else {
-        map.set(client.legalEntityId, [client]);
-      }
-    }
-
-    return map;
-  }, [clients]);
   const caseOwnerClientId = resolveCaseOwnerClientId(form.type, form.clientId, form.expenseClientId);
   const caseOwnerLegalEntityId = form.type === 'Expense'
     ? (form.expenseLegalEntityId || form.legalEntityId)
@@ -1419,7 +1407,7 @@ export function InvoiceModal({
   useEffect(() => {
     let cancelled = false;
 
-    async function loadContractsByClient() {
+    async function loadContractsByOwner() {
       if (!open || (!form.clientId && !form.legalEntityId)) {
         setContractOptions([]);
         setContractsError(null);
@@ -1428,7 +1416,10 @@ export function InvoiceModal({
       }
 
       const clientId = Number.parseInt(form.clientId, 10);
-      if (!Number.isFinite(clientId) || clientId <= 0) {
+      const legalEntityId = Number.parseInt(form.legalEntityId, 10);
+      const hasClientId = Number.isFinite(clientId) && clientId > 0;
+      const hasLegalEntityId = Number.isFinite(legalEntityId) && legalEntityId > 0;
+      if (!hasClientId && !hasLegalEntityId) {
         setContractOptions([]);
         setContractsError(null);
         setContractsLoadedClientId('');
@@ -1436,13 +1427,14 @@ export function InvoiceModal({
       }
 
       const requestRevision = contractOptionsRevisionRef.current;
-      const requestClientId = String(clientId);
+      const requestOwnerKey = hasClientId ? `client:${clientId}` : `legal:${legalEntityId}`;
       setContractsLoading(true);
       setContractsError(null);
       setContractsLoadedClientId('');
       try {
         const response = await apiService.getContracts({
-          clientId,
+          clientId: hasClientId ? clientId : undefined,
+          legalEntityId: !hasClientId && hasLegalEntityId ? legalEntityId : undefined,
           page: 1,
           pageSize: 200,
           sortBy: 'createdAt',
@@ -1450,12 +1442,12 @@ export function InvoiceModal({
         });
         if (!cancelled && requestRevision === contractOptionsRevisionRef.current) {
           setContractOptions(sortContractsByRecency(response.items ?? []));
-          setContractsLoadedClientId(requestClientId);
+          setContractsLoadedClientId(requestOwnerKey);
         }
       } catch (error) {
         if (!cancelled && requestRevision === contractOptionsRevisionRef.current) {
           setContractOptions([]);
-          setContractsLoadedClientId(requestClientId);
+          setContractsLoadedClientId(requestOwnerKey);
           setContractsError(error instanceof Error ? error.message : 'Не удалось загрузить договоры');
         }
       } finally {
@@ -1463,11 +1455,11 @@ export function InvoiceModal({
       }
     }
 
-    void loadContractsByClient();
+    void loadContractsByOwner();
     return () => {
       cancelled = true;
     };
-  }, [open, form.clientId]);
+  }, [open, form.clientId, form.legalEntityId]);
 
   useEffect(() => {
     if (!open || mode !== 'create' || !form.clientId || form.contractId || contractOptions.length === 0) {
@@ -1497,10 +1489,11 @@ export function InvoiceModal({
       setForm((prev) => ({ ...prev, contractId: '' }));
       return;
     }
-    if (contractsLoading || contractsLoadedClientId !== form.clientId) return;
+    const ownerKey = form.clientId ? `client:${form.clientId}` : `legal:${form.legalEntityId}`;
+    if (contractsLoading || contractsLoadedClientId !== ownerKey) return;
     if (contractOptions.some((contract) => String(contract.id) === form.contractId)) return;
     setForm((prev) => ({ ...prev, contractId: '' }));
-  }, [contractOptions, contractsLoadedClientId, contractsLoading, form.clientId, form.contractId, open]);
+  }, [contractOptions, contractsLoadedClientId, contractsLoading, form.clientId, form.contractId, form.legalEntityId, open]);
 
   const handleCreateContractFromInvoice = useCallback(async (payload: ContractInput) => {
     setCreateContractSubmitting(true);
@@ -1574,13 +1567,13 @@ export function InvoiceModal({
 
   useEffect(() => {
     if (open) {
-      const nextForm = resumeDraft?.form ?? normalizeInvoiceToForm(invoice, defaultClientId, defaultResponsibleId, defaultType, defaultExpenseClientId);
+      const nextForm = resumeDraft?.form ?? normalizeInvoiceToForm(invoice, defaultClientId, defaultLegalEntityId, defaultResponsibleId, defaultType, defaultExpenseClientId, defaultExpenseLegalEntityId);
       setForm(nextForm);
       setLineItems(resumeDraft?.lineItems ?? normalizeLineItems(invoice?.lineItems, invoice?.amount));
       setSelectedActs(resumeDraft?.selectedActs ?? normalizeInvoiceActs(invoice));
       setActOptions(normalizeInvoiceActs(invoice));
       setClientCaseOptions(normalizeInvoiceClientCases(invoice));
-      setSelectedClientCaseIds(resumeDraft?.selectedClientCaseIds ?? normalizeInvoiceClientCaseIds(invoice));
+      setSelectedClientCaseIds(resumeDraft?.selectedClientCaseIds ?? normalizeInvoiceClientCaseIds(invoice, defaultClientCaseId));
       setCaseDropdownOpen(false);
       setCreateCaseOpen(false);
       setActDropdownOpen(false);
@@ -1597,7 +1590,7 @@ export function InvoiceModal({
       }
       lastAutoContractClientIdRef.current = nextForm.contractId ? nextForm.clientId : '';
     }
-  }, [defaultClientId, defaultExpenseClientId, defaultResponsibleId, defaultType, invoice, open, presentation, relatedInstallmentPlan, resumeDraft]);
+  }, [defaultClientId, defaultLegalEntityId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultClientCaseId, defaultResponsibleId, defaultType, invoice, open, presentation, relatedInstallmentPlan, resumeDraft]);
 
   useEffect(() => {
     if (!open || resumeDraft?.installmentPlan || installmentPlanTouched) {

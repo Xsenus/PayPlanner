@@ -3,7 +3,10 @@ import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   CheckCircle2,
+  FileCheck2,
+  FileText,
   Loader2,
+  Pencil,
   Search,
   Plus,
   Trash2,
@@ -12,7 +15,13 @@ import {
 import { useTranslation } from "../../hooks/useTranslation";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import type {
+  Act,
+  ActInput,
+  ActResponsible,
   Client,
+  ClientCase,
+  Invoice,
+  InvoiceInput,
   LegalEntityBankAccount,
   LegalEntityCard,
   LegalEntityCashRegister,
@@ -21,7 +30,6 @@ import type {
   LegalEntitySuggestion,
   LegalEntityDadataDetails,
   DadataAddressSuggestion,
-  ActResponsible,
 } from "../../types";
 import { ClientStatusBadge } from "../Clients/ClientStatusBadge";
 import {
@@ -34,10 +42,19 @@ import {
 } from "../Clients/addressEntryPersistence";
 import { chooseBestDisplayAddress } from "../Clients/addressEntryUtils";
 import { apiService } from "../../services/api";
+import { useActs } from "../../hooks/useActs";
+import { useClients } from "../../hooks/useClients";
+import { useClientCases } from "../../hooks/useClientCases";
 import { useDialog } from "../../hooks/useDialog";
 import { useDictionaries } from "../../hooks/useDictionaries";
 import { useFormRequirements } from "../../hooks/useFormRequirements";
+import { useInvoices } from "../../hooks/useInvoices";
+import { useLegalEntities } from "../../hooks/useLegalEntities";
 import { useToast } from "../../hooks/useToast";
+import { formatCurrencySmart } from "../../utils/formatters";
+import { ActModal } from "../Acts/ActModal";
+import { InvoiceModal } from "../Accounts/InvoiceModal";
+import { CaseModal } from "../Clients/CaseModal";
 import DictionariesModal from "../Dictionaries/DictionariesModal";
 import { TablePagination } from "../ui/TablePagination";
 import { ObjectAuditLauncher } from "../ui/ObjectAuditModal";
@@ -202,6 +219,10 @@ type LegalEntityDictTab =
   | "timezones"
   | "tax-systems"
   | "tax-system-modes";
+type LegalEntityCaseFilter = "all" | number;
+type LegalEntityCasePayload = Omit<ClientCase, "id" | "createdAt">;
+type LegalEntityInvoiceModalMode = "create" | "edit";
+type LegalEntityActModalMode = "create" | "edit";
 
 const BACKEND_IMAGE_DATA_URL_MAX_LENGTH = 350_000;
 const LEGAL_ENTITY_REQUEST_BODY_MAX_LENGTH = 900_000;
@@ -234,6 +255,62 @@ const ADDRESS_TYPE_OPTIONS = [
 ] as const;
 
 const CLIENT_PAGE_SIZE_OPTIONS = [10, 25, 50];
+
+const CASE_STATUS_META: Record<
+  string,
+  { label: string; className: string }
+> = {
+  Open: {
+    label: "Открыто",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  },
+  OnHold: {
+    label: "Приостановлено",
+    className: "border-amber-200 bg-amber-50 text-amber-700",
+  },
+  Closed: {
+    label: "Закрыто",
+    className: "border-slate-200 bg-slate-50 text-slate-600",
+  },
+};
+
+const INVOICE_STATUS_LABELS = {
+  Pending: "Ожидает",
+  Completed: "Оплачено",
+  Overdue: "Просрочено",
+  Cancelled: "Аннулировано",
+  Processing: "В обработке",
+} as const;
+
+const ACT_STATUS_LABELS = {
+  Created: "Создан",
+  Transferred: "Передан",
+  Signed: "Подписан",
+  Terminated: "Аннулирован",
+} as const;
+
+function formatDocumentDate(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("ru-RU");
+}
+
+function renderCaseStatusBadge(status?: string | null) {
+  const meta =
+    CASE_STATUS_META[status ?? ""] ?? {
+      label: status || "—",
+      className: "border-slate-200 bg-slate-50 text-slate-600",
+    };
+
+  return (
+    <span
+      className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${meta.className}`}
+    >
+      {meta.label}
+    </span>
+  );
+}
 
 function LegalEntityImageField({
   title,
@@ -771,9 +848,31 @@ export function LegalEntityModal({
   const [dictModalTab, setDictModalTab] =
     useState<LegalEntityDictTab>("countries");
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
+  const [selectedLegalEntityCaseId, setSelectedLegalEntityCaseId] =
+    useState<LegalEntityCaseFilter>("all");
+  const [caseModalOpen, setCaseModalOpen] = useState(false);
+  const [caseMode, setCaseMode] = useState<"create" | "edit">("create");
+  const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [invoiceModalMode, setInvoiceModalMode] =
+    useState<LegalEntityInvoiceModalMode>("create");
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [invoiceSubmitting, setInvoiceSubmitting] = useState(false);
+  const [invoiceModalError, setInvoiceModalError] = useState<string | null>(
+    null,
+  );
+  const [actModalOpen, setActModalOpen] = useState(false);
+  const [actModalMode, setActModalMode] =
+    useState<LegalEntityActModalMode>("create");
+  const [selectedAct, setSelectedAct] = useState<Act | null>(null);
+  const [actSubmitting, setActSubmitting] = useState(false);
+  const [actModalError, setActModalError] = useState<string | null>(null);
 
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === "page";
+  const currentLegalEntityId = initial?.id ?? null;
+  const selectedCaseId =
+    selectedLegalEntityCaseId === "all" ? undefined : selectedLegalEntityCaseId;
   const showLegacyImageFields = false;
   const shouldHidePageNavigation = isPageMode && hidePageNavigation;
   const shouldShowFormActions = !hideFormActions;
@@ -783,6 +882,60 @@ export function LegalEntityModal({
     (initial
       ? t("editLegalEntity") || "Редактирование юридического лица"
       : t("addLegalEntity") || "Добавление юридического лица");
+
+  const clientsLookupOptions = useMemo(
+    () =>
+      ({
+        mode: "paged" as const,
+        page: 1,
+        pageSize: 200,
+        isActive: true,
+        sortBy: "name" as const,
+        sortDir: "asc" as const,
+      }) satisfies Parameters<typeof useClients>[0],
+    [],
+  );
+  const {
+    clients: documentClients,
+    loading: documentClientsLoading,
+    error: documentClientsError,
+    refresh: refreshDocumentClients,
+  } = useClients(clientsLookupOptions);
+  const {
+    legalEntities,
+    loading: legalEntitiesLoading,
+    error: legalEntitiesError,
+  } = useLegalEntities();
+  const {
+    cases: legalEntityCases,
+    loading: legalEntityCasesLoading,
+    error: legalEntityCasesError,
+    createCase: createLegalEntityCase,
+    updateCase: updateLegalEntityCase,
+    deleteCase: deleteLegalEntityCase,
+    setCases: setLegalEntityCases,
+  } = useClientCases(undefined, {
+    enabled: isOpen && Boolean(currentLegalEntityId),
+    legalEntityId: currentLegalEntityId ?? undefined,
+  });
+  const legalEntityInvoicesResult = useInvoices({
+    legalEntityId: currentLegalEntityId ?? undefined,
+    caseId: selectedCaseId,
+    page: 1,
+    pageSize: 5,
+    sortBy: "date",
+    sortDir: "desc",
+    enabled: isOpen && Boolean(currentLegalEntityId),
+  });
+  const legalEntityActsResult = useActs({
+    legalEntityId: currentLegalEntityId ?? undefined,
+    caseId: selectedCaseId,
+    page: 1,
+    pageSize: 5,
+    sortBy: "date",
+    sortDir: "desc",
+    enabled: isOpen && Boolean(currentLegalEntityId),
+  });
 
   useEffect(() => {
     if (!isOpen) {
@@ -1003,6 +1156,13 @@ export function LegalEntityModal({
     setPickerTotal(0);
     setSelectedClientsPage(1);
     setHydratedSelectedClientIds([]);
+    setSelectedLegalEntityCaseId("all");
+    setCaseModalOpen(false);
+    setEditingCase(null);
+    setInvoiceModalOpen(false);
+    setSelectedInvoice(null);
+    setActModalOpen(false);
+    setSelectedAct(null);
   }, [initial, isOpen]);
 
   useEffect(
@@ -1021,6 +1181,15 @@ export function LegalEntityModal({
       .then((items) => setResponsibles(items ?? []))
       .catch(() => setResponsibles([]));
   }, [isOpen]);
+
+  useEffect(() => {
+    if (
+      selectedLegalEntityCaseId !== "all" &&
+      !legalEntityCases.some((item) => item.id === selectedLegalEntityCaseId)
+    ) {
+      setSelectedLegalEntityCaseId("all");
+    }
+  }, [legalEntityCases, selectedLegalEntityCaseId]);
 
   useEffect(() => {
     if (!isOpen || selectedClients.length === 0) return;
@@ -1999,6 +2168,141 @@ export function LegalEntityModal({
     }
   };
 
+  const openCreateCase = () => {
+    if (!currentLegalEntityId || readOnly) return;
+    setCaseMode("create");
+    setEditingCase(null);
+    setCaseModalOpen(true);
+  };
+
+  const openEditCase = (clientCase: ClientCase) => {
+    if (readOnly) return;
+    setCaseMode("edit");
+    setEditingCase(clientCase);
+    setCaseModalOpen(true);
+  };
+
+  const saveLegalEntityCase = async (patch: Partial<ClientCase>) => {
+    if (!currentLegalEntityId) return;
+
+    const payload: LegalEntityCasePayload = {
+      clientId: null,
+      legalEntityId: currentLegalEntityId,
+      title: (patch.title ?? editingCase?.title ?? "").trim(),
+      description: patch.description ?? editingCase?.description ?? "",
+      status: patch.status ?? editingCase?.status ?? "Open",
+    };
+
+    if (caseMode === "edit" && editingCase) {
+      await updateLegalEntityCase(editingCase.id, payload);
+      return;
+    }
+
+    const created = await createLegalEntityCase(payload);
+    setSelectedLegalEntityCaseId(created.id);
+  };
+
+  const removeLegalEntityCase = async () => {
+    if (!editingCase) return;
+    await deleteLegalEntityCase(editingCase.id);
+    if (selectedLegalEntityCaseId === editingCase.id) {
+      setSelectedLegalEntityCaseId("all");
+    }
+  };
+
+  const openCreateInvoice = () => {
+    if (!currentLegalEntityId || readOnly) return;
+    setInvoiceModalMode("create");
+    setSelectedInvoice(null);
+    setInvoiceModalError(null);
+    setInvoiceModalOpen(true);
+  };
+
+  const openEditInvoice = (invoice: Invoice) => {
+    if (readOnly) return;
+    setInvoiceModalMode("edit");
+    setSelectedInvoice(invoice);
+    setInvoiceModalError(null);
+    setInvoiceModalOpen(true);
+  };
+
+  const closeInvoiceModal = () => {
+    setInvoiceModalOpen(false);
+    setSelectedInvoice(null);
+    setInvoiceModalError(null);
+  };
+
+  const submitInvoice = async (payload: InvoiceInput) => {
+    try {
+      setInvoiceSubmitting(true);
+      setInvoiceModalError(null);
+      if (invoiceModalMode === "edit" && selectedInvoice) {
+        await legalEntityInvoicesResult.updateInvoice(selectedInvoice.id, payload);
+      } else {
+        await legalEntityInvoicesResult.createInvoice(payload);
+      }
+      await legalEntityActsResult.refresh();
+      closeInvoiceModal();
+    } catch (err) {
+      const message = extractErrorMessage(err, "Не удалось сохранить счёт");
+      setInvoiceModalError(message);
+      throw err;
+    } finally {
+      setInvoiceSubmitting(false);
+    }
+  };
+
+  const openCreateAct = () => {
+    if (!currentLegalEntityId || readOnly) return;
+    setActModalMode("create");
+    setSelectedAct(null);
+    setActModalError(null);
+    setActModalOpen(true);
+  };
+
+  const openEditAct = (act: Act) => {
+    if (readOnly) return;
+    setActModalMode("edit");
+    setSelectedAct(act);
+    setActModalError(null);
+    setActModalOpen(true);
+  };
+
+  const closeActModal = () => {
+    setActModalOpen(false);
+    setSelectedAct(null);
+    setActModalError(null);
+  };
+
+  const submitAct = async (payload: ActInput) => {
+    try {
+      setActSubmitting(true);
+      setActModalError(null);
+      if (actModalMode === "edit" && selectedAct) {
+        await legalEntityActsResult.updateAct(selectedAct.id, payload);
+      } else {
+        await legalEntityActsResult.createAct(payload);
+      }
+      closeActModal();
+    } catch (err) {
+      const message = extractErrorMessage(err, "Не удалось сохранить акт");
+      setActModalError(message);
+      throw err;
+    } finally {
+      setActSubmitting(false);
+    }
+  };
+
+  const handleInvoiceCaseCreated = (clientCase: ClientCase) => {
+    if (clientCase.legalEntityId !== currentLegalEntityId) return;
+    setLegalEntityCases((prev) =>
+      prev.some((item) => item.id === clientCase.id)
+        ? prev
+        : [clientCase, ...prev],
+    );
+    setSelectedLegalEntityCaseId(clientCase.id);
+  };
+
   const clientsSection = (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-3">
@@ -2096,6 +2400,311 @@ export function LegalEntityModal({
         }}
       />
     </div>
+  );
+
+  const blankLegalEntityCase: ClientCase = {
+    id: 0,
+    clientId: null,
+    legalEntityId: currentLegalEntityId,
+    title: "",
+    description: "",
+    status: "Open",
+    createdAt: new Date().toISOString(),
+  };
+
+  const documentsLookupsLoading =
+    documentClientsLoading || legalEntitiesLoading;
+  const documentsLookupsError = [
+    documentClientsError,
+    legalEntitiesError,
+  ]
+    .filter(Boolean)
+    .join("; ");
+
+  const legalEntityWorkSection = (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+            <FileCheck2 className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
+              Дела и документы
+            </h3>
+            <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+              <span>Дел: {legalEntityCases.length}</span>
+              <span>Счетов: {legalEntityInvoicesResult.pagination.total}</span>
+              <span>Актов: {legalEntityActsResult.pagination.total}</span>
+            </div>
+          </div>
+        </div>
+        {currentLegalEntityId && !readOnly ? (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={openCreateCase}
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100"
+            >
+              <Plus className="h-4 w-4" />
+              Дело
+            </button>
+            <button
+              type="button"
+              onClick={openCreateInvoice}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              <FileText className="h-4 w-4" />
+              Счёт
+            </button>
+            <button
+              type="button"
+              onClick={openCreateAct}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              <FileCheck2 className="h-4 w-4" />
+              Акт
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {!currentLegalEntityId ? (
+        <div className="mt-5 rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500">
+          Сохраните карточку, чтобы добавить дела, счета и акты.
+        </div>
+      ) : (
+        <div className="mt-5 space-y-6">
+          <div>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedLegalEntityCaseId("all")}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                  selectedLegalEntityCaseId === "all"
+                    ? "border-blue-200 bg-blue-50 text-blue-700"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                Все дела
+              </button>
+              {legalEntityCases.map((clientCase) => (
+                <button
+                  key={clientCase.id}
+                  type="button"
+                  onClick={() => setSelectedLegalEntityCaseId(clientCase.id)}
+                  className={`max-w-full rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                    selectedLegalEntityCaseId === clientCase.id
+                      ? "border-blue-200 bg-blue-50 text-blue-700"
+                      : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <span className="block max-w-[16rem] truncate">
+                    {clientCase.title || "Без названия"}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {legalEntityCasesError ? (
+              <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {extractErrorMessage(
+                  legalEntityCasesError,
+                  "Не удалось загрузить дела",
+                )}
+              </div>
+            ) : null}
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="min-w-full table-fixed text-sm">
+                <colgroup>
+                  <col style={{ width: "42%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "18%" }} />
+                  {!readOnly ? <col style={{ width: "22%" }} /> : null}
+                </colgroup>
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Дело</th>
+                    <th className="px-3 py-2 text-left">Статус</th>
+                    <th className="px-3 py-2 text-left">Создано</th>
+                    {!readOnly ? (
+                      <th className="px-3 py-2 text-right">Действия</th>
+                    ) : null}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {legalEntityCasesLoading ? (
+                    <tr>
+                      <td
+                        colSpan={readOnly ? 3 : 4}
+                        className="px-3 py-6 text-center text-slate-500"
+                      >
+                        Загрузка...
+                      </td>
+                    </tr>
+                  ) : legalEntityCases.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={readOnly ? 3 : 4}
+                        className="px-3 py-6 text-center text-slate-500"
+                      >
+                        Дел пока нет.
+                      </td>
+                    </tr>
+                  ) : (
+                    legalEntityCases.map((clientCase) => (
+                      <tr
+                        key={clientCase.id}
+                        className={
+                          selectedLegalEntityCaseId === clientCase.id
+                            ? "bg-blue-50/40"
+                            : "bg-white"
+                        }
+                      >
+                        <td className="px-3 py-3 align-top">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedLegalEntityCaseId(clientCase.id)
+                            }
+                            className="text-left font-medium text-slate-900 transition hover:text-blue-700"
+                          >
+                            {clientCase.title || "Без названия"}
+                          </button>
+                          {clientCase.description ? (
+                            <div className="mt-1 line-clamp-2 text-xs text-slate-500">
+                              {clientCase.description}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          {renderCaseStatusBadge(clientCase.status)}
+                        </td>
+                        <td className="px-3 py-3 align-top text-slate-600">
+                          {formatDocumentDate(clientCase.createdAt)}
+                        </td>
+                        {!readOnly ? (
+                          <td className="px-3 py-3 text-right align-top">
+                            <button
+                              type="button"
+                              onClick={() => openEditCase(clientCase)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Изменить
+                            </button>
+                          </td>
+                        ) : null}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-2">
+            <div className="rounded-xl border border-slate-200">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                <h4 className="text-sm font-semibold text-slate-800">Счета</h4>
+                {legalEntityInvoicesResult.refreshing ? (
+                  <span className="text-xs text-slate-400">Обновление...</span>
+                ) : null}
+              </div>
+              <div className="divide-y divide-slate-100">
+                {legalEntityInvoicesResult.loading ? (
+                  <div className="px-4 py-6 text-center text-sm text-slate-500">
+                    Загрузка...
+                  </div>
+                ) : legalEntityInvoicesResult.error ? (
+                  <div className="px-4 py-4 text-sm text-rose-700">
+                    {legalEntityInvoicesResult.error}
+                  </div>
+                ) : legalEntityInvoicesResult.invoices.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-slate-500">
+                    Счетов пока нет.
+                  </div>
+                ) : (
+                  legalEntityInvoicesResult.invoices.map((invoice) => (
+                    <div key={invoice.id} className="px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => openEditInvoice(invoice)}
+                            disabled={readOnly}
+                            className="truncate text-left font-medium text-slate-900 transition hover:text-blue-700 disabled:hover:text-slate-900"
+                          >
+                            № {invoice.number || invoice.id}
+                          </button>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {formatDocumentDate(invoice.date)} ·{" "}
+                            {INVOICE_STATUS_LABELS[invoice.status] ??
+                              invoice.status}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right text-sm font-semibold text-slate-900">
+                          {formatCurrencySmart(invoice.amount).short}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                <h4 className="text-sm font-semibold text-slate-800">Акты</h4>
+                {legalEntityActsResult.refreshing ? (
+                  <span className="text-xs text-slate-400">Обновление...</span>
+                ) : null}
+              </div>
+              <div className="divide-y divide-slate-100">
+                {legalEntityActsResult.loading ? (
+                  <div className="px-4 py-6 text-center text-sm text-slate-500">
+                    Загрузка...
+                  </div>
+                ) : legalEntityActsResult.error ? (
+                  <div className="px-4 py-4 text-sm text-rose-700">
+                    {legalEntityActsResult.error}
+                  </div>
+                ) : legalEntityActsResult.acts.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-slate-500">
+                    Актов пока нет.
+                  </div>
+                ) : (
+                  legalEntityActsResult.acts.map((act) => (
+                    <div key={act.id} className="px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => openEditAct(act)}
+                            disabled={readOnly}
+                            className="truncate text-left font-medium text-slate-900 transition hover:text-blue-700 disabled:hover:text-slate-900"
+                          >
+                            № {act.number || act.id}
+                          </button>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {formatDocumentDate(act.date)} ·{" "}
+                            {ACT_STATUS_LABELS[act.status] ?? act.status}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right text-sm font-semibold text-slate-900">
+                          {formatCurrencySmart(act.amount).short}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 
   const dadataSection = (
@@ -2926,6 +3535,8 @@ export function LegalEntityModal({
           </div>
         </div>
 
+        {!compactReadOnlyView ? legalEntityWorkSection : null}
+
         {clientsSection}
 
         <div className="mt-6">
@@ -3387,6 +3998,84 @@ export function LegalEntityModal({
           </div>
         ) : null}
       </form>
+
+      {caseModalOpen ? (
+        <CaseModal
+          isOpen={caseModalOpen}
+          onClose={() => setCaseModalOpen(false)}
+          caseData={
+            caseMode === "edit" && editingCase
+              ? editingCase
+              : blankLegalEntityCase
+          }
+          onSave={saveLegalEntityCase}
+          onDelete={caseMode === "edit" && !readOnly ? removeLegalEntityCase : undefined}
+        />
+      ) : null}
+
+      {invoiceModalOpen ? (
+        <InvoiceModal
+          mode={invoiceModalMode}
+          open={invoiceModalOpen}
+          invoice={selectedInvoice}
+          onClose={closeInvoiceModal}
+          onSubmit={submitInvoice}
+          submitting={invoiceSubmitting}
+          errorMessage={invoiceModalError}
+          clients={documentClients}
+          legalEntities={legalEntities}
+          legalEntitiesLoading={legalEntitiesLoading}
+          legalEntitiesError={legalEntitiesError ?? undefined}
+          onClientCreated={(client) => {
+            if (client.legalEntityId === currentLegalEntityId) {
+              setSelectedClients((prev) =>
+                prev.some((item) => item.id === client.id)
+                  ? prev
+                  : [...prev, toClientAssociationItem(client)],
+              );
+            }
+            void refreshDocumentClients("refresh");
+          }}
+          responsibles={responsibles}
+          lookupsLoading={documentsLookupsLoading}
+          lookupsError={documentsLookupsError || undefined}
+          defaultLegalEntityId={currentLegalEntityId ?? undefined}
+          defaultClientCaseId={selectedCaseId}
+          defaultResponsibleId={
+            formState.responsibleUserId
+              ? Number(formState.responsibleUserId)
+              : undefined
+          }
+          defaultType="Income"
+          onClientCaseCreated={handleInvoiceCaseCreated}
+        />
+      ) : null}
+
+      {actModalOpen ? (
+        <ActModal
+          open={actModalOpen}
+          mode={actModalMode}
+          act={selectedAct}
+          onClose={closeActModal}
+          onSubmit={submitAct}
+          submitting={actSubmitting}
+          errorMessage={actModalError}
+          clients={documentClients}
+          responsibles={responsibles}
+          lookupsLoading={documentsLookupsLoading}
+          lookupsError={documentsLookupsError || undefined}
+          defaultResponsibleId={
+            formState.responsibleUserId
+              ? Number(formState.responsibleUserId)
+              : undefined
+          }
+          initialValues={
+            actModalMode === "create" && currentLegalEntityId
+              ? { legalEntityId: currentLegalEntityId }
+              : undefined
+          }
+        />
+      ) : null}
 
       <DictionariesModal
         open={dictModalOpen}
