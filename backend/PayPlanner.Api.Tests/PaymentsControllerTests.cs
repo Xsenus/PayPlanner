@@ -680,12 +680,72 @@ public class PaymentsControllerTests
         var ok = Assert.IsType<OkObjectResult>(actionResult);
         var updated = Assert.IsType<Payment>(ok.Value);
         Assert.Equal(invoice.InvoiceEntityId, updated.InvoiceId);
-        Assert.Null(updated.Account);
+        Assert.Equal("30", updated.Account);
         Assert.Contains(InstallmentPaymentMarker, updated.SystemNotes);
         Assert.Equal("Updated installment payment", updated.Description);
         Assert.Equal(PaymentStatus.Completed, updated.Status);
         Assert.True(updated.IsPaid);
         Assert.Equal(paidDate, updated.PaidDate);
+    }
+
+    [Fact]
+    public async Task UpdateInvoiceManaged_SyncsGeneratedInstallmentBindingsFromRepresentative()
+    {
+        await using var db = await CreateContextAsync();
+
+        var invoiceClient = new Client { Name = "Correct invoice client" };
+        var staleClient = new Client { Name = "Stale installment client" };
+        var staleCase = new ClientCase { Client = staleClient, Title = "Stale installment case" };
+        var invoice = new Invoice { Number = "166", Date = new DateTime(2025, 9, 16) };
+        db.AddRange(invoiceClient, staleClient, staleCase, invoice);
+        await db.SaveChangesAsync();
+
+        var representative = CreatePayment(new DateTime(2025, 11, 24), 332_000m, "Invoice 166");
+        representative.DocumentKind = DocumentKind.Invoice;
+        representative.InvoiceId = invoice.Id;
+        representative.Account = invoice.Number;
+        representative.AccountDate = invoice.Date;
+        representative.ClientId = invoiceClient.Id;
+        representative.ClientCaseId = null;
+
+        var installment = CreatePayment(new DateTime(2026, 4, 30), 20_000m, "Installment 1/17");
+        installment.InvoiceId = invoice.Id;
+        installment.Account = invoice.Number;
+        installment.AccountDate = invoice.Date;
+        installment.ClientId = staleClient.Id;
+        installment.ClientCaseId = staleCase.Id;
+        installment.SystemNotes = $"{InstallmentPaymentMarker} {{\"Sequence\":1}}";
+        db.Payments.AddRange(representative, installment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(new DateTime(2026, 5, 1), installment.Amount, "Updated installment");
+        update.ClientId = staleClient.Id;
+        update.ClientCaseId = staleCase.Id;
+        update.InvoiceId = null;
+        update.Account = "BROKEN";
+        update.AccountDate = new DateTime(2030, 1, 1);
+        update.SystemNotes = installment.SystemNotes;
+
+        var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(invoice.Id, updated.InvoiceId);
+        Assert.Equal(invoice.Number, updated.Account);
+        Assert.Equal(invoice.Date, updated.AccountDate);
+        Assert.Equal(invoiceClient.Id, updated.ClientId);
+        Assert.Null(updated.ClientCaseId);
+        Assert.Equal("Updated installment", updated.Description);
+        Assert.Equal(new DateTime(2026, 5, 1), updated.Date);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == installment.Id);
+        Assert.Equal(invoiceClient.Id, stored.ClientId);
+        Assert.Null(stored.ClientCaseId);
+        Assert.Equal(invoice.Number, stored.Account);
+        Assert.Equal(invoice.Date, stored.AccountDate);
     }
 
     [Fact]

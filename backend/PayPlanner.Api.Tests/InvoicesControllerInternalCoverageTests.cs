@@ -261,6 +261,7 @@ public class InvoicesControllerInternalCoverageTests
             null,
             null,
             null,
+            null,
             null));
 
         Assert.Equal(["INV-MATCH"], filtered);
@@ -2203,6 +2204,7 @@ public class InvoicesControllerInternalCoverageTests
         DateTime? to,
         PaymentStatus? status,
         int? clientId,
+        int? legalEntityId,
         int? contractId,
         int? caseId,
         int? responsibleId,
@@ -2215,7 +2217,7 @@ public class InvoicesControllerInternalCoverageTests
         var controller = CreateController(db, isAdmin: true, userId: null);
         var method = typeof(InvoicesController).GetMethod("ApplyFilters", BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(method);
-        return method!.Invoke(controller, [query, from, to, status, clientId, contractId, caseId, responsibleId, search, type, clientRole, clientIds])!;
+        return method!.Invoke(controller, [query, from, to, status, clientId, legalEntityId, contractId, caseId, responsibleId, search, type, clientRole, clientIds])!;
     }
 
     private static string[] ExtractSortedAccounts(object query)

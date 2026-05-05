@@ -328,6 +328,7 @@ public class PaymentsController : ControllerBase
         e.LegacyAccountDate = immutableLegacyAccountDate;
         e.Type = immutableType;
 
+        await SyncInvoiceManagedPaymentBindingsAsync(e, ct);
         var invoiceManagedValidationError = await ValidatePaymentAttributionAsync(e, ct);
         if (invoiceManagedValidationError is not null) return invoiceManagedValidationError;
         PaymentDomainService.Normalize(e);
@@ -393,6 +394,76 @@ public class PaymentsController : ControllerBase
         await _db.SaveChangesAsync();
         PopulateAuditMetadata(_db, e);
         return Ok(e);
+    }
+
+    private async Task SyncInvoiceManagedPaymentBindingsAsync(Payment payment, CancellationToken ct)
+    {
+        if (!InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(payment)
+            || !payment.InvoiceId.HasValue
+            || payment.InvoiceId.Value <= 0)
+        {
+            return;
+        }
+
+        var representative = await _db.Payments
+            .Include(item => item.Responsibles)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                item => item.InvoiceId == payment.InvoiceId.Value
+                    && item.DocumentKind == DocumentKind.Invoice,
+                ct);
+        if (representative is null)
+        {
+            return;
+        }
+
+        payment.Account = representative.Account;
+        payment.AccountDate = representative.AccountDate;
+        payment.Type = representative.Type;
+        payment.ClientId = representative.ClientId;
+        payment.LegalEntityId = representative.LegalEntityId;
+        payment.ExpenseClientId = representative.ExpenseClientId;
+        payment.ExpenseLegalEntityId = representative.ExpenseLegalEntityId;
+        payment.ContractId = representative.ContractId;
+        payment.ClientCaseId = representative.ClientCaseId;
+        payment.ClientCaseReference = representative.ClientCaseReference;
+        payment.PaymentSourceId = representative.PaymentSourceId;
+        payment.ServiceId = representative.ServiceId;
+        payment.IncomeTypeId = representative.IncomeTypeId;
+        payment.DealTypeId = representative.DealTypeId;
+        payment.PaymentStatusId = representative.PaymentStatusId;
+        payment.CounterpartyName = null;
+
+        await SyncPaymentResponsiblesAsync(payment, representative.Responsibles.Select(item => item.UserId), ct);
+    }
+
+    private async Task SyncPaymentResponsiblesAsync(Payment payment, IEnumerable<int> responsibleIds, CancellationToken ct)
+    {
+        var collection = _db.Entry(payment).Collection(item => item.Responsibles);
+        if (!collection.IsLoaded)
+        {
+            await collection.LoadAsync(ct);
+        }
+
+        var targetIds = responsibleIds.Where(id => id > 0).Distinct().ToHashSet();
+        foreach (var existing in payment.Responsibles.Where(item => !targetIds.Contains(item.UserId)).ToList())
+        {
+            payment.Responsibles.Remove(existing);
+        }
+
+        var existingIds = payment.Responsibles.Select(item => item.UserId).ToHashSet();
+        foreach (var responsibleId in targetIds)
+        {
+            if (existingIds.Contains(responsibleId))
+            {
+                continue;
+            }
+
+            payment.Responsibles.Add(new PaymentResponsible
+            {
+                UserId = responsibleId,
+            });
+        }
     }
 
     [HttpPost("repair-invoice-links")]
