@@ -11,6 +11,7 @@ const ALL_TABS: Tab[] = [
   'clients',
   'contacts',
   'contactsClients',
+  'contactsLegal',
   'contactsExternal',
   'clientDetail',
   'accounts',
@@ -28,6 +29,7 @@ const ALL_TABS: Tab[] = [
   'moneyBank',
   'moneyCash',
   'moneyCards',
+  'moneyEMoney',
   'moneyTotal',
   'contracts',
   'contractCreate',
@@ -169,6 +171,10 @@ function isPaymentsTab(tab: Tab): tab is 'payments' | 'paymentsIncome' | 'paymen
   return tab === 'payments' || tab === 'paymentsIncome' || tab === 'paymentsExpense';
 }
 
+function isAccountsTab(tab: string | null): tab is 'accounts' | 'accountsIncome' | 'accountsExpense' {
+  return tab === 'accounts' || tab === 'accountsIncome' || tab === 'accountsExpense';
+}
+
 function isActsTab(tab: string | null): tab is 'acts' | 'actsIncome' | 'actsExpense' {
   return tab === 'acts' || tab === 'actsIncome' || tab === 'actsExpense';
 }
@@ -198,7 +204,7 @@ export function getInitialTab(): Tab {
   }
 
   if (getPathInvoiceId() || isInvoicesListPath()) {
-    return 'accounts';
+    return isAccountsTab(urlTab) ? urlTab : 'accounts';
   }
 
   if (getPathPaymentId() || isPaymentsListPath()) {
@@ -247,6 +253,30 @@ export function getInitialTab(): Tab {
   }
 
   return 'calendar';
+}
+
+export function getTabHref(tab: Tab): string {
+  if (tab === 'clients') {
+    return '/clients';
+  }
+
+  if (isAccountsTab(tab)) {
+    return tab === 'accounts' ? '/invoices' : `/invoices?ppTab=${tab}`;
+  }
+
+  if (isPaymentsTab(tab)) {
+    return tab === 'payments' ? '/payments' : `/payments?ppTab=${tab}`;
+  }
+
+  if (isActsTab(tab)) {
+    return tab === 'acts' ? '/acts' : `/acts?ppTab=${tab}`;
+  }
+
+  if (tab === 'contracts') {
+    return '/contracts';
+  }
+
+  return `/?ppTab=${tab}`;
 }
 
 export function getInitialUserId(): number | null {

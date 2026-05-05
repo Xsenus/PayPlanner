@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type MouseEvent } from 'react';
 import {
   Calendar,
   BarChart,
@@ -29,6 +29,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { Tab } from '../../types/tabs';
+import { getTabHref } from '../../appRouting';
 
 interface NavigationProps {
   activeTab: Tab;
@@ -330,6 +331,26 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     });
   }, []);
 
+  const handleNavLinkClick = useCallback(
+    (event: MouseEvent<HTMLAnchorElement>, tab: Tab) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      onTabChange(tab);
+      setMobileOpen(false);
+    },
+    [onTabChange],
+  );
+
   useEffect(() => {
     setExpandedSections((prev) => {
       let changed = false;
@@ -432,12 +453,16 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
               return (
                 <li key={item.id} className="space-y-1">
                   <div className="relative">
-                    <button
-                      onClick={() => {
+                    <a
+                      href={item.tab ? getTabHref(item.tab) : '#'}
+                      onClick={(event) => {
                         if (item.tab) {
-                          onTabChange(item.tab);
-                          setMobileOpen(false);
-                        } else if (hasChildren) {
+                          handleNavLinkClick(event, item.tab);
+                          return;
+                        }
+
+                        event.preventDefault();
+                        if (hasChildren) {
                           toggleSection(item.id);
                         }
                       }}
@@ -462,7 +487,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                       {isActive && !collapsed && (
                         <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full" />
                       )}
-                    </button>
+                    </a>
                     {!collapsed && hasChildren ? (
                       <button
                         type="button"
@@ -488,11 +513,9 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                         const childActive = activeTab === child.id;
                         return (
                           <li key={child.id}>
-                            <button
-                              onClick={() => {
-                                onTabChange(child.id);
-                                setMobileOpen(false);
-                              }}
+                            <a
+                              href={getTabHref(child.id)}
+                              onClick={(event) => handleNavLinkClick(event, child.id)}
                               aria-current={childActive ? 'page' : undefined}
                               title={child.label}
                               className={[
@@ -511,7 +534,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                               {childActive && (
                                 <div className="absolute right-1.5 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-blue-100/80" />
                               )}
-                            </button>
+                            </a>
                           </li>
                         );
                       })}

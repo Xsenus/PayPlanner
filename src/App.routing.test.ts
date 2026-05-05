@@ -7,6 +7,7 @@ import {
   getInitialContractReturnTab,
   getInitialPaymentId,
   getInitialTab,
+  getTabHref,
   getPathActId,
   getPathClientId,
   getPathContractId,
@@ -112,6 +113,37 @@ describe('App client routing helpers', () => {
     window.history.replaceState({}, '', '/');
 
     expect(getInitialTab()).toBe('clients');
+  });
+});
+
+describe('App sidebar routing helpers', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    window.localStorage.clear();
+  });
+
+  it('builds real href values for menu tabs', () => {
+    expect(getTabHref('calendar')).toBe('/?ppTab=calendar');
+    expect(getTabHref('clients')).toBe('/clients');
+    expect(getTabHref('accountsIncome')).toBe('/invoices?ppTab=accountsIncome');
+    expect(getTabHref('paymentsExpense')).toBe('/payments?ppTab=paymentsExpense');
+    expect(getTabHref('actsIncome')).toBe('/acts?ppTab=actsIncome');
+    expect(getTabHref('moneyEMoney')).toBe('/?ppTab=moneyEMoney');
+    expect(getTabHref('contactsLegal')).toBe('/?ppTab=contactsLegal');
+  });
+
+  it('restores invoice child tabs from menu links', () => {
+    window.history.replaceState({}, '', '/invoices?ppTab=accountsExpense');
+
+    expect(getInitialTab()).toBe('accountsExpense');
+  });
+
+  it('restores non-path menu tabs from query links', () => {
+    window.history.replaceState({}, '', '/?ppTab=moneyEMoney');
+    expect(getInitialTab()).toBe('moneyEMoney');
+
+    window.history.replaceState({}, '', '/?ppTab=contactsLegal');
+    expect(getInitialTab()).toBe('contactsLegal');
   });
 });
 
