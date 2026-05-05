@@ -298,6 +298,41 @@ public class InvoicesControllerCoverageTests
     }
 
     [Fact]
+    public async Task Create_AllowsExpenseInvoiceWithoutExpenseCounterparty()
+    {
+        await using var db = await CreateContextAsync();
+        var supplierId = await CreateClientAsync(db, "External Supplier");
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var createAction = await controller.Create(new UpsertInvoiceRequest
+        {
+            Number = "EXP-NO-CLIENT-1",
+            Date = new DateTime(2026, 5, 5),
+            DueDate = new DateTime(2026, 5, 20),
+            Amount = 12_500m,
+            Type = PaymentType.Expense,
+            Status = PaymentStatus.Pending,
+            ClientId = supplierId,
+            Description = "Expense invoice without client attribution",
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(created.Value);
+
+        Assert.Equal(PaymentType.Expense, dto.Type);
+        Assert.Equal(supplierId, dto.ClientId);
+        Assert.Null(dto.ExpenseClientId);
+        Assert.Null(dto.ExpenseLegalEntityId);
+        Assert.Null(dto.ClientCaseId);
+
+        var payment = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == dto.Id);
+        Assert.Equal(PaymentType.Expense, payment.Type);
+        Assert.Equal(supplierId, payment.ClientId);
+        Assert.Null(payment.ExpenseClientId);
+        Assert.Null(payment.ExpenseLegalEntityId);
+    }
+
+    [Fact]
     public async Task NumberingSettings_RoundTrip_AndNextNumber_UsesFirstFreeStrategy()
     {
         await using var db = await CreateContextAsync();

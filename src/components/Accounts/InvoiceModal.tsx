@@ -1200,7 +1200,7 @@ export function InvoiceModal({
 
   const resolveCaseOwnerClientId = useCallback(
     (type: PaymentKind, clientId: string, expenseClientId: string): string =>
-      type === 'Expense' ? expenseClientId : clientId,
+      type === 'Expense' ? (expenseClientId || clientId) : clientId,
     [],
   );
 
@@ -2463,11 +2463,6 @@ export function InvoiceModal({
     }
     if (!form.clientId && !form.legalEntityId) {
       setLocalError(`Выберите ${counterpartyLabel.toLocaleLowerCase('ru')}`);
-      return;
-    }
-
-    if (!isIncome && selectedClientCaseIds.length > 0 && !form.expenseClientId && !form.expenseLegalEntityId) {
-      setLocalError('Выберите клиента, к делу которого относится расход');
       return;
     }
 
@@ -4360,14 +4355,14 @@ export function InvoiceModal({
                             {!isIncome && (
                               <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
                                 <label className="flex flex-col gap-1 text-sm">
-                                  <span className="font-medium text-slate-700">Контрагент и дело расхода</span>
+                                  <span className="font-medium text-slate-700">Контрагент и дело расхода (опционально)</span>
                                   <div className="flex gap-2">
                                     <input
                                       type="text"
                                       value={selectedExpenseCounterpartyName}
                                       readOnly
                                       className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                                      placeholder="Выберите клиента или юрлицо, к делу которого относится расход"
+                                      placeholder="Не выбрано - расход только по поставщику"
                                     />
                                     <button
                                       type="button"
@@ -4380,7 +4375,7 @@ export function InvoiceModal({
                                     </button>
                                   </div>
                                   <span className="text-xs text-slate-500">
-                                    Эта привязка нужна для аналитики расходов, долгов и рентабельности дела.
+                                    Аналитика расходов, долгов и рентабельности дела.
                                   </span>
                                 </label>
                                 {(selectedExpenseClient?.clientStatus || selectedExpenseClient?.responsibleUserName || selectedExpenseLegalEntity) && (

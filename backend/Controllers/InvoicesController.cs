@@ -2763,6 +2763,13 @@ public class InvoicesController : ControllerBase
             return null;
         }
 
+        var hasExpenseClient = request.ExpenseClientId.HasValue && request.ExpenseClientId.Value > 0;
+        var hasExpenseLegalEntity = request.ExpenseLegalEntityId.HasValue && request.ExpenseLegalEntityId.Value > 0;
+        if (!hasExpenseClient && !hasExpenseLegalEntity)
+        {
+            return null;
+        }
+
         return await ValidateCounterpartyAsync(request.ExpenseClientId, request.ExpenseLegalEntityId, "expense", ct);
     }
 

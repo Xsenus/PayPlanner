@@ -114,6 +114,8 @@ vi.mock('../../services/api', () => ({
     getNextInvoiceNumber: vi.fn().mockResolvedValue('24'),
     getPayment: vi.fn(),
     getMoneyOperationsPaged: vi.fn().mockResolvedValue({ items: [], totalCount: 0, summary: {} }),
+    getClientsV2: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    getLegalEntitiesPaged: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     createContract: vi.fn(),
     createCase: vi.fn(),
     createAct: vi.fn(),
@@ -273,6 +275,10 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue({ items: [], totalCount: 0, summary: {} });
+    vi.mocked(apiService.getClientsV2).mockReset();
+    vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [], total: 0 });
+    vi.mocked(apiService.getLegalEntitiesPaged).mockReset();
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [], total: 0 });
     vi.mocked(apiService.updateInvoice).mockClear();
     vi.mocked(apiService.createClient).mockReset();
   });
@@ -336,6 +342,7 @@ describe('InvoiceModal integration', () => {
     } as LegalEntitySummary;
     const onClientCreated = vi.fn();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [legalEntity], total: 1 });
 
     const invoice = {
       id: 701,
@@ -367,9 +374,9 @@ describe('InvoiceModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /открыть выбор: клиент/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Юрлица' }));
-    expect(screen.getByText('ООО Ромашка')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /выбрать юрлицо/i }));
+    fireEvent.click(screen.getByRole('button', { name: /юридические лица/i }));
+    expect(await screen.findByText('ООО Ромашка')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^выбрать$/i }));
 
     await waitFor(() => {
       expect(apiService.createClient).not.toHaveBeenCalled();
@@ -1885,8 +1892,8 @@ describe('InvoiceModal integration', () => {
       }));
     });
   
-    it('creates and loads client cases for the expense client on expense invoices', async () => {
-      const getCasesMock = vi.mocked(apiService.getCases);
+  it('creates and loads client cases for the expense client on expense invoices', async () => {
+    const getCasesMock = vi.mocked(apiService.getCases);
     const createCaseMock = vi.mocked(apiService.createCase);
     const onClientCaseCreated = vi.fn();
     getCasesMock.mockResolvedValue([]);
@@ -1950,6 +1957,46 @@ describe('InvoiceModal integration', () => {
       title: 'Case from invoice',
     }));
     expect(await screen.findByText('Case from invoice')).toBeTruthy();
+  });
+
+  it('submits an expense invoice without an expense counterparty', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createTestClient(1, 'External supplier')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        defaultClientId={1}
+        defaultType="Expense"
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/Номер сч/i), {
+      target: { value: 'EXP-NO-CLIENT-1' },
+    });
+
+    const form = document.getElementById('invoice-edit-form') as HTMLFormElement | null;
+    expect(form).toBeTruthy();
+    fireEvent.submit(form!);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'Expense',
+        clientId: 1,
+        expenseClientId: null,
+        expenseLegalEntityId: null,
+        clientCaseId: null,
+        clientCaseIds: [],
+      }));
+    });
   });
 
   it('opens the client case modal above the invoice overlay', async () => {
