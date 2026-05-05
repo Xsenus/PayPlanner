@@ -505,6 +505,7 @@ describe('InvoiceModal integration', () => {
       invoiceId: 24,
       amount: 10000,
       date: '2026-04-02',
+      plannedDate: '2025-11-24',
       paidDate: '2026-04-03',
       type: 'Income',
       status: 'Completed',
@@ -533,6 +534,7 @@ describe('InvoiceModal integration', () => {
     expect(screen.queryByText('Связанные платежи пока не добавлены.')).toBeNull();
     expect(screen.getByText('Зачтено с баланса: 750 ₽')).toBeTruthy();
     expect(screen.getByText('Ожидаемая дата: 02.04.2026')).toBeTruthy();
+    expect(screen.queryByText('Ожидаемая дата: 24.11.2025')).toBeNull();
     expect(screen.getByText('Фактическая дата: 03.04.2026')).toBeTruthy();
     expect(screen.getAllByText(/₽/).length).toBeGreaterThan(0);
   });
@@ -658,6 +660,50 @@ describe('InvoiceModal integration', () => {
     expect(screen.getByText('Банк')).toBeTruthy();
     expect(screen.getByText('Сверено')).toBeTruthy();
     expect(screen.getByText('ОСНОВНОЙ Банк')).toBeTruthy();
+  });
+
+  it('hides the money operations section when there are no linked operations', async () => {
+    const invoice = {
+      id: 1850,
+      invoiceEntityId: 1850,
+      number: '52',
+      date: '2026-05-03',
+      dueDate: '2026-05-15',
+      amount: 37000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Анализ документов', quantity: 1, unit: 'усл.ед.', price: 37000 }],
+    } as unknown as Invoice;
+
+    vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValueOnce({
+      items: [],
+      totalCount: 0,
+      summary: {},
+    });
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(apiService.getMoneyOperationsPaged).toHaveBeenCalledWith({ linkedInvoiceId: 1850, page: 1, pageSize: 20 });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Движения денег')).toBeNull();
+    });
+    expect(screen.queryByText('Связанные движения денег пока не найдены.')).toBeNull();
   });
 
   it('hides the money operations section when linked operations fail to load', async () => {
@@ -1363,6 +1409,9 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
+    expect(await screen.findByText('Печатный шаблон счета')).toBeTruthy();
+    expect(screen.queryByText('Основные параметры')).toBeNull();
+
     fireEvent.click(await screen.findByTestId('invoice-related-payment-link-883'));
 
     expect(onEditRelatedPayment).toHaveBeenCalledWith(
@@ -1373,6 +1422,8 @@ describe('InvoiceModal integration', () => {
     );
     expect(onEditRelatedPayment).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('invoice-related-payment-preview')).toBeNull();
+    expect(screen.getByText('Печатный шаблон счета')).toBeTruthy();
+    expect(screen.queryByText('Основные параметры')).toBeNull();
   });
 
   it('routes invoice-managed sidebar clicks through the payment edit callback', async () => {
@@ -1615,7 +1666,8 @@ describe('InvoiceModal integration', () => {
         invoiceId: 552,
       }),
     );
-    expect(await screen.findByRole('button', { name: 'Сохранить' })).toBeTruthy();
+    expect(screen.getByText('Печатный шаблон счета')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
     expect(screen.queryByTestId('invoice-related-payment-preview')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Открыть полный платеж' })).toBeNull();
   });
