@@ -1,5 +1,5 @@
 import { Building2, Check, ChevronLeft, ChevronRight, Loader2, Search, UserRoundSearch, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
 import type { Client, LegalEntitySummary } from '../../types';
@@ -87,7 +87,10 @@ export function CounterpartyPickerModal({
     () => (allowedScopes.length > 0 ? allowedScopes : DEFAULT_SCOPES),
     [allowedScopes],
   );
-  const resolveScope = (value: CounterpartyKind) => (normalizedScopes.includes(value) ? value : normalizedScopes[0]);
+  const resolveScope = useCallback(
+    (value: CounterpartyKind) => (normalizedScopes.includes(value) ? value : normalizedScopes[0]),
+    [normalizedScopes],
+  );
   const [scope, setScope] = useState<CounterpartyKind>(() => resolveScope(initialScope));
   const [query, setQuery] = useState('');
   const debouncedQuery = useDebouncedValue(query.trim(), 250);
@@ -106,7 +109,7 @@ export function CounterpartyPickerModal({
     setPage(1);
     setPageSize(PAGE_SIZE_OPTIONS[1]);
     setDraftSelected(selected);
-  }, [initialScope, normalizedScopes, open, selected]);
+  }, [initialScope, open, resolveScope, selected]);
 
   useEffect(() => {
     setPage(1);

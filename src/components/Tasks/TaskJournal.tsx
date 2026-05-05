@@ -231,7 +231,7 @@ export function TaskJournal() {
       ]);
       setTasks(tasksResponse.items);
       setAssignees(assigneeResponse);
-    } catch (error) {
+    } catch {
       toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');
     } finally {
       setLoading(false);
@@ -372,7 +372,7 @@ export function TaskJournal() {
       setModal(null);
       await refreshTasks();
       emitTaskChange();
-    } catch (error) {
+    } catch {
       toast.error('Не удалось сохранить задачу.', 'Журнал задач');
     }
   };
