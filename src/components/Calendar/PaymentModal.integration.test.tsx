@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentModal } from './PaymentModal';
@@ -11,6 +11,8 @@ const {
   getCasesMock,
   getContractsMock,
   getInvoicesMock,
+  getClientsV2Mock,
+  getLegalEntitiesPagedMock,
   getClientBalanceMock,
   applyClientBalanceMock,
   invoiceModalPropsSpy,
@@ -24,6 +26,8 @@ const {
   getCasesMock: vi.fn(),
   getContractsMock: vi.fn(),
   getInvoicesMock: vi.fn(),
+  getClientsV2Mock: vi.fn(),
+  getLegalEntitiesPagedMock: vi.fn(),
   getClientBalanceMock: vi.fn(),
   applyClientBalanceMock: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
@@ -104,6 +108,8 @@ vi.mock('../../services/api', () => ({
     getCase: getCaseMock,
     getContracts: getContractsMock,
     createInvoice: createInvoiceMock,
+    getClientsV2: getClientsV2Mock,
+    getLegalEntitiesPaged: getLegalEntitiesPagedMock,
     getClientBalance: getClientBalanceMock,
     applyClientBalance: applyClientBalanceMock,
   },
@@ -173,6 +179,40 @@ vi.mock('../Clients/ClientStatusBadge', () => ({
   ClientStatusBadge: () => null,
 }));
 
+function getPickerOptionAction(label: HTMLElement): HTMLButtonElement {
+  let current: HTMLElement | null = label;
+
+  while (current && current !== document.body) {
+    const actions = within(current).queryAllByRole('button', { name: 'Выбрать' });
+    if (actions.length === 1) {
+      return actions[0] as HTMLButtonElement;
+    }
+    current = current.parentElement;
+  }
+
+  throw new Error(`Не найдена кнопка выбора для ${label.textContent ?? 'контрагента'}`);
+}
+
+async function selectPickerOption(name: string): Promise<void> {
+  const labels = await screen.findAllByText(name);
+  for (const label of labels.reverse()) {
+    try {
+      fireEvent.click(getPickerOptionAction(label));
+      return;
+    } catch {
+      // Some names can also exist in hidden selects outside the picker.
+    }
+  }
+
+  const visibleActions = screen.queryAllByRole('button', { name: 'Выбрать' });
+  if (visibleActions.length > 0) {
+    fireEvent.click(visibleActions[0]);
+    return;
+  }
+
+  throw new Error(`Не найден вариант выбора ${name}`);
+}
+
 describe('PaymentModal integration', () => {
   beforeEach(() => {
     confirmMock.mockReset();
@@ -182,6 +222,8 @@ describe('PaymentModal integration', () => {
     getCasesMock.mockReset();
     getContractsMock.mockReset();
     getInvoicesMock.mockReset();
+    getClientsV2Mock.mockReset();
+    getLegalEntitiesPagedMock.mockReset();
     getClientBalanceMock.mockReset();
     applyClientBalanceMock.mockReset();
     invoiceModalPropsSpy.mockReset();
@@ -206,6 +248,41 @@ describe('PaymentModal integration', () => {
     getCasesMock.mockResolvedValue([]);
     getContractsMock.mockResolvedValue({ items: [] });
     getInvoicesMock.mockResolvedValue({ items: [] });
+    getClientsV2Mock.mockResolvedValue({
+      items: [
+        { id: 69, name: 'Test Client', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
+        { id: 77, name: 'Supplier Client', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
+        { id: 88, name: 'Expense Client', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
+      ],
+      total: 3,
+      page: 1,
+      pageSize: 25,
+    });
+    getLegalEntitiesPagedMock.mockResolvedValue({
+      items: [
+        {
+          id: 301,
+          shortName: 'ООО Юрклиент',
+          fullName: 'Общество с ограниченной ответственностью Юрклиент',
+          inn: '5400000001',
+          kpp: '540001001',
+          clients: [],
+          clientsCount: 0,
+          createdAt: '2026-04-01T00:00:00Z',
+        },
+        {
+          id: 302,
+          shortName: 'ООО Поставщик ЮЛ',
+          inn: '5400000002',
+          clients: [],
+          clientsCount: 0,
+          createdAt: '2026-04-01T00:00:00Z',
+        },
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 25,
+    });
     getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 0 });
     applyClientBalanceMock.mockResolvedValue({ appliedAmount: 0, balance: 0 });
   });
@@ -412,9 +489,8 @@ describe('PaymentModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать контрагента' }));
-    fireEvent.click(screen.getByRole('button', { name: /Юрлица/i }));
-    await screen.findAllByText('ООО Юрклиент');
-    fireEvent.click(screen.getAllByText('ООО Юрклиент').at(-1)!.closest('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Юридические лица' }));
+    await selectPickerOption('ООО Юрклиент');
     fireEvent.click(screen.getByRole('button', { name: 'save' }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));

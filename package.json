@@ -7,7 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "npm run test:unit",
+    "test:all": "vitest run",
+    "test:unit": "vitest run --exclude \"**/*.integration.test.*\"",
+    "test:integration": "node scripts/run-integration-tests.mjs",
+    "test:guard": "vitest run src/App.routing.test.ts src/components/Navigation/Navigation.test.tsx",
+    "test:ci": "npm run test:guard && npm run test:unit",
     "preview": "vite preview"
   },
   "dependencies": {

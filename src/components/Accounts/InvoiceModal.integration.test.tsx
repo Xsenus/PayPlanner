@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { InvoiceModal } from './InvoiceModal';
@@ -110,12 +110,12 @@ vi.mock('../../services/api', () => ({
     getContract: vi.fn(),
     getContracts: vi.fn().mockResolvedValue({ items: [] }),
     getCases: vi.fn().mockResolvedValue([]),
+    getClientsV2: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 }),
     getActs: vi.fn().mockResolvedValue({ items: [] }),
+    getLegalEntitiesPaged: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 }),
     getNextInvoiceNumber: vi.fn().mockResolvedValue('24'),
     getPayment: vi.fn(),
     getMoneyOperationsPaged: vi.fn().mockResolvedValue({ items: [], totalCount: 0, summary: {} }),
-    getClientsV2: vi.fn().mockResolvedValue({ items: [], total: 0 }),
-    getLegalEntitiesPaged: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     createContract: vi.fn(),
     createCase: vi.fn(),
     createAct: vi.fn(),
@@ -214,6 +214,34 @@ function createTestClient(id: number, name: string): Client {
   } as Client;
 }
 
+function getPickerOptionAction(label: HTMLElement): HTMLButtonElement {
+  let current: HTMLElement | null = label;
+
+  while (current && current !== document.body) {
+    const actions = within(current).queryAllByRole('button', { name: 'Выбрать' });
+    if (actions.length === 1) {
+      return actions[0] as HTMLButtonElement;
+    }
+    current = current.parentElement;
+  }
+
+  throw new Error(`Не найдена кнопка выбора для ${label.textContent ?? 'контрагента'}`);
+}
+
+async function selectPickerOption(name: string): Promise<void> {
+  const labels = await screen.findAllByText(name);
+  for (const label of labels.reverse()) {
+    try {
+      fireEvent.click(getPickerOptionAction(label));
+      return;
+    } catch {
+      // Some names can also exist in hidden selects outside the picker.
+    }
+  }
+
+  throw new Error(`Не найден вариант выбора ${name}`);
+}
+
 describe('InvoiceModal integration', () => {
   const storeInvoiceEditorDraftMock = vi.mocked(storeInvoiceEditorDraft);
 
@@ -269,16 +297,16 @@ describe('InvoiceModal integration', () => {
     });
     vi.mocked(apiService.getCases).mockReset();
     vi.mocked(apiService.getCases).mockResolvedValue([]);
+    vi.mocked(apiService.getClientsV2).mockReset();
+    vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
     vi.mocked(apiService.createCase).mockReset();
     vi.mocked(apiService.createAct).mockReset();
     vi.mocked(apiService.getContract).mockReset();
+    vi.mocked(apiService.getLegalEntitiesPaged).mockReset();
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
     vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue({ items: [], totalCount: 0, summary: {} });
-    vi.mocked(apiService.getClientsV2).mockReset();
-    vi.mocked(apiService.getClientsV2).mockResolvedValue({ items: [], total: 0 });
-    vi.mocked(apiService.getLegalEntitiesPaged).mockReset();
-    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [], total: 0 });
     vi.mocked(apiService.updateInvoice).mockClear();
     vi.mocked(apiService.createClient).mockReset();
   });
@@ -355,6 +383,12 @@ describe('InvoiceModal integration', () => {
       clientId: 1,
       lineItems: [{ name: 'Услуга', quantity: 1, unit: 'шт', price: 15000 }],
     } as unknown as Invoice;
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValueOnce({
+      items: [legalEntity],
+      total: 1,
+      page: 1,
+      pageSize: 25,
+    });
 
     const { container } = render(
       <InvoiceModal
@@ -374,9 +408,8 @@ describe('InvoiceModal integration', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /открыть выбор: клиент/i }));
-    fireEvent.click(screen.getByRole('button', { name: /юридические лица/i }));
-    expect(await screen.findByText('ООО Ромашка')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /^выбрать$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Юридические лица' }));
+    await selectPickerOption('ООО Ромашка');
 
     await waitFor(() => {
       expect(apiService.createClient).not.toHaveBeenCalled();

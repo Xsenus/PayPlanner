@@ -45,57 +45,64 @@ const {
   runBankStatementAutoImportMock,
   reprocessBankStatementImportMock,
   rollbackBankStatementImportMock,
+  toastMock,
   toastErrorMock,
   toastSuccessMock,
   updateCashOrderMock,
   updateMoneyOperationMock,
   upsertUserSettingMock,
-} = vi.hoisted(() => ({
-  createCashOrderMock: vi.fn(),
-  createCashInventoryMock: vi.fn(),
-  createCashOrderFromPaymentMock: vi.fn(),
-  createCashOrderFromMoneyOperationMock: vi.fn(),
-  cancelCashOrderMock: vi.fn(),
-  copyCashOrderMock: vi.fn(),
-  createMoneyOperationMock: vi.fn(),
-  deleteCashOrderMock: vi.fn(),
-  deleteMoneyOperationMock: vi.fn(),
-  downloadCashOrderPdfMock: vi.fn(),
-  getCashBookMock: vi.fn(),
-  getCashBookPrintHtmlMock: vi.fn(),
-  getCashInventoriesMock: vi.fn(),
-  getCashOrderRegisterMock: vi.fn(),
-  getCashOrderRegisterPrintHtmlMock: vi.fn(),
-  getCashOrderPrintHtmlMock: vi.fn(),
-  getBankStatementImportMock: vi.fn(),
-  getBankStatementImportsMock: vi.fn(),
-  getCashOrderMock: vi.fn(),
-  getIncomeTypesMock: vi.fn(),
-  getMoneyAccountsMock: vi.fn(),
-  getMoneyOperationAccountsMock: vi.fn(),
-  getMoneyOperationAccountSummariesMock: vi.fn(),
-  getMoneyOperationDailyBalancesMock: vi.fn(),
-  getMoneyBalanceReconciliationResultsMock: vi.fn(),
-  getMoneyOperationInvoiceCandidatesMock: vi.fn(),
-  getMoneyOperationMock: vi.fn(),
-  getMoneyOperationsPagedMock: vi.fn(),
-  getMoneyOperationsPrintHtmlMock: vi.fn(),
-  getUserSettingMock: vi.fn(),
-  exportMoneyOperationsCsvMock: vi.fn(),
-  exportMoneyOperationsExcelMock: vi.fn(),
-  exportMoneyOperationsPdfMock: vi.fn(),
-  importBankStatementMock: vi.fn(),
-  postCashOrderMock: vi.fn(),
-  runMoneyBalanceReconciliationMock: vi.fn(),
-  runBankStatementAutoImportMock: vi.fn(),
-  reprocessBankStatementImportMock: vi.fn(),
-  rollbackBankStatementImportMock: vi.fn(),
-  toastErrorMock: vi.fn(),
-  toastSuccessMock: vi.fn(),
-  updateCashOrderMock: vi.fn(),
-  updateMoneyOperationMock: vi.fn(),
-  upsertUserSettingMock: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const toastErrorMock = vi.fn();
+  const toastSuccessMock = vi.fn();
+
+  return {
+    createCashOrderMock: vi.fn(),
+    createCashInventoryMock: vi.fn(),
+    createCashOrderFromPaymentMock: vi.fn(),
+    createCashOrderFromMoneyOperationMock: vi.fn(),
+    cancelCashOrderMock: vi.fn(),
+    copyCashOrderMock: vi.fn(),
+    createMoneyOperationMock: vi.fn(),
+    deleteCashOrderMock: vi.fn(),
+    deleteMoneyOperationMock: vi.fn(),
+    downloadCashOrderPdfMock: vi.fn(),
+    getCashBookMock: vi.fn(),
+    getCashBookPrintHtmlMock: vi.fn(),
+    getCashInventoriesMock: vi.fn(),
+    getCashOrderRegisterMock: vi.fn(),
+    getCashOrderRegisterPrintHtmlMock: vi.fn(),
+    getCashOrderPrintHtmlMock: vi.fn(),
+    getBankStatementImportMock: vi.fn(),
+    getBankStatementImportsMock: vi.fn(),
+    getCashOrderMock: vi.fn(),
+    getIncomeTypesMock: vi.fn(),
+    getMoneyAccountsMock: vi.fn(),
+    getMoneyOperationAccountsMock: vi.fn(),
+    getMoneyOperationAccountSummariesMock: vi.fn(),
+    getMoneyOperationDailyBalancesMock: vi.fn(),
+    getMoneyBalanceReconciliationResultsMock: vi.fn(),
+    getMoneyOperationInvoiceCandidatesMock: vi.fn(),
+    getMoneyOperationMock: vi.fn(),
+    getMoneyOperationsPagedMock: vi.fn(),
+    getMoneyOperationsPrintHtmlMock: vi.fn(),
+    getUserSettingMock: vi.fn(),
+    exportMoneyOperationsCsvMock: vi.fn(),
+    exportMoneyOperationsExcelMock: vi.fn(),
+    exportMoneyOperationsPdfMock: vi.fn(),
+    importBankStatementMock: vi.fn(),
+    postCashOrderMock: vi.fn(),
+    runMoneyBalanceReconciliationMock: vi.fn(),
+    runBankStatementAutoImportMock: vi.fn(),
+    reprocessBankStatementImportMock: vi.fn(),
+    rollbackBankStatementImportMock: vi.fn(),
+    toastMock: { error: toastErrorMock, success: toastSuccessMock },
+    toastErrorMock,
+    toastSuccessMock,
+    updateCashOrderMock: vi.fn(),
+    updateMoneyOperationMock: vi.fn(),
+    upsertUserSettingMock: vi.fn(),
+  };
+});
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 7 } }),
@@ -106,10 +113,7 @@ vi.mock('../../contexts/TabContext', () => ({
 }));
 
 vi.mock('../../hooks/useToast', () => ({
-  useToast: () => ({
-    error: toastErrorMock,
-    success: toastSuccessMock,
-  }),
+  useToast: () => toastMock,
 }));
 
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
@@ -272,6 +276,18 @@ function createOperation(overrides: Partial<MoneyOperation> = {}): MoneyOperatio
     cashOrderStatus: overrides.cashOrderStatus ?? null,
     canCreateCashOrder: overrides.canCreateCashOrder ?? false,
   };
+}
+
+function getLastButton(name: string | RegExp): HTMLElement {
+  const buttons = screen.getAllByRole('button', { name });
+  const button = buttons.at(-1);
+  expect(button).toBeTruthy();
+  return button as HTMLElement;
+}
+
+async function clickJournalAction(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+  await user.click(screen.getByRole('button', { name: 'Экспорт и печать' }));
+  await user.click(await screen.findByRole('button', { name }));
 }
 
 describe('MoneyOperations integration', () => {
@@ -957,7 +973,7 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Bank" />);
 
     await screen.findByText('Поставщик А');
-    await user.click(screen.getByRole('button', { name: 'Печать' }));
+    await clickJournalAction(user, 'Печать');
 
     await waitFor(() =>
       expect(getMoneyOperationsPrintHtmlMock).toHaveBeenCalledWith(
@@ -978,7 +994,7 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Bank" />);
 
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalled());
-    await user.click(screen.getByRole('button', { name: 'PDF' }));
+    await clickJournalAction(user, 'PDF');
 
     await waitFor(() =>
       expect(exportMoneyOperationsPdfMock).toHaveBeenCalledWith(
@@ -999,7 +1015,7 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Bank" />);
 
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalled());
-    await user.click(screen.getByRole('button', { name: 'Excel' }));
+    await clickJournalAction(user, 'Excel');
 
     await waitFor(() =>
       expect(exportMoneyOperationsExcelMock).toHaveBeenCalledWith(
@@ -1415,7 +1431,7 @@ describe('MoneyOperations integration', () => {
     await user.clear(screen.getByLabelText(/^Назначение$/));
     await user.type(screen.getByLabelText(/^Назначение$/), 'Обновлённое назначение');
 
-    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await user.click(getLastButton('Сохранить'));
 
     await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
     expect(updateMoneyOperationMock).toHaveBeenCalledWith(
@@ -1452,7 +1468,7 @@ describe('MoneyOperations integration', () => {
     await user.clear(screen.getByLabelText('ID счёта'));
     await user.type(screen.getByLabelText('ID счёта'), '33');
     await user.type(screen.getByLabelText('Комментарий сверки'), 'Оплата по выписке');
-    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await user.click(getLastButton('Сохранить'));
 
     await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
     expect(updateMoneyOperationMock).toHaveBeenCalledWith(
@@ -1506,7 +1522,7 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Подходящие счета');
     await screen.findByText('Счёт 33 от 20.04.2026');
     await user.click(screen.getByRole('button', { name: /Счёт 33/ }));
-    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await user.click(getLastButton('Сохранить'));
 
     await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
     expect(updateMoneyOperationMock).toHaveBeenCalledWith(
@@ -1560,7 +1576,7 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Подходящие счета');
     await screen.findByText('Счёт 44 от 20.04.2026');
     await user.click(screen.getByRole('button', { name: /Счёт 44/ }));
-    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await user.click(getLastButton('Сохранить'));
 
     await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
     expect(updateMoneyOperationMock).toHaveBeenCalledWith(
@@ -1592,7 +1608,7 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Неизвестный отправитель');
     await user.click(screen.getByRole('button', { name: 'Изменить' }));
     await user.selectOptions(screen.getByLabelText('Статус'), 'Ignored');
-    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await user.click(getLastButton('Сохранить'));
 
     await waitFor(() => expect(updateMoneyOperationMock).toHaveBeenCalledTimes(1));
     expect(updateMoneyOperationMock).toHaveBeenCalledWith(
@@ -1759,6 +1775,7 @@ describe('MoneyOperations integration', () => {
   }, 15000);
 
   it('loads and renders the cash orders journal in the cash section', async () => {
+    const user = userEvent.setup();
     operations = [];
     getCashOrderRegisterMock.mockResolvedValueOnce({
       items: [
@@ -1922,7 +1939,7 @@ describe('MoneyOperations integration', () => {
     const appendixInput = screen.getByDisplayValue('Счёт №33');
     await user.clear(appendixInput);
     await user.type(appendixInput, 'Квитанция к счёту №33');
-    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await user.click(getLastButton('Сохранить'));
     await waitFor(() =>
       expect(updateCashOrderMock).toHaveBeenCalledWith(
         9,
@@ -2059,7 +2076,7 @@ describe('MoneyOperations integration', () => {
     await user.type(screen.getByLabelText('Плательщик'), 'Ахмедова Айтан Рафик Кызы');
     await user.type(screen.getByLabelText('Основание'), 'Оплата по счёту №33');
 
-    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await user.click(getLastButton('Сохранить'));
 
     await waitFor(() =>
       expect(createCashOrderMock).toHaveBeenCalledWith(
@@ -2088,7 +2105,7 @@ describe('MoneyOperations integration', () => {
     await user.click(screen.getByRole('button', { name: 'Создать ордер' }));
     await screen.findByText('Приходный кассовый ордер Новый');
 
-    await user.click(screen.getByRole('button', { name: 'Сохранить' }));
+    await user.click(getLastButton('Сохранить'));
 
     expect(await screen.findByText('Сумма кассового ордера должна быть больше нуля.')).toBeTruthy();
     expect(createCashOrderMock).not.toHaveBeenCalled();
@@ -2156,7 +2173,7 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('ПКО-2026-0005');
     await user.click(screen.getByRole('button', { name: 'ПКО-2026-0005' }));
     await screen.findByText('Черновик');
-    await user.click(screen.getByRole('button', { name: 'Провести' }));
+    await user.click(getLastButton('Провести'));
 
     await waitFor(() => expect(postCashOrderMock).toHaveBeenCalledWith(12));
     expect(toastSuccessMock).toHaveBeenCalledWith('Кассовый ордер проведён.', 'Касса');

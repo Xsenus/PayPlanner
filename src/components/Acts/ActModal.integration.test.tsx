@@ -1,13 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActModal } from './ActModal';
 import type { ActResponsible, Client, Invoice } from '../../types';
 
-const { getActMock, getInvoiceMock, getInvoicesMock } = vi.hoisted(() => ({
+const { getActMock, getInvoiceMock, getInvoicesMock, getClientsV2Mock, getLegalEntitiesPagedMock } = vi.hoisted(() => ({
   getActMock: vi.fn(),
   getInvoiceMock: vi.fn(),
   getInvoicesMock: vi.fn(),
+  getClientsV2Mock: vi.fn(),
+  getLegalEntitiesPagedMock: vi.fn(),
 }));
 
 vi.mock('../../hooks/useTranslation', () => ({
@@ -50,8 +52,10 @@ vi.mock('../../hooks/useLegalEntities', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getAct: getActMock,
+    getClientsV2: getClientsV2Mock,
     getInvoice: getInvoiceMock,
     getInvoices: getInvoicesMock,
+    getLegalEntitiesPaged: getLegalEntitiesPagedMock,
   },
 }));
 
@@ -80,12 +84,76 @@ function createResponsible(id: number, fullName: string): ActResponsible {
   };
 }
 
+function getPickerOptionAction(label: HTMLElement): HTMLButtonElement {
+  let current: HTMLElement | null = label;
+
+  while (current && current !== document.body) {
+    const actions = within(current).queryAllByRole('button', { name: 'Выбрать' });
+    if (actions.length === 1) {
+      return actions[0] as HTMLButtonElement;
+    }
+    current = current.parentElement;
+  }
+
+  throw new Error(`Не найдена кнопка выбора для ${label.textContent ?? 'контрагента'}`);
+}
+
+async function selectPickerOption(name: string): Promise<void> {
+  const labels = await screen.findAllByText(name);
+  for (const label of labels.reverse()) {
+    try {
+      fireEvent.click(getPickerOptionAction(label));
+      return;
+    } catch {
+      // Some names can also exist in hidden selects outside the picker.
+    }
+  }
+
+  throw new Error(`Не найден вариант выбора ${name}`);
+}
+
 describe('ActModal integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getActMock.mockResolvedValue(null);
+    getClientsV2Mock.mockResolvedValue({
+      items: [
+        createClient(1, 'Базовый клиент'),
+        createClient(2, 'ООО Поставщик'),
+        createClient(7, 'Иван Иванов'),
+        createClient(9, 'Другой поставщик'),
+      ],
+      total: 4,
+      page: 1,
+      pageSize: 25,
+    });
     getInvoiceMock.mockResolvedValue(null);
     getInvoicesMock.mockResolvedValue({ items: [] });
+    getLegalEntitiesPagedMock.mockResolvedValue({
+      items: [
+        {
+          id: 301,
+          shortName: 'ООО Юрклиент',
+          fullName: 'Общество с ограниченной ответственностью Юрклиент',
+          inn: '5400000001',
+          kpp: '540001001',
+          clients: [],
+          clientsCount: 0,
+          createdAt: '2026-04-01T00:00:00Z',
+        },
+        {
+          id: 302,
+          shortName: 'ООО Поставщик ЮЛ',
+          inn: '5400000002',
+          clients: [],
+          clientsCount: 0,
+          createdAt: '2026-04-01T00:00:00Z',
+        },
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 25,
+    });
   });
 
   it('uses the invoice type, hides inn fields and submits only the selected invoice positions', async () => {
@@ -230,10 +298,10 @@ describe('ActModal integration', () => {
       expect(getInvoicesMock).toHaveBeenCalledWith({ page: 1, pageSize: 200 });
     });
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Справочник' })[0]);
-    fireEvent.click((await screen.findByText('ООО Поставщик')).closest('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать' }));
+    await selectPickerOption('ООО Поставщик');
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Справочник' })[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Справочник' }));
     expect(await screen.findByText(/Счет №INV-618 от 2026-04-10/i)).toBeTruthy();
     expect(screen.queryByText(/Счет №INV-999 от 2026-04-11/i)).toBeNull();
     fireEvent.click((await screen.findByText(/Счет №INV-618 от 2026-04-10/i)).closest('button') as HTMLButtonElement);
@@ -246,7 +314,7 @@ describe('ActModal integration', () => {
       expect(screen.getByRole('button', { name: 'Выбрать все' })).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Очистить' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Очистить' }).at(-1)!);
     expect(screen.getByText('Пока в акт не добавлена ни одна позиция счета.')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '+ Добавить' }));
@@ -332,8 +400,9 @@ describe('ActModal integration', () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Справочник' })[0]);
-    fireEvent.click((await screen.findByText('ООО Юрклиент')).closest('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Юридические лица' }));
+    await selectPickerOption('ООО Юрклиент');
     fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'LEGAL-ACT-1' } });
     fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '6400' } });
     fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
@@ -378,8 +447,8 @@ describe('ActModal integration', () => {
       screen.getByText('Можно выбрать счет из справочника или оставить акт пустым и заполнить его вручную.'),
     ).toBeTruthy();
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Справочник' })[0]);
-    fireEvent.click((await screen.findByText('Иван Иванов')).closest('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать' }));
+    await selectPickerOption('Иван Иванов');
 
     fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'MANUAL-1' } });
     fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '4321.50' } });

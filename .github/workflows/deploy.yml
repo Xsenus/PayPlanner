@@ -59,8 +59,8 @@ jobs:
         if: ${{ hashFiles('package-lock.json') == '' }}
         run: npm install
 
-      - name: Test FE navigation guard
-        run: npm test -- src/App.routing.test.ts src/components/Navigation/Navigation.test.tsx
+      - name: Test FE guard and unit
+        run: npm run test:ci
 
       - name: Build FE
         env:
