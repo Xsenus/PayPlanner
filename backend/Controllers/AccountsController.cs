@@ -67,6 +67,12 @@ public class AccountsController : ControllerBase
                 PaidAmount = payment.PaidAmount,
                 Type = payment.Type,
                 Status = payment.Status,
+                WorkflowStatus = payment.InvoiceWorkflowStatus,
+                SentForSigningAt = payment.InvoiceSentForSigningAt,
+                SignedAt = payment.InvoiceSignedAt,
+                CancelledAt = payment.InvoiceCancelledAt,
+                CancelledByUserId = payment.InvoiceCancelledByUserId,
+                CancelledReason = payment.InvoiceCancelledReason,
                 IsPaid = payment.IsPaid,
                 PaidDate = payment.PaidDate,
                 SystemNotes = payment.SystemNotes,
@@ -974,6 +980,12 @@ public class AccountsController : ControllerBase
             OutstandingAmount = group.OutstandingAmount,
             Type = representative.Type,
             Status = effectiveInvoiceStatus,
+            WorkflowStatus = representative.WorkflowStatus,
+            SentForSigningAt = representative.SentForSigningAt,
+            SignedAt = representative.SignedAt,
+            CancelledAt = representative.CancelledAt,
+            CancelledByUserId = representative.CancelledByUserId,
+            CancelledReason = representative.CancelledReason,
             IsPaid = effectiveInvoiceStatus == PaymentStatus.Completed,
             PaidDate = group.PaidDate ?? representative.PaidDate,
             ClientId = representative.ClientId,
@@ -1612,6 +1624,12 @@ public class AccountsController : ControllerBase
         public decimal PaidAmount { get; init; }
         public PaymentType Type { get; init; }
         public PaymentStatus Status { get; init; }
+        public string WorkflowStatus { get; init; } = InvoiceWorkflowStatus.Draft;
+        public DateTime? SentForSigningAt { get; init; }
+        public DateTime? SignedAt { get; init; }
+        public DateTime? CancelledAt { get; init; }
+        public int? CancelledByUserId { get; init; }
+        public string? CancelledReason { get; init; }
         public bool IsPaid { get; init; }
         public DateTime? PaidDate { get; init; }
         public string? SystemNotes { get; init; }

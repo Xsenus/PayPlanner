@@ -568,6 +568,33 @@ describe('Accounts integration', () => {
     expect(screen.getByRole('heading', { name: 'Кредиторка' })).toBeTruthy();
   });
 
+  it('shows document signing status separately from payment status', () => {
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        createAccountRow({
+          invoice: createInvoice({
+            workflowStatus: 'SignedByClient',
+            signedAt: '2026-04-03T12:00:00Z',
+          }),
+          status: 'paid',
+        }),
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts />);
+
+    const row = screen.getByRole('button', { name: '24' }).closest('tr');
+    expect(row).toBeTruthy();
+    expect(within(row as HTMLTableRowElement).getByText('Оплачен')).toBeTruthy();
+    expect(within(row as HTMLTableRowElement).getByText('Подписан')).toBeTruthy();
+  });
+
   it('passes grouped invoice operations into the editor opened from the accounts registry', async () => {
     render(<Accounts routeInvoiceId={528} />);
 

@@ -82,6 +82,7 @@ interface AccountsProps {
 
 type FilterType = PaymentKind | 'All';
 type AccountStatus = 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
+type InvoiceSigningStatus = 'notSigned' | 'onSigning' | 'signed' | 'cancelled';
 type ClientRoleFilter = ClientRole | 'all';
 type ColumnKey =
   | 'date'
@@ -89,6 +90,7 @@ type ColumnKey =
   | 'amount'
   | 'counterparty'
   | 'status'
+  | 'signingStatus'
   | 'dueDate'
   | 'paidDate'
   | 'act'
@@ -228,6 +230,7 @@ const ACCOUNT_COLUMNS = [
   { key: 'amount', label: 'Сумма', defaultVisible: true, defaultWidth: 150 },
   { key: 'counterparty', label: 'Клиент / поставщик', defaultVisible: true, defaultWidth: 240 },
   { key: 'status', label: 'Статус', defaultVisible: true, defaultWidth: 170 },
+  { key: 'signingStatus', label: 'Статус документа', defaultVisible: true, defaultWidth: 180 },
   { key: 'dueDate', label: 'Оплатить до', defaultVisible: true, defaultWidth: 150 },
   { key: 'paidDate', label: 'Дата оплаты', defaultVisible: false, defaultWidth: 150 },
   { key: 'act', label: 'Акт', defaultVisible: true, defaultWidth: 210 },
@@ -263,6 +266,14 @@ function deriveStatusFromPayments(payments: Payment[], fallback?: Invoice | null
   );
 
   return anyProgress ? 'partial' : 'created';
+}
+
+function deriveInvoiceSigningStatus(invoice?: Invoice | null): InvoiceSigningStatus {
+  if (!invoice) return 'notSigned';
+  if (invoice.cancelledAt || invoice.workflowStatus === 'Cancelled') return 'cancelled';
+  if (invoice.signedAt || invoice.workflowStatus === 'SignedByClient') return 'signed';
+  if (invoice.sentForSigningAt || invoice.workflowStatus === 'OnSigning') return 'onSigning';
+  return 'notSigned';
 }
 
 function accountKey(value?: string | null): string | null {
@@ -551,6 +562,18 @@ export function Accounts({
     partial: 'bg-blue-100 text-blue-700 border border-blue-200',
     overdue: 'bg-rose-100 text-rose-700 border border-rose-200',
     cancelled: 'bg-slate-100 text-slate-700 border border-slate-200',
+  };
+  const signingStatusLabels: Record<InvoiceSigningStatus, string> = {
+    notSigned: 'Не подписан',
+    onSigning: 'На подписании',
+    signed: 'Подписан',
+    cancelled: 'Аннулирован',
+  };
+  const signingStatusClasses: Record<InvoiceSigningStatus, string> = {
+    notSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+    onSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
+    signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
   const statusBadgeClass =
     'inline-flex max-w-full items-center justify-center rounded-full px-3 py-1 text-center text-xs font-medium leading-tight whitespace-normal';
@@ -1115,6 +1138,7 @@ export function Accounts({
       { key: 'amount', label: t('invoiceAmount') ?? t('amount') ?? 'Сумма', sortable: true },
       { key: 'counterparty', label: t('invoiceClient') ?? 'Клиент / поставщик', sortable: true },
       { key: 'status', label: t('invoiceStatus') ?? t('status') ?? 'Статус', sortable: false },
+      { key: 'signingStatus', label: 'Статус документа', sortable: false },
       { key: 'dueDate', label: t('invoiceDueDate') ?? 'Оплатить до', sortable: true },
       { key: 'paidDate', label: t('paidDate') ?? 'Дата оплаты', sortable: false },
       { key: 'act', label: t('invoiceAct') ?? 'Акт', sortable: false },
@@ -2371,6 +2395,7 @@ export function Accounts({
                     const invoice = row.invoice;
                     const invoiceId = typeof invoice?.id === 'number' ? invoice.id : null;
                     const accountStatus = row.status;
+                    const signingStatus = deriveInvoiceSigningStatus(invoice);
                     const type = row.type;
                     const typeBadgeClass = typeBadgeClasses[type];
                     const typeLabel = typeLabels[type];
@@ -2485,6 +2510,14 @@ export function Accounts({
                                         <div className="text-center text-xs text-gray-500">{invoice.paymentStatusName}</div>
                                       )}
                                     </div>
+                                  </td>
+                                );
+                              case 'signingStatus':
+                                return (
+                                  <td key={column.key} className="px-4 py-3 text-center align-middle">
+                                    <span className={`${statusBadgeClass} ${signingStatusClasses[signingStatus]}`}>
+                                      {signingStatusLabels[signingStatus]}
+                                    </span>
                                   </td>
                                 );
                               case 'dueDate':

@@ -48,6 +48,38 @@ public class AccountsControllerTests
     }
 
     [Fact]
+    public async Task GetRegistry_IncludesInvoiceDocumentSigningFields()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateSignedInvoiceDocumentAsync(db);
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: null,
+            to: null,
+            status: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+
+        Assert.NotNull(row.Invoice);
+        Assert.Equal(InvoiceWorkflowStatus.SignedByClient, row.Invoice!.WorkflowStatus);
+        Assert.Equal(new DateTime(2026, 4, 2, 10, 0, 0), row.Invoice.SentForSigningAt);
+        Assert.Equal(new DateTime(2026, 4, 3, 11, 30, 0), row.Invoice.SignedAt);
+        Assert.Null(row.Invoice.CancelledAt);
+        Assert.Null(row.Invoice.CancelledReason);
+    }
+
+    [Fact]
     public async Task GetRegistry_ReturnsOverdueStatus_WhenInstallmentInvoiceHasPaidProgress_AndOverdueTail()
     {
         await using var db = await CreateContextAsync();
@@ -553,6 +585,31 @@ public class AccountsControllerTests
         payment.PaidAmount = 15_000m;
         payment.PaidDate = new DateTime(2026, 2, 1);
         payment.LastPaymentDate = payment.PaidDate;
+
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CreateSignedInvoiceDocumentAsync(PaymentContext db)
+    {
+        var invoice = new Invoice
+        {
+            Number = "INV-SIGNED",
+            Date = new DateTime(2026, 4, 2),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(invoice.Date, 24_000m, "Signed invoice");
+        payment.DocumentKind = DocumentKind.Invoice;
+        payment.InvoiceId = invoice.Id;
+        payment.Account = invoice.Number;
+        payment.AccountDate = invoice.Date;
+        payment.Status = PaymentStatus.Pending;
+        payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.SignedByClient;
+        payment.InvoiceSentForSigningAt = new DateTime(2026, 4, 2, 10, 0, 0);
+        payment.InvoiceSignedAt = new DateTime(2026, 4, 3, 11, 30, 0);
 
         db.Payments.Add(payment);
         await db.SaveChangesAsync();
