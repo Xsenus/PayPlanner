@@ -263,6 +263,65 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public void RenderHtml_RendersLegalEntityBuyerRequisitesAndFoundation()
+    {
+        var legalEntity = new LegalEntity
+        {
+            ShortName = "ООО Ромашка",
+            FullName = "Общество с ограниченной ответственностью \"Ромашка\"",
+            Inn = "6311000000",
+            Kpp = "631101001",
+            Ogrn = "1236300000000",
+            Phone = "+7 846 200-00-00",
+            Email = "office@example.test",
+            Addresses =
+            [
+                new AddressRecord
+                {
+                    Type = AddressType.Legal,
+                    Value = "Самара, ул. Юридическая, д. 5",
+                    IsPrimary = true,
+                },
+            ],
+        };
+        var payment = new Payment
+        {
+            Account = "77",
+            AccountDate = new DateTime(2026, 4, 10),
+            Date = new DateTime(2026, 4, 20),
+            Amount = 45_000m,
+            Type = PaymentType.Income,
+            LegalEntity = legalEntity,
+            Contract = new Contract
+            {
+                Number = "LE-9",
+                Date = new DateTime(2026, 4, 5),
+                Title = "Договор с юрлицом",
+            },
+        };
+
+        var html = InvoiceDocumentTemplateEngine.RenderHtml(
+            InvoiceDocumentTemplateEngine.CreateDefaultSettings().DefaultTemplateHtml,
+            payment,
+            [
+                new InvoiceLineItemDto
+                {
+                    Name = "Юридические услуги",
+                    Quantity = 1m,
+                    Unit = "усл. ед.",
+                    Price = 45_000m,
+                },
+            ],
+            mainCompany: null,
+            includeSignatureAndSeal: false);
+
+        Assert.Contains("Общество с ограниченной ответственностью &quot;Ромашка&quot;, ИНН 6311000000, КПП 631101001, ОГРН 1236300000000", html);
+        Assert.Contains("<span class=\"counterparty-line\">Самара, ул. Юридическая, д. 5</span>", html);
+        Assert.Contains(">Основание:</td>", html);
+        Assert.Contains("Договор № LE-9 от 05.04.2026 Договор с юрлицом", html);
+    }
+
+    [Fact]
     public async Task GetDocument_RendersInstallmentSchedule_WhenInstallmentsExist()
     {
         await using var db = await CreateContextAsync();

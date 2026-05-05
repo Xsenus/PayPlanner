@@ -725,6 +725,71 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public void ActDocumentTemplateEngine_RendersLegalEntityBuyerBlock_LikeInvoice()
+    {
+        var legalEntity = new LegalEntity
+        {
+            Id = 301,
+            ShortName = "ООО Ромашка",
+            FullName = "Общество с ограниченной ответственностью \"Ромашка\"",
+            Inn = "6311000000",
+            Kpp = "631101001",
+            Ogrn = "1236300000000",
+            Director = "Романов Роман Романович",
+            Addresses =
+            [
+                new AddressRecord
+                {
+                    Type = AddressType.Legal,
+                    Value = "Самара, ул. Юридическая, д. 5",
+                    IsPrimary = true,
+                },
+            ],
+        };
+        var act = new Act
+        {
+            Number = "36",
+            Date = new DateTime(2026, 4, 24),
+            Amount = 45_000m,
+            Invoice = new Payment
+            {
+                Type = PaymentType.Income,
+                Account = "77",
+                AccountDate = new DateTime(2026, 4, 10),
+                LegalEntity = legalEntity,
+                CounterpartyName = "ООО Ромашка",
+                Invoice = new Invoice
+                {
+                    Number = "77",
+                    Date = new DateTime(2026, 4, 10),
+                },
+            },
+        };
+
+        var html = ActDocumentTemplateEngine.RenderHtml(
+            act,
+            [
+                new ActLineItem
+                {
+                    Name = "Юридические услуги",
+                    Quantity = 1m,
+                    Unit = "услуга",
+                    Price = 45_000m,
+                    SortOrder = 0,
+                },
+            ],
+            mainCompany: null,
+            includeSignatureAndSeal: false);
+
+        var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
+
+        Assert.Contains("Общество с ограниченной ответственностью &quot;Ромашка&quot;, ИНН 6311000000, КПП 631101001, ОГРН 1236300000000", normalizedHtml);
+        Assert.Contains("Самара, ул. Юридическая, д. 5", normalizedHtml);
+        Assert.Contains("Счет № 77 от 10.04.2026", normalizedHtml);
+        Assert.Contains("/ Романов Р. Р. /", normalizedHtml);
+    }
+
+    [Fact]
     public void ActDocumentTemplateEngine_RendersKubStyleSlashSignaturesForBothParties()
     {
         var act = new Act

@@ -408,6 +408,10 @@ public static class InvoiceDocumentTemplateEngine
         {
             var legalName = FirstNotEmpty(directLegalEntity.FullName, directLegalEntity.ShortName, payment.CounterpartyName, "Контрагент");
             var legalAddress = LegalEntityAddressResolver.ResolvePreferredAddress(directLegalEntity);
+            var legalContractValue = BuildBuyerContractValue(payment.Contract);
+            var legalContract = string.IsNullOrWhiteSpace(legalContractValue)
+                ? string.Empty
+                : $"Договор: {legalContractValue}";
             var legalRequisitesLines = new List<string>
             {
                 string.Join(", ", new[]
@@ -432,8 +436,8 @@ public static class InvoiceDocumentTemplateEngine
                 Snils = string.Empty,
                 Phone = directLegalEntity.Phone ?? string.Empty,
                 Email = directLegalEntity.Email ?? string.Empty,
-                Contract = string.Empty,
-                Foundation = string.Empty,
+                Contract = legalContract,
+                Foundation = legalContractValue,
                 Case = BuildBuyerCase(payment),
                 Requisites = string.Join(", ", legalRequisitesLines.Where(static part => !string.IsNullOrWhiteSpace(part))),
                 RequisitesHtml = BuildCounterpartyLinesHtml(legalRequisitesLines),

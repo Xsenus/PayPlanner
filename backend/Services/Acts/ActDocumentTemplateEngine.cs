@@ -482,14 +482,41 @@ public static class ActDocumentTemplateEngine
             companyParty.SignatoryShortName);
 
     private static BuyerInfo BuildBuyer(Act act)
-        => BuildClientParty(
-            EnumerateBuyerClients(act).ToList(),
-            FirstNotEmpty(
-                act.Client?.Name,
-                act.Invoice?.Client?.Name,
-                act.Invoice?.ExpenseClient?.Name,
-                act.Invoice?.CounterpartyName,
-                "Заказчик"));
+    {
+        var clients = EnumerateBuyerClients(act).ToList();
+        if (clients.Count > 0)
+        {
+            return BuildClientParty(
+                clients,
+                FirstNotEmpty(
+                    act.Client?.Name,
+                    act.Invoice?.Client?.Name,
+                    act.Invoice?.ExpenseClient?.Name,
+                    act.Invoice?.CounterpartyName,
+                    "Заказчик"));
+        }
+
+        var legalEntity = ResolveIncomeBuyerLegalEntity(act);
+        if (legalEntity is not null)
+        {
+            return BuildLegalEntityBuyerParty(
+                legalEntity,
+                FirstNotEmpty(
+                    legalEntity.FullName,
+                    legalEntity.ShortName,
+                    act.Invoice?.CounterpartyName,
+                    "Заказчик"));
+        }
+
+        return BuildClientParty(
+            [],
+            FirstNotEmpty(act.Invoice?.CounterpartyName, "Заказчик"));
+    }
+
+    private static LegalEntity? ResolveIncomeBuyerLegalEntity(Act act)
+        => act.Invoice?.LegalEntity
+           ?? act.LegalEntity
+           ?? act.Invoice?.ExpenseLegalEntity;
 
     private static BuyerInfo BuildLegalEntityBuyerParty(LegalEntity? legalEntity, string fallbackName)
     {
@@ -515,7 +542,7 @@ public static class ActDocumentTemplateEngine
             Encode(string.Join(", ", requisitesLines.Where(static value => !string.IsNullOrWhiteSpace(value)))),
             string.Join("<br/>", requisitesLines.Where(static value => !string.IsNullOrWhiteSpace(value)).Select(Encode)),
             displayName,
-            BuildShortName(displayName));
+            BuildShortName(FirstNotEmpty(legalEntity?.Director, displayName)));
     }
 
     private static BuyerInfo BuildClientParty(IReadOnlyCollection<Client> clients, string fallbackName)
