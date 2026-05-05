@@ -667,6 +667,50 @@ describe('Accounts integration', () => {
     });
   });
 
+  it('keeps the acts cell compact and opens extra acts from the counter', async () => {
+    const firstAct = {
+      id: 901,
+      number: 'ACT-901',
+      date: '2026-04-05',
+      amount: 15000,
+      status: 'Created',
+    } as Act;
+    const secondAct = {
+      id: 902,
+      number: 'ACT-902',
+      date: '2026-04-06',
+      amount: 15000,
+      status: 'Signed',
+    } as Act;
+    const onOpenActPage = vi.fn();
+
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [{
+        ...createAccountRow(),
+        acts: [firstAct, secondAct],
+      }],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts onOpenActPage={onOpenActPage} />);
+
+    expect(screen.getByRole('button', { name: /Акт №ACT-901/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Акт №ACT-902/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Показать все акты счета 24/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /Акт №ACT-902/i }));
+
+    expect(onOpenActPage).toHaveBeenCalledWith(902, {
+      invoiceId: 528,
+    });
+  });
+
   it('keeps grouped payments when the fetched invoice has another row id but the same invoice entity id', async () => {
     getInvoiceMock.mockResolvedValue(createInvoice({ id: 777 }));
 

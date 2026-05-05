@@ -392,6 +392,7 @@ export function Accounts({
   const [actModalInvoice, setActModalInvoice] = useState<AccountRow | null>(null);
   const [actModalMode, setActModalMode] = useState<'create' | 'edit'>('create');
   const [activeAct, setActiveAct] = useState<Act | null>(null);
+  const [expandedActListKey, setExpandedActListKey] = useState<string | null>(null);
   const [actInitialValues, setActInitialValues] = useState<Partial<ActInput> & { amount?: number | null } | null>(null);
   const [actClients, setActClients] = useState<Client[]>([]);
   const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
@@ -1613,6 +1614,7 @@ export function Accounts({
   };
 
   const openActCreateModal = (row: AccountRow) => {
+    setExpandedActListKey(null);
     const normalizedDate =
       toDateInputValue(row.invoice?.date ?? row.dueDate) || formatLocalYMD(new Date());
     const nextInitialValues: Partial<ActInput> & { amount?: number | null } = {
@@ -1646,6 +1648,7 @@ export function Accounts({
   };
 
   const openActEditModal = (act: Act, row: AccountRow) => {
+    setExpandedActListKey(null);
     if (onOpenActPage) {
       onOpenActPage(act.id, {
         invoiceId: act.invoiceId ?? row.invoice?.id ?? null,
@@ -2404,6 +2407,10 @@ export function Accounts({
                     const typeBadgeClass = typeBadgeClasses[type];
                     const typeLabel = typeLabels[type];
                     const actsForInvoice = row.acts ?? [];
+                    const primaryAct = actsForInvoice[0] ?? null;
+                    const extraActs = actsForInvoice.slice(1);
+                    const actListKey = `${row.accountNumber}-${invoice?.id ?? 'no-invoice'}`;
+                    const isActListOpen = expandedActListKey === actListKey;
                     const primaryName = invoice?.clientName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
                     const caseLines = getInvoiceCaseSummary(invoice);
                     const clientId = typeof invoice?.clientId === 'number' ? invoice.clientId : null;
@@ -2531,46 +2538,94 @@ export function Accounts({
                               case 'act':
                                 return (
                                   <td key={column.key} className="px-4 py-3 text-center align-middle">
-                                    <div className="flex flex-col items-center gap-2">
-                                      {actsForInvoice.length > 0 ? (
+                                    <div className="relative flex items-center justify-center gap-1.5">
+                                      {primaryAct ? (
                                         <>
-                                          <div className="flex items-center justify-center gap-2">
-                                            {canCreate && (
-                                              <button
-                                                type="button"
-                                                onClick={() => openActCreateModal(row)}
-                                                className="rounded-full border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100"
-                                                aria-label={t('addAct') ?? 'Добавить акт'}
-                                              >
-                                                <FilePlus2 className="h-4 w-4" />
-                                              </button>
-                                            )}
-                                          </div>
-                                          <div className="flex flex-col items-center gap-2">
-                                            {actsForInvoice.map((act) => (
-                                              <button
-                                                key={act.id}
-                                                type="button"
-                                                onClick={() => openActEditModal(act, row)}
-                                                className="group inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
-                                              >
-                                                <span>{act.number ? `Акт №${act.number}` : t('act') ?? 'Акт'}</span>
-                                                <span className="text-[11px] font-medium text-gray-500">{formatDate(act.date)}</span>
-                                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{actStatusLabels[act.status]}</span>
-                                              </button>
-                                            ))}
-                                          </div>
-                                        </>
-                                      ) : (
-                                        canCreate && (
+                                          {canCreate && (
+                                            <button
+                                              type="button"
+                                              onClick={(event) => { event.stopPropagation(); openActCreateModal(row); }}
+                                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-blue-200 bg-blue-50 text-blue-700 transition hover:bg-blue-100"
+                                              aria-label={t('addAct') ?? 'Добавить акт'}
+                                            >
+                                              <FilePlus2 className="h-4 w-4" />
+                                            </button>
+                                          )}
                                           <button
                                             type="button"
-                                            onClick={() => openActCreateModal(row)}
-                                            className="rounded-full border border-blue-200 bg-blue-50 p-2 text-blue-700 transition hover:bg-blue-100"
+                                            onClick={(event) => { event.stopPropagation(); openActEditModal(primaryAct, row); }}
+                                            className="inline-flex w-[7.5rem] min-w-0 flex-col items-start rounded-md border border-slate-200 bg-white px-2 py-1 text-left text-xs shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                                            title={`${primaryAct.number ? `Акт №${primaryAct.number}` : t('act') ?? 'Акт'} · ${formatDate(primaryAct.date)} · ${actStatusLabels[primaryAct.status]}`}
+                                          >
+                                            <span className="block w-full truncate font-semibold text-blue-700">
+                                              {primaryAct.number ? `Акт №${primaryAct.number}` : t('act') ?? 'Акт'}
+                                            </span>
+                                            <span className="block w-full truncate text-[11px] font-medium text-slate-500">
+                                              {formatDate(primaryAct.date)} · {actStatusLabels[primaryAct.status]}
+                                            </span>
+                                          </button>
+                                          {extraActs.length > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                setExpandedActListKey(isActListOpen ? null : actListKey);
+                                              }}
+                                              className={`inline-flex h-8 min-w-8 shrink-0 items-center justify-center rounded-md border px-2 text-xs font-semibold transition ${
+                                                isActListOpen
+                                                  ? 'border-blue-300 bg-blue-50 text-blue-700'
+                                                  : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:text-blue-700'
+                                              }`}
+                                              aria-expanded={isActListOpen}
+                                              aria-label={`Показать все акты счета ${row.accountNumber}`}
+                                            >
+                                              +{extraActs.length}
+                                            </button>
+                                          )}
+                                          {isActListOpen && (
+                                            <div
+                                              className="absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 rounded-lg border border-slate-200 bg-white p-2 text-left shadow-lg"
+                                              onClick={(event) => event.stopPropagation()}
+                                            >
+                                              <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                                Акты по счету
+                                              </div>
+                                              <div className="space-y-1">
+                                                {actsForInvoice.map((act) => (
+                                                  <button
+                                                    key={act.id}
+                                                    type="button"
+                                                    onClick={(event) => { event.stopPropagation(); openActEditModal(act, row); }}
+                                                    className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-blue-50"
+                                                  >
+                                                    <span className="min-w-0">
+                                                      <span className="block truncate text-xs font-semibold text-blue-700">
+                                                        {act.number ? `Акт №${act.number}` : t('act') ?? 'Акт'}
+                                                      </span>
+                                                      <span className="block text-[11px] font-medium text-slate-500">{formatDate(act.date)}</span>
+                                                    </span>
+                                                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                                                      {actStatusLabels[act.status]}
+                                                    </span>
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        canCreate ? (
+                                          <button
+                                            type="button"
+                                            onClick={(event) => { event.stopPropagation(); openActCreateModal(row); }}
+                                            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
                                             aria-label={t('actCreateFromInvoice') ?? 'Создать акт из счёта'}
                                           >
-                                            <FilePlus2 className="h-5 w-5" />
+                                            <FilePlus2 className="h-4 w-4" />
+                                            <span>Акт</span>
                                           </button>
+                                        ) : (
+                                          <span className="text-slate-400">—</span>
                                         )
                                       )}
                                     </div>
