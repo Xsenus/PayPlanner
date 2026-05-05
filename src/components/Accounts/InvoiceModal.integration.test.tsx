@@ -532,6 +532,8 @@ describe('InvoiceModal integration', () => {
     await screen.findByText('Оплата по счету №24');
     expect(screen.queryByText('Связанные платежи пока не добавлены.')).toBeNull();
     expect(screen.getByText('Зачтено с баланса: 750 ₽')).toBeTruthy();
+    expect(screen.getByText('Ожидаемая дата: 02.04.2026')).toBeTruthy();
+    expect(screen.getByText('Фактическая дата: 03.04.2026')).toBeTruthy();
     expect(screen.getAllByText(/₽/).length).toBeGreaterThan(0);
   });
 
@@ -759,6 +761,8 @@ describe('InvoiceModal integration', () => {
     await screen.findByText((content) => content.includes('26') && content.includes('1/2'));
     expect(screen.getAllByText(/1\/2/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/2\/2/).length).toBeGreaterThan(0);
+    expect(screen.getByText('Ожидаемая дата: 10.05.2026')).toBeTruthy();
+    expect(screen.queryByText('Фактическая дата: —')).toBeNull();
     expect(screen.getAllByText(/11\s*200/).length).toBeGreaterThan(0);
   });
 

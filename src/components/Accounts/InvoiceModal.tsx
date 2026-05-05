@@ -478,8 +478,12 @@ function moneyOperationMatchStatusLabel(status?: MoneyOperation['matchStatus']):
   }
 }
 
-function resolveRelatedPaymentDate(payment: Payment): string {
-  return payment.paidDate ?? payment.lastPaymentDate ?? payment.plannedDate ?? payment.date ?? '';
+function resolveRelatedPaymentExpectedDate(payment: Payment): string {
+  return payment.plannedDate ?? payment.date ?? '';
+}
+
+function resolveRelatedPaymentActualDate(payment: Payment): string {
+  return payment.paidDate ?? payment.lastPaymentDate ?? '';
 }
 
 function formatContractSidebarLabel(contract: Contract | null): string {
@@ -490,12 +494,11 @@ function formatContractSidebarLabel(contract: Contract | null): string {
 }
 
 function formatRelatedPaymentLinkLabel(payment: Payment): string {
-  const dateLabel = formatDate(resolveRelatedPaymentDate(payment)) || 'без даты';
   const sourceLabel = payment.paymentSource?.name?.trim();
   const amountLabel = formatCurrencySmart(payment.amount ?? 0).short;
   return sourceLabel
-    ? `от ${dateLabel} ${sourceLabel.toLowerCase()}: ${amountLabel}`
-    : `от ${dateLabel}: ${amountLabel}`;
+    ? `${amountLabel} · ${sourceLabel}`
+    : amountLabel;
 }
 
 function getInstallmentPlanLastDate(plan: InstallmentPlanInput | null | undefined): string {
@@ -1304,6 +1307,12 @@ export function InvoiceModal({
   const selectedPaymentPreviewInstallment = selectedPaymentPreview
     ? parseInstallmentPaymentMetadata(selectedPaymentPreview.systemNotes)
     : null;
+  const selectedPaymentPreviewExpectedDate = selectedPaymentPreview
+    ? resolveRelatedPaymentExpectedDate(selectedPaymentPreview)
+    : '';
+  const selectedPaymentPreviewActualDate = selectedPaymentPreview
+    ? resolveRelatedPaymentActualDate(selectedPaymentPreview)
+    : '';
   const defaultContractClients = useMemo<ContractClient[]>(
     () =>
       selectedClient
@@ -3581,6 +3590,8 @@ export function InvoiceModal({
                         {displayPayments.map((payment) => {
                           const installmentMeta = parseInstallmentPaymentMetadata(payment.systemNotes);
                           const appliedClientBalanceAmount = getAppliedClientBalanceAmount(payment.systemNotes);
+                          const expectedPaymentDate = resolveRelatedPaymentExpectedDate(payment);
+                          const actualPaymentDate = resolveRelatedPaymentActualDate(payment);
                           const installmentSequenceLabel = installmentMeta
                             ? `${installmentMeta.sequence}/${Math.max(installmentMeta.months, installmentMeta.sequence)}`
                             : null;
@@ -3610,6 +3621,13 @@ export function InvoiceModal({
                               </div>
                               <div className="mt-1 text-xs text-slate-600">
                                 {payment.description?.trim() || 'Без описания'}
+                              </div>
+                              <div className="mt-2 grid gap-1 text-xs text-slate-500">
+                                <span>Ожидаемая дата: {formatDate(expectedPaymentDate) || '—'}</span>
+                                {actualPaymentDate ? (
+                                  <span>Фактическая дата: {formatDate(actualPaymentDate) || actualPaymentDate}</span>
+                                ) : null}
+                                {payment.account ? <span>Счёт: {payment.account}</span> : null}
                               </div>
                               <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <span
@@ -4113,6 +4131,8 @@ export function InvoiceModal({
                       const canEditInvoiceManagedPayment = false;
                       const canEditRelatedPayment = Boolean(onEditRelatedPayment);
                       const canDeleteRelatedPayment = Boolean(onDeleteRelatedPayment) && !invoiceManagedPayment;
+                      const expectedPaymentDate = resolveRelatedPaymentExpectedDate(payment);
+                      const actualPaymentDate = resolveRelatedPaymentActualDate(payment);
                       const installmentSequenceLabel = installmentMeta
                         ? `${installmentMeta.sequence}/${Math.max(installmentMeta.months, installmentMeta.sequence)}`
                         : null;
@@ -4149,8 +4169,10 @@ export function InvoiceModal({
                             {payment.description?.trim() || 'Без описания'}
                           </div>
                           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                            <span>План: {formatDate(payment.plannedDate || payment.date) || '—'}</span>
-                            <span>Факт: {formatDate(payment.paidDate || payment.lastPaymentDate) || '—'}</span>
+                            <span>Ожидаемая дата: {formatDate(expectedPaymentDate) || '—'}</span>
+                            {actualPaymentDate ? (
+                              <span>Фактическая дата: {formatDate(actualPaymentDate) || actualPaymentDate}</span>
+                            ) : null}
                             {payment.account && <span>Счёт: {payment.account}</span>}
                           </div>
                         </div>
@@ -4712,17 +4734,19 @@ export function InvoiceModal({
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl border border-slate-200 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Плановая дата</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Ожидаемая дата</div>
                   <div className="mt-2 text-sm font-medium text-slate-900">
-                    {formatDate(selectedPaymentPreview.plannedDate || selectedPaymentPreview.date) || '—'}
+                    {formatDate(selectedPaymentPreviewExpectedDate) || '—'}
                   </div>
                 </div>
-                <div className="rounded-xl border border-slate-200 px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Дата оплаты</div>
-                  <div className="mt-2 text-sm font-medium text-slate-900">
-                    {formatDate(selectedPaymentPreview.paidDate || selectedPaymentPreview.lastPaymentDate) || '—'}
+                {selectedPaymentPreviewActualDate ? (
+                  <div className="rounded-xl border border-slate-200 px-4 py-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Фактическая дата</div>
+                    <div className="mt-2 text-sm font-medium text-slate-900">
+                      {formatDate(selectedPaymentPreviewActualDate) || selectedPaymentPreviewActualDate}
+                    </div>
                   </div>
-                </div>
+                ) : null}
                 <div className="rounded-xl border border-slate-200 px-4 py-3">
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Счет</div>
                   <div className="mt-2 text-sm font-medium text-slate-900">
