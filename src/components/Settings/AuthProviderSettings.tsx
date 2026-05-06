@@ -23,7 +23,6 @@ const SECTION_OPTIONS: Array<{ id: SectionId; label: string }> = [
   { id: 'google', label: 'Google' },
   { id: 'vk', label: 'VK ID' },
   { id: 'yandex', label: 'Яндекс ID' },
-  { id: 'telegramBot', label: 'Telegram Bot' },
   { id: 'telegramWidget', label: 'Telegram Widget' },
 ];
 

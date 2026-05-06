@@ -31,6 +31,7 @@ public static class TelegramBotUpdateModes
 
 public static class NotificationPurposes
 {
+    public const string TelegramAuth = "telegramAuth";
     public const string RegistrationUser = "registrationUser";
     public const string RegistrationAdmin = "registrationAdmin";
     public const string PasswordIssue = "passwordIssue";
@@ -39,6 +40,7 @@ public static class NotificationPurposes
 
     public static readonly IReadOnlyList<string> All =
     [
+        TelegramAuth,
         RegistrationUser,
         RegistrationAdmin,
         PasswordIssue,

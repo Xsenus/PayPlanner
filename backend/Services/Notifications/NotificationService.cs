@@ -14,6 +14,7 @@ public sealed class NotificationService : INotificationService
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private static readonly IReadOnlyList<NotificationPurposeDefinition> PurposeDefinitions =
     [
+        new(NotificationPurposes.TelegramAuth, "Вход через Telegram", "Telegram-бот для авторизации, привязки профиля и Login Widget."),
         new(NotificationPurposes.RegistrationUser, "Регистрация пользователя", "Сообщения пользователю о заявке, одобрении или отклонении регистрации."),
         new(NotificationPurposes.RegistrationAdmin, "Новая регистрация для админов", "Уведомления администраторам о новой заявке на регистрацию."),
         new(NotificationPurposes.PasswordIssue, "Выдача пароля", "Служебные сообщения с новым временным паролем сотрудника."),

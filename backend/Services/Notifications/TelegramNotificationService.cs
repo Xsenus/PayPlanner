@@ -33,12 +33,22 @@ public sealed class TelegramNotificationService : ITelegramNotificationService
     public async Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
     {
         var settings = await LoadSettingsAsync(cancellationToken);
+        var senderConfigs = await LoadEnabledTelegramSenderConfigsAsync(cancellationToken);
+        var authSenderConfig = senderConfigs
+            .FirstOrDefault(item => HasPurpose(item.PurposesJson, NotificationPurposes.TelegramAuth))
+            .Config;
+        var firstSenderConfig = senderConfigs.FirstOrDefault().Config;
         var token = ResolveValue(settings, NotificationBotTokenKey, null)
-                    ?? ResolveValue(settings, AuthBotTokenKey, "Auth:Telegram:BotToken");
+                    ?? ResolveValue(settings, AuthBotTokenKey, "Auth:Telegram:BotToken")
+                    ?? authSenderConfig?.BotToken
+                    ?? firstSenderConfig?.BotToken;
         var enabled = ResolveBool(settings, NotificationEnabledKey, "Notifications:Telegram:Enabled")
                       ?? ResolveBool(settings, AuthEnabledKey, "Auth:Telegram:Enabled")
-                      ?? false;
-        var username = ResolveValue(settings, AuthBotUsernameKey, "Auth:Telegram:BotUsername") ?? string.Empty;
+                      ?? senderConfigs.Count > 0;
+        var username = authSenderConfig?.BotUsername
+                       ?? firstSenderConfig?.BotUsername
+                       ?? ResolveValue(settings, AuthBotUsernameKey, "Auth:Telegram:BotUsername")
+                       ?? string.Empty;
         var linkedUsersCount = await _context.UserExternalIdentities
             .AsNoTracking()
             .Where(identity => identity.Provider == "telegram" && identity.ChatId.HasValue)
@@ -54,6 +64,23 @@ public sealed class TelegramNotificationService : ITelegramNotificationService
             LinkedUsersCount = linkedUsersCount,
             Ready = enabled && !string.IsNullOrWhiteSpace(token),
         };
+    }
+
+    private async Task<IReadOnlyList<(string PurposesJson, TelegramSenderConfig Config)>> LoadEnabledTelegramSenderConfigsAsync(
+        CancellationToken cancellationToken)
+    {
+        var senders = await _context.NotificationSenders
+            .AsNoTracking()
+            .Where(sender => sender.Channel == NotificationChannels.Telegram && sender.IsEnabled)
+            .OrderBy(sender => sender.SortOrder)
+            .ThenBy(sender => sender.Id)
+            .Select(sender => new { sender.PurposesJson, sender.ConfigJson })
+            .ToListAsync(cancellationToken);
+
+        return senders
+            .Select(sender => (sender.PurposesJson, Config: DeserializeTelegramSenderConfig(sender.ConfigJson)))
+            .Where(sender => !string.IsNullOrWhiteSpace(sender.Config.BotToken))
+            .ToList();
     }
 
     public async Task<TelegramSendResult> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
@@ -178,6 +205,42 @@ public sealed class TelegramNotificationService : ITelegramNotificationService
             "0" or "false" or "no" or "off" => false,
             _ => null
         };
+    }
+
+    private static bool HasPurpose(string? rawPurposes, string purpose)
+    {
+        if (string.IsNullOrWhiteSpace(rawPurposes))
+        {
+            return false;
+        }
+
+        try
+        {
+            var purposes = JsonSerializer.Deserialize<List<string>>(rawPurposes, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+            return purposes.Any(item => string.Equals(item, purpose, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static TelegramSenderConfig DeserializeTelegramSenderConfig(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return new TelegramSenderConfig();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<TelegramSenderConfig>(raw, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                   ?? new TelegramSenderConfig();
+        }
+        catch (JsonException)
+        {
+            return new TelegramSenderConfig();
+        }
     }
 
     private static string? ExtractTelegramError(string? payload)

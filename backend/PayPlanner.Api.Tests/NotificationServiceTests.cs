@@ -1,6 +1,9 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -309,6 +312,84 @@ public class NotificationServiceTests
     }
 
 
+    [Fact]
+    public async Task GetPublicSettingsAsync_UsesNotificationSenderForTelegramLoginBot()
+    {
+        await using var db = await CreateContextAsync();
+        db.NotificationSenders.Add(CreateTelegramSender("Login bot", NotificationPurposes.TelegramAuth));
+        await db.SaveChangesAsync();
+
+        var service = CreateExternalAuthService(db);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Scheme = "https";
+        httpContext.Request.Host = new HostString("crm.example.test");
+
+        var settings = await service.GetPublicSettingsAsync(httpContext.Request);
+
+        Assert.True(settings.TelegramEnabled);
+        Assert.Equal("payplanner_bot", settings.TelegramBotUsername);
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_LoginStartCompletesTelegramAuthBeforeBotSubscription()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "link@example.com");
+        db.TelegramAuthRequests.Add(new TelegramAuthRequest
+        {
+            State = "login-state",
+            UserId = user.Id,
+            Intent = "link",
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10)
+        });
+        var sender = CreateTelegramSender(
+            "Login bot",
+            NotificationPurposes.TelegramAuth,
+            updateMode: TelegramBotUpdateModes.Webhook,
+            webhookSecret: "secret");
+        db.NotificationSenders.Add(sender);
+        await db.SaveChangesAsync();
+
+        using var update = JsonDocument.Parse("""
+            {
+              "update_id": 11,
+              "message": {
+                "message_id": 1,
+                "text": "/start login_login-state",
+                "chat": { "id": 777888 },
+                "from": {
+                  "id": 12345,
+                  "username": "auth_user",
+                  "first_name": "Auth",
+                  "last_name": "User"
+                }
+              }
+            }
+            """);
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-Telegram-Bot-Api-Secret-Token"] = "secret";
+        var httpFactory = new StaticHttpClientFactory(new HttpClient(new TelegramOkHandler()));
+        var updateService = new TelegramBotUpdateService(
+            db,
+            httpFactory,
+            NullLogger<TelegramBotUpdateService>.Instance,
+            CreateExternalAuthService(db, httpFactory));
+
+        await updateService.HandleWebhookAsync(sender.Id, update, context.Request);
+
+        var authRequest = await db.TelegramAuthRequests.SingleAsync();
+        Assert.Equal("completed", authRequest.Status);
+        Assert.Equal("12345", authRequest.TelegramUserId);
+        Assert.Equal(777888, authRequest.ChatId);
+        Assert.Empty(await db.NotificationBotSubscriptions.ToListAsync());
+
+        var identity = await db.UserExternalIdentities.SingleAsync(item => item.UserId == user.Id && item.Provider == "telegram");
+        Assert.Equal("12345", identity.TelegramUserId);
+        Assert.Equal(777888, identity.ChatId);
+    }
+
     private static NotificationService CreateService(
         PaymentContext db,
         IEmailService emailService,
@@ -324,6 +405,30 @@ public class NotificationServiceTests
             emailService,
             telegramService,
             NullLogger<NotificationService>.Instance);
+    }
+
+    private static ExternalAuthService CreateExternalAuthService(
+        PaymentContext db,
+        IHttpClientFactory? httpClientFactory = null)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+        var passwordHasher = new PasswordHasher<User>();
+        var authService = new AuthService(
+            db,
+            configuration,
+            new RecordingEmailService(),
+            new FakeWebHostEnvironment(),
+            passwordHasher);
+
+        return new ExternalAuthService(
+            db,
+            configuration,
+            httpClientFactory ?? new StaticHttpClientFactory(new HttpClient(new TelegramOkHandler())),
+            passwordHasher,
+            authService,
+            NullLogger<ExternalAuthService>.Instance);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()
@@ -620,5 +725,15 @@ public class NotificationServiceTests
                 Content = new StringContent(payload)
             });
         }
+    }
+
+    private sealed class FakeWebHostEnvironment : IWebHostEnvironment
+    {
+        public string ApplicationName { get; set; } = "PayPlanner.Tests";
+        public IFileProvider WebRootFileProvider { get; set; } = null!;
+        public string WebRootPath { get; set; } = string.Empty;
+        public string EnvironmentName { get; set; } = "Development";
+        public string ContentRootPath { get; set; } = string.Empty;
+        public IFileProvider ContentRootFileProvider { get; set; } = null!;
     }
 }

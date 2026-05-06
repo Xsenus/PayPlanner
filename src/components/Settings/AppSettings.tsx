@@ -43,13 +43,51 @@ type DatabaseOperationsSubsection = 'invoices' | 'addresses' | 'dictionary-merge
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 const DETAILS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const SHOW_LEGACY_SQLITE_IMPORT = false;
+const SETTINGS_SECTION_PARAM = 'settingsSection';
+const NOTIFICATION_CHANNEL_PARAM = 'notificationChannel';
+const NOTIFICATION_SENDER_PARAM = 'notificationSender';
+const SETTINGS_SECTIONS: SettingsSection[] = [
+  'companies',
+  'general',
+  'integrations',
+  'notifications',
+  'auth-providers',
+  'db-maintenance',
+  'db-import',
+  'db-operations',
+  'form-requirements',
+];
+
+function isSettingsSection(value: string | null): value is SettingsSection {
+  return SETTINGS_SECTIONS.includes(value as SettingsSection);
+}
+
+function readSettingsSectionFromUrl(): SettingsSection {
+  if (typeof window === 'undefined') {
+    return 'general';
+  }
+
+  const section = new URLSearchParams(window.location.search).get(SETTINGS_SECTION_PARAM);
+  return isSettingsSection(section) ? section : 'general';
+}
+
+function pushSettingsSectionToUrl(section: SettingsSection) {
+  if (typeof window === 'undefined') return;
+
+  const url = new URL(window.location.href);
+  url.searchParams.set(SETTINGS_SECTION_PARAM, section);
+  url.searchParams.delete(NOTIFICATION_CHANNEL_PARAM);
+  url.searchParams.delete(NOTIFICATION_SENDER_PARAM);
+
+  window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
 
 export function AppSettings() {
   const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const { confirm } = useDialog();
   const toast = useToast();
-  const [activeSection, setActiveSection] = useState<SettingsSection>('general');
+  const [activeSection, setActiveSection] = useState<SettingsSection>(() => readSettingsSectionFromUrl());
   const [activeFinancialRulesSubsection, setActiveFinancialRulesSubsection] = useState<FinancialRulesSubsection>('invoices');
   const [activeDatabaseOperationsSubsection, setActiveDatabaseOperationsSubsection] = useState<DatabaseOperationsSubsection>('invoices');
   const [loading, setLoading] = useState(false);
@@ -105,6 +143,17 @@ export function AppSettings() {
   const isAdminRole = isAdmin();
   const auditOnlyMode = !isAdminRole && permissions.audit.canView;
 
+  const selectSection = useCallback((section: SettingsSection) => {
+    setActiveSection(section);
+    pushSettingsSectionToUrl(section);
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => setActiveSection(readSettingsSectionFromUrl());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'companies') return 'Компании сервиса';
     if (activeSection === 'general') return 'Финансовые правила';
@@ -120,9 +169,9 @@ export function AppSettings() {
 
   useEffect(() => {
     if (auditOnlyMode && activeSection !== 'db-maintenance') {
-      setActiveSection('db-maintenance');
+      selectSection('db-maintenance');
     }
-  }, [activeSection, auditOnlyMode]);
+  }, [activeSection, auditOnlyMode, selectSection]);
 
   const migrationDetails = useMemo(() => result?.details ?? [], [result]);
   const migrationDetailsTotalPages = useMemo(
@@ -647,7 +696,7 @@ export function AppSettings() {
                 <div className="mt-3 space-y-2">
                   <button
                     type="button"
-                    onClick={() => setActiveSection('companies')}
+                    onClick={() => selectSection('companies')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'companies'
                         ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
@@ -658,7 +707,7 @@ export function AppSettings() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveSection('general')}
+                    onClick={() => selectSection('general')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'general'
                         ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
@@ -669,7 +718,7 @@ export function AppSettings() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveSection('form-requirements')}
+                    onClick={() => selectSection('form-requirements')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'form-requirements'
                         ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
@@ -696,7 +745,7 @@ export function AppSettings() {
                 <div className="mt-3 space-y-2">
                   <button
                     type="button"
-                    onClick={() => setActiveSection('integrations')}
+                    onClick={() => selectSection('integrations')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'integrations'
                         ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
@@ -707,7 +756,7 @@ export function AppSettings() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveSection('notifications')}
+                    onClick={() => selectSection('notifications')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'notifications'
                         ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
@@ -721,7 +770,7 @@ export function AppSettings() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveSection('auth-providers')}
+                    onClick={() => selectSection('auth-providers')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'auth-providers'
                         ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
@@ -747,7 +796,7 @@ export function AppSettings() {
                 <div className="mt-3 space-y-2">
                   <button
                     type="button"
-                    onClick={() => setActiveSection('db-maintenance')}
+                    onClick={() => selectSection('db-maintenance')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'db-maintenance'
                         ? 'border-emerald-200 bg-emerald-100 text-emerald-900 shadow-sm'
@@ -760,7 +809,7 @@ export function AppSettings() {
                     <>
                   <button
                     type="button"
-                    onClick={() => setActiveSection('db-operations')}
+                    onClick={() => selectSection('db-operations')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'db-operations'
                         ? 'border-emerald-200 bg-emerald-100 text-emerald-900 shadow-sm'
@@ -771,7 +820,7 @@ export function AppSettings() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveSection('db-import')}
+                    onClick={() => selectSection('db-import')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'db-import'
                         ? 'border-emerald-200 bg-emerald-100 text-emerald-900 shadow-sm'

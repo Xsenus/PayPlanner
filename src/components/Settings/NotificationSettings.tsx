@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
-import { Bot, CheckCircle2, Link2, Mail, Plus, RefreshCw, Save, Send, Trash2, Unlink } from 'lucide-react';
+import { ArrowLeft, Bot, CheckCircle2, Link2, Mail, Pencil, Plus, RefreshCw, Save, Send, Trash2, Unlink } from 'lucide-react';
 import {
   apiService,
   type NotificationChannel,
@@ -45,6 +45,67 @@ type SenderForm = {
 };
 
 const DEFAULT_PURPOSES = ['manualTest'];
+
+type SenderRoute =
+  | { mode: 'list' }
+  | { mode: 'new'; channel: NotificationChannel }
+  | { mode: 'edit'; channel: NotificationChannel; id: number };
+
+const SETTINGS_SECTION_PARAM = 'settingsSection';
+const SETTINGS_NOTIFICATION_SECTION = 'notifications';
+const NOTIFICATION_CHANNEL_PARAM = 'notificationChannel';
+const NOTIFICATION_SENDER_PARAM = 'notificationSender';
+
+function isNotificationChannel(value: string | null): value is NotificationChannel {
+  return value === 'email' || value === 'telegram';
+}
+
+function readNotificationRoute(): SenderRoute {
+  if (typeof window === 'undefined') {
+    return { mode: 'list' };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const channel = params.get(NOTIFICATION_CHANNEL_PARAM);
+  const sender = params.get(NOTIFICATION_SENDER_PARAM);
+
+  if (!isNotificationChannel(channel) || !sender) {
+    return { mode: 'list' };
+  }
+
+  if (sender === 'new') {
+    return { mode: 'new', channel };
+  }
+
+  const id = Number(sender);
+  return Number.isInteger(id) && id > 0
+    ? { mode: 'edit', channel, id }
+    : { mode: 'list' };
+}
+
+function buildNotificationRouteHref(route: SenderRoute) {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set(SETTINGS_SECTION_PARAM, SETTINGS_NOTIFICATION_SECTION);
+
+  if (route.mode === 'list') {
+    url.searchParams.delete(NOTIFICATION_CHANNEL_PARAM);
+    url.searchParams.delete(NOTIFICATION_SENDER_PARAM);
+  } else {
+    url.searchParams.set(NOTIFICATION_CHANNEL_PARAM, route.channel);
+    url.searchParams.set(NOTIFICATION_SENDER_PARAM, route.mode === 'new' ? 'new' : String(route.id));
+  }
+
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function pushNotificationRoute(route: SenderRoute) {
+  if (typeof window === 'undefined') return;
+  window.history.pushState(null, '', buildNotificationRouteHref(route));
+}
 
 function createBlankForm(channel: NotificationChannel = 'email', nextOrder = 10): SenderForm {
   return {
@@ -125,6 +186,7 @@ export function NotificationSettings() {
   const { confirm } = useDialog();
   const [settings, setSettings] = useState<NotificationSettingsDto | null>(null);
   const [form, setForm] = useState<SenderForm>(() => createBlankForm());
+  const [route, setRoute] = useState<SenderRoute>(() => readNotificationRoute());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -139,13 +201,6 @@ export function NotificationSettings() {
     try {
       const next = await apiService.getNotificationSettings();
       setSettings(next);
-      setForm((prev) => {
-        if (prev.id) {
-          const actual = next.senders.find((item) => item.id === prev.id);
-          return actual ? formFromSender(actual) : createBlankForm('email', resolveNextOrder(next.senders));
-        }
-        return prev;
-      });
     } catch (error) {
       const text = extractDisplayErrorMessage(error, 'Не удалось загрузить настройки уведомлений');
       setMessage(text);
@@ -159,15 +214,53 @@ export function NotificationSettings() {
     void loadSettings();
   }, [loadSettings]);
 
+  useEffect(() => {
+    const handlePopState = () => setRoute(readNotificationRoute());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const senders = useMemo(() => settings?.senders ?? [], [settings?.senders]);
   const purposes = useMemo(() => settings?.purposes ?? [], [settings?.purposes]);
   const emailSenders = useMemo(() => senders.filter((item) => item.channel === 'email'), [senders]);
   const telegramSenders = useMemo(() => senders.filter((item) => item.channel === 'telegram'), [senders]);
   const selectedSender = form.id ? senders.find((item) => item.id === form.id) : null;
 
-  const selectNewSender = (channel: NotificationChannel) => {
+  useEffect(() => {
+    if (!settings || route.mode === 'list') return;
+
+    if (route.mode === 'new') {
+      const nextOrder = resolveNextOrder(senders.filter((item) => item.channel === route.channel));
+      setForm(createBlankForm(route.channel, nextOrder));
+      return;
+    }
+
+    const actual = senders.find((item) => item.id === route.id && item.channel === route.channel);
+    if (actual) {
+      setForm(formFromSender(actual));
+    }
+  }, [route, senders, settings]);
+
+  const openSenderList = () => {
+    pushNotificationRoute({ mode: 'list' });
+    setRoute({ mode: 'list' });
+    setMessage(null);
+  };
+
+  const openNewSender = (channel: NotificationChannel) => {
     const nextOrder = resolveNextOrder(senders.filter((item) => item.channel === channel));
     setForm(createBlankForm(channel, nextOrder));
+    const nextRoute: SenderRoute = { mode: 'new', channel };
+    pushNotificationRoute(nextRoute);
+    setRoute(nextRoute);
+    setMessage(null);
+  };
+
+  const openEditSender = (sender: NotificationSenderDto) => {
+    setForm(formFromSender(sender));
+    const nextRoute: SenderRoute = { mode: 'edit', channel: sender.channel, id: sender.id };
+    pushNotificationRoute(nextRoute);
+    setRoute(nextRoute);
     setMessage(null);
   };
 
@@ -234,6 +327,9 @@ export function NotificationSettings() {
         : next.senders.find((item) => item.name === payload.name && item.channel === payload.channel) ?? next.senders[next.senders.length - 1];
       if (saved) {
         setForm(formFromSender(saved));
+        const nextRoute: SenderRoute = { mode: 'edit', channel: saved.channel, id: saved.id };
+        pushNotificationRoute(nextRoute);
+        setRoute(nextRoute);
       }
       if (saved?.channel === 'telegram' && shouldSyncTelegramProfile) {
         try {
@@ -289,6 +385,7 @@ export function NotificationSettings() {
       const next = await apiService.getNotificationSettings();
       setSettings(next);
       setForm(createBlankForm('email', resolveNextOrder(next.senders)));
+      openSenderList();
       toast.success('Отправитель удалён.', 'Уведомления');
     } catch (error) {
       const text = extractDisplayErrorMessage(error, 'Не удалось удалить отправителя');
@@ -435,90 +532,67 @@ export function NotificationSettings() {
         <SummaryTile label="Привязано Telegram" value={settings?.telegram.linkedUsersCount ?? 0} ready={settings?.telegram.ready ? 1 : 0} />
       </div>
 
-      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h4 className="text-base font-semibold text-gray-900">Отправители</h4>
-            <p className="text-sm text-gray-500">Email-ящики и Telegram-боты для системных сообщений.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => selectNewSender('email')}
-              className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
-            >
-              <Plus className="h-4 w-4" />
-              Email
-            </button>
-            <button
-              type="button"
-              onClick={() => selectNewSender('telegram')}
-              className="inline-flex items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-100"
-            >
-              <Plus className="h-4 w-4" />
-              Telegram
-            </button>
-            <button
-              type="button"
-              onClick={() => void loadSettings()}
-              disabled={loading}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-            >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              Обновить
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {senders.map((sender) => (
-            <button
-              key={sender.id}
-              type="button"
-              onClick={() => setForm(formFromSender(sender))}
-              className={`rounded-xl border p-4 text-left transition ${
-                form.id === sender.id
-                  ? 'border-blue-300 bg-blue-50'
-                  : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-blue-50/50'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    {sender.channel === 'telegram' ? <Bot className="h-4 w-4 text-teal-600" /> : <Mail className="h-4 w-4 text-blue-600" />}
-                    <span className="truncate font-semibold text-gray-900">{sender.name}</span>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {sender.purposes.map((purpose) => (
-                      <span key={purpose} className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-700">
-                        {purposeLabel(purposes, purpose)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <span className={`shrink-0 rounded-full border px-2 py-1 text-xs font-semibold ${statusClass(sender.ready, sender.isEnabled)}`}>
-                  {!sender.isEnabled ? 'Отключён' : sender.ready ? 'Готов' : 'Не готов'}
-                </span>
-              </div>
-            </button>
-          ))}
-          {senders.length === 0 && (
-            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-5 text-sm text-gray-600">
-              Отправители пока не заведены.
+      {route.mode === 'list' ? (
+        <div className="space-y-5">
+          {message && (
+            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              {message}
             </div>
           )}
-        </div>
-      </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h4 className="text-base font-semibold text-gray-900">{form.id ? 'Редактирование отправителя' : 'Новый отправитель'}</h4>
-              {selectedSender && (
-                <p className="text-sm text-gray-500">{channelLabel(selectedSender.channel)} · #{selectedSender.id}</p>
-              )}
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="text-base font-semibold text-gray-900">Отправители уведомлений</h4>
+                <p className="text-sm text-gray-500">Отдельные реестры для Email-ящиков и Telegram-ботов. Позже сюда можно добавить новые каналы.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadSettings()}
+                disabled={loading}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Обновить
+              </button>
             </div>
+
+            <div className="mt-5 grid gap-5 xl:grid-cols-2">
+              <SenderTable
+                channel="email"
+                title="Email отправители"
+                description="SMTP-ящики для регистрации, паролей, напоминаний и ручных уведомлений."
+                senders={emailSenders}
+                purposes={purposes}
+                onCreate={openNewSender}
+                onOpen={openEditSender}
+              />
+              <SenderTable
+                channel="telegram"
+                title="Telegram-боты"
+                description="Боты для авторизации сотрудников, напоминаний, хука и polling."
+                senders={telegramSenders}
+                purposes={purposes}
+                onCreate={openNewSender}
+                onOpen={openEditSender}
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <a
+              href={buildNotificationRouteHref({ mode: 'list' })}
+              onClick={(event) => {
+                event.preventDefault();
+                openSenderList();
+              }}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              К списку отправителей
+            </a>
             <div className="flex flex-wrap gap-2">
               {form.id && (
                 <button
@@ -543,130 +617,139 @@ export function NotificationSettings() {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="text-sm font-medium text-gray-700">
-              Канал
-              <select
-                value={form.channel}
-                onChange={(event) => setForm(createBlankForm(event.target.value as NotificationChannel, form.sortOrder))}
-                disabled={Boolean(form.id)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              >
-                <option value="email">Email</option>
-                <option value="telegram">Telegram</option>
-              </select>
-            </label>
-            <label className="text-sm font-medium text-gray-700">
-              Название
-              <input
-                value={form.name}
-                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="text-sm font-medium text-gray-700">
-              Порядок
-              <input
-                type="number"
-                value={form.sortOrder}
-                onChange={(event) => setForm((prev) => ({ ...prev, sortOrder: Number(event.target.value) || 0 }))}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
-              <input
-                type="checkbox"
-                checked={form.isEnabled}
-                onChange={(event) => setForm((prev) => ({ ...prev, isEnabled: event.target.checked }))}
-                className="h-4 w-4 rounded border-gray-300 text-blue-600"
-              />
-              Включён
-            </label>
-          </div>
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="mb-5">
+                <h4 className="text-base font-semibold text-gray-900">{form.id ? 'Карточка отправителя' : 'Новая карточка отправителя'}</h4>
+                <p className="text-sm text-gray-500">{channelLabel(form.channel)}{selectedSender ? ` · #${selectedSender.id}` : ''}</p>
+              </div>
 
-          <div className="mt-5">
-            <div className="mb-2 text-sm font-semibold text-gray-800">Сценарии</div>
-            <div className="grid gap-2 md:grid-cols-2">
-              {purposes.map((purpose) => (
-                <label key={purpose.key} className="flex items-start gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Канал
+                  <select
+                    value={form.channel}
+                    onChange={(event) => openNewSender(event.target.value as NotificationChannel)}
+                    disabled={Boolean(form.id)}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  >
+                    <option value="email">Email</option>
+                    <option value="telegram">Telegram</option>
+                  </select>
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Название
+                  <input
+                    value={form.name}
+                    onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Порядок
+                  <input
+                    type="number"
+                    value={form.sortOrder}
+                    onChange={(event) => setForm((prev) => ({ ...prev, sortOrder: Number(event.target.value) || 0 }))}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
                   <input
                     type="checkbox"
-                    checked={form.purposes.includes(purpose.key)}
-                    onChange={() => togglePurpose(purpose.key)}
-                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+                    checked={form.isEnabled}
+                    onChange={(event) => setForm((prev) => ({ ...prev, isEnabled: event.target.checked }))}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600"
                   />
-                  <span>
-                    <span className="block font-medium text-gray-900">{purpose.label}</span>
-                    <span className="text-xs text-gray-500">{purpose.description}</span>
-                  </span>
+                  Включён
                 </label>
-              ))}
+              </div>
+
+              <div className="mt-5">
+                <div className="mb-2 text-sm font-semibold text-gray-800">Сценарии</div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {purposes.map((purpose) => (
+                    <label key={purpose.key} className="flex items-start gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={form.purposes.includes(purpose.key)}
+                        onChange={() => togglePurpose(purpose.key)}
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+                      />
+                      <span>
+                        <span className="block font-medium text-gray-900">{purpose.label}</span>
+                        <span className="text-xs text-gray-500">{purpose.description}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {form.channel === 'email' ? (
+                <EmailFields form={form} setForm={setForm} passwordSet={selectedSender?.email?.smtpPasswordSet} />
+              ) : (
+                <TelegramFields
+                  form={form}
+                  setForm={setForm}
+                  sender={selectedSender}
+                  busy={saving}
+                  onSyncWebhook={syncTelegramWebhook}
+                  onDeleteWebhook={deleteTelegramWebhook}
+                  onSyncProfile={syncTelegramProfile}
+                  onApplyProfile={applyTelegramProfile}
+                />
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <h4 className="text-base font-semibold text-gray-900">Тест</h4>
+              <div className="mt-4 space-y-3">
+                <label className="text-sm font-medium text-gray-700">
+                  Получатель
+                  <input
+                    value={testRecipient}
+                    onChange={(event) => setTestRecipient(event.target.value)}
+                    placeholder={form.channel === 'telegram' ? 'Telegram chat id' : 'name@example.com'}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Тема
+                  <input
+                    value={testSubject}
+                    onChange={(event) => setTestSubject(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="text-sm font-medium text-gray-700">
+                  Сообщение
+                  <textarea
+                    value={testMessage}
+                    onChange={(event) => setTestMessage(event.target.value)}
+                    rows={4}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void sendTest()}
+                  disabled={testing || !form.id}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  <Send className="h-4 w-4" />
+                  Отправить тест
+                </button>
+              </div>
+
+              {message && (
+                <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                  {message}
+                </div>
+              )}
             </div>
           </div>
-
-          {form.channel === 'email' ? (
-            <EmailFields form={form} setForm={setForm} passwordSet={selectedSender?.email?.smtpPasswordSet} />
-          ) : (
-            <TelegramFields
-              form={form}
-              setForm={setForm}
-              sender={selectedSender}
-              busy={saving}
-              onSyncWebhook={syncTelegramWebhook}
-              onDeleteWebhook={deleteTelegramWebhook}
-              onSyncProfile={syncTelegramProfile}
-              onApplyProfile={applyTelegramProfile}
-            />
-          )}
         </div>
-
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-          <h4 className="text-base font-semibold text-gray-900">Тест</h4>
-          <div className="mt-4 space-y-3">
-            <label className="text-sm font-medium text-gray-700">
-              Получатель
-              <input
-                value={testRecipient}
-                onChange={(event) => setTestRecipient(event.target.value)}
-                placeholder={form.channel === 'telegram' ? 'Telegram chat id' : 'name@example.com'}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="text-sm font-medium text-gray-700">
-              Тема
-              <input
-                value={testSubject}
-                onChange={(event) => setTestSubject(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="text-sm font-medium text-gray-700">
-              Сообщение
-              <textarea
-                value={testMessage}
-                onChange={(event) => setTestMessage(event.target.value)}
-                rows={4}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => void sendTest()}
-              disabled={testing || !form.id}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-            >
-              <Send className="h-4 w-4" />
-              Отправить тест
-            </button>
-          </div>
-
-          {message && (
-            <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-              {message}
-            </div>
-          )}
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -684,6 +767,136 @@ function SummaryTile({ label, value, ready }: { label: string; value: number; re
       </div>
     </div>
   );
+}
+
+function SenderTable({
+  channel,
+  title,
+  description,
+  senders,
+  purposes,
+  onCreate,
+  onOpen,
+}: {
+  channel: NotificationChannel;
+  title: string;
+  description: string;
+  senders: NotificationSenderDto[];
+  purposes: NotificationPurposeDto[];
+  onCreate: (channel: NotificationChannel) => void;
+  onOpen: (sender: NotificationSenderDto) => void;
+}) {
+  const Icon = channel === 'telegram' ? Bot : Mail;
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50/60">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Icon className={`h-4 w-4 ${channel === 'telegram' ? 'text-teal-600' : 'text-blue-600'}`} />
+            <h5 className="font-semibold text-gray-900">{title}</h5>
+          </div>
+          <p className="mt-1 text-sm text-gray-500">{description}</p>
+        </div>
+        <a
+          href={buildNotificationRouteHref({ mode: 'new', channel })}
+          onClick={(event) => {
+            event.preventDefault();
+            onCreate(channel);
+          }}
+          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold ${
+            channel === 'telegram'
+              ? 'border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100'
+              : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+          }`}
+        >
+          <Plus className="h-4 w-4" />
+          Добавить
+        </a>
+      </div>
+
+      {senders.length === 0 ? (
+        <div className="m-4 rounded-xl border border-dashed border-gray-300 bg-white px-4 py-5 text-sm text-gray-600">
+          {channel === 'telegram' ? 'Telegram-боты пока не заведены.' : 'Email отправители пока не заведены.'}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="px-4 py-3">Название</th>
+                <th className="px-4 py-3">Сценарии</th>
+                <th className="px-4 py-3">{channel === 'telegram' ? 'Бот' : 'SMTP'}</th>
+                <th className="px-4 py-3">Статус</th>
+                <th className="px-4 py-3">Порядок</th>
+                <th className="px-4 py-3 text-right">Действия</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 bg-white">
+              {senders.map((sender) => (
+                <tr key={sender.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="font-semibold text-gray-900">{sender.name}</div>
+                    <div className="text-xs text-gray-500">#{sender.id}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex max-w-[260px] flex-wrap gap-1.5">
+                      {sender.purposes.map((purpose) => (
+                        <span key={purpose} className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-700">
+                          {purposeLabel(purposes, purpose)}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {channel === 'telegram' ? (
+                      <>
+                        <div>{sender.telegram?.botUsername ? `@${sender.telegram.botUsername}` : 'Username не задан'}</div>
+                        <div className="text-xs text-gray-500">
+                          {updateModeLabel(sender.telegram?.updateMode)} · подписок: {sender.telegram?.subscriptionsCount ?? 0}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>{sender.email?.fromEmail || 'From email не задан'}</div>
+                        <div className="text-xs text-gray-500">
+                          {sender.email?.smtpHost || 'SMTP host не задан'}{sender.email?.smtpPort ? `:${sender.email.smtpPort}` : ''}
+                        </div>
+                      </>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${statusClass(sender.ready, sender.isEnabled)}`}>
+                      {senderStatusLabel(sender)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">{sender.sortOrder}</td>
+                  <td className="px-4 py-3 text-right">
+                    <a
+                      href={buildNotificationRouteHref({ mode: 'edit', channel: sender.channel, id: sender.id })}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        onOpen(sender);
+                      }}
+                      className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Открыть
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function senderStatusLabel(sender: NotificationSenderDto) {
+  if (!sender.isEnabled) return 'Отключён';
+  return sender.ready ? 'Готов' : 'Не готов';
 }
 
 function EmailFields({

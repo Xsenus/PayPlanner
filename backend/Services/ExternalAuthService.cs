@@ -71,10 +71,8 @@ public sealed partial class ExternalAuthService
 
     public async Task<AuthProviderPublicSettingsDto> GetPublicSettingsAsync(HttpRequest request, CancellationToken cancellationToken = default)
     {
-        var telegramUsername = await GetSettingOrConfigAsync(
-            TelegramBotUsernameKey,
-            "Auth:Telegram:BotUsername",
-            cancellationToken);
+        var telegramBot = await ResolveTelegramAuthBotAsync(cancellationToken);
+        var telegramUsername = telegramBot?.BotUsername ?? string.Empty;
 
         return new AuthProviderPublicSettingsDto
         {
@@ -102,7 +100,7 @@ public sealed partial class ExternalAuthService
                 YandexClientSecretKey,
                 "Auth:Yandex:ClientSecret",
                 cancellationToken),
-            TelegramEnabled = await IsTelegramReadyAsync(cancellationToken),
+            TelegramEnabled = IsTelegramReady(telegramBot),
             TelegramWidgetEnabled = await IsTelegramWidgetReadyAsync(request, cancellationToken),
             TelegramBotUsername = string.IsNullOrWhiteSpace(telegramUsername) ? null : telegramUsername.Trim()
         };
@@ -134,7 +132,8 @@ public sealed partial class ExternalAuthService
             YandexClientSecretKey,
             "Auth:Yandex:ClientSecret",
             cancellationToken);
-        var telegramBotReady = await IsTelegramReadyAsync(cancellationToken);
+        var telegramBot = await ResolveTelegramAuthBotAsync(cancellationToken);
+        var telegramBotReady = IsTelegramReady(telegramBot);
         var telegramWidgetReady = await IsTelegramWidgetReadyAsync(request, cancellationToken);
 
         return new AuthProviderSettingsDto
@@ -157,17 +156,21 @@ public sealed partial class ExternalAuthService
             YandexReady = yandexReady,
             YandexCallbackUrl = BuildAbsoluteUrl(request, "/api/auth/external/callback/yandex"),
 
-            TelegramEnabled = await GetBooleanSettingOrConfigAsync(TelegramEnabledKey, "Auth:Telegram:Enabled", false, cancellationToken),
+            TelegramEnabled = telegramBot?.Enabled ?? await GetBooleanSettingOrConfigAsync(TelegramEnabledKey, "Auth:Telegram:Enabled", false, cancellationToken),
             TelegramWidgetEnabled = await GetBooleanSettingOrConfigAsync(TelegramWidgetEnabledKey, "Auth:Telegram:WidgetEnabled", false, cancellationToken),
-            TelegramBotToken = await GetSettingOrConfigAsync(TelegramBotTokenKey, "Auth:Telegram:BotToken", cancellationToken) ?? string.Empty,
-            TelegramBotUsername = await GetSettingOrConfigAsync(TelegramBotUsernameKey, "Auth:Telegram:BotUsername", cancellationToken) ?? string.Empty,
-            TelegramWebhookSecret = await GetSettingOrConfigAsync(TelegramWebhookSecretKey, "Auth:Telegram:WebhookSecret", cancellationToken) ?? string.Empty,
-            TelegramWebhookUrl = BuildAbsoluteUrl(request, "/api/auth/telegram/webhook"),
-            TelegramWebhookConfigured = await HasTelegramWebhookSyncAsync(cancellationToken),
+            TelegramBotToken = telegramBot?.NotificationSenderId is null
+                ? await GetSettingOrConfigAsync(TelegramBotTokenKey, "Auth:Telegram:BotToken", cancellationToken) ?? string.Empty
+                : string.Empty,
+            TelegramBotUsername = telegramBot?.BotUsername ?? (await GetSettingOrConfigAsync(TelegramBotUsernameKey, "Auth:Telegram:BotUsername", cancellationToken)) ?? string.Empty,
+            TelegramWebhookSecret = telegramBot?.WebhookSecret ?? (await GetSettingOrConfigAsync(TelegramWebhookSecretKey, "Auth:Telegram:WebhookSecret", cancellationToken)) ?? string.Empty,
+            TelegramWebhookUrl = string.IsNullOrWhiteSpace(telegramBot?.WebhookUrl)
+                ? BuildAbsoluteUrl(request, "/api/auth/telegram/webhook")
+                : telegramBot.WebhookUrl,
+            TelegramWebhookConfigured = HasTelegramWebhookSync(telegramBot) || await HasTelegramWebhookSyncAsync(cancellationToken),
             TelegramBotReady = telegramBotReady,
             TelegramWidgetReady = telegramWidgetReady,
-            TelegramBotInfoSyncedAt = ParseDateTime(await GetSettingOrConfigAsync(TelegramBotInfoSyncedAtKey, null, cancellationToken)),
-            TelegramWebhookSyncedAt = ParseDateTime(await GetSettingOrConfigAsync(TelegramWebhookSyncedAtKey, null, cancellationToken)),
+            TelegramBotInfoSyncedAt = telegramBot?.BotInfoSyncedAt ?? ParseDateTime(await GetSettingOrConfigAsync(TelegramBotInfoSyncedAtKey, null, cancellationToken)),
+            TelegramWebhookSyncedAt = telegramBot?.WebhookSyncedAt ?? ParseDateTime(await GetSettingOrConfigAsync(TelegramWebhookSyncedAtKey, null, cancellationToken)),
         };
     }
 
@@ -1073,15 +1076,7 @@ public sealed partial class ExternalAuthService
 
     private async Task<bool> IsTelegramReadyAsync(CancellationToken cancellationToken)
     {
-        var enabled = await GetBooleanSettingOrConfigAsync(TelegramEnabledKey, "Auth:Telegram:Enabled", false, cancellationToken);
-        if (!enabled)
-        {
-            return false;
-        }
-
-        var token = await GetSettingOrConfigAsync(TelegramBotTokenKey, "Auth:Telegram:BotToken", cancellationToken);
-        var username = await GetSettingOrConfigAsync(TelegramBotUsernameKey, "Auth:Telegram:BotUsername", cancellationToken);
-        return !string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(username);
+        return IsTelegramReady(await ResolveTelegramAuthBotAsync(cancellationToken));
     }
 
     private async Task<bool> IsTelegramWidgetReadyAsync(HttpRequest request, CancellationToken cancellationToken)
@@ -1116,9 +1111,23 @@ public sealed partial class ExternalAuthService
 
     private async Task<bool> HasTelegramWebhookSyncAsync(CancellationToken cancellationToken)
     {
+        var telegramBot = await ResolveTelegramAuthBotAsync(cancellationToken);
+        if (HasTelegramWebhookSync(telegramBot))
+        {
+            return true;
+        }
+
         var syncedAt = await GetSettingOrConfigAsync(TelegramWebhookSyncedAtKey, null, cancellationToken);
         return ParseDateTime(syncedAt).HasValue;
     }
+
+    private static bool IsTelegramReady(ResolvedTelegramAuthBot? telegramBot)
+        => telegramBot?.Enabled == true
+           && !string.IsNullOrWhiteSpace(telegramBot.BotToken)
+           && !string.IsNullOrWhiteSpace(telegramBot.BotUsername);
+
+    private static bool HasTelegramWebhookSync(ResolvedTelegramAuthBot? telegramBot)
+        => telegramBot?.WebhookSyncedAt.HasValue == true || !string.IsNullOrWhiteSpace(telegramBot?.WebhookUrl);
 
     private async Task<string> RefreshTelegramBotInfoAsync(string botToken, DateTime now, CancellationToken cancellationToken)
     {

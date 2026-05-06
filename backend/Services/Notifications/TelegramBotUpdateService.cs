@@ -6,6 +6,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services.Notifications;
 
@@ -16,6 +17,7 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
     private readonly PaymentContext _context;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<TelegramBotUpdateService> _logger;
+    private readonly ExternalAuthService? _externalAuthService;
 
     private static readonly Regex CommandRegex = new("^[a-z0-9_]{1,32}$", RegexOptions.Compiled);
 
@@ -30,10 +32,20 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
         PaymentContext context,
         IHttpClientFactory httpClientFactory,
         ILogger<TelegramBotUpdateService> logger)
+        : this(context, httpClientFactory, logger, null)
+    {
+    }
+
+    public TelegramBotUpdateService(
+        PaymentContext context,
+        IHttpClientFactory httpClientFactory,
+        ILogger<TelegramBotUpdateService> logger,
+        ExternalAuthService? externalAuthService)
     {
         _context = context;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _externalAuthService = externalAuthService;
     }
 
     public async Task<TelegramWebhookSyncResultDto> SyncWebhookAsync(
@@ -456,6 +468,15 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
         var command = message.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
         if (command.StartsWith("/start", StringComparison.OrdinalIgnoreCase))
         {
+            if (_externalAuthService is not null
+                && await _externalAuthService.TryHandleTelegramBotAuthUpdateAsync(
+                    update,
+                    (chatId, text, ct) => SendBotReplyAsync(config, chatId, text, ct),
+                    cancellationToken))
+            {
+                return;
+            }
+
             var user = await ResolveUserAsync(message, cancellationToken);
             if (user is null)
             {

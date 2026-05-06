@@ -262,7 +262,9 @@ public sealed partial class ExternalAuthService
         int? currentUserId,
         CancellationToken cancellationToken = default)
     {
-        var botToken = await GetSettingOrConfigAsync(TelegramBotTokenKey, "Auth:Telegram:BotToken", cancellationToken);
+        var telegramBot = await ResolveTelegramAuthBotAsync(cancellationToken);
+        var botToken = telegramBot?.BotToken
+                       ?? await GetSettingOrConfigAsync(TelegramBotTokenKey, "Auth:Telegram:BotToken", cancellationToken);
         if (string.IsNullOrWhiteSpace(botToken))
         {
             throw new InvalidOperationException("Telegram bot token is not configured.");
@@ -312,7 +314,8 @@ public sealed partial class ExternalAuthService
         HttpRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (!await IsTelegramReadyAsync(cancellationToken))
+        var telegramBot = await ResolveTelegramAuthBotAsync(cancellationToken);
+        if (!IsTelegramReady(telegramBot))
         {
             throw new InvalidOperationException("Telegram bot is not configured for login.");
         }
@@ -323,8 +326,7 @@ public sealed partial class ExternalAuthService
             throw new InvalidOperationException("Требуется авторизованный пользователь для привязки Telegram.");
         }
 
-        var username = await GetSettingOrConfigAsync(TelegramBotUsernameKey, "Auth:Telegram:BotUsername", cancellationToken)
-            ?? throw new InvalidOperationException("Telegram bot username is not configured.");
+        var username = telegramBot!.BotUsername;
 
         var authRequest = new TelegramAuthRequest
         {
@@ -420,6 +422,114 @@ public sealed partial class ExternalAuthService
         }
 
         return await GetTelegramBotStatusAsync(state, cancellationToken);
+    }
+
+    public async Task<bool> TryHandleTelegramBotAuthUpdateAsync(
+        JsonElement update,
+        Func<long, string, CancellationToken, Task> sendMessageAsync,
+        CancellationToken cancellationToken = default)
+    {
+        if (!update.TryGetProperty("message", out var messageElement)
+            || messageElement.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var text = ReadString(messageElement, "text");
+        if (string.IsNullOrWhiteSpace(text) || !text.StartsWith("/start", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var state = ExtractTelegramState(text);
+        if (string.IsNullOrWhiteSpace(state))
+        {
+            return false;
+        }
+
+        var chatId = ReadInt64(messageElement, "chat", "id");
+        var telegramUserId = ReadInt64(messageElement, "from", "id");
+        if (chatId == 0 || telegramUserId == 0)
+        {
+            return true;
+        }
+
+        var authRequest = await _context.TelegramAuthRequests
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(x => x.State == state, cancellationToken);
+        if (authRequest is null)
+        {
+            await sendMessageAsync(chatId, "Ссылка авторизации не найдена. Запросите новую на сайте.", cancellationToken);
+            return true;
+        }
+
+        if (authRequest.ExpiresAt <= DateTime.UtcNow)
+        {
+            authRequest.Status = "expired";
+            authRequest.Error = "Срок действия ссылки истек.";
+            await _context.SaveChangesAsync(cancellationToken);
+            await sendMessageAsync(chatId, "Ссылка авторизации устарела. Вернитесь на сайт и начните вход заново.", cancellationToken);
+            return true;
+        }
+
+        if (authRequest.Status is "completed" or "consumed")
+        {
+            await sendMessageAsync(chatId, "Эта ссылка уже использована. Если нужно, начните вход заново на сайте.", cancellationToken);
+            return true;
+        }
+
+        var fullName = string.Join(" ", new[]
+        {
+            ReadString(messageElement, "from", "first_name"),
+            ReadString(messageElement, "from", "last_name")
+        }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
+
+        var profile = new ExternalIdentityProfile(
+            Provider: "telegram",
+            ProviderUserId: telegramUserId.ToString(),
+            Email: null,
+            EmailVerified: false,
+            Username: ReadString(messageElement, "from", "username"),
+            DisplayName: fullName,
+            AvatarUrl: null);
+
+        User? user = null;
+        if (string.Equals(authRequest.Intent, "link", StringComparison.Ordinal))
+        {
+            if (!authRequest.UserId.HasValue)
+            {
+                authRequest.Status = "failed";
+                authRequest.Error = "Пользователь для привязки не найден.";
+                authRequest.CompletedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync(cancellationToken);
+                await sendMessageAsync(chatId, "Не удалось завершить привязку. Повторите попытку из профиля.", cancellationToken);
+                return true;
+            }
+
+            await AttachExternalIdentityAsync(authRequest.UserId.Value, profile, chatId, cancellationToken);
+        }
+        else
+        {
+            user = await ResolveOrCreateExternalUserAsync(profile, cancellationToken);
+            authRequest.UserId = user.Id;
+        }
+
+        authRequest.ChatId = chatId;
+        authRequest.TelegramUserId = telegramUserId.ToString();
+        authRequest.Status = "completed";
+        authRequest.Error = null;
+        authRequest.CompletedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var answer = string.Equals(authRequest.Intent, "link", StringComparison.Ordinal)
+            ? "Telegram успешно привязан к вашему профилю. Вернитесь на сайт."
+            : !user!.IsActive
+                ? "Аккаунт отключен. Обратитесь к администратору."
+                : !user.IsApproved
+                    ? "Аккаунт создан и ожидает подтверждения администратором. Вернитесь на сайт."
+                    : "Вход подтвержден. Вернитесь на сайт, авторизация завершится автоматически.";
+        await sendMessageAsync(chatId, answer, cancellationToken);
+        return true;
     }
 
     public async Task HandleTelegramWebhookFlowAsync(
