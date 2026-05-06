@@ -851,7 +851,8 @@ public sealed partial class ExternalAuthService
                 Username: ReadString(messageElement, "from", "username"),
                 DisplayName: fullName,
                 AvatarUrl: null),
-            cancellationToken);
+            cancellationToken,
+            chatId);
 
         authRequest.UserId = user.Id;
         authRequest.ChatId = chatId;
@@ -918,7 +919,10 @@ public sealed partial class ExternalAuthService
         };
     }
 
-    private async Task<User> ResolveOrCreateExternalUserAsync(ExternalIdentityProfile profile, CancellationToken cancellationToken)
+    private async Task<User> ResolveOrCreateExternalUserAsync(
+        ExternalIdentityProfile profile,
+        CancellationToken cancellationToken,
+        long? chatId = null)
     {
         var provider = TechnicalEmailHelper.NormalizeProvider(profile.Provider);
         var providerUserId = NormalizeRequired(profile.ProviderUserId, "External provider user id is invalid.");
@@ -1027,6 +1031,7 @@ public sealed partial class ExternalAuthService
         identity.DisplayName = NormalizeOptional(profile.DisplayName);
         identity.AvatarUrl = NormalizeOptional(profile.AvatarUrl);
         identity.TelegramUserId = provider == "telegram" ? providerUserId : identity.TelegramUserId;
+        identity.ChatId = provider == "telegram" ? chatId ?? identity.ChatId : identity.ChatId;
         identity.VerifiedAt ??= now;
         identity.LastUsedAt = now;
         identity.UpdatedAt = now;

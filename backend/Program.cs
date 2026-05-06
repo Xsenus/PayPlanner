@@ -12,6 +12,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.LegalEntities;
+using PayPlanner.Api.Services.Notifications;
 using PayPlanner.Api.Services.UserActivity;
 using System.IO.Compression;
 using System.Text;
@@ -86,6 +87,9 @@ builder.Services.Configure<PasswordHasherOptions>(opt =>
 });
 
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
+builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ExternalAuthService>();
 builder.Services.AddScoped<RoleManagementAccessService>();
@@ -111,6 +115,8 @@ else
 
 builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
+builder.Services.AddHostedService<TaskJournalReminderNotificationService>();
+builder.Services.AddHostedService<TelegramBotPollingService>();
 builder.Services.AddHostedService<MoneyBalanceReconciliationSchedulerService>();
 builder.Services.AddHostedService<UserActivityRetentionService>();
 

@@ -2823,6 +2823,199 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("MoneyOperations");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.NotificationBotSubscription", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("ChatId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("NotificationSenderId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TelegramUserId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChatId")
+                        .HasDatabaseName("IX_NotificationBotSubscriptions_ChatId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("NotificationSenderId", "TelegramUserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_NotificationBotSubscriptions_Sender_TelegramUser");
+
+                    b.HasIndex("NotificationSenderId", "UserId")
+                        .HasDatabaseName("IX_NotificationBotSubscriptions_Sender_User");
+
+                    b.ToTable("NotificationBotSubscriptions");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.NotificationDelivery", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BodyPreview")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("EventKey")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
+                    b.Property<int?>("NotificationSenderId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RecipientAddress")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<int?>("RecipientUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SenderName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_NotificationDeliveries_CreatedAt");
+
+                    b.HasIndex("EventKey")
+                        .HasDatabaseName("IX_NotificationDeliveries_EventKey");
+
+                    b.HasIndex("NotificationSenderId");
+
+                    b.HasIndex("RecipientUserId");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_NotificationDeliveries_Status");
+
+                    b.HasIndex("EventKey", "Channel", "RecipientUserId", "NotificationSenderId")
+                        .HasDatabaseName("IX_NotificationDeliveries_Event_Channel_User_Sender");
+
+                    b.ToTable("NotificationDeliveries");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.NotificationSender", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ConfigJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("PurposesJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Channel")
+                        .HasDatabaseName("IX_NotificationSenders_Channel");
+
+                    b.HasIndex("Channel", "IsEnabled", "SortOrder")
+                        .HasDatabaseName("IX_NotificationSenders_Channel_Enabled_Order");
+
+                    b.ToTable("NotificationSenders");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ObjectAuditEvent", b =>
                 {
                     b.Property<int>("Id")
@@ -5150,6 +5343,41 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("LinkedInvoice");
 
                     b.Navigation("MoneyAccount");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.NotificationBotSubscription", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.NotificationSender", "NotificationSender")
+                        .WithMany()
+                        .HasForeignKey("NotificationSenderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("NotificationSender");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.NotificationDelivery", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.NotificationSender", "NotificationSender")
+                        .WithMany()
+                        .HasForeignKey("NotificationSenderId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "RecipientUser")
+                        .WithMany()
+                        .HasForeignKey("RecipientUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("NotificationSender");
+
+                    b.Navigation("RecipientUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>

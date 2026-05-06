@@ -1647,6 +1647,76 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.AuthorUserId).HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
         });
 
+        modelBuilder.Entity<NotificationDelivery>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.EventKey).HasMaxLength(240).IsRequired();
+            entity.Property(e => e.Channel).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.SenderName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.RecipientAddress).HasMaxLength(320).IsRequired();
+            entity.Property(e => e.Subject).HasMaxLength(300).IsRequired();
+            entity.Property(e => e.BodyPreview).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Error).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.RecipientUser)
+                .WithMany()
+                .HasForeignKey(e => e.RecipientUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.NotificationSender)
+                .WithMany()
+                .HasForeignKey(e => e.NotificationSenderId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.EventKey).HasDatabaseName("IX_NotificationDeliveries_EventKey");
+            entity.HasIndex(e => new { e.EventKey, e.Channel, e.RecipientUserId, e.NotificationSenderId })
+                .HasDatabaseName("IX_NotificationDeliveries_Event_Channel_User_Sender");
+            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_NotificationDeliveries_CreatedAt");
+            entity.HasIndex(e => e.Status).HasDatabaseName("IX_NotificationDeliveries_Status");
+        });
+
+        modelBuilder.Entity<NotificationSender>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Channel).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.PurposesJson).IsRequired();
+            entity.Property(e => e.ConfigJson).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.Channel).HasDatabaseName("IX_NotificationSenders_Channel");
+            entity.HasIndex(e => new { e.Channel, e.IsEnabled, e.SortOrder })
+                .HasDatabaseName("IX_NotificationSenders_Channel_Enabled_Order");
+        });
+
+        modelBuilder.Entity<NotificationBotSubscription>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TelegramUserId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Username).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.DisplayName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.NotificationSender)
+                .WithMany()
+                .HasForeignKey(e => e.NotificationSenderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => new { e.NotificationSenderId, e.TelegramUserId })
+                .HasDatabaseName("IX_NotificationBotSubscriptions_Sender_TelegramUser")
+                .IsUnique();
+            entity.HasIndex(e => new { e.NotificationSenderId, e.UserId })
+                .HasDatabaseName("IX_NotificationBotSubscriptions_Sender_User");
+            entity.HasIndex(e => e.ChatId).HasDatabaseName("IX_NotificationBotSubscriptions_ChatId");
+        });
+
         if (UseObjectAuditModel)
         {
             ConfigureAudit<Act>(modelBuilder);
@@ -2235,6 +2305,9 @@ public class PaymentContext : DbContext
     public DbSet<UserActivityLog> UserActivityLogs { get; set; }
     public DbSet<ObjectAuditEvent> ObjectAuditEvents { get; set; }
     public DbSet<TaskJournalItem> TaskJournalItems { get; set; }
+    public DbSet<NotificationDelivery> NotificationDeliveries { get; set; }
+    public DbSet<NotificationSender> NotificationSenders { get; set; }
+    public DbSet<NotificationBotSubscription> NotificationBotSubscriptions { get; set; }
 
     /// <summary>
     /// Пользовательские настройки.

@@ -7,6 +7,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.Notifications;
 using System.IdentityModel.Tokens.Jwt;
 using System.IO;
 using System.Security.Claims;
@@ -21,6 +22,7 @@ public partial class AuthService
     private readonly PaymentContext _context;
     private readonly IEmailService _emailService;
     private readonly IWebHostEnvironment _environment;
+    private readonly INotificationService? _notificationService;
     private readonly IPasswordHasher<User> _passwordHasher;
     private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
@@ -30,13 +32,15 @@ public partial class AuthService
         IConfiguration configuration,
         IEmailService emailService,
         IWebHostEnvironment environment,
-        IPasswordHasher<User> passwordHasher)
+        IPasswordHasher<User> passwordHasher,
+        INotificationService? notificationService = null)
     {
         _context = context;
         _configuration = configuration;
         _emailService = emailService;
         _environment = environment;
         _passwordHasher = passwordHasher;
+        _notificationService = notificationService;
     }
 
     private static string NormalizeEmail(string email)
@@ -258,6 +262,12 @@ public partial class AuthService
 
     public async Task NotifyPendingRegistrationAsync(User user, CancellationToken cancellationToken = default)
     {
+        if (_notificationService is not null)
+        {
+            await _notificationService.NotifyPendingRegistrationAsync(user, cancellationToken);
+            return;
+        }
+
         if (user.Role is null)
         {
             await _context.Entry(user).Reference(x => x.Role).LoadAsync(cancellationToken);
@@ -316,7 +326,14 @@ public partial class AuthService
         user.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
-        await _emailService.SendRegistrationApprovedEmailAsync(user.Email, user.FullName);
+        if (_notificationService is not null)
+        {
+            await _notificationService.NotifyRegistrationApprovedAsync(user);
+        }
+        else
+        {
+            await _emailService.SendRegistrationApprovedEmailAsync(user.Email, user.FullName);
+        }
         return true;
     }
 
@@ -332,7 +349,14 @@ public partial class AuthService
         EnsureProtectedUserManagedBySelf(user, actorUserId);
         EnsureProtectedUserNotDeleted(user);
 
-        await _emailService.SendRegistrationRejectedEmailAsync(user.Email, user.FullName, reason);
+        if (_notificationService is not null)
+        {
+            await _notificationService.NotifyRegistrationRejectedAsync(user, reason);
+        }
+        else
+        {
+            await _emailService.SendRegistrationRejectedEmailAsync(user.Email, user.FullName, reason);
+        }
         _context.Users.Remove(user);
         await _context.SaveChangesAsync();
         return true;

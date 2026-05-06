@@ -2760,6 +2760,193 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("MoneyOperations");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.NotificationBotSubscription", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ChatId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("NotificationSenderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TelegramUserId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChatId")
+                        .HasDatabaseName("IX_NotificationBotSubscriptions_ChatId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("NotificationSenderId", "TelegramUserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_NotificationBotSubscriptions_Sender_TelegramUser");
+
+                    b.HasIndex("NotificationSenderId", "UserId")
+                        .HasDatabaseName("IX_NotificationBotSubscriptions_Sender_User");
+
+                    b.ToTable("NotificationBotSubscriptions");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.NotificationDelivery", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BodyPreview")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventKey")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("NotificationSenderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RecipientAddress")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RecipientUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SenderName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_NotificationDeliveries_CreatedAt");
+
+                    b.HasIndex("EventKey")
+                        .HasDatabaseName("IX_NotificationDeliveries_EventKey");
+
+                    b.HasIndex("NotificationSenderId");
+
+                    b.HasIndex("RecipientUserId");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_NotificationDeliveries_Status");
+
+                    b.HasIndex("EventKey", "Channel", "RecipientUserId", "NotificationSenderId")
+                        .HasDatabaseName("IX_NotificationDeliveries_Event_Channel_User_Sender");
+
+                    b.ToTable("NotificationDeliveries");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.NotificationSender", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConfigJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PurposesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Channel")
+                        .HasDatabaseName("IX_NotificationSenders_Channel");
+
+                    b.HasIndex("Channel", "IsEnabled", "SortOrder")
+                        .HasDatabaseName("IX_NotificationSenders_Channel_Enabled_Order");
+
+                    b.ToTable("NotificationSenders");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ObjectAuditEvent", b =>
                 {
                     b.Property<int>("Id")
@@ -5034,6 +5221,41 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("LinkedInvoice");
 
                     b.Navigation("MoneyAccount");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.NotificationBotSubscription", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.NotificationSender", "NotificationSender")
+                        .WithMany()
+                        .HasForeignKey("NotificationSenderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("NotificationSender");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.NotificationDelivery", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.NotificationSender", "NotificationSender")
+                        .WithMany()
+                        .HasForeignKey("NotificationSenderId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "RecipientUser")
+                        .WithMany()
+                        .HasForeignKey("RecipientUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("NotificationSender");
+
+                    b.Navigation("RecipientUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.Payment", b =>
