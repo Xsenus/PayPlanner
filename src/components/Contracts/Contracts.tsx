@@ -25,6 +25,8 @@ import { getContractBillingModeLabel, getContractEffectiveAmount, getContractExe
 import { toRuDate, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { buildClientLookupOptions } from '../Clients/clientLookupOptions';
+import { LookupSelect } from '../ui/LookupSelect';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 
@@ -153,6 +155,10 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil((pagination.total || 0) / (pagination.pageSize || pageSize || 1))),
     [pageSize, pagination.pageSize, pagination.total],
+  );
+  const clientOptions = useMemo(
+    () => buildClientLookupOptions(clients),
+    [clients],
   );
 
   const columnsByKey = useMemo(
@@ -377,21 +383,20 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
             </label>
-            <label className="flex flex-col gap-1 text-sm text-slate-700">
-              {t('contractsClientFilter') ?? t('client') ?? 'Клиент'}
-              <select
-                value={clientFilter}
-                onChange={(event) => setClientFilter(event.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              >
-                <option value="all">{t('allClients') ?? 'Все клиенты'}</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <LookupSelect
+              label={t('contractsClientFilter') ?? t('client') ?? 'Клиент'}
+              value={clientFilter === 'all' ? '' : clientFilter}
+              options={clientOptions}
+              onChange={(value) => setClientFilter(value || 'all')}
+              placeholder={t('allClients') ?? 'Все клиенты'}
+              title="Выбор клиента"
+              dictionaryLabel="Открыть справочник"
+              searchPlaceholder="Поиск по ФИО, компании, телефону или email"
+              emptyOptionLabel={t('allClients') ?? 'Все клиенты'}
+              emptyOptionDescription="Показать договоры всех клиентов"
+              buttonClassName="border-gray-300 text-slate-700 focus:border-blue-500"
+              noOptionsText="Клиенты не найдены"
+            />
             <label className="flex flex-col gap-1 text-sm text-slate-700">
               {t('search') ?? 'Поиск'}
               <div className="relative">

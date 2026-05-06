@@ -57,8 +57,10 @@ import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { ActModal } from '../Acts/ActModal';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
+import { buildClientLookupOptions } from '../Clients/clientLookupOptions';
 import { DatePeriodPicker } from '../DateRange/DatePeriodPicker';
 import { FormPromptModal } from '../ui/FormPromptModal';
+import { LookupSelect } from '../ui/LookupSelect';
 import { TableContextMenu, type TableContextMenuAction } from '../ui/TableContextMenu';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
@@ -416,6 +418,10 @@ export function Accounts({
     const value = Number(selectedClientId);
     return Number.isFinite(value) && value > 0 ? value : undefined;
   }, [selectedClientId]);
+  const accountClientOptions = useMemo(
+    () => buildClientLookupOptions(accountClients),
+    [accountClients],
+  );
 
   const {
     columnOrder,
@@ -1995,25 +2001,20 @@ export function Accounts({
                     <option value="cancelled">{accountStatusLabels.cancelled}</option>
                   </select>
                 </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-gray-700">Клиент / поставщик</span>
-                  <select
-                    value={selectedClientId}
-                    onChange={(event) => setSelectedClientId(event.target.value)}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                  >
-                    <option value="">Все контрагенты</option>
-                    {accountClients
-                      .filter((client) => client.id && client.name)
-                      .slice()
-                      .sort((left, right) => (left.name ?? '').localeCompare(right.name ?? '', 'ru'))
-                      .map((client) => (
-                        <option key={client.id} value={client.id}>
-                          {client.name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
+                <LookupSelect
+                  label="Клиент / поставщик"
+                  value={selectedClientId}
+                  options={accountClientOptions}
+                  onChange={setSelectedClientId}
+                  placeholder="Все контрагенты"
+                  title="Выбор клиента / поставщика"
+                  dictionaryLabel="Открыть справочник"
+                  searchPlaceholder="Поиск по ФИО, компании, телефону или email"
+                  emptyOptionLabel="Все контрагенты"
+                  emptyOptionDescription="Показать счета всех клиентов и поставщиков"
+                  buttonClassName="border-gray-300 focus:border-blue-500"
+                  noOptionsText="Клиенты не найдены"
+                />
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="font-medium text-gray-700">Роль клиента</span>
                   <select

@@ -415,6 +415,36 @@ vi.mock('../ui/FormPromptModal', () => ({
   FormPromptModal: () => null,
 }));
 
+vi.mock('../ui/LookupSelect', () => ({
+  LookupSelect: ({
+    label,
+    value,
+    options,
+    onChange,
+    placeholder,
+    emptyOptionLabel,
+  }: {
+    label?: string;
+    value: string;
+    options: Array<{ value: string; label: string }>;
+    onChange: (value: string) => void;
+    placeholder?: string;
+    emptyOptionLabel?: string;
+  }) => (
+    <label>
+      {label}
+      <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="">{emptyOptionLabel ?? placeholder ?? 'Не выбрано'}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  ),
+}));
+
 vi.mock('../ui/TableContextMenu', () => ({
   TableContextMenu: () => null,
 }));
