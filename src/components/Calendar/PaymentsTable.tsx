@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
   type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import type { Payment } from '../../types';
@@ -180,7 +181,8 @@ export function PaymentsTable({
               <button
                 type="button"
                 className="block w-full text-left text-blue-600 hover:underline"
-                onClick={() => {
+                onClick={(event) => {
+                  event.stopPropagation();
                   if (payment.clientId) {
                     onOpenClient?.(payment.clientId, payment.clientCaseId ?? undefined);
                   }
@@ -270,6 +272,27 @@ export function PaymentsTable({
     [canDelete, canDeletePayment],
   );
 
+  const openPayment = useCallback(
+    (payment: Payment) => {
+      if (isEditAllowed(payment)) {
+        onEditPayment(payment);
+      }
+    },
+    [isEditAllowed, onEditPayment],
+  );
+
+  const handleRowKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLTableRowElement>, payment: Payment) => {
+      if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+      }
+
+      event.preventDefault();
+      openPayment(payment);
+    },
+    [openPayment],
+  );
+
   const menuEditAllowed = menuState ? isEditAllowed(menuState.payment) : false;
   const menuDeleteAllowed = menuState ? isDeleteAllowed(menuState.payment) : false;
 
@@ -342,10 +365,12 @@ export function PaymentsTable({
                 <tr
                   key={payment.id}
                   onContextMenu={(event) => openMenu(event, payment)}
-                  onDoubleClick={() => {
-                    if (isEditAllowed(payment)) onEditPayment(payment);
-                  }}
-                  className="cursor-default transition-colors hover:bg-gray-50/60"
+                  onClick={() => openPayment(payment)}
+                  onKeyDown={(event) => handleRowKeyDown(event, payment)}
+                  tabIndex={isEditAllowed(payment) ? 0 : undefined}
+                  className={`transition-colors hover:bg-gray-50/60 ${
+                    isEditAllowed(payment) ? 'cursor-pointer focus:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-500' : 'cursor-default'
+                  }`}
                   title={
                     canAdd || isEditAllowed(payment) || isDeleteAllowed(payment)
                       ? t('contextMenuHint') ?? 'ПКМ для действий'
