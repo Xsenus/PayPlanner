@@ -121,6 +121,7 @@ vi.mock('../../services/api', () => ({
     createAct: vi.fn(),
     updateInvoice: vi.fn(),
     createInvoice: vi.fn(),
+    cancelInvoice: vi.fn(),
     createClient: vi.fn(),
     sendInvoiceByEmail: vi.fn(),
     deleteInvoice: vi.fn(),
@@ -308,6 +309,7 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.getMoneyOperationsPaged).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue({ items: [], totalCount: 0, summary: {} });
     vi.mocked(apiService.updateInvoice).mockClear();
+    vi.mocked(apiService.cancelInvoice).mockReset();
     vi.mocked(apiService.createClient).mockReset();
   });
 
@@ -810,6 +812,109 @@ describe('InvoiceModal integration', () => {
     expect(screen.getByText('Ожидаемая дата: 10.05.2026')).toBeTruthy();
     expect(screen.queryByText('Фактическая дата: —')).toBeNull();
     expect(screen.getAllByText(/11\s*200/).length).toBeGreaterThan(0);
+  });
+
+  it('cancels only unpaid installment payments from the cancellation modal without browser prompts', async () => {
+    const invoice = {
+      id: 1844,
+      invoiceEntityId: 49,
+      number: '49',
+      date: '2026-04-29',
+      dueDate: '2026-06-29',
+      amount: 12000,
+      paidAmount: 6000,
+      outstandingAmount: 6000,
+      type: 'Income',
+      status: 'Processing',
+      workflowStatus: 'PartiallyPaid',
+      clientId: 1,
+      createdAt: '2026-04-29T00:00:00Z',
+      lineItems: [{ name: 'Рассрочка', quantity: 1, unit: 'шт', price: 12000 }],
+    } as unknown as Invoice;
+
+    const paidInstallment = {
+      id: 701,
+      invoiceId: 49,
+      amount: 6000,
+      paidAmount: 6000,
+      outstandingAmount: 0,
+      date: '2026-05-29',
+      plannedDate: '2026-05-29',
+      paidDate: '2026-05-29',
+      lastPaymentDate: '2026-05-29',
+      type: 'Income',
+      status: 'Completed',
+      isPaid: true,
+      description: 'Рассрочка по счету №49 · платеж 1/2',
+      account: '49',
+      accountDate: '2026-04-29',
+      systemNotes: '[pp:installment-payment] {"sequence":1,"total":12000,"item":{"sequence":1}}',
+    } as unknown as Payment;
+
+    const unpaidInstallment = {
+      id: 702,
+      invoiceId: 49,
+      amount: 6000,
+      paidAmount: 0,
+      outstandingAmount: 6000,
+      date: '2026-06-29',
+      plannedDate: '2026-06-29',
+      type: 'Income',
+      status: 'Pending',
+      isPaid: false,
+      description: 'Рассрочка по счету №49 · платеж 2/2',
+      account: '49',
+      accountDate: '2026-04-29',
+      systemNotes: '[pp:installment-payment] {"sequence":2,"total":12000,"item":{"sequence":2}}',
+    } as unknown as Payment;
+
+    vi.mocked(apiService.cancelInvoice).mockResolvedValue({
+      ...invoice,
+      status: 'Processing',
+      workflowStatus: 'PartiallyPaid',
+      paidAmount: 6000,
+      outstandingAmount: 0,
+    } as Invoice);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('legacy prompt');
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        presentation="page"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Клиент рассрочки')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[paidInstallment, unpaidInstallment]}
+        onRefreshRequested={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Отмен[её]н/i }));
+
+    expect(await screen.findByTestId('invoice-cancel-dialog')).toBeTruthy();
+    expect(promptSpy).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId('invoice-cancel-reason'), {
+      target: { value: 'Клиент отказался от остатка' },
+    });
+    fireEvent.click(screen.getByTestId('invoice-cancel-submit'));
+
+    await waitFor(() => {
+      expect(apiService.cancelInvoice).toHaveBeenCalledWith(
+        1844,
+        'Клиент отказался от остатка',
+        'Reject',
+        null,
+        null,
+        null,
+        'UnpaidInstallmentsOnly',
+      );
+    });
   });
 
   it('prompts to align due date with the last installment payment before saving the invoice', async () => {
@@ -1325,6 +1430,61 @@ describe('InvoiceModal integration', () => {
     expect(await screen.findByTestId('invoice-page-payment-summary')).toBeTruthy();
     expect(screen.getByTestId('invoice-page-paid-amount').textContent).toMatch(/8\s000/);
     expect(screen.getByTestId('invoice-page-debt-amount').textContent).toMatch(/17\s000/);
+  });
+
+  it('shows unpaid status for a processing invoice without paid amount', async () => {
+    const invoice = {
+      id: 572,
+      invoiceEntityId: 572,
+      number: '572',
+      date: '2026-04-29',
+      dueDate: '2026-05-08',
+      amount: 2500,
+      paidAmount: 0,
+      outstandingAmount: 2500,
+      type: 'Expense',
+      status: 'Processing',
+      lineItems: [{ name: 'Expense service', quantity: 1, unit: 'pcs', price: 2500 }],
+    } as unknown as Invoice;
+
+    const relatedPayment = {
+      id: 892,
+      invoiceId: 572,
+      documentKind: 'Invoice',
+      amount: 2500,
+      paidAmount: 0,
+      outstandingAmount: 2500,
+      hasPartialPayment: false,
+      date: '2026-05-08',
+      plannedDate: '2026-05-08',
+      type: 'Expense',
+      status: 'Processing',
+      description: '',
+      account: '572',
+      accountDate: '2026-04-29',
+      notes: '',
+      systemNotes: '',
+    } as unknown as Payment;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[relatedPayment]}
+      />,
+    );
+
+    expect((await screen.findByTestId('invoice-page-status-badge')).textContent).toContain('Не оплачен');
+    expect(screen.getByTestId('invoice-page-paid-amount').textContent).toContain('0');
+    expect(screen.getByTestId('invoice-page-debt-amount').textContent).toMatch(/2\s500/);
   });
 
   it('shows full payment and zero debt in the invoice page summary for a completed invoice without related payments', async () => {

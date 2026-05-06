@@ -628,6 +628,85 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Cancel_UnpaidInstallmentsOnly_PreservesPaidGeneratedPayment()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Keep Paid Installment");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var invoiceDate = DateTime.UtcNow.Date.AddDays(5);
+        var request = CreateRequest("INV-CANCEL-UNPAID-INST", clientId, invoiceDate, 12_000m);
+        request.InstallmentPlan = CreateInstallmentPlanRequest(
+            total: 12_000m,
+            startDate: invoiceDate,
+            invoiceDate.AddDays(15),
+            invoiceDate.AddDays(45));
+
+        var createAction = await controller.Create(request, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var storedParent = await db.Payments.SingleAsync(payment => payment.Id == createdDto.Id);
+        var generatedPayments = await db.Payments
+            .Where(payment =>
+                payment.InvoiceId == storedParent.InvoiceId
+                && payment.Id != storedParent.Id
+                && payment.SystemNotes != null
+                && payment.SystemNotes.Contains(InstallmentPaymentMarker))
+            .OrderBy(payment => payment.Date)
+            .ToListAsync();
+        var paidInstallment = generatedPayments[0];
+        paidInstallment.Status = PaymentStatus.Completed;
+        paidInstallment.PaidAmount = paidInstallment.Amount;
+        paidInstallment.IsPaid = true;
+        paidInstallment.PaidDate = paidInstallment.Date;
+        paidInstallment.LastPaymentDate = paidInstallment.Date;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var cancelAction = await controller.Cancel(
+            createdDto.Id,
+            new CancelInvoiceRequest
+            {
+                Reason = "Оставить оплаченную часть",
+                CancellationScope = InvoiceCancellationScope.UnpaidInstallmentsOnly,
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(cancelAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(PaymentStatus.Processing, dto.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, dto.WorkflowStatus);
+        Assert.Equal(paidInstallment.Amount, dto.PaidAmount);
+        Assert.Equal(0m, dto.OutstandingAmount);
+        Assert.Null(dto.CancelledAt);
+        Assert.Null(dto.CancelledReason);
+
+        db.ChangeTracker.Clear();
+        var storedUpdatedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(PaymentStatus.Processing, storedUpdatedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, storedUpdatedParent.InvoiceWorkflowStatus);
+        Assert.Equal(paidInstallment.Amount, storedUpdatedParent.PaidAmount);
+        Assert.Null(storedUpdatedParent.InvoiceCancelledAt);
+        Assert.Contains("Оплаченные платежи сохранены", storedUpdatedParent.SystemNotes, StringComparison.Ordinal);
+
+        var installments = await LoadInstallmentPaymentsAsync(db, storedUpdatedParent.InvoiceId!.Value, storedUpdatedParent.Id);
+        Assert.Equal(2, installments.Count);
+        Assert.Equal(PaymentStatus.Completed, installments[0].Status);
+        Assert.True(installments[0].IsPaid);
+        Assert.Equal(installments[0].Amount, installments[0].PaidAmount);
+        Assert.Equal(PaymentStatus.Cancelled, installments[1].Status);
+        Assert.False(installments[1].IsPaid);
+        Assert.Equal(0m, installments[1].PaidAmount);
+        Assert.Contains("Неоплаченный платёж рассрочки отменён", installments[1].SystemNotes, StringComparison.Ordinal);
+
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+        Assert.Empty(await db.MoneyOperations.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task Cancel_PaidInvoiceWithReallocateAction_AppliesCreditToTargetInvoice()
     {
         await using var db = await CreateContextAsync();

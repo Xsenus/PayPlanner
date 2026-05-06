@@ -341,15 +341,16 @@ public class InvoicesControllerValidationTests
     }
 
     [Fact]
-    public async Task Create_ProcessingStatus_ClearsPaidDates_WhenThereIsNoPaidAmount()
+    public async Task Create_ProcessingStatusWithoutPaidAmount_NormalizesToPending()
     {
         await using var db = await CreateContextAsync();
         var clientId = await CreateClientAsync(db, "Processing Client");
+        var invoiceDate = DateTime.UtcNow.Date.AddDays(5);
 
         var controller = CreateController(db, isAdmin: true, userId: null);
-        var request = CreateRequest("INV-PROC-1", clientId, new DateTime(2026, 4, 10));
+        var request = CreateRequest("INV-PROC-1", clientId, invoiceDate);
         request.Status = PaymentStatus.Processing;
-        request.PaidDate = new DateTime(2026, 4, 11);
+        request.PaidDate = invoiceDate.AddDays(1);
 
         var action = await controller.Create(request, CancellationToken.None);
 
@@ -357,7 +358,7 @@ public class InvoicesControllerValidationTests
         var dto = Assert.IsType<InvoiceDto>(created.Value);
 
         var storedPayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == dto.Id);
-        Assert.Equal(PaymentStatus.Processing, storedPayment.Status);
+        Assert.Equal(PaymentStatus.Pending, storedPayment.Status);
         Assert.Equal(0m, storedPayment.PaidAmount);
         Assert.False(storedPayment.IsPaid);
         Assert.Null(storedPayment.PaidDate);
@@ -883,6 +884,37 @@ public class InvoicesControllerValidationTests
         Assert.Equal(11_000m, storedPayment.PaidAmount);
         Assert.Equal(new DateTime(2026, 4, 11), storedPayment.PaidDate);
         Assert.Equal(new DateTime(2026, 4, 11), storedPayment.LastPaymentDate);
+        Assert.False(storedPayment.IsPaid);
+    }
+
+    [Fact]
+    public async Task Update_ProcessingStatusWithoutPaidAmount_NormalizesToPending()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Unpaid Processing Update Client");
+        var invoiceDate = DateTime.UtcNow.Date.AddDays(5);
+        var invoiceId = await CreateInvoiceAsync(db, clientId, "INV-UPD-PROC-0", request =>
+        {
+            request.Date = invoiceDate;
+            request.DueDate = invoiceDate;
+        });
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var request = CreateRequest("INV-UPD-PROC-0", clientId, invoiceDate);
+        request.DueDate = invoiceDate;
+        request.Status = PaymentStatus.Processing;
+        request.PaidDate = invoiceDate.AddDays(1);
+
+        var action = await controller.Update(invoiceId, request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        Assert.IsType<InvoiceDto>(ok.Value);
+
+        var storedPayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == invoiceId);
+        Assert.Equal(PaymentStatus.Pending, storedPayment.Status);
+        Assert.Equal(0m, storedPayment.PaidAmount);
+        Assert.Null(storedPayment.PaidDate);
+        Assert.Null(storedPayment.LastPaymentDate);
         Assert.False(storedPayment.IsPaid);
     }
 

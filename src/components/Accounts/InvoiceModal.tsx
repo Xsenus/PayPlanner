@@ -92,6 +92,9 @@ type DraftActForm = {
 type InvoiceCounterpartyPickerMode = 'main' | 'expense';
 
 type LineItemLookupState = { lineItemId: string } | null;
+type InvoiceCancellationScope = 'All' | 'UnpaidInstallmentsOnly';
+type InvoiceCancellationMoneyAction = 'Reject' | 'LeaveAsAdvance' | 'Refund' | 'Reallocate';
+type InvoiceCancellationRefundSource = 'Bank' | 'Cash' | 'Card' | 'EMoney';
 
 const LINE_ITEM_GRID_TEMPLATE =
   'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(8.5rem,0.85fr)_2.75rem]';
@@ -552,6 +555,16 @@ function resolveOutstandingAmount(payment: Payment): number {
   return Math.max((payment.amount ?? 0) - resolvePaidAmount(payment), 0);
 }
 
+function paymentHasReceivedMoney(payment: Payment): boolean {
+  return (
+    resolvePaidAmount(payment) > 0
+    || Boolean(payment.isPaid)
+    || Boolean(payment.paidDate)
+    || Boolean(payment.lastPaymentDate)
+    || payment.status === 'Completed'
+  );
+}
+
 function paymentSourceLabel(payment: Payment): string {
   const description = payment.description?.trim();
   if (description) return description;
@@ -564,12 +577,20 @@ function deriveInvoiceStatusFromPayments(
   payments: Payment[],
   fallbackStatus: PaymentStatus,
   fallbackDueDate?: string | null,
+  fallbackAmount?: string | number | null,
+  fallbackPaidAmount?: string | number | null,
 ): PaymentStatus {
   const sourcePayments = getStatusSourcePaymentsForInvoice(payments);
 
   if (sourcePayments.length === 0) {
-    if (fallbackStatus === 'Completed' || fallbackStatus === 'Cancelled' || fallbackStatus === 'Processing' || fallbackStatus === 'Overdue') {
+    if (fallbackStatus === 'Completed' || fallbackStatus === 'Cancelled' || fallbackStatus === 'Overdue') {
       return fallbackStatus;
+    }
+
+    const fallbackAmountValue = parseMoneyInput(fallbackAmount);
+    const fallbackPaidAmountValue = Math.min(parseMoneyInput(fallbackPaidAmount), Math.max(fallbackAmountValue, 0));
+    if (fallbackPaidAmountValue > 0 && fallbackPaidAmountValue < fallbackAmountValue) {
+      return 'Processing';
     }
 
     const normalizedDueDate = toDateInputValue(fallbackDueDate ?? null);
@@ -595,7 +616,6 @@ function deriveInvoiceStatusFromPayments(
   const hasProgress = sourcePayments.some(
     (payment) =>
       payment.status === 'Completed'
-      || payment.status === 'Processing'
       || payment.hasPartialPayment
       || resolvePaidAmount(payment) > 0,
   );
@@ -684,10 +704,14 @@ function buildInvoiceStatusSnapshot(
   fallbackStatus: PaymentStatus,
   fallbackDueDate?: string | null,
   fallbackAmount?: string | number | null,
+  fallbackPaidAmount?: string | number | null,
+  fallbackOutstandingAmount?: string | number | null,
 ): InvoiceStatusSnapshot {
   const sourcePayments = getStatusSourcePaymentsForInvoice(payments);
-  const status = deriveInvoiceStatusFromPayments(payments, fallbackStatus, fallbackDueDate);
+  const status = deriveInvoiceStatusFromPayments(payments, fallbackStatus, fallbackDueDate, fallbackAmount, fallbackPaidAmount);
   const fallbackAmountValue = parseMoneyInput(fallbackAmount);
+  const fallbackPaidAmountValue = Math.min(parseMoneyInput(fallbackPaidAmount), Math.max(fallbackAmountValue, 0));
+  const fallbackOutstandingAmountValue = parseMoneyInput(fallbackOutstandingAmount);
   const aggregatedTotalFromPayments = sourcePayments.reduce((sum, payment) => {
     const paymentAmount = Math.max(payment.amount ?? 0, 0);
     const resolvedAmount = Math.max(paymentAmount, resolvePaidAmount(payment) + resolveOutstandingAmount(payment));
@@ -701,7 +725,7 @@ function buildInvoiceStatusSnapshot(
     ? sourcePayments.reduce((sum, payment) => sum + resolvePaidAmount(payment), 0)
     : status === 'Completed'
       ? totalAmount
-      : 0;
+      : fallbackPaidAmountValue;
   const rawOutstandingAmount = sourcePayments.reduce((sum, payment) => sum + resolveOutstandingAmount(payment), 0);
   const outstandingAmount = sourcePayments.length > 0
     ? rawOutstandingAmount > 0
@@ -709,6 +733,8 @@ function buildInvoiceStatusSnapshot(
       : Math.max(totalAmount - paidAmount, 0)
     : status === 'Completed' || status === 'Cancelled'
       ? 0
+      : fallbackOutstandingAmountValue > 0
+        ? fallbackOutstandingAmountValue
       : Math.max(totalAmount - paidAmount, 0);
 
   let reason = 'Связанные платежи по счету еще не созданы.';
@@ -740,8 +766,8 @@ function buildInvoiceStatusSnapshot(
     .sort((left, right) => right.sortValue - left.sortValue);
 
   const currentEntry: StatusTimelineEntry = {
-    key: `current-${fallbackStatus}-${paidAmount}-${outstandingAmount}`,
-    title: `Текущий статус: ${invoiceStatusLabel(fallbackStatus)}`,
+    key: `current-${status}-${paidAmount}-${outstandingAmount}`,
+    title: `Текущий статус: ${invoiceStatusLabel(status)}`,
     description: reason,
     sourceLabel: sourcePayments.length > 0
       ? `Связанных платежей: ${sourcePayments.length}`
@@ -875,6 +901,15 @@ export function InvoiceModal({
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
   const [documentPreviewError, setDocumentPreviewError] = useState<string | null>(null);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelScope, setCancelScope] = useState<InvoiceCancellationScope>('All');
+  const [cancelMoneyAction, setCancelMoneyAction] = useState<InvoiceCancellationMoneyAction>('LeaveAsAdvance');
+  const [cancelTargetPaymentId, setCancelTargetPaymentId] = useState('');
+  const [cancelRefundSource, setCancelRefundSource] = useState<InvoiceCancellationRefundSource>('Bank');
+  const [cancelRefundDate, setCancelRefundDate] = useState(() => formatLocalYMD(new Date()));
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const lastErrorToastRef = useRef<string | null>(null);
   const lastLocalErrorToastRef = useRef<string | null>(null);
   const lastAutoResponsibleIdRef = useRef<string>('');
@@ -2256,15 +2291,38 @@ export function InvoiceModal({
   };
 
   const statusSnapshot = useMemo(
-    () => buildInvoiceStatusSnapshot(relatedPayments, form.status, form.dueDate, form.amount),
-    [form.amount, form.dueDate, form.status, relatedPayments],
+    () => buildInvoiceStatusSnapshot(
+      relatedPayments,
+      form.status,
+      form.dueDate,
+      form.amount,
+      invoice?.paidAmount,
+      invoice?.outstandingAmount,
+    ),
+    [form.amount, form.dueDate, form.status, invoice?.outstandingAmount, invoice?.paidAmount, relatedPayments],
   );
   const hasGeneratedRelatedPayments = useMemo(
     () => relatedPayments.some((payment) => isGeneratedInstallmentPayment(payment)),
     [relatedPayments],
   );
+  const cancellationInstallmentStats = useMemo(() => {
+    const generated = relatedPayments.filter((payment) => isGeneratedInstallmentPayment(payment));
+    const active = generated.filter((payment) => payment.status !== 'Cancelled');
+    const paid = active.filter(paymentHasReceivedMoney);
+    const unpaid = active.filter((payment) => !paymentHasReceivedMoney(payment));
 
-  const effectiveInvoiceStatus = form.status;
+    return {
+      generatedCount: generated.length,
+      paidCount: paid.length,
+      unpaidCount: unpaid.length,
+      paidAmount: paid.reduce((sum, payment) => sum + resolvePaidAmount(payment), 0),
+      unpaidAmount: unpaid.reduce((sum, payment) => sum + resolveOutstandingAmount(payment), 0),
+      canPreservePaidInstallments: paid.length > 0 && unpaid.length > 0,
+    };
+  }, [relatedPayments]);
+  const cancelDialogHasReceivedMoney = statusSnapshot.paidAmount > 0 || cancellationInstallmentStats.paidCount > 0;
+
+  const effectiveInvoiceStatus = statusSnapshot.status;
   const installmentPlanAmountMismatch = useMemo(() => {
     if (!installmentPlan) return false;
     return Math.abs(parseMoneyInput(form.amount) - installmentPlan.total) > 0.009;
@@ -2784,12 +2842,101 @@ export function InvoiceModal({
   };
 
 
+  const openCancelInvoiceDialog = () => {
+    if (!invoice?.id) {
+      toast.error('Сначала сохраните счёт, затем можно аннулировать его.');
+      return;
+    }
+
+    setCancelReason('');
+    setCancelScope(cancellationInstallmentStats.canPreservePaidInstallments ? 'UnpaidInstallmentsOnly' : 'All');
+    setCancelMoneyAction(cancelDialogHasReceivedMoney ? 'LeaveAsAdvance' : 'Reject');
+    setCancelTargetPaymentId('');
+    setCancelRefundSource('Bank');
+    setCancelRefundDate(formatLocalYMD(new Date()));
+    setCancelError(null);
+    setCancelDialogOpen(true);
+  };
+
+  const handleCancelInvoiceSubmit = async () => {
+    if (!invoice?.id) {
+      setCancelError('Сначала сохраните счёт, затем можно аннулировать его.');
+      return;
+    }
+
+    const reason = cancelReason.trim();
+    if (!reason) {
+      setCancelError('Укажите причину отмены.');
+      return;
+    }
+
+    const isUnpaidOnly = cancelScope === 'UnpaidInstallmentsOnly';
+    let receivedMoneyAction: InvoiceCancellationMoneyAction = 'Reject';
+    let targetPaymentId: number | null = null;
+    let refundSource: InvoiceCancellationRefundSource | null = null;
+    let refundDate: string | null = null;
+
+    if (!isUnpaidOnly && cancelDialogHasReceivedMoney) {
+      receivedMoneyAction = cancelMoneyAction;
+      if (receivedMoneyAction === 'Reallocate') {
+        const parsedTargetPaymentId = Number(cancelTargetPaymentId);
+        if (!Number.isInteger(parsedTargetPaymentId) || parsedTargetPaymentId <= 0) {
+          setCancelError('Для зачёта укажите положительный ID счёта.');
+          return;
+        }
+        targetPaymentId = parsedTargetPaymentId;
+      }
+
+      if (receivedMoneyAction === 'Refund') {
+        refundSource = cancelRefundSource;
+        refundDate = cancelRefundDate || formatLocalYMD(new Date());
+      }
+    }
+
+    setCancelSubmitting(true);
+    setCancelError(null);
+    try {
+      const updated = await apiService.cancelInvoice(
+        invoice.id,
+        reason,
+        receivedMoneyAction,
+        targetPaymentId,
+        refundSource,
+        refundDate,
+        cancelScope,
+      );
+      setForm((prev) => ({
+        ...prev,
+        status: updated.status,
+        workflowStatus: updated.workflowStatus ?? prev.workflowStatus,
+      }));
+      await onRefreshRequested?.();
+      setCancelDialogOpen(false);
+      toast.success(
+        isUnpaidOnly
+          ? 'Неоплаченные платежи графика отменены, оплаченные оставлены.'
+          : 'Счёт аннулирован.',
+        'Счёт обновлён',
+      );
+    } catch (err) {
+      const message = extractDisplayErrorMessage(err, 'Не удалось отменить счёт.');
+      setCancelError(message);
+      toast.error(message);
+    } finally {
+      setCancelSubmitting(false);
+    }
+  };
+
   const handlePageAction = async (action: 'send' | 'sendToSigning' | 'markSigned' | 'copy' | 'paid' | 'cancel' | 'delete') => {
+    if (action === 'cancel') {
+      openCancelInvoiceDialog();
+      return;
+    }
+
     const actionMeta = {
       send: { title: 'Отправить счёт', message: 'Сформировать документ WORD и отправить на email клиента?', confirmLabel: 'Отправить' },
       copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
       paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
-      cancel: { title: 'Отменить счёт', message: 'Подтвердите отмену счёта.', confirmLabel: 'Отменить' },
       delete: { title: 'Удалить счёт', message: 'Удалить счёт без возможности восстановления?', confirmLabel: 'Удалить' },
       sendToSigning: { title: 'Отправить на подписание', message: 'Перевести счёт в статус “на подписании”?', confirmLabel: 'На подписание' },
       markSigned: { title: 'Отметить подписанным', message: 'Отметить счёт как подписанный клиентом?', confirmLabel: 'Подписан' },
@@ -2800,7 +2947,7 @@ export function InvoiceModal({
       description: actionMeta.message,
       confirmLabel: actionMeta.confirmLabel,
       cancelLabel: 'Отмена',
-      variant: action === 'cancel' || action === 'delete' ? 'danger' : 'primary',
+      variant: action === 'delete' ? 'danger' : 'primary',
     });
     if (!accepted) return;
 
@@ -2850,58 +2997,6 @@ export function InvoiceModal({
         await apiService.createInvoice(payload);
         await onRefreshRequested?.();
         toast.success('Создана копия текущего счета.', 'Копия создана');
-        return;
-      }
-
-      if (action === 'cancel') {
-        if (!invoice?.id) {
-          throw new Error('Сначала сохраните счёт, затем можно аннулировать его.');
-        }
-
-        const reason = window.prompt('Укажите причину аннулирования счёта');
-        if (!reason?.trim()) {
-          toast.error('Для аннулирования счёта нужна причина.');
-          return;
-        }
-
-        const hasReceivedMoney =
-          Number(invoice.paidAmount ?? 0) > 0 ||
-          invoice.status === 'Completed' ||
-          invoice.status === 'Processing';
-        let receivedMoneyAction: 'Reject' | 'LeaveAsAdvance' | 'Refund' | 'Reallocate' = 'Reject';
-        let targetPaymentId: number | null = null;
-        if (hasReceivedMoney) {
-          const targetInvoiceInput = window.prompt(
-            'По счёту уже есть оплата. Укажите ID счёта для зачёта, слово "возврат" для возврата денег или оставьте пустым для аванса клиента.',
-          );
-          if (targetInvoiceInput === null) {
-            return;
-          }
-
-          const normalizedTargetInvoiceInput = targetInvoiceInput.trim();
-          if (/^(возврат|refund|return)$/i.test(normalizedTargetInvoiceInput)) {
-            receivedMoneyAction = 'Refund';
-          } else if (normalizedTargetInvoiceInput) {
-            const parsedTargetPaymentId = Number(normalizedTargetInvoiceInput);
-            if (!Number.isInteger(parsedTargetPaymentId) || parsedTargetPaymentId <= 0) {
-              toast.error('Укажите положительный ID счёта для зачёта, слово "возврат" или оставьте поле пустым.');
-              return;
-            }
-            receivedMoneyAction = 'Reallocate';
-            targetPaymentId = parsedTargetPaymentId;
-          } else {
-            receivedMoneyAction = 'LeaveAsAdvance';
-          }
-        }
-
-        const updated = await apiService.cancelInvoice(invoice.id, reason.trim(), receivedMoneyAction, targetPaymentId);
-        setForm((prev) => ({
-          ...prev,
-          status: updated.status,
-          workflowStatus: updated.workflowStatus ?? prev.workflowStatus,
-        }));
-        await onRefreshRequested?.();
-        toast.success('Счёт аннулирован.', 'Счёт обновлён');
         return;
       }
 
@@ -3515,7 +3610,7 @@ export function InvoiceModal({
               <div className="rounded-lg border border-slate-300 bg-white p-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xl font-semibold">{printableAmount}</span>
-                  <span className={`rounded px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>{currentStatusMeta.label}</span>
+                  <span data-testid="invoice-page-status-badge" className={`rounded px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>{currentStatusMeta.label}</span>
                 </div>
                 <div data-testid="invoice-page-payment-summary" className="mt-3 grid grid-cols-2 gap-2">
                   <div className={`rounded-lg border px-3 py-2 text-center ${statusSnapshot.outstandingAmount > 0 ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}>
@@ -4893,6 +4988,213 @@ export function InvoiceModal({
               onApplyPlan={handleApplyInstallmentPlan}
               onCancel={() => setInstallmentModalOpen(false)}
             />
+          </div>
+        </div>
+      )}
+
+      {cancelDialogOpen && (
+        <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/60 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="invoice-cancel-dialog-title"
+            data-testid="invoice-cancel-dialog"
+            className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h3 id="invoice-cancel-dialog-title" className="text-lg font-semibold text-slate-900">Отмена счёта</h3>
+                <p className="mt-1 text-sm text-slate-500">Выберите, что сделать с платежами и уже полученными деньгами.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!cancelSubmitting) setCancelDialogOpen(false);
+                }}
+                disabled={cancelSubmitting}
+                className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Закрыть окно отмены счёта"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-5 px-5 py-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Оплачено</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">{formatCurrencySmart(statusSnapshot.paidAmount).short}</div>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Не оплачено</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">{formatCurrencySmart(statusSnapshot.outstandingAmount).short}</div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">График</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">
+                    {cancellationInstallmentStats.generatedCount > 0
+                      ? `${cancellationInstallmentStats.paidCount} оплач., ${cancellationInstallmentStats.unpaidCount} не оплач.`
+                      : 'Нет рассрочки'}
+                  </div>
+                </div>
+              </div>
+
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-slate-700">Причина отмены</span>
+                <textarea
+                  data-testid="invoice-cancel-reason"
+                  value={cancelReason}
+                  onChange={(event) => setCancelReason(event.target.value)}
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  placeholder="Например: клиент отказался от оставшихся платежей"
+                />
+              </label>
+
+              <fieldset className="space-y-3">
+                <legend className="text-sm font-semibold text-slate-900">Что отменить</legend>
+                {cancellationInstallmentStats.canPreservePaidInstallments ? (
+                  <>
+                    <label className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-3 text-sm transition ${cancelScope === 'UnpaidInstallmentsOnly' ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                      <input
+                        type="radio"
+                        name="invoice-cancel-scope"
+                        value="UnpaidInstallmentsOnly"
+                        checked={cancelScope === 'UnpaidInstallmentsOnly'}
+                        onChange={() => setCancelScope('UnpaidInstallmentsOnly')}
+                        className="mt-1"
+                      />
+                      <span>
+                        <span className="block font-medium text-slate-900">Только неоплаченные платежи графика</span>
+                        <span className="mt-1 block text-slate-600">
+                          Оплаченные платежи останутся оплаченными. Счёт не будет полностью аннулирован.
+                        </span>
+                      </span>
+                    </label>
+                    <label className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-3 text-sm transition ${cancelScope === 'All' ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                      <input
+                        type="radio"
+                        name="invoice-cancel-scope"
+                        value="All"
+                        checked={cancelScope === 'All'}
+                        onChange={() => setCancelScope('All')}
+                        className="mt-1"
+                      />
+                      <span>
+                        <span className="block font-medium text-slate-900">Весь счёт и все платежи</span>
+                        <span className="mt-1 block text-slate-600">
+                          Счёт будет аннулирован, а полученную оплату нужно перенести, зачесть или вернуть.
+                        </span>
+                      </span>
+                    </label>
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                    Будет аннулирован весь счёт. Вариант с сохранением оплаченных платежей появляется, когда в графике есть и оплаченные, и неоплаченные платежи.
+                  </div>
+                )}
+              </fieldset>
+
+              {cancelScope === 'All' && cancelDialogHasReceivedMoney && (
+                <fieldset className="space-y-3">
+                  <legend className="text-sm font-semibold text-slate-900">Что сделать с полученной оплатой</legend>
+                  <label className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-3 text-sm transition ${cancelMoneyAction === 'LeaveAsAdvance' ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                    <input
+                      type="radio"
+                      name="invoice-cancel-money-action"
+                      checked={cancelMoneyAction === 'LeaveAsAdvance'}
+                      onChange={() => setCancelMoneyAction('LeaveAsAdvance')}
+                      className="mt-1"
+                    />
+                    <span>
+                      <span className="block font-medium text-slate-900">Оставить авансом клиента</span>
+                      <span className="mt-1 block text-slate-600">Деньги останутся на балансе контрагента для будущих счетов.</span>
+                    </span>
+                  </label>
+                  <label className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-3 text-sm transition ${cancelMoneyAction === 'Reallocate' ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                    <input
+                      type="radio"
+                      name="invoice-cancel-money-action"
+                      checked={cancelMoneyAction === 'Reallocate'}
+                      onChange={() => setCancelMoneyAction('Reallocate')}
+                      className="mt-1"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-slate-900">Зачесть на другой счёт</span>
+                      <span className="mt-1 block text-slate-600">Укажите ID счёта этого же контрагента.</span>
+                      {cancelMoneyAction === 'Reallocate' && (
+                        <input
+                          value={cancelTargetPaymentId}
+                          onChange={(event) => setCancelTargetPaymentId(event.target.value.replace(/[^\d]/g, ''))}
+                          className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          placeholder="ID счёта"
+                          inputMode="numeric"
+                        />
+                      )}
+                    </span>
+                  </label>
+                  <label className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-3 text-sm transition ${cancelMoneyAction === 'Refund' ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                    <input
+                      type="radio"
+                      name="invoice-cancel-money-action"
+                      checked={cancelMoneyAction === 'Refund'}
+                      onChange={() => setCancelMoneyAction('Refund')}
+                      className="mt-1"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-slate-900">Оформить возврат денег</span>
+                      <span className="mt-1 block text-slate-600">Будет создан расход денег на сумму полученной оплаты.</span>
+                      {cancelMoneyAction === 'Refund' && (
+                        <span className="mt-2 grid gap-2 sm:grid-cols-2">
+                          <select
+                            value={cancelRefundSource}
+                            onChange={(event) => setCancelRefundSource(event.target.value as InvoiceCancellationRefundSource)}
+                            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          >
+                            {(['Bank', 'Cash', 'Card', 'EMoney'] as InvoiceCancellationRefundSource[]).map((source) => (
+                              <option key={source} value={source}>{moneyOperationSourceLabel(source)}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="date"
+                            value={cancelRefundDate}
+                            onChange={(event) => setCancelRefundDate(event.target.value)}
+                            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          />
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                </fieldset>
+              )}
+
+              {cancelError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {cancelError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 px-5 py-4 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setCancelDialogOpen(false)}
+                disabled={cancelSubmitting}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Не отменять
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCancelInvoiceSubmit()}
+                disabled={cancelSubmitting}
+                data-testid="invoice-cancel-submit"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cancelSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                Продолжить
+              </button>
+            </div>
           </div>
         </div>
       )}

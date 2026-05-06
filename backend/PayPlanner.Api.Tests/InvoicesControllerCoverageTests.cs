@@ -755,7 +755,15 @@ public class InvoicesControllerCoverageTests
 
         var firstInvoiceId = await CreateInvoicePaymentAsync(db, "FLT-1", alphaClientId, new DateTime(2026, 4, 10), 100m, PaymentStatus.Pending, PaymentType.Income);
         var secondInvoiceId = await CreateInvoicePaymentAsync(db, "FLT-2", betaClientId, new DateTime(2026, 4, 11), 200m, PaymentStatus.Overdue, PaymentType.Income);
-        var thirdInvoiceId = await CreateInvoicePaymentAsync(db, "FLT-3", alphaClientId, new DateTime(2026, 4, 12), 300m, PaymentStatus.Processing, PaymentType.Income);
+        var thirdInvoiceId = await CreateInvoicePaymentAsync(
+            db,
+            "FLT-3",
+            alphaClientId,
+            new DateTime(2026, 4, 12),
+            300m,
+            PaymentStatus.Processing,
+            PaymentType.Income,
+            paidAmount: 100m);
 
         var firstPayment = await db.Payments.SingleAsync(item => item.Id == firstInvoiceId);
         firstPayment.ClientCaseId = alphaCaseId;

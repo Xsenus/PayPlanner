@@ -1554,10 +1554,11 @@ export class ApiService {
     targetPaymentId?: number | null,
     refundSource?: 'Bank' | 'Cash' | 'Card' | 'EMoney' | null,
     refundDate?: string | null,
+    cancellationScope: 'All' | 'UnpaidInstallmentsOnly' = 'All',
   ) {
     return this.request<Invoice>(`/invoices/${id}/cancel`, {
       method: 'POST',
-      body: JSON.stringify({ reason, receivedMoneyAction, targetPaymentId, refundSource, refundDate }),
+      body: JSON.stringify({ reason, cancellationScope, receivedMoneyAction, targetPaymentId, refundSource, refundDate }),
     });
   }
 

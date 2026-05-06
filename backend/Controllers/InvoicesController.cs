@@ -387,10 +387,38 @@ public class InvoicesController : ControllerBase
             return BadRequest("Invoice aggregate was not found.");
         }
 
+        if (!Enum.IsDefined(request.CancellationScope))
+        {
+            return BadRequest("Unknown invoice cancellation scope.");
+        }
+
         await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         await LockInvoiceAggregateAsync(invoiceEntityId.Value, ct);
 
         var generatedPayments = await LoadGeneratedInstallmentPaymentsAsync(invoiceEntityId.Value, payment.Id, ct);
+        var now = DateTime.UtcNow;
+        var actor = User.GetDisplayName();
+        var actorId = GetUserId(User);
+
+        if (request.CancellationScope == InvoiceCancellationScope.UnpaidInstallmentsOnly)
+        {
+            var unpaidInstallmentCancelError = CancelUnpaidGeneratedInstallmentPayments(
+                payment,
+                generatedPayments,
+                reason,
+                now);
+            if (unpaidInstallmentCancelError is not null)
+            {
+                return unpaidInstallmentCancelError;
+            }
+
+            await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+
+            var updatedDto = await LoadInvoiceDtoAsync(payment.Id, ct);
+            return Ok(updatedDto);
+        }
+
         var paymentsToCancel = generatedPayments
             .Where(item => item.Status != PaymentStatus.Cancelled)
             .Prepend(payment)
@@ -470,15 +498,12 @@ public class InvoicesController : ControllerBase
             generatedPayments,
             reason,
             allowReceivedMoney: hasReceivedMoney,
-            now: DateTime.UtcNow);
+            now: now);
         if (installmentCancelError is not null)
         {
             return installmentCancelError;
         }
 
-        var now = DateTime.UtcNow;
-        var actor = User.GetDisplayName();
-        var actorId = GetUserId(User);
         await CancelLinkedActsAsync(payment, reason, now, actorId, ct);
 
         if (hasReceivedMoney && request.ReceivedMoneyAction is InvoiceCancellationMoneyAction.LeaveAsAdvance or InvoiceCancellationMoneyAction.Reallocate)
@@ -2397,6 +2422,9 @@ public class InvoicesController : ControllerBase
             payment.IsPaid = false;
             if (payment.PaidAmount <= 0m)
             {
+                payment.Status = payment.Date.Date < DateTime.UtcNow.Date
+                    ? PaymentStatus.Overdue
+                    : PaymentStatus.Pending;
                 payment.LastPaymentDate = null;
                 payment.PaidDate = null;
             }
@@ -2554,7 +2582,6 @@ public class InvoicesController : ControllerBase
 
         if (payments.Any(payment =>
                 payment.Status == PaymentStatus.Completed
-                || payment.Status == PaymentStatus.Processing
                 || payment.PaidAmount > 0m))
         {
             return PaymentStatus.Processing;
@@ -3603,6 +3630,105 @@ public class InvoicesController : ControllerBase
             .ThenBy(payment => payment.Id)
             .ToListAsync(ct);
 
+    private ActionResult? CancelUnpaidGeneratedInstallmentPayments(
+        Payment invoicePayment,
+        IReadOnlyCollection<Payment> generatedPayments,
+        string reason,
+        DateTime now)
+    {
+        if (generatedPayments.Count == 0)
+        {
+            return BadRequest("У счёта нет сформированного графика платежей.");
+        }
+
+        var actor = User.GetDisplayName();
+        var activeGeneratedPayments = generatedPayments
+            .Where(payment => payment.Status != PaymentStatus.Cancelled)
+            .ToList();
+        var paidGeneratedPayments = activeGeneratedPayments
+            .Where(HasReceivedMoney)
+            .ToList();
+        if (paidGeneratedPayments.Count == 0)
+        {
+            return BadRequest("Этот режим доступен для частично оплаченной рассрочки: нужен хотя бы один оплаченный платёж, который останется в истории.");
+        }
+
+        var unpaidGeneratedPayments = activeGeneratedPayments
+            .Where(payment => !HasReceivedMoney(payment))
+            .ToList();
+        if (unpaidGeneratedPayments.Count == 0)
+        {
+            return BadRequest("Не найдено неоплаченных платежей графика для отмены.");
+        }
+
+        foreach (var payment in unpaidGeneratedPayments)
+        {
+            payment.Status = PaymentStatus.Cancelled;
+            payment.PaidAmount = 0m;
+            payment.IsPaid = false;
+            payment.PaidDate = null;
+            payment.LastPaymentDate = null;
+            PaymentDomainService.AppendSystemNote(payment, $"Неоплаченный платёж рассрочки отменён. Причина: {reason}", now, actor);
+            PaymentDomainService.Normalize(payment);
+        }
+
+        RefreshInvoiceRepresentativeFromGeneratedPayments(invoicePayment, generatedPayments);
+        PaymentDomainService.AppendSystemNote(
+            invoicePayment,
+            $"Отменены только неоплаченные платежи графика рассрочки ({unpaidGeneratedPayments.Count}). Оплаченные платежи сохранены: {paidGeneratedPayments.Count}. Причина: {reason}",
+            now,
+            actor);
+        return null;
+    }
+
+    private static void RefreshInvoiceRepresentativeFromGeneratedPayments(
+        Payment representative,
+        IReadOnlyCollection<Payment> generatedPayments)
+    {
+        if (generatedPayments.Count == 0)
+        {
+            return;
+        }
+
+        representative.PaidAmount = NormalizeMoneyAmount(generatedPayments.Sum(ResolvePaidAmount));
+        representative.Status = DeriveInvoiceStatus(generatedPayments, representative.Status, representative.Date);
+        representative.InvoiceWorkflowStatus = InvoiceWorkflowStatus.FromPaymentStatus(
+            representative.Status,
+            representative.PaidAmount,
+            representative.Amount);
+        representative.IsPaid = AreAmountsEqual(representative.PaidAmount, representative.Amount)
+                                && representative.Status == PaymentStatus.Completed;
+
+        var lastPlannedDate = generatedPayments
+            .Select(EffectivePlannedDate)
+            .DefaultIfEmpty(representative.Date)
+            .Max();
+        representative.Date = lastPlannedDate;
+        representative.PlannedDate = lastPlannedDate;
+
+        representative.PaidDate = generatedPayments
+            .Where(payment => payment.PaidDate.HasValue)
+            .Select(payment => payment.PaidDate!.Value)
+            .DefaultIfEmpty()
+            .Max();
+        if (representative.PaidDate == default)
+        {
+            representative.PaidDate = null;
+        }
+
+        representative.LastPaymentDate = generatedPayments
+            .Where(payment => payment.LastPaymentDate.HasValue || payment.PaidDate.HasValue)
+            .Select(payment => payment.LastPaymentDate ?? payment.PaidDate!.Value)
+            .DefaultIfEmpty()
+            .Max();
+        if (representative.LastPaymentDate == default)
+        {
+            representative.LastPaymentDate = null;
+        }
+
+        PaymentDomainService.Normalize(representative);
+    }
+
     private ActionResult? CancelGeneratedInstallmentPayments(
         IReadOnlyCollection<Payment> generatedPayments,
         string reason,
@@ -3746,7 +3872,7 @@ public class InvoicesController : ControllerBase
            || payment.IsPaid
            || payment.PaidDate.HasValue
            || payment.LastPaymentDate.HasValue
-           || payment.Status is PaymentStatus.Completed or PaymentStatus.Processing;
+           || payment.Status == PaymentStatus.Completed;
 
     private static bool HasSingleCounterpartyOwner(int? clientId, int? legalEntityId)
         => (clientId.HasValue && clientId.Value > 0 && !legalEntityId.HasValue)
@@ -4459,34 +4585,56 @@ public class InvoicesController : ControllerBase
 
     private async Task<string?> ResolveInvoiceNumberForSaveAsync(string number, DateTime accountDate, int? excludeId, bool allowDuplicateOnImport, CancellationToken ct)
     {
-        var duplicateError = await EnsureInvoiceNumberIsUniqueAsync(number, accountDate, excludeId, ct);
-        if (duplicateError is null)
+        if (allowDuplicateOnImport)
         {
-            return number;
-        }
+            var reservedNumbers = await LoadReservedInvoiceNumberLookupAsync(accountDate, excludeId, ct);
+            if (!reservedNumbers.Contains(BuildInvoiceNumberLookupKey(number)))
+            {
+                return number;
+            }
 
-        if (!allowDuplicateOnImport)
-        {
+            var baseNumber = number;
+            for (var i = 1; i <= 9999; i++)
+            {
+                var suffix = $"-IMP{i}";
+                var maxBaseLength = Math.Max(1, 120 - suffix.Length);
+                var truncatedBase = baseNumber.Length > maxBaseLength
+                    ? baseNumber[..maxBaseLength]
+                    : baseNumber;
+                var candidate = $"{truncatedBase}{suffix}";
+                if (!reservedNumbers.Contains(BuildInvoiceNumberLookupKey(candidate)))
+                {
+                    return candidate;
+                }
+            }
+
             return null;
         }
 
-        var baseNumber = number;
-        for (var i = 1; i <= 9999; i++)
-        {
-            var suffix = $"-IMP{i}";
-            var maxBaseLength = Math.Max(1, 120 - suffix.Length);
-            var truncatedBase = baseNumber.Length > maxBaseLength
-                ? baseNumber[..maxBaseLength]
-                : baseNumber;
-            var candidate = $"{truncatedBase}{suffix}";
-            var candidateError = await EnsureInvoiceNumberIsUniqueAsync(candidate, accountDate, excludeId, ct);
-            if (candidateError is null)
-            {
-                return candidate;
-            }
-        }
+        var duplicateError = await EnsureInvoiceNumberIsUniqueAsync(number, accountDate, excludeId, ct);
+        return duplicateError is null ? number : null;
+    }
 
-        return null;
+    private async Task<HashSet<string>> LoadReservedInvoiceNumberLookupAsync(DateTime accountDate, int? excludeId, CancellationToken ct)
+    {
+        var yearStart = new DateTime(accountDate.Year, 1, 1);
+        var yearEnd = yearStart.AddYears(1);
+
+        var numbers = await BuildActiveInvoiceEntitiesQuery()
+            .Where(x => x.Date >= yearStart && x.Date < yearEnd)
+            .Where(x => excludeId == null || !x.Payments.Any(p => p.Id == excludeId.Value))
+            .Select(x => x.Number)
+            .ToListAsync(ct);
+
+        return numbers
+            .Select(BuildInvoiceNumberLookupKey)
+            .Where(value => value.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string BuildInvoiceNumberLookupKey(string? number)
+    {
+        return (number ?? string.Empty).Trim();
     }
 
     private async Task<ActionResult?> EnsureInvoiceNumberIsUniqueAsync(string number, DateTime accountDate, int? excludeId, CancellationToken ct)

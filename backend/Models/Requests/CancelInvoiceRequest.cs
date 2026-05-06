@@ -11,11 +11,19 @@ public enum InvoiceCancellationMoneyAction
     Reallocate
 }
 
+public enum InvoiceCancellationScope
+{
+    All,
+    UnpaidInstallmentsOnly
+}
+
 public class CancelInvoiceRequest
 {
     [Required]
     [StringLength(1000, MinimumLength = 1)]
     public string Reason { get; set; } = string.Empty;
+
+    public InvoiceCancellationScope CancellationScope { get; set; } = InvoiceCancellationScope.All;
 
     public InvoiceCancellationMoneyAction ReceivedMoneyAction { get; set; } = InvoiceCancellationMoneyAction.Reject;
 
