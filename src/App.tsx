@@ -293,6 +293,13 @@ function AppContent() {
     [logActivity, permissions.clients.canView],
   );
 
+  const handleOpenCalendarClient = useCallback(
+    (clientId: number, caseId?: number) => {
+      handleOpenClient(clientId, caseId, { returnTo: { tab: 'calendar' } });
+    },
+    [handleOpenClient],
+  );
+
   const handleRouteInvoiceChange = useCallback((invoiceId: number | null) => {
     setSelectedInvoiceId(invoiceId);
     if (invoiceId === null) {
@@ -685,7 +692,7 @@ function AppContent() {
     switch (activeTab) {
       case 'calendar':
         return permissions.calendar.canView
-          ? <Calendar onOpenClient={handleOpenClient} />
+          ? <Calendar onOpenClient={handleOpenCalendarClient} />
           : renderNoAccess('Раздел календаря недоступен для вашей роли.');
 
       case 'tasks':
@@ -1127,7 +1134,7 @@ function AppContent() {
 
       default:
         return permissions.calendar.canView
-          ? <Calendar onOpenClient={handleOpenClient} />
+          ? <Calendar onOpenClient={handleOpenCalendarClient} />
           : renderNoAccess('Раздел календаря недоступен для вашей роли.');
     }
   };
