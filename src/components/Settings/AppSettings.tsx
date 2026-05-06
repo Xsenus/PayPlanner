@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Database, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { Bell, Database, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -13,6 +13,7 @@ import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
 import { MainCompanySettings } from './MainCompanySettings';
 import { MoneyAccountSettings } from './MoneyAccountSettings';
+import { NotificationSettings } from './NotificationSettings';
 import { SpreadsheetImportSettings } from './SpreadsheetImportSettings';
 import { UserMergeSettings } from './UserMergeSettings';
 import type {
@@ -31,6 +32,7 @@ type SettingsSection =
   | 'companies'
   | 'general'
   | 'integrations'
+  | 'notifications'
   | 'auth-providers'
   | 'db-maintenance'
   | 'db-import'
@@ -107,6 +109,7 @@ export function AppSettings() {
     if (activeSection === 'companies') return 'Компании сервиса';
     if (activeSection === 'general') return 'Финансовые правила';
     if (activeSection === 'integrations') return 'Ключи и внешние сервисы';
+    if (activeSection === 'notifications') return 'Уведомления';
     if (activeSection === 'auth-providers') return 'Внешняя авторизация';
     if (activeSection === 'db-maintenance') return 'Обслуживание базы данных';
     if (activeSection === 'db-import') return 'Импорт данных';
@@ -704,6 +707,20 @@ export function AppSettings() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => setActiveSection('notifications')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'notifications'
+                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Bell className="h-4 w-4" />
+                      Уведомления
+                    </span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setActiveSection('auth-providers')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'auth-providers'
@@ -1083,7 +1100,10 @@ export function AppSettings() {
               </div>
             )}
 
+            {activeSection === 'notifications' && <NotificationSettings />}
+
             {activeSection === 'auth-providers' && <AuthProviderSettings />}
+
 
             {activeSection === 'db-maintenance' && <DatabaseMaintenanceSettings />}
 

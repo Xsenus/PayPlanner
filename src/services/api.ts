@@ -76,6 +76,163 @@ export interface UserSettingDto {
   updatedAt: string;
 }
 
+export type NotificationChannel = 'email' | 'telegram';
+
+export interface NotificationPurposeDto {
+  key: string;
+  label: string;
+  description: string;
+}
+
+export interface EmailNotificationSettingsDto {
+  enabled: boolean;
+  ready: boolean;
+  smtpHost: string;
+  smtpPort: number;
+  smtpUsername: string;
+  smtpPasswordSet: boolean;
+  fromEmail: string;
+  fromName: string;
+  enableSsl: boolean;
+}
+
+export interface TelegramNotificationSettingsDto {
+  enabled: boolean;
+  ready: boolean;
+  botTokenSet: boolean;
+  botUsername: string;
+  linkedUsersCount: number;
+}
+
+export interface EmailNotificationSenderDto {
+  smtpHost: string;
+  smtpPort: number;
+  smtpUsername: string;
+  smtpPasswordSet: boolean;
+  fromEmail: string;
+  fromName: string;
+  enableSsl: boolean;
+}
+
+export interface TelegramNotificationSenderDto {
+  botTokenSet: boolean;
+  botUsername: string;
+  updateMode: 'disabled' | 'webhook' | 'polling' | string;
+  webhookSecretSet: boolean;
+  webhookUrl: string;
+  webhookSyncedAt?: string | null;
+  lastPollingAt?: string | null;
+  subscriptionsCount: number;
+  proxyUrl: string;
+  proxyUsername: string;
+  proxyPasswordSet: boolean;
+  botId?: number | null;
+  botFirstName: string;
+  profileName: string;
+  profileDescription: string;
+  profileShortDescription: string;
+  profileCommands: TelegramBotCommandDto[];
+  hasProfilePhoto: boolean;
+  profileSyncedAt?: string | null;
+  canJoinGroups: boolean;
+  canReadAllGroupMessages: boolean;
+  supportsInlineQueries: boolean;
+}
+
+export interface TelegramBotCommandDto {
+  command: string;
+  description: string;
+}
+
+export interface NotificationSenderDto {
+  id: number;
+  channel: NotificationChannel;
+  name: string;
+  isEnabled: boolean;
+  ready: boolean;
+  purposes: string[];
+  sortOrder: number;
+  email?: EmailNotificationSenderDto | null;
+  telegram?: TelegramNotificationSenderDto | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface NotificationSettingsDto {
+  email: EmailNotificationSettingsDto;
+  telegram: TelegramNotificationSettingsDto;
+  senders: NotificationSenderDto[];
+  purposes: NotificationPurposeDto[];
+}
+
+export interface UpsertNotificationSenderRequest {
+  channel: NotificationChannel;
+  name: string;
+  isEnabled: boolean;
+  purposes: string[];
+  sortOrder: number;
+  email?: {
+    smtpHost?: string | null;
+    smtpPort?: number | null;
+    smtpUsername?: string | null;
+    smtpPassword?: string | null;
+    keepExistingPassword?: boolean;
+    fromEmail?: string | null;
+    fromName?: string | null;
+    enableSsl?: boolean;
+  } | null;
+  telegram?: {
+    botToken?: string | null;
+    keepExistingToken?: boolean;
+    botUsername?: string | null;
+    updateMode?: string | null;
+    webhookSecret?: string | null;
+    keepExistingWebhookSecret?: boolean;
+    proxyUrl?: string | null;
+    proxyUsername?: string | null;
+    proxyPassword?: string | null;
+    keepExistingProxyPassword?: boolean;
+    profileName?: string | null;
+    profileDescription?: string | null;
+    profileShortDescription?: string | null;
+    profileCommands?: TelegramBotCommandDto[] | null;
+  } | null;
+}
+
+export interface SendNotificationTestResponseDto {
+  success: boolean;
+  channel: string;
+  recipient: string;
+  status: string;
+  error?: string | null;
+}
+
+export interface TelegramWebhookSyncResultDto {
+  success: boolean;
+  message: string;
+  webhookUrl: string;
+  botUsername: string;
+}
+
+export interface TelegramBotProfileSyncResultDto {
+  success: boolean;
+  message: string;
+  profile?: {
+    botId?: number | null;
+    botUsername: string;
+    botFirstName: string;
+    name: string;
+    description: string;
+    shortDescription: string;
+    commands: TelegramBotCommandDto[];
+    hasProfilePhoto: boolean;
+    syncedAt?: string | null;
+    canJoinGroups: boolean;
+    canReadAllGroupMessages: boolean;
+    supportsInlineQueries: boolean;
+  } | null;
+}
+
 export interface DatabaseStatusDto {
   provider: string;
   displayName: string;
@@ -936,6 +1093,94 @@ export class ApiService {
     return this.request<UserSettingDto>(`/user-settings/${encodeURIComponent(key)}`, {
       method: 'PUT',
       body: JSON.stringify({ value }),
+    });
+  }
+
+  // ===== Notifications =====
+  async getNotificationSettings() {
+    return this.request<NotificationSettingsDto>('/notifications/settings');
+  }
+
+  async createNotificationSender(payload: UpsertNotificationSenderRequest) {
+    return this.request<NotificationSettingsDto>('/notifications/senders', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateNotificationSender(id: number, payload: UpsertNotificationSenderRequest) {
+    return this.request<NotificationSettingsDto>(`/notifications/senders/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteNotificationSender(id: number) {
+    return this.request<void>(`/notifications/senders/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async syncTelegramNotificationWebhook(id: number) {
+    return this.request<TelegramWebhookSyncResultDto>(`/notifications/senders/${id}/telegram/webhook/sync`, {
+      method: 'POST',
+    });
+  }
+
+  async deleteTelegramNotificationWebhook(id: number) {
+    return this.request<TelegramWebhookSyncResultDto>(`/notifications/senders/${id}/telegram/webhook`, {
+      method: 'DELETE',
+    });
+  }
+
+  async syncTelegramBotProfile(id: number) {
+    return this.request<TelegramBotProfileSyncResultDto>(`/notifications/senders/${id}/telegram/profile/sync`, {
+      method: 'POST',
+    });
+  }
+
+  async applyTelegramBotProfile(
+    id: number,
+    payload: {
+      name?: string | null;
+      description?: string | null;
+      shortDescription?: string | null;
+      commands?: TelegramBotCommandDto[] | null;
+    },
+  ) {
+    return this.request<TelegramBotProfileSyncResultDto>(`/notifications/senders/${id}/telegram/profile`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getTelegramBotProfilePhotoBlob(id: number) {
+    const url = `${API_BASE_URL}/notifications/senders/${id}/telegram/photo`;
+    const token = getAuthToken();
+    const response = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(`HTTP ${response.status} ${response.statusText} at ${url} ${text ? `- ${text}` : ''}`);
+    }
+
+    return response.blob();
+  }
+
+  async sendNotificationTest(payload: {
+    channel: NotificationChannel;
+    senderId?: number | null;
+    userId?: number | null;
+    email?: string | null;
+    telegramChatId?: number | null;
+    subject?: string | null;
+    message?: string | null;
+  }) {
+    return this.request<SendNotificationTestResponseDto>('/notifications/test', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 
