@@ -39,10 +39,15 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditFieldLabel('payment', 'Legal Entity Id')).toBe('Юридическое лицо');
     expect(getObjectAuditFieldLabel('payment', 'Payment Status Id')).toBe('Статус оплаты');
     expect(getObjectAuditFieldLabel('payment', 'Client Case Reference')).toBe('Дело');
+    expect(getObjectAuditFieldLabel('payment', 'Invoice Workflow Status')).toBe('Статус документа');
+    expect(getObjectAuditFieldLabel('invoice-line-item', 'Sort Order')).toBe('Порядок строки');
   });
 
   it('builds readable change summary', () => {
     expect(formatAuditChangeSummary('payment', '["Status"]')).toBe('Изменено поле: Статус платежа');
+    expect(formatAuditChangeSummary('payment', '["Invoice Workflow Status","IsPaid","LastPaymentDate","PaidAmount"]')).toBe(
+      'Изменены поля: Статус документа, Оплачен, Дата последней оплаты и ещё 1',
+    );
     expect(formatAuditChangeSummary('payment', '["Status","ExpenseClientId","ClientCaseId","Amount"]')).toBe(
       'Изменены поля: Статус платежа, Клиент расхода, Дело и ещё 1',
     );
@@ -69,6 +74,8 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue('true')).toBe('Да');
     expect(formatAuditValue('0', 'payment', 'Is Paid')).toBe('Нет');
     expect(formatAuditValue('Overdue')).toBe('Просрочено');
+    expect(formatAuditValue('SignedByClient')).toBe('Подписан клиентом');
+    expect(formatAuditValue('PartiallyPaid')).toBe('Частично оплачен');
     expect(formatAuditValue('2026-04-27 00:00:00', 'payment', 'Date')).toBe('27.04.2026');
     expect(formatAuditValue('1500.00', 'payment', 'Amount')).toMatch(/1\s*500\s*₽/u);
     expect(formatAuditValue('42', 'payment', 'Payment Status Id')).toBe('ID 42');
@@ -77,6 +84,8 @@ describe('objectAudit utilities', () => {
   it('translates technical audit labels and hides Codex repair actor', () => {
     expect(getObjectAuditActionLabel('DataRepair')).toBe('Исправление данных');
     expect(getObjectAuditTypeLabel('task-journal-item')).toBe('Задача');
+    expect(getObjectAuditTypeLabel('invoice-line-item')).toBe('Позиция счета');
+    expect(getObjectAuditTypeLabel('money-operation')).toBe('Денежная операция');
     expect(getObjectAuditActorLabel('Codex data repair')).toBe('Системное исправление');
     expect(formatObjectAuditText('Codex data repair updated Task Journal Item #1')).toBe(
       'Системное исправление updated Задача #1',
