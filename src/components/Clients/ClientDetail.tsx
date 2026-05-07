@@ -106,6 +106,7 @@ import {
   getVisibleNotes,
   getVisibleSystemNotes,
 } from "../../utils/systemNotes";
+import { getObjectAuditActorLabel } from "../../utils/objectAudit";
 import { getContractEffectiveAmount } from "../../utils/contracts";
 import {
   formatPeriodLabel,
@@ -558,8 +559,12 @@ function formatAuditShortDate(value?: string | null): string {
 
 function caseAuditSummary(caseItem: ClientCase): string {
   const createdBy =
-    caseItem.auditCreatedByUserName?.trim() || "автор неизвестен";
-  const updatedBy = caseItem.auditUpdatedByUserName?.trim();
+    caseItem.auditCreatedByUserName?.trim()
+      ? getObjectAuditActorLabel(caseItem.auditCreatedByUserName)
+      : "автор неизвестен";
+  const updatedBy = caseItem.auditUpdatedByUserName?.trim()
+    ? getObjectAuditActorLabel(caseItem.auditUpdatedByUserName)
+    : "";
 
   if (caseItem.auditUpdatedAt || updatedBy) {
     return `Изменил: ${updatedBy || "пользователь неизвестен"}, ${formatAuditShortDate(caseItem.auditUpdatedAt)}`;
@@ -9308,7 +9313,7 @@ export function ClientDetail({
                               </p>
                               {item.createdByUserName ? (
                                 <p className="mt-1 text-xs text-slate-400">
-                                  Автор: {item.createdByUserName}
+                                  Автор: {getObjectAuditActorLabel(item.createdByUserName)}
                                 </p>
                               ) : null}
                               {item.paymentId || item.invoiceId ? (

@@ -40,6 +40,7 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditFieldLabel('payment', 'Payment Status Id')).toBe('Статус оплаты');
     expect(getObjectAuditFieldLabel('payment', 'Client Case Reference')).toBe('Дело');
     expect(getObjectAuditFieldLabel('payment', 'Invoice Workflow Status')).toBe('Статус документа');
+    expect(getObjectAuditFieldLabel('payment', 'System Notes')).toBe('Служебные заметки');
     expect(getObjectAuditFieldLabel('invoice-line-item', 'Sort Order')).toBe('Порядок строки');
   });
 
@@ -81,14 +82,15 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue('42', 'payment', 'Payment Status Id')).toBe('ID 42');
   });
 
-  it('translates technical audit labels and hides Codex repair actor', () => {
+  it('translates technical audit labels and hides Codex actors', () => {
     expect(getObjectAuditActionLabel('DataRepair')).toBe('Исправление данных');
     expect(getObjectAuditTypeLabel('task-journal-item')).toBe('Задача');
     expect(getObjectAuditTypeLabel('invoice-line-item')).toBe('Позиция счета');
     expect(getObjectAuditTypeLabel('money-operation')).toBe('Денежная операция');
-    expect(getObjectAuditActorLabel('Codex data repair')).toBe('Системное исправление');
-    expect(formatObjectAuditText('Codex data repair updated Task Journal Item #1')).toBe(
-      'Системное исправление updated Задача #1',
+    expect(getObjectAuditActorLabel('Codex data repair')).toBe('Администратор');
+    expect(getObjectAuditActorLabel('Codex maintenance')).toBe('Администратор');
+    expect(formatObjectAuditText('Codex maintenance updated System Notes')).toBe(
+      'Администратор изменил Служебные заметки',
     );
   });
 });

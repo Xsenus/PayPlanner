@@ -4,6 +4,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type DeletedObjectAuditItemDto } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { getObjectAuditActorLabel } from '../../utils/objectAudit';
 
 type DeletedObjectType =
   | 'client'
@@ -40,9 +41,13 @@ function formatDateTime(value?: string | null) {
   }
 }
 
+function formatAuditUserName(value?: string | null) {
+  return value?.trim() ? getObjectAuditActorLabel(value) : '—';
+}
+
 function getRestoreDescription(item: DeletedObjectAuditItemDto) {
   const parts = [
-    item.deletedByUserName ? `Удалил: ${item.deletedByUserName}` : null,
+    item.deletedByUserName ? `Удалил: ${formatAuditUserName(item.deletedByUserName)}` : null,
     item.deletedAt ? `Когда: ${formatDateTime(item.deletedAt)}` : null,
   ].filter(Boolean);
 
@@ -286,9 +291,9 @@ export function ObjectAuditDeletedObjectsSettings({
                         ) : null}
                         <div className="mt-3 grid gap-2 text-xs text-slate-500 md:grid-cols-2">
                           <div>Создан: {formatDateTime(item.createdAt)}</div>
-                          <div>Создал: {item.createdByUserName || '—'}</div>
+                          <div>Создал: {formatAuditUserName(item.createdByUserName)}</div>
                           <div>Обновлён: {formatDateTime(item.updatedAt)}</div>
-                          <div>Изменил: {item.updatedByUserName || '—'}</div>
+                          <div>Изменил: {formatAuditUserName(item.updatedByUserName)}</div>
                         </div>
                         <div className="mt-3 text-xs text-slate-500">{getRestoreDescription(item)}</div>
                       </div>

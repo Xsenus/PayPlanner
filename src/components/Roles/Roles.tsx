@@ -23,6 +23,7 @@ import { TablePagination } from '../ui/TablePagination';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { MENU_SECTION_KEYS } from '../../types/permissions';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import { getObjectAuditActorLabel } from '../../utils/objectAudit';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
@@ -69,6 +70,10 @@ function formatDateTime(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatAuditUserName(value?: string | null) {
+  return value?.trim() ? getObjectAuditActorLabel(value) : 'После создания права не менялись';
 }
 
 function getAccessibleSectionsLabel(role: Role) {
@@ -273,7 +278,7 @@ export const Roles = () => {
               {role.permissionsUpdatedAt ? formatDateTime(role.permissionsUpdatedAt) : 'Не изменялись'}
             </div>
             <div className="text-xs text-slate-500">
-              {role.permissionsUpdatedByUserName || 'После создания права не менялись'}
+              {formatAuditUserName(role.permissionsUpdatedByUserName)}
             </div>
           </div>
         );
@@ -653,7 +658,7 @@ export const Roles = () => {
                   Последнее изменение прав
                 </div>
                 <div className="mt-3 text-sm font-medium text-slate-900">
-                  {selectedRole.permissionsUpdatedByUserName || 'После создания права не менялись'}
+                  {formatAuditUserName(selectedRole.permissionsUpdatedByUserName)}
                 </div>
                 <div className="mt-1 text-sm text-slate-500">
                   {formatDateTime(selectedRole.permissionsUpdatedAt)}

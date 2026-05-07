@@ -18,6 +18,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
+import { getObjectAuditActorLabel } from '../../utils/objectAudit';
 import { LegalEntityModal } from '../LegalEntities/LegalEntityModal';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 
@@ -215,6 +216,10 @@ function columnsForScope(scope: ContactKind): ContactColumnConfig[] {
 function formatDate(value?: string | null) {
   if (!value) return '';
   return new Date(value).toLocaleDateString('ru-RU');
+}
+
+function formatAuditUserName(value?: string | null) {
+  return value?.trim() ? getObjectAuditActorLabel(value) : '—';
 }
 
 function normalize(value?: string | null) {
@@ -796,9 +801,9 @@ export function UnifiedContacts({
       case 'updatedAt':
         return formatDate(client?.auditUpdatedAt || legal?.updatedAt || legal?.auditUpdatedAt) || '—';
       case 'auditCreatedBy':
-        return client?.auditCreatedByUserName || legal?.auditCreatedByUserName || '—';
+        return formatAuditUserName(client?.auditCreatedByUserName || legal?.auditCreatedByUserName);
       case 'auditUpdatedBy':
-        return client?.auditUpdatedByUserName || legal?.auditUpdatedByUserName || '—';
+        return formatAuditUserName(client?.auditUpdatedByUserName || legal?.auditUpdatedByUserName);
       default:
         return '—';
     }

@@ -1,3 +1,5 @@
+import { getObjectAuditActorLabel } from '../../utils/objectAudit';
+
 interface AuditInfoCardProps {
   createdAt?: string | null;
   createdByUserName?: string | null;
@@ -39,7 +41,8 @@ function formatAuditDate(value?: string | null): string | null {
 
 function AuditInfoRow({ label, userName, date, emptyText }: AuditInfoRowProps) {
   const formattedDate = formatAuditDate(date);
-  const hasValue = Boolean(userName || formattedDate);
+  const displayUserName = userName?.trim() ? getObjectAuditActorLabel(userName) : null;
+  const hasValue = Boolean(displayUserName || formattedDate);
 
   return (
     <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
@@ -47,7 +50,7 @@ function AuditInfoRow({ label, userName, date, emptyText }: AuditInfoRowProps) {
       {hasValue ? (
         <div className="mt-3 space-y-2">
           <div className="break-words text-sm font-semibold leading-6 text-slate-900">
-            {userName || 'Неизвестно'}
+            {displayUserName || 'Неизвестно'}
           </div>
           <div className="text-xs leading-5 text-slate-500">{formattedDate || 'Дата не указана'}</div>
         </div>

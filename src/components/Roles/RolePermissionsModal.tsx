@@ -33,6 +33,7 @@ import {
   type MenuSectionKey,
   type RolePermissions,
 } from '../../types/permissions';
+import { getObjectAuditActorLabel } from '../../utils/objectAudit';
 
 interface RolePermissionsModalProps {
   role: Role;
@@ -287,6 +288,10 @@ function formatDateTime(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatAuditUserName(value?: string | null) {
+  return value?.trim() ? getObjectAuditActorLabel(value) : 'После создания права не менялись';
 }
 
 function getOpenedSectionsCount(permissions: RolePermissions, sections: MenuSectionKey[]) {
@@ -647,7 +652,7 @@ export function RolePermissionsModal({
                     {role.permissionsUpdatedAt ? formatDateTime(role.permissionsUpdatedAt) : '—'}
                   </div>
                   <div className="mt-2 text-sm leading-6 text-slate-500">
-                    {role.permissionsUpdatedByUserName || 'После создания права не менялись'}
+                    {formatAuditUserName(role.permissionsUpdatedByUserName)}
                   </div>
                 </div>
 

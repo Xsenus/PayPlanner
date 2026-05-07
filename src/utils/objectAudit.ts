@@ -2,8 +2,11 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   Id: 'ID',
   Name: 'Название',
   FullName: 'Полное имя',
+  Title: 'Заголовок',
   Description: 'Описание',
   Comment: 'Комментарий',
+  Notes: 'Заметки',
+  SystemNotes: 'Служебные заметки',
   Type: 'Тип',
   Status: 'Статус',
   Amount: 'Сумма',
@@ -49,6 +52,11 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   InvoiceNumber: 'Счет',
   InvoiceWorkflowStatus: 'Статус документа',
   WorkflowStatus: 'Статус документа',
+  InvoiceSentForSigningAt: 'Дата отправки счета на подписание',
+  InvoiceSignedAt: 'Дата подписания счета',
+  InvoiceCancelledAt: 'Дата отмены счета',
+  InvoiceCancelledByUserId: 'Кто отменил счет',
+  InvoiceCancelledReason: 'Причина отмены счета',
   SentForSigningAt: 'Дата отправки на подписание',
   SignedAt: 'Дата подписания',
   CancelledAt: 'Дата отмены',
@@ -61,6 +69,8 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   AccountDate: 'Дата операции',
   PaymentSourceId: 'Источник платежа',
   PaymentSourceName: 'Источник платежа',
+  PaymentOrderNumber: 'Номер платежного поручения',
+  PaymentDocumentDate: 'Дата платежного документа',
   ServiceId: 'Услуга',
   ServiceName: 'Услуга',
   IncomeTypeId: 'Тип дохода',
@@ -78,8 +88,13 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   LastPaymentDate: 'Дата последней оплаты',
   PlannedDate: 'Плановая дата',
   IsPaid: 'Оплачен',
+  HasPartialPayment: 'Есть частичная оплата',
   PaidAmount: 'Оплачено',
   OutstandingAmount: 'Долг',
+  DocumentKind: 'Тип документа',
+  LegacyAccountNumber: 'Старый номер счета',
+  LegacyAccountDate: 'Старая дата счета',
+  IsNotForAccounting: 'Не для бухгалтерии',
   SortOrder: 'Порядок',
   Quantity: 'Количество',
   Unit: 'Ед. изм.',
@@ -199,7 +214,8 @@ const OBJECT_TYPE_LABELS: Record<string, string> = {
 };
 
 const AUDIT_ACTOR_LABELS: Record<string, string> = {
-  'codex data repair': 'Системное исправление',
+  'codex data repair': 'Администратор',
+  'codex maintenance': 'Администратор',
 };
 
 const VALUE_LABELS: Record<string, string> = {
@@ -337,11 +353,21 @@ function formatJsonValue(value: string): string | null {
 
 function translateTechnicalWords(value: string): string {
   return value
-    .replace(/\bCodex data repair\b/gi, 'Системное исправление')
-    .replace(/\bCodex\b/gi, 'Система')
+    .replace(/\bCodex data repair\b/gi, 'Администратор')
+    .replace(/\bCodex maintenance\b/gi, 'Администратор')
+    .replace(/\bCodex\b/gi, 'Администратор')
+    .replace(/\bSystem Notes\b/gi, 'Служебные заметки')
+    .replace(/\bSystemNotes\b/gi, 'Служебные заметки')
+    .replace(/\bInvoice Workflow Status\b/gi, 'Статус документа')
+    .replace(/\bPayment Status\b/gi, 'Статус платежа')
+    .replace(/\bClient Case Reference\b/gi, 'Дело')
     .replace(/\bDataRepair\b/gi, 'Исправление данных')
     .replace(/\bTask Journal Item\b/gi, 'Задача')
-    .replace(/\btask journal item\b/gi, 'Задача');
+    .replace(/\btask journal item\b/gi, 'Задача')
+    .replace(/\bupdated\b/gi, 'изменил')
+    .replace(/\bcreated\b/gi, 'создал')
+    .replace(/\bdeleted\b/gi, 'удалил')
+    .replace(/\brestored\b/gi, 'восстановил');
 }
 
 export function formatObjectAuditText(value: string | null | undefined): string {
@@ -395,6 +421,10 @@ export function getObjectAuditActorLabel(actorUserName?: string | null): string 
     return 'Система';
   }
 
+  if (/\bcodex\b/iu.test(normalizedActor)) {
+    return 'Администратор';
+  }
+
   return AUDIT_ACTOR_LABELS[normalizedActor.toLowerCase()] ?? translateTechnicalWords(normalizedActor);
 }
 
@@ -407,7 +437,7 @@ export function getObjectAuditFieldLabel(objectType: string | null | undefined, 
   const commonLabel = findLabel(COMMON_FIELD_LABELS, fieldName);
   if (commonLabel) return commonLabel;
 
-  return prettifyFieldName(fieldName);
+  return translateTechnicalWords(prettifyFieldName(fieldName));
 }
 
 export function parseAuditChangedFields(metadataJson: string | null | undefined): string[] {
