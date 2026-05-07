@@ -2,6 +2,16 @@ import type { Invoice, Payment } from '../types';
 import { toDateInputValue } from './dateUtils';
 
 export const INSTALLMENT_PAYMENT_MARKER = '[pp:installment-payment]';
+export const PARTIAL_REMAINDER_PAYMENT_MARKER = '[pp:partial-remainder]';
+export const PARTIAL_REMAINDER_SOURCE_MARKER = '[pp:partial-remainder-source]';
+
+export interface PartialRemainderTransferMetadata {
+  sourcePaymentId?: number;
+  sourceOriginalAmount?: number;
+  paidAmount?: number;
+  remainderAmount?: number;
+  remainderDate?: string;
+}
 
 export function normalizeInvoiceNumberKey(value?: string | null): string | null {
   const normalized = String(value ?? '').trim().toLowerCase();
@@ -84,10 +94,85 @@ export function isGeneratedInstallmentPayment(payment: Pick<Payment, 'systemNote
   return Boolean(payment.systemNotes?.includes(INSTALLMENT_PAYMENT_MARKER));
 }
 
-export function isInvoiceManagedPayment(
-  payment: Pick<Payment, 'documentKind' | 'systemNotes'>,
+export function isTransferredRemainderPayment(payment: Pick<Payment, 'systemNotes'>): boolean {
+  return Boolean(payment.systemNotes?.includes(PARTIAL_REMAINDER_PAYMENT_MARKER));
+}
+
+export function isPartialRemainderSourcePayment(payment: Pick<Payment, 'systemNotes'>): boolean {
+  return Boolean(payment.systemNotes?.includes(PARTIAL_REMAINDER_SOURCE_MARKER));
+}
+
+function readStringProperty(value: unknown, propertyName: string): string | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const entry = Object.entries(value as Record<string, unknown>).find(
+    ([key]) => key.toLowerCase() === propertyName.toLowerCase(),
+  );
+  const rawValue = entry?.[1];
+  return typeof rawValue === 'string' && rawValue.trim() ? rawValue.trim() : null;
+}
+
+function parsePartialRemainderMarkerLine(line: string, marker: string): PartialRemainderTransferMetadata | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith(marker)) {
+    return null;
+  }
+
+  const rawJson = trimmed.slice(marker.length).trim();
+  if (!rawJson.startsWith('{')) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawJson);
+    return {
+      sourcePaymentId: readNumberProperty(parsed, 'sourcePaymentId') ?? undefined,
+      sourceOriginalAmount: readNumberProperty(parsed, 'sourceOriginalAmount') ?? undefined,
+      paidAmount: readNumberProperty(parsed, 'paidAmount') ?? undefined,
+      remainderAmount: readNumberProperty(parsed, 'remainderAmount') ?? undefined,
+      remainderDate: readStringProperty(parsed, 'remainderDate') ?? undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function parsePartialRemainderTransferMetadata(
+  payment: Pick<Payment, 'systemNotes'>,
+): PartialRemainderTransferMetadata | null {
+  const markerLine = (payment.systemNotes ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.startsWith(PARTIAL_REMAINDER_PAYMENT_MARKER) || line.startsWith(PARTIAL_REMAINDER_SOURCE_MARKER));
+
+  if (!markerLine) {
+    return null;
+  }
+
+  return parsePartialRemainderMarkerLine(markerLine, PARTIAL_REMAINDER_PAYMENT_MARKER)
+    ?? parsePartialRemainderMarkerLine(markerLine, PARTIAL_REMAINDER_SOURCE_MARKER);
+}
+
+export function isGeneratedInvoiceRemainderPayment(
+  payment: Pick<Payment, 'systemNotes'> & { invoiceId?: number | null },
 ): boolean {
-  return payment.documentKind === 'Invoice' || isGeneratedInstallmentPayment(payment);
+  return Boolean(
+    payment.invoiceId
+    && payment.invoiceId > 0
+    && isTransferredRemainderPayment(payment),
+  );
+}
+
+export function isInvoiceManagedPayment(
+  payment: Pick<Payment, 'documentKind' | 'systemNotes'> & { invoiceId?: number | null },
+): boolean {
+  return (
+    payment.documentKind === 'Invoice'
+    || isGeneratedInstallmentPayment(payment)
+    || isGeneratedInvoiceRemainderPayment(payment)
+  );
 }
 
 function getRepresentativeInvoicePayment(payments: Payment[]): Payment | null {

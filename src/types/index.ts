@@ -1760,6 +1760,17 @@ export type PaymentPayload = Omit<
   | 'delayDays'
 >;
 
+export interface TransferPaymentRemainderResponse {
+  payment: Payment;
+  remainderPayment: Payment;
+  createdRemainder: boolean;
+}
+
+export interface RollbackPaymentRemainderTransferResponse {
+  payment: Payment;
+  removedRemainderPaymentId: number;
+}
+
 export interface InvoiceResponsible {
   id: number;
   fullName: string;

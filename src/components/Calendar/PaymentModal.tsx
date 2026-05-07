@@ -28,7 +28,12 @@ import { InvoiceModal } from '../Accounts/InvoiceModal';
 import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 import { getAppliedClientBalanceAmount, getVisibleSystemNoteLines } from '../../utils/systemNotes';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
-import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import {
+  isInvoiceManagedPayment,
+  isPartialRemainderSourcePayment,
+  isTransferredRemainderPayment,
+  parsePartialRemainderTransferMetadata,
+} from '../../utils/invoicePayments';
 import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
 import { CounterpartyPickerModal } from '../ui/CounterpartyPickerModal';
 
@@ -92,6 +97,16 @@ interface PaymentModalProps {
   payment?: Payment | null;
   onDelete?: (id: number) => Promise<void>;
   onCreateRemainder?: (payment: PaymentPayload) => Promise<unknown>;
+  onTransferRemainder?: (
+    payment: { id: number } & PaymentPayload,
+    remainderDate: string,
+  ) => Promise<unknown>;
+  onRollbackRemainderTransfer?: (paymentId: number) => Promise<unknown>;
+  onAdjustRemainderTransfer?: (
+    paymentId: number,
+    paidAmount: number,
+    remainderDate: string,
+  ) => Promise<unknown>;
   availableClientBalance?: number;
   onApplyClientBalance?: (amount: number) => Promise<ApplyClientBalanceResult | void>;
   onBalanceApplied?: (paymentId: number) => Promise<unknown> | unknown;
@@ -104,6 +119,9 @@ export function PaymentModal({
   payment,
   onDelete,
   onCreateRemainder,
+  onTransferRemainder,
+  onRollbackRemainderTransfer,
+  onAdjustRemainderTransfer,
   availableClientBalance,
   onApplyClientBalance,
   onBalanceApplied,
@@ -208,6 +226,9 @@ export function PaymentModal({
   const [invoiceCreateLookupsError, setInvoiceCreateLookupsError] = useState<string | null>(null);
   const [rescheduleRemainder, setRescheduleRemainder] = useState(false);
   const [rescheduleDate, setRescheduleDate] = useState<string>('');
+  const [remainderToolsOpen, setRemainderToolsOpen] = useState(false);
+  const [adjustPaidAmount, setAdjustPaidAmount] = useState('');
+  const [adjustRemainderDate, setAdjustRemainderDate] = useState('');
   const [showProcessHelp, setShowProcessHelp] = useState(false);
   const [detailsTab, setDetailsTab] = useState<'details' | 'system'>('details');
   const hasLockedInvoice = Boolean(linkedInvoice?.invoiceEntityId);
@@ -517,8 +538,16 @@ export function PaymentModal({
 
       const fallbackDate =
         (p ? toDateInputValue(p.plannedDate) || toDateInputValue(p.date) : null) || todayYMD();
+      const splitMetadata = p ? parsePartialRemainderTransferMetadata(p) : null;
       setRescheduleDate(fallbackDate);
       setRescheduleRemainder(false);
+      setRemainderToolsOpen(false);
+      setAdjustPaidAmount(
+        splitMetadata?.paidAmount !== undefined
+          ? formatMoneyString(splitMetadata.paidAmount)
+          : '',
+      );
+      setAdjustRemainderDate(toDateInputValue(splitMetadata?.remainderDate) || fallbackDate);
 
       prevOpenRef.current = true;
     }
@@ -991,13 +1020,21 @@ export function PaymentModal({
             : undefined,
       };
 
-      if (payment) {
+      if (shouldCreateRemainder && payment && onTransferRemainder && normalizedRescheduleDate) {
+        await onTransferRemainder({ id: payment.id, ...paymentData }, normalizedRescheduleDate);
+      } else if (payment) {
         await onSubmit({ id: payment.id, ...paymentData });
       } else {
         await onSubmit(paymentData);
       }
 
-      if (shouldCreateRemainder && onCreateRemainder && normalizedRescheduleDate) {
+      const shouldCreateRemainderViaFallback =
+        shouldCreateRemainder
+        && normalizedRescheduleDate
+        && onCreateRemainder
+        && (!payment || !onTransferRemainder);
+
+      if (shouldCreateRemainderViaFallback) {
         const nextPayment: PaymentPayload = {
           ...paymentData,
           date: normalizedRescheduleDate,
@@ -1403,8 +1440,80 @@ export function PaymentModal({
     setSyncDateWithPayment(true);
   };
 
-  const canDelete = !!payment && !!onDelete && !isInvoiceManagedPayment(payment);
-  const canCancelPayment = !!payment && !isInvoiceManagedPayment(payment) && payment.status !== 'Cancelled';
+  const isProtectedTransferredRemainder = !!payment && isTransferredRemainderPayment(payment);
+  const isProtectedRemainderSource = !!payment && isPartialRemainderSourcePayment(payment);
+  const remainderTransferMetadata = payment ? parsePartialRemainderTransferMetadata(payment) : null;
+  const hasRemainderServiceActions = Boolean(
+    payment
+    && (isProtectedTransferredRemainder || isProtectedRemainderSource)
+    && (onRollbackRemainderTransfer || onAdjustRemainderTransfer),
+  );
+  const canDelete = !!payment && !!onDelete && !isInvoiceManagedPayment(payment) && !isProtectedTransferredRemainder && !isProtectedRemainderSource;
+  const canCancelPayment = !!payment && !isInvoiceManagedPayment(payment) && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
+
+  const openRemainderTools = () => {
+    if (!payment) return;
+    setAdjustPaidAmount(
+      remainderTransferMetadata?.paidAmount !== undefined
+        ? formatMoneyString(remainderTransferMetadata.paidAmount)
+        : formData.paidAmount,
+    );
+    setAdjustRemainderDate(
+      toDateInputValue(remainderTransferMetadata?.remainderDate)
+      || rescheduleDate
+      || formData.plannedDate
+      || formData.date,
+    );
+    setRemainderToolsOpen(true);
+  };
+
+  const handleRollbackRemainderTransfer = async () => {
+    if (!payment || !onRollbackRemainderTransfer || loading) return;
+
+    const approved = await confirm({
+      title: 'Откатить перенос остатка',
+      description: 'Перенесенный остаток будет удален, а исходная сумма вернется в платеж. Операция доступна только пока остаток не оплачен.',
+      confirmLabel: 'Откатить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    try {
+      setLoading(true);
+      await onRollbackRemainderTransfer(payment.id);
+      onClose();
+    } catch {
+      return;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAdjustRemainderTransfer = async () => {
+    if (!payment || !onAdjustRemainderTransfer || loading) return;
+
+    const paidAmount = parseDecimal(adjustPaidAmount);
+    if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
+      toast.error('Укажите фактически оплаченную сумму.');
+      return;
+    }
+    if (!adjustRemainderDate) {
+      toast.error('Укажите дату переноса остатка.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await onAdjustRemainderTransfer(payment.id, Number(paidAmount.toFixed(2)), adjustRemainderDate);
+      onClose();
+    } catch {
+      return;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCancelPayment = async () => {
     if (!payment || loading) return;
 
@@ -2311,6 +2420,81 @@ export function PaymentModal({
                 ) : !formData.notes.trim() && !(transferTrail.length > 0 || (formData.rescheduleCount ?? 0) > 0 || hasPartial) ? (
                   <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-500 shadow-sm">
                     {'\u0421\u043b\u0443\u0436\u0435\u0431\u043d\u044b\u0445 \u0437\u0430\u043c\u0435\u0442\u043e\u043a \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.'}
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {hasRemainderServiceActions && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 shadow-sm">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-blue-950">Перенос остатка</div>
+                    <div className="mt-1 text-sm text-blue-800">
+                      Остаток связан с исходным частично оплаченным платежом, поэтому удаление и изменение суммы выполняются отдельными действиями.
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {onAdjustRemainderTransfer ? (
+                      <button
+                        type="button"
+                        onClick={openRemainderTools}
+                        disabled={loading}
+                        className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:opacity-60">
+                        Изменить разделение
+                      </button>
+                    ) : null}
+                    {onRollbackRemainderTransfer ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleRollbackRemainderTransfer()}
+                        disabled={loading}
+                        className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:opacity-60">
+                        Откатить перенос
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {remainderToolsOpen && onAdjustRemainderTransfer ? (
+                  <div className="mt-4 grid gap-3 rounded-lg border border-blue-100 bg-white p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Фактически оплачено
+                      <input
+                        type="text"
+                        value={adjustPaidAmount}
+                        onChange={(event) => setAdjustPaidAmount(event.target.value)}
+                        onBlur={() => {
+                          const value = parseDecimal(adjustPaidAmount);
+                          setAdjustPaidAmount(Number.isFinite(value) && value > 0 ? formatMoneyDisplayValue(value) : '');
+                        }}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Новая дата остатка
+                      <input
+                        type="date"
+                        value={adjustRemainderDate}
+                        onChange={(event) => setAdjustRemainderDate(event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                      />
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRemainderToolsOpen(false)}
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50">
+                        Отмена
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleAdjustRemainderTransfer()}
+                        disabled={loading}
+                        className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-60">
+                        Сохранить
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </div>

@@ -94,7 +94,7 @@ import { LookupSelect } from "../ui/LookupSelect";
 import { TableColumnSettings } from "../ui/TableColumnSettings";
 import { TablePagination } from "../ui/TablePagination";
 import { ObjectAuditModal } from "../ui/ObjectAuditModal";
-import { isInvoiceManagedPayment } from "../../utils/invoicePayments";
+import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from "../../utils/invoicePayments";
 import { useClientStatuses } from "../../hooks/useClientStatuses";
 import { ClientStatusBadge } from "./ClientStatusBadge";
 import { DatePeriodPicker } from "../DateRange/DatePeriodPicker";
@@ -3874,6 +3874,88 @@ export function ClientDetail({
     }
   };
 
+  const transferPaymentRemainder = async (
+    payload: { id: number } & PaymentPayload,
+    remainderDate: string,
+  ) => {
+    if (!clientPermissions.canEdit) {
+      showPermissionWarning(
+        t("permissionNoEditPayment") ??
+          "Недостаточно прав для редактирования платежей.",
+      );
+      return;
+    }
+
+    try {
+      await apiService.transferPaymentRemainder(payload.id, toBody(payload), remainderDate);
+      await refreshPayments();
+      await refreshClientBalance();
+      if (clientBalanceExpanded) await refreshClientBalanceTransactions();
+      bumpStats();
+      toast.success("Остаток платежа перенесён.", "Платежи");
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, "Не удалось перенести остаток платежа"),
+        "Платежи",
+      );
+      throw error;
+    }
+  };
+
+  const rollbackPaymentRemainderTransfer = async (paymentId: number) => {
+    if (!clientPermissions.canEdit) {
+      showPermissionWarning(
+        t("permissionNoEditPayment") ??
+          "Недостаточно прав для редактирования платежей.",
+      );
+      return;
+    }
+
+    try {
+      await apiService.rollbackPaymentRemainderTransfer(paymentId);
+      await refreshPayments();
+      await refreshClientBalance();
+      if (clientBalanceExpanded) await refreshClientBalanceTransactions();
+      bumpStats();
+      toast.success("Перенос остатка отменен.", "Платежи");
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, "Не удалось откатить перенос остатка"),
+        "Платежи",
+      );
+      throw error;
+    }
+  };
+
+  const adjustPaymentRemainderTransfer = async (
+    paymentId: number,
+    paidAmount: number,
+    remainderDate: string,
+  ) => {
+    if (!clientPermissions.canEdit) {
+      showPermissionWarning(
+        t("permissionNoEditPayment") ??
+          "Недостаточно прав для редактирования платежей.",
+      );
+      return;
+    }
+
+    try {
+      await apiService.adjustPaymentRemainderTransfer(paymentId, paidAmount, remainderDate);
+      await refreshPayments();
+      await refreshClientBalance();
+      if (clientBalanceExpanded) await refreshClientBalanceTransactions();
+      bumpStats();
+      toast.success("Разделение платежа обновлено.", "Платежи");
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, "Не удалось изменить разделение платежа"),
+        "Платежи",
+      );
+      throw error;
+    }
+  };
+
   const applyClientBalanceToPayment = async (amount: number) => {
     if (!editingPayment?.id || !clientId) return;
 
@@ -3891,9 +3973,13 @@ export function ClientDetail({
   };
 
   const removePayment = async (target: Payment | number) => {
-    if (typeof target !== "number" && isInvoiceManagedPayment(target)) {
+    const isLockedPayment = typeof target !== "number"
+      && (isInvoiceManagedPayment(target) || isTransferredRemainderPayment(target) || isPartialRemainderSourcePayment(target));
+    if (isLockedPayment) {
       toast.error(
-        'Счет и график рассрочки удаляются через раздел "Счета".',
+        isTransferredRemainderPayment(target as Payment) || isPartialRemainderSourcePayment(target as Payment)
+          ? "Перенесенный остаток нельзя удалить отдельно."
+          : 'Счет и график рассрочки удаляются через раздел "Счета".',
         "Платежи",
       );
       return false;
@@ -7795,7 +7881,9 @@ export function ClientDetail({
                                           </button>
                                         ) : null}
                                         {clientPermissions.canDelete &&
-                                        !isInvoiceManagedPayment(payment) ? (
+                                        !isInvoiceManagedPayment(payment) &&
+                                        !isTransferredRemainderPayment(payment) &&
+                                        !isPartialRemainderSourcePayment(payment) ? (
                                           <button
                                             type="button"
                                             className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-rose-600 transition-colors hover:border-rose-300 hover:bg-rose-50"
@@ -9434,6 +9522,9 @@ export function ClientDetail({
           onClose={closePayModal}
           payment={editingPayment ?? undefined}
           onSubmit={submitPayment}
+          onTransferRemainder={transferPaymentRemainder}
+          onRollbackRemainderTransfer={rollbackPaymentRemainderTransfer}
+          onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}
           availableClientBalance={clientBalance?.balance ?? 0}
           onApplyClientBalance={applyClientBalanceToPayment}
           onCreateRemainder={async (payload) => {
@@ -9456,7 +9547,7 @@ export function ClientDetail({
           }}
           onDelete={
             clientPermissions.canDelete &&
-            (!editingPayment || !isInvoiceManagedPayment(editingPayment))
+            (!editingPayment || (!isInvoiceManagedPayment(editingPayment) && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
               ? async (id: number) => {
                   const removed = await removePayment(editingPayment ?? id);
                   if (removed) {

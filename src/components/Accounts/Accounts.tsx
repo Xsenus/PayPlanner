@@ -51,7 +51,7 @@ import {
   peekInvoiceEditorDraft,
   type InvoiceEditorDraftState,
 } from '../../utils/invoiceEditorBridge';
-import { INSTALLMENT_PAYMENT_MARKER, isGeneratedInstallmentPayment, isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import { INSTALLMENT_PAYMENT_MARKER, isGeneratedInstallmentPayment, isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from '../../utils/invoicePayments';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
@@ -1599,9 +1599,83 @@ export function Accounts({
     }
   };
 
+  const handleTransferPaymentRemainder = async (
+    payload: { id: number } & PaymentPayload,
+    remainderDate: string,
+  ) => {
+    try {
+      await apiService.transferPaymentRemainder(payload.id, payload, remainderDate);
+      await refreshAccounts();
+      if (pageEditingInvoiceId) {
+        try {
+          const refreshedInvoice = await apiService.getInvoice(pageEditingInvoiceId);
+          setPageEditingInvoice(refreshedInvoice);
+        } catch {
+          // Keep the current page state if the invoice refresh fails after a successful payment save.
+        }
+      }
+      handleClosePaymentModal();
+      toast.success('Остаток платежа перенесён.', 'Платежи счета');
+    } catch (err) {
+      toast.error(extractDisplayErrorMessage(err, 'Не удалось перенести остаток платежа.'), 'Платежи счета');
+      throw err;
+    }
+  };
+
+  const handleRollbackPaymentRemainderTransfer = async (paymentId: number) => {
+    try {
+      await apiService.rollbackPaymentRemainderTransfer(paymentId);
+      await refreshAccounts();
+      if (pageEditingInvoiceId) {
+        try {
+          const refreshedInvoice = await apiService.getInvoice(pageEditingInvoiceId);
+          setPageEditingInvoice(refreshedInvoice);
+        } catch {
+          // Keep the current page state if the invoice refresh fails after a successful payment change.
+        }
+      }
+      handleClosePaymentModal();
+      toast.success('Перенос остатка отменен.', 'Платежи счета');
+    } catch (err) {
+      toast.error(extractDisplayErrorMessage(err, 'Не удалось откатить перенос остатка.'), 'Платежи счета');
+      throw err;
+    }
+  };
+
+  const handleAdjustPaymentRemainderTransfer = async (
+    paymentId: number,
+    paidAmount: number,
+    remainderDate: string,
+  ) => {
+    try {
+      await apiService.adjustPaymentRemainderTransfer(paymentId, paidAmount, remainderDate);
+      await refreshAccounts();
+      if (pageEditingInvoiceId) {
+        try {
+          const refreshedInvoice = await apiService.getInvoice(pageEditingInvoiceId);
+          setPageEditingInvoice(refreshedInvoice);
+        } catch {
+          // Keep the current page state if the invoice refresh fails after a successful payment change.
+        }
+      }
+      handleClosePaymentModal();
+      toast.success('Разделение платежа обновлено.', 'Платежи счета');
+    } catch (err) {
+      toast.error(extractDisplayErrorMessage(err, 'Не удалось изменить разделение платежа.'), 'Платежи счета');
+      throw err;
+    }
+  };
+
   const handleDeletePayment = async (payment: Payment) => {
-    if (isInvoiceManagedPayment(payment)) {
-      toast.error('Счет и график рассрочки удаляются через раздел "Счета".', 'Платежи счета');
+    const isTransferredRemainder = isTransferredRemainderPayment(payment);
+    const isRemainderSource = isPartialRemainderSourcePayment(payment);
+    if (isInvoiceManagedPayment(payment) || isTransferredRemainder || isRemainderSource) {
+      toast.error(
+        isTransferredRemainder || isRemainderSource
+          ? 'Перенесенный остаток нельзя удалить отдельно.'
+          : 'Счет и график рассрочки удаляются через раздел "Счета".',
+        'Платежи счета',
+      );
       return;
     }
     if (!canDelete) return;
@@ -1804,6 +1878,9 @@ export function Accounts({
       isOpen={paymentModalOpen}
       onClose={handleClosePaymentModal}
       onSubmit={handleSubmitPayment}
+      onTransferRemainder={handleTransferPaymentRemainder}
+      onRollbackRemainderTransfer={handleRollbackPaymentRemainderTransfer}
+      onAdjustRemainderTransfer={handleAdjustPaymentRemainderTransfer}
       payment={editingPayment ?? undefined}
       type={paymentModalType}
       linkedInvoice={paymentModalInvoiceContext}
@@ -1811,7 +1888,8 @@ export function Accounts({
         await refreshAccounts();
       }}
       onDelete={
-        canDelete && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
+        canDelete
+        && (!editingPayment || (!isInvoiceManagedPayment(editingPayment) && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
           ? async (id) => {
               await apiService.deletePayment(id);
               toast.success('Платеж удален.');
@@ -2776,7 +2854,7 @@ export function Accounts({
                                                     <Pencil className="h-4 w-4" />
                                                   </button>
                                                 )}
-                                                {canDelete && !isInvoiceManagedPayment(payment) && (
+                                                {canDelete && !isInvoiceManagedPayment(payment) && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment) && (
                                                   <button
                                                     type="button"
                                                     onClick={(event) => {

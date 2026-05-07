@@ -7,8 +7,13 @@ import {
   getStatusSourcePaymentsForInvoice,
   getInvoiceLegacyKey,
   INSTALLMENT_PAYMENT_MARKER,
+  PARTIAL_REMAINDER_PAYMENT_MARKER,
+  PARTIAL_REMAINDER_SOURCE_MARKER,
+  isPartialRemainderSourcePayment,
   isInvoiceManagedPayment,
   isPaymentLinkedToInvoice,
+  isTransferredRemainderPayment,
+  parsePartialRemainderTransferMetadata,
 } from './invoicePayments';
 
 function createInvoice(overrides: Partial<Invoice> = {}): Invoice {
@@ -125,16 +130,46 @@ describe('invoicePayments utilities', () => {
     expect(result.map((payment) => payment.id)).toEqual([547]);
   });
 
-  it('treats representative invoice and generated installment payments as invoice-managed', () => {
+  it('treats representative invoice, generated installment and transferred remainder payments as invoice-managed', () => {
     const invoicePayment = createPayment({ documentKind: 'Invoice' });
     const installmentPayment = createPayment({
       systemNotes: `${INSTALLMENT_PAYMENT_MARKER} {"sequence":1}`,
+    });
+    const remainderPayment = createPayment({
+      invoiceId: 30,
+      systemNotes: `${PARTIAL_REMAINDER_PAYMENT_MARKER} {"sourcePaymentId":548}`,
     });
     const standalonePayment = createPayment({ id: 901, systemNotes: 'manual note' });
 
     expect(isInvoiceManagedPayment(invoicePayment)).toBe(true);
     expect(isInvoiceManagedPayment(installmentPayment)).toBe(true);
+    expect(isInvoiceManagedPayment(remainderPayment)).toBe(true);
     expect(isInvoiceManagedPayment(standalonePayment)).toBe(false);
+  });
+
+  it('detects transferred remainder payments even without an invoice link', () => {
+    const remainderPayment = createPayment({
+      invoiceId: null,
+      systemNotes: `${PARTIAL_REMAINDER_PAYMENT_MARKER} {"sourcePaymentId":548}`,
+    });
+
+    expect(isTransferredRemainderPayment(remainderPayment)).toBe(true);
+    expect(isInvoiceManagedPayment(remainderPayment)).toBe(false);
+  });
+
+  it('detects and parses partial remainder source payments', () => {
+    const sourcePayment = createPayment({
+      systemNotes: `${PARTIAL_REMAINDER_SOURCE_MARKER} {"sourcePaymentId":547,"sourceOriginalAmount":10000,"paidAmount":4000,"remainderAmount":6000,"remainderDate":"2026-05-20"}`,
+    });
+
+    expect(isPartialRemainderSourcePayment(sourcePayment)).toBe(true);
+    expect(parsePartialRemainderTransferMetadata(sourcePayment)).toEqual({
+      sourcePaymentId: 547,
+      sourceOriginalAmount: 10_000,
+      paidAmount: 4_000,
+      remainderAmount: 6_000,
+      remainderDate: '2026-05-20',
+    });
   });
 
   it('hides the representative invoice row when an installment schedule exists', () => {

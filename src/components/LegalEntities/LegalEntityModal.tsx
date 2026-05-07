@@ -2482,6 +2482,72 @@ export function LegalEntityModal({
     }
   };
 
+  const transferPaymentRemainder = async (
+    payload: { id: number } & PaymentPayload,
+    remainderDate: string,
+  ) => {
+    try {
+      const { id, ...rest } = payload;
+      await apiService.transferPaymentRemainder(
+        id,
+        normalizeLegalEntityPaymentPayload(rest),
+        remainderDate,
+      );
+      await legalEntityPaymentsResult.refresh();
+      await legalEntityInvoicesResult.refresh();
+      await legalEntityActsResult.refresh();
+      setCaseFinanceReloadToken((value) => value + 1);
+      closePaymentModal();
+      toast.success("Остаток платежа перенесён.", "Платежи");
+    } catch (error) {
+      toast.error(
+        extractErrorMessage(error, "Не удалось перенести остаток платежа"),
+        "Платежи",
+      );
+      throw error;
+    }
+  };
+
+  const rollbackPaymentRemainderTransfer = async (paymentId: number) => {
+    try {
+      await apiService.rollbackPaymentRemainderTransfer(paymentId);
+      await legalEntityPaymentsResult.refresh();
+      await legalEntityInvoicesResult.refresh();
+      await legalEntityActsResult.refresh();
+      setCaseFinanceReloadToken((value) => value + 1);
+      closePaymentModal();
+      toast.success("Перенос остатка отменен.", "Платежи");
+    } catch (error) {
+      toast.error(
+        extractErrorMessage(error, "Не удалось откатить перенос остатка"),
+        "Платежи",
+      );
+      throw error;
+    }
+  };
+
+  const adjustPaymentRemainderTransfer = async (
+    paymentId: number,
+    paidAmount: number,
+    remainderDate: string,
+  ) => {
+    try {
+      await apiService.adjustPaymentRemainderTransfer(paymentId, paidAmount, remainderDate);
+      await legalEntityPaymentsResult.refresh();
+      await legalEntityInvoicesResult.refresh();
+      await legalEntityActsResult.refresh();
+      setCaseFinanceReloadToken((value) => value + 1);
+      closePaymentModal();
+      toast.success("Разделение платежа обновлено.", "Платежи");
+    } catch (error) {
+      toast.error(
+        extractErrorMessage(error, "Не удалось изменить разделение платежа"),
+        "Платежи",
+      );
+      throw error;
+    }
+  };
+
   const clientsSection = (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-3">
@@ -4799,6 +4865,9 @@ export function LegalEntityModal({
           onClose={closePaymentModal}
           payment={selectedPayment ?? undefined}
           onSubmit={submitPayment}
+          onTransferRemainder={transferPaymentRemainder}
+          onRollbackRemainderTransfer={rollbackPaymentRemainderTransfer}
+          onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}
           defaultLegalEntityId={currentLegalEntityId ?? undefined}
           defaultClientCaseId={selectedCaseId}
           casesPrefetch={legalEntityCases}

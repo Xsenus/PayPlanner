@@ -20,7 +20,7 @@ import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { apiService } from '../../services/api';
-import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from '../../utils/invoicePayments';
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
 
@@ -772,8 +772,15 @@ export function Payments({
 
   const handleDeletePayment = useCallback(
     async (payment: Payment) => {
-      if (isInvoiceManagedPayment(payment)) {
-        toast.error('Счет и график рассрочки удаляются через раздел "Счета".', t('payments') ?? 'Платежи');
+      const isTransferredRemainder = isTransferredRemainderPayment(payment);
+      const isRemainderSource = isPartialRemainderSourcePayment(payment);
+      if (isInvoiceManagedPayment(payment) || isTransferredRemainder || isRemainderSource) {
+        toast.error(
+          isTransferredRemainder || isRemainderSource
+            ? 'Перенос остатка нельзя удалить обычным удалением.'
+            : 'Счет и график рассрочки удаляются через раздел "Счета".',
+          t('payments') ?? 'Платежи',
+        );
         return false;
       }
       if (!paymentsPermissions.canDelete) {
@@ -804,8 +811,15 @@ export function Payments({
 
   const handleCancelPayment = useCallback(
     async (payment: Payment) => {
-      if (isInvoiceManagedPayment(payment)) {
-        toast.error('Счет и график рассрочки управляют этим платежом. Измените статус через счет.', t('payments') ?? 'Платежи');
+      const isTransferredRemainder = isTransferredRemainderPayment(payment);
+      const isRemainderSource = isPartialRemainderSourcePayment(payment);
+      if (isInvoiceManagedPayment(payment) || isTransferredRemainder || isRemainderSource) {
+        toast.error(
+          isTransferredRemainder || isRemainderSource
+            ? 'Перенос остатка нельзя аннулировать обычным действием.'
+            : 'Счет и график рассрочки управляют этим платежом. Измените статус через счет.',
+          t('payments') ?? 'Платежи',
+        );
         return false;
       }
       if (!paymentsPermissions.canEdit) {
@@ -869,6 +883,57 @@ export function Payments({
       }
     },
     [editingPayment, page, refresh, t, toast],
+  );
+
+  const handleTransferRemainder = useCallback(
+    async (payload: SubmitDTO & { id: number }, remainderDate: string) => {
+      try {
+        await apiService.transferPaymentRemainder(payload.id, payload, remainderDate);
+        await refresh();
+        toast.success('Остаток платежа перенесён.', t('payments') ?? 'Платежи');
+        setIsModalOpen(false);
+        setEditingPayment(null);
+      } catch (error) {
+        const message = extractDisplayErrorMessage(error, 'Не удалось перенести остаток платежа.');
+        toast.error(message, t('payments') ?? 'Платежи');
+        throw new Error(message);
+      }
+    },
+    [refresh, t, toast],
+  );
+
+  const handleRollbackRemainderTransfer = useCallback(
+    async (paymentId: number) => {
+      try {
+        await apiService.rollbackPaymentRemainderTransfer(paymentId);
+        await refresh();
+        toast.success('Перенос остатка отменен.', t('payments') ?? 'Платежи');
+        setIsModalOpen(false);
+        setEditingPayment(null);
+      } catch (error) {
+        const message = extractDisplayErrorMessage(error, 'Не удалось откатить перенос остатка.');
+        toast.error(message, t('payments') ?? 'Платежи');
+        throw new Error(message);
+      }
+    },
+    [refresh, t, toast],
+  );
+
+  const handleAdjustRemainderTransfer = useCallback(
+    async (paymentId: number, paidAmount: number, remainderDate: string) => {
+      try {
+        await apiService.adjustPaymentRemainderTransfer(paymentId, paidAmount, remainderDate);
+        await refresh();
+        toast.success('Разделение платежа обновлено.', t('payments') ?? 'Платежи');
+        setIsModalOpen(false);
+        setEditingPayment(null);
+      } catch (error) {
+        const message = extractDisplayErrorMessage(error, 'Не удалось изменить разделение платежа.');
+        toast.error(message, t('payments') ?? 'Платежи');
+        throw new Error(message);
+      }
+    },
+    [refresh, t, toast],
   );
 
   const handleCloseModal = useCallback(() => {
@@ -1297,7 +1362,7 @@ export function Payments({
                 canEdit={paymentsPermissions.canEdit}
                 canDelete={paymentsPermissions.canDelete}
                 canEditPayment={() => true}
-                canDeletePayment={(payment) => !isInvoiceManagedPayment(payment)}
+                canDeletePayment={(payment) => !isInvoiceManagedPayment(payment) && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment)}
                 columns={visiblePaymentColumns}
                 draggingColumn={draggingColumn}
                 onColumnDragStart={handleColumnDragStart}
@@ -1527,7 +1592,7 @@ export function Payments({
                     Аннулировать
                   </button>
                 ) : null}
-                {routePaymentPreview && paymentsPermissions.canDelete && !isInvoiceManagedPayment(routePaymentPreview) ? (
+                {routePaymentPreview && paymentsPermissions.canDelete && !isInvoiceManagedPayment(routePaymentPreview) && !isTransferredRemainderPayment(routePaymentPreview) && !isPartialRemainderSourcePayment(routePaymentPreview) ? (
                   <button
                     type="button"
                     onClick={async () => {
@@ -1558,13 +1623,17 @@ export function Payments({
         onClose={handleCloseModal}
         onSubmit={handleSubmit}
         onCreateRemainder={apiService.createPayment}
+        onTransferRemainder={handleTransferRemainder}
+        onRollbackRemainderTransfer={handleRollbackRemainderTransfer}
+        onAdjustRemainderTransfer={handleAdjustRemainderTransfer}
         onBalanceApplied={async () => {
           await refresh();
         }}
         payment={editingPayment}
         type={modalType}
         onDelete={
-          paymentsPermissions.canDelete && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
+          paymentsPermissions.canDelete
+          && (!editingPayment || (!isInvoiceManagedPayment(editingPayment) && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
             ? async (id) => {
                 try {
                   await apiService.deletePayment(id);

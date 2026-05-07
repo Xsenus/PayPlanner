@@ -17,7 +17,7 @@ import { useToast } from '../../hooks/useToast';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
-import { isInvoiceManagedPayment } from '../../utils/invoicePayments';
+import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from '../../utils/invoicePayments';
 import { apiService } from '../../services/api';
 
 type SubmitDTO = PaymentPayload | ({ id: number } & PaymentPayload);
@@ -268,8 +268,14 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleDeletePayment = async (payment: Payment) => {
-    if (isInvoiceManagedPayment(payment)) {
-      toast.error('Счет и график рассрочки удаляются через раздел "Счета".', 'Платежи');
+    const isTransferredRemainder = isTransferredRemainderPayment(payment);
+    if (isInvoiceManagedPayment(payment) || isTransferredRemainder) {
+      toast.error(
+        isTransferredRemainder
+          ? 'Перенесенный остаток нельзя удалить отдельно.'
+          : 'Счет и график рассрочки удаляются через раздел "Счета".',
+        'Платежи',
+      );
       return;
     }
     if (!calendarPermissions.canDelete) {
@@ -324,6 +330,51 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           error,
           isUpdate ? 'Не удалось обновить платёж.' : 'Не удалось создать платёж.',
         ),
+        'Платежи',
+      );
+      throw error;
+    }
+  };
+
+  const handleTransferRemainder = async (payload: SubmitDTO & { id: number }, remainderDate: string) => {
+    try {
+      await apiService.transferPaymentRemainder(payload.id, payload, remainderDate);
+      await refreshPayments();
+      bumpStats();
+      toast.success('Остаток платежа перенесён.', 'Платежи');
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, 'Не удалось перенести остаток платежа.'),
+        'Платежи',
+      );
+      throw error;
+    }
+  };
+
+  const handleRollbackRemainderTransfer = async (paymentId: number) => {
+    try {
+      await apiService.rollbackPaymentRemainderTransfer(paymentId);
+      await refreshPayments();
+      bumpStats();
+      toast.success('Перенос остатка отменен.', 'Платежи');
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, 'Не удалось откатить перенос остатка.'),
+        'Платежи',
+      );
+      throw error;
+    }
+  };
+
+  const handleAdjustRemainderTransfer = async (paymentId: number, paidAmount: number, remainderDate: string) => {
+    try {
+      await apiService.adjustPaymentRemainderTransfer(paymentId, paidAmount, remainderDate);
+      await refreshPayments();
+      bumpStats();
+      toast.success('Разделение платежа обновлено.', 'Платежи');
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, 'Не удалось изменить разделение платежа.'),
         'Платежи',
       );
       throw error;
@@ -717,7 +768,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               canEdit={calendarPermissions.canEdit}
               canDelete={calendarPermissions.canDelete}
               canEditPayment={() => true}
-              canDeletePayment={(payment) => !isInvoiceManagedPayment(payment)}
+              canDeletePayment={(payment) => !isInvoiceManagedPayment(payment) && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment)}
               columns={visiblePaymentColumns}
               draggingColumn={draggingColumn}
               onColumnDragStart={handleColumnDragStart}
@@ -748,13 +799,17 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           type={modalType}
           onSubmit={handleSubmit}
           onCreateRemainder={createPayment}
+          onTransferRemainder={handleTransferRemainder}
+          onRollbackRemainderTransfer={handleRollbackRemainderTransfer}
+          onAdjustRemainderTransfer={handleAdjustRemainderTransfer}
           onBalanceApplied={async () => {
             await refreshPayments();
             bumpStats();
           }}
           payment={editingPayment}
           onDelete={
-            calendarPermissions.canDelete && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
+            calendarPermissions.canDelete
+            && (!editingPayment || (!isInvoiceManagedPayment(editingPayment) && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
               ? async (id) => {
                   try {
                     await deletePayment(id);

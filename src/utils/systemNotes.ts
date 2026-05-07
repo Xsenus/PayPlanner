@@ -1,8 +1,14 @@
 import { INSTALLMENT_PAYMENT_MARKER } from './installmentPlan';
+import { PARTIAL_REMAINDER_PAYMENT_MARKER, PARTIAL_REMAINDER_SOURCE_MARKER } from './invoicePayments';
 
 export const INVOICE_LINE_ITEMS_MARKER = '[pp:invoice-items]';
 
-const HIDDEN_SYSTEM_NOTE_MARKERS = [INSTALLMENT_PAYMENT_MARKER, INVOICE_LINE_ITEMS_MARKER] as const;
+const HIDDEN_SYSTEM_NOTE_MARKERS = [
+  INSTALLMENT_PAYMENT_MARKER,
+  PARTIAL_REMAINDER_PAYMENT_MARKER,
+  PARTIAL_REMAINDER_SOURCE_MARKER,
+  INVOICE_LINE_ITEMS_MARKER,
+] as const;
 const SYSTEM_NOTE_PREFIXES = ['system:', 'системно:'] as const;
 const WINDOWS_1251_DECODED_80_TO_FF =
   'ЂЃ‚ѓ„…†‡€‰Љ‹ЊЌЋЏђ‘’“”•–—\u0098™љ›њќћџ\u00A0ЎўЈ¤Ґ¦§Ё©Є«¬\u00AD®Ї°±Ііґµ¶·ё№є»јЅѕїАБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдежзийклмнопрстуфхцчшщъыьэюя';

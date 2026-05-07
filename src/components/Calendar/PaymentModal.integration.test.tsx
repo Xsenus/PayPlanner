@@ -635,6 +635,88 @@ describe('PaymentModal integration', () => {
     );
   });
 
+  it('transfers an existing partial payment remainder through the atomic handler', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onCreateRemainder = vi.fn().mockResolvedValue(undefined);
+    const onTransferRemainder = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={onClose}
+        onSubmit={onSubmit}
+        onCreateRemainder={onCreateRemainder}
+        onTransferRemainder={onTransferRemainder}
+        payment={{
+          id: 998,
+          date: '2026-04-20',
+          plannedDate: '2026-04-20',
+          amount: 80_000,
+          paidAmount: 0,
+          outstandingAmount: 80_000,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Рассрочка по счету №56 · платеж 1/4',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+          account: '56',
+          accountDate: '2026-04-01',
+          documentKind: 'Payment',
+          createdAt: '2026-04-20T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Case 501',
+            status: 'Open',
+            clientId: 69,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    const paidAmountInput = document.body.querySelector(
+      'input[name="paidAmount"]',
+    ) as HTMLInputElement | null;
+    expect(paidAmountInput).not.toBeNull();
+
+    fireEvent.change(paidAmountInput!, { target: { value: '35000' } });
+    fireEvent.blur(paidAmountInput!);
+
+    fireEvent.click(screen.getByLabelText('Перенести остаток'));
+
+    const rescheduleDateInput = document.body.querySelector('#reschedule-date') as HTMLInputElement | null;
+    expect(rescheduleDateInput).not.toBeNull();
+    fireEvent.change(rescheduleDateInput!, { target: { value: '2026-05-20' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onTransferRemainder).toHaveBeenCalledTimes(1));
+    expect(onTransferRemainder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 998,
+        amount: 35_000,
+        paidAmount: 35_000,
+        status: 'Completed',
+        isPaid: true,
+        invoiceId: undefined,
+      }),
+      '2026-05-20',
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onCreateRemainder).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('applies available client balance to an existing payment', async () => {
     const onBalanceApplied = vi.fn().mockResolvedValue(undefined);
     getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 750 });

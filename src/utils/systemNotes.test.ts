@@ -7,6 +7,7 @@ import {
   getAppliedClientBalanceAmount,
 } from './systemNotes';
 import { INSTALLMENT_PAYMENT_MARKER } from './installmentPlan';
+import { PARTIAL_REMAINDER_PAYMENT_MARKER, PARTIAL_REMAINDER_SOURCE_MARKER } from './invoicePayments';
 
 describe('systemNotes helpers', () => {
   it('hides technical invoice and installment markers', () => {
@@ -14,6 +15,8 @@ describe('systemNotes helpers', () => {
       'Regular system note',
       '[pp:invoice-items] [{"name":"Document preparation","quantity":1}]',
       `${INSTALLMENT_PAYMENT_MARKER} {"sequence":1,"months":6}`,
+      `${PARTIAL_REMAINDER_PAYMENT_MARKER} {"sourcePaymentId":548}`,
+      `${PARTIAL_REMAINDER_SOURCE_MARKER} {"sourcePaymentId":547}`,
       '\u2022 Payment moved to a new date',
     ].join('\n');
 

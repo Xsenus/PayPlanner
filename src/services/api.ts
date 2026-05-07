@@ -1825,6 +1825,32 @@ export class ApiService {
     });
   }
 
+  async transferPaymentRemainder(id: number, payment: PaymentPayload, remainderDate: string) {
+    return this.request<TransferPaymentRemainderResponse>(`/payments/${id}/partial-remainder`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        payment,
+        remainderDate,
+      }),
+    });
+  }
+
+  async rollbackPaymentRemainderTransfer(id: number) {
+    return this.request<RollbackPaymentRemainderTransferResponse>(`/payments/${id}/partial-remainder/rollback`, {
+      method: 'POST',
+    });
+  }
+
+  async adjustPaymentRemainderTransfer(id: number, paidAmount: number, remainderDate: string) {
+    return this.request<TransferPaymentRemainderResponse>(`/payments/${id}/partial-remainder/adjust`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        paidAmount,
+        remainderDate,
+      }),
+    });
+  }
+
   async deletePayment(id: number) {
     return this.request<void>(`/payments/${id}`, { method: 'DELETE' });
   }
@@ -3324,6 +3350,8 @@ import type {
   ClientBalanceSummary,
   ClientBalanceTransaction,
   ApplyClientBalanceResult,
+  TransferPaymentRemainderResponse,
+  RollbackPaymentRemainderTransferResponse,
   CleanedAddress,
   DadataAddressSuggestion,
   ClientReferenceItem,
