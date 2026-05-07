@@ -1720,6 +1720,107 @@ public class PaymentsControllerTests
         Assert.Equal(250m, (await db.Payments.FindAsync(installment.Id))!.PaidAmount);
     }
 
+    [Fact]
+    public async Task UpdateInvoiceManaged_RefreshesParentInvoice_WhenInstallmentIsPaid()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Клиент рассрочки", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "RS-1", Date = DateTime.UtcNow.Date.AddDays(10) };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var parentPayment = CreatePayment(invoice.Date, 18_000m, "Счет RS-1");
+        parentPayment.ClientId = client.Id;
+        parentPayment.DocumentKind = DocumentKind.Invoice;
+        parentPayment.InvoiceId = invoice.Id;
+        parentPayment.Account = invoice.Number;
+        parentPayment.AccountDate = invoice.Date;
+
+        var firstInstallment = CreatePayment(invoice.Date.AddDays(5), 6_000m, "Рассрочка 1/3");
+        firstInstallment.ClientId = client.Id;
+        firstInstallment.InvoiceId = invoice.Id;
+        firstInstallment.Account = invoice.Number;
+        firstInstallment.AccountDate = invoice.Date;
+        firstInstallment.SystemNotes = $"{InstallmentPaymentMarker}\nПлатёж 1/3";
+
+        var secondInstallment = CreatePayment(invoice.Date.AddDays(35), 6_000m, "Рассрочка 2/3");
+        secondInstallment.ClientId = client.Id;
+        secondInstallment.InvoiceId = invoice.Id;
+        secondInstallment.Account = invoice.Number;
+        secondInstallment.AccountDate = invoice.Date;
+        secondInstallment.SystemNotes = $"{InstallmentPaymentMarker}\nПлатёж 2/3";
+
+        db.Payments.AddRange(parentPayment, firstInstallment, secondInstallment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(firstInstallment.Date, firstInstallment.Amount, firstInstallment.Description);
+        update.ClientId = client.Id;
+        update.InvoiceId = invoice.Id;
+        update.Account = invoice.Number;
+        update.AccountDate = invoice.Date;
+        update.Status = PaymentStatus.Completed;
+        update.PaidAmount = firstInstallment.Amount;
+        update.PaidDate = firstInstallment.Date;
+        update.LastPaymentDate = firstInstallment.Date;
+
+        var actionResult = await controller.UpdateInvoiceManaged(firstInstallment.Id, update, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(actionResult);
+        db.ChangeTracker.Clear();
+
+        var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
+        Assert.Equal(6_000m, refreshedParent.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.False(refreshedParent.IsPaid);
+        Assert.Equal(firstInstallment.Date, refreshedParent.PaidDate!.Value);
+        Assert.Equal(secondInstallment.Date, refreshedParent.Date);
+    }
+
+    [Fact]
+    public async Task Create_LinkedPayment_RefreshesParentInvoiceAsPartiallyPaid()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Клиент счета", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "LINK-1", Date = DateTime.UtcNow.Date.AddDays(7) };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var parentPayment = CreatePayment(invoice.Date, 10_000m, "Счет LINK-1");
+        parentPayment.ClientId = client.Id;
+        parentPayment.DocumentKind = DocumentKind.Invoice;
+        parentPayment.InvoiceId = invoice.Id;
+        parentPayment.Account = invoice.Number;
+        parentPayment.AccountDate = invoice.Date;
+        db.Payments.Add(parentPayment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var linkedPayment = CreatePayment(invoice.Date.AddDays(1), 4_000m, "Оплата по счету LINK-1");
+        linkedPayment.ClientId = client.Id;
+        linkedPayment.InvoiceId = invoice.Id;
+        linkedPayment.Status = PaymentStatus.Completed;
+        linkedPayment.PaidAmount = 4_000m;
+        linkedPayment.PaidDate = linkedPayment.Date;
+        linkedPayment.LastPaymentDate = linkedPayment.Date;
+
+        var actionResult = await controller.Create(linkedPayment, CancellationToken.None);
+
+        Assert.IsType<CreatedResult>(actionResult);
+        db.ChangeTracker.Clear();
+
+        var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
+        Assert.Equal(4_000m, refreshedParent.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.False(refreshedParent.IsPaid);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
     {
         var connection = new SqliteConnection("Data Source=:memory:");

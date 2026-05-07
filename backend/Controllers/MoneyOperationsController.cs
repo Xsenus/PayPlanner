@@ -5,6 +5,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
 using System.Globalization;
 using System.Net;
@@ -1489,12 +1490,38 @@ public class MoneyOperationsController : ControllerBase
                 payment.InvoiceId.HasValue)
             .ToListAsync(ct);
 
+        var invoiceIds = invoicePayments
+            .Select(payment => payment.InvoiceId!.Value)
+            .Distinct()
+            .ToList();
+
+        var aggregatePaymentsByInvoiceId = invoiceIds.Count == 0
+            ? new Dictionary<int, List<Payment>>()
+            : (await _db.Payments
+                .AsNoTracking()
+                .Where(payment => payment.InvoiceId.HasValue && invoiceIds.Contains(payment.InvoiceId.Value))
+                .ToListAsync(ct))
+            .GroupBy(payment => payment.InvoiceId!.Value)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
         var candidates = invoicePayments
             .Select(payment =>
             {
                 var invoiceNumber = payment.Invoice?.Number ?? payment.Account ?? payment.LegacyAccountNumber ?? string.Empty;
                 var numberTokens = BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber);
-                var outstandingAmount = CalculateOutstandingAmount(payment.Amount, payment.PaidAmount, payment.Status);
+                var relatedPayments = aggregatePaymentsByInvoiceId.TryGetValue(payment.InvoiceId!.Value, out var aggregatePayments)
+                    ? aggregatePayments
+                    : new List<Payment> { payment };
+                var statusSourcePayments = InvoicePaymentStateService.SelectStatusSourcePayments(
+                    relatedPayments,
+                    payment.Id,
+                    payment.Amount);
+                var paidAmount = statusSourcePayments.Count > 0
+                    ? Math.Round(statusSourcePayments.Sum(InvoicePaymentStateService.ResolvePaidAmount), 2, MidpointRounding.AwayFromZero)
+                    : InvoicePaymentStateService.ResolvePaidAmount(payment);
+                var outstandingAmount = statusSourcePayments.Count > 0
+                    ? Math.Round(statusSourcePayments.Sum(InvoicePaymentStateService.ResolveOutstandingAmount), 2, MidpointRounding.AwayFromZero)
+                    : CalculateOutstandingAmount(payment.Amount, payment.PaidAmount, payment.Status);
                 var score = 0;
                 var reasons = new List<string>();
 
@@ -1530,7 +1557,7 @@ public class MoneyOperationsController : ControllerBase
                     InvoiceNumber = invoiceNumber,
                     InvoiceDate = payment.Invoice?.Date ?? payment.AccountDate,
                     Amount = payment.Amount,
-                    PaidAmount = payment.PaidAmount,
+                    PaidAmount = paidAmount,
                     OutstandingAmount = outstandingAmount,
                     Status = payment.Status,
                     ClientId = payment.ClientId,
@@ -3895,21 +3922,30 @@ public class MoneyOperationsController : ControllerBase
             return new(invoice, "К счёту можно привязать только приходную денежную операцию.");
         }
 
-        var invoicePayment = await _db.Payments
+        var invoicePayments = await _db.Payments
             .AsNoTracking()
             .Where(payment =>
                 payment.InvoiceId == invoiceId &&
-                payment.DocumentKind == DocumentKind.Invoice &&
                 payment.Type == PaymentType.Income &&
                 payment.Status != PaymentStatus.Cancelled)
-            .OrderByDescending(payment => payment.Id)
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
+        var invoicePayment = invoicePayments
+            .Where(payment => payment.DocumentKind == DocumentKind.Invoice)
+            .OrderByDescending(payment => payment.Amount)
+            .ThenBy(payment => payment.Id)
+            .FirstOrDefault();
         if (invoicePayment is null)
         {
             return new(invoice, null);
         }
 
-        var outstandingAmount = CalculateOutstandingAmount(invoicePayment.Amount, invoicePayment.PaidAmount, invoicePayment.Status);
+        var statusSourcePayments = InvoicePaymentStateService.SelectStatusSourcePayments(
+            invoicePayments,
+            invoicePayment.Id,
+            invoicePayment.Amount);
+        var outstandingAmount = statusSourcePayments.Count > 0
+            ? Math.Round(statusSourcePayments.Sum(InvoicePaymentStateService.ResolveOutstandingAmount), 2, MidpointRounding.AwayFromZero)
+            : CalculateOutstandingAmount(invoicePayment.Amount, invoicePayment.PaidAmount, invoicePayment.Status);
         if (outstandingAmount <= 0m)
         {
             return new(invoice, "Счёт уже полностью оплачен, привязка денежной операции не выполнена.");
@@ -3933,14 +3969,35 @@ public class MoneyOperationsController : ControllerBase
             return;
         }
 
-        var payment = await _db.Payments
+        var invoicePayments = await _db.Payments
             .Where(item =>
                 item.InvoiceId == invoiceId &&
-                item.DocumentKind == DocumentKind.Invoice &&
                 item.Type == PaymentType.Income &&
                 item.Status != PaymentStatus.Cancelled)
-            .OrderByDescending(item => item.Id)
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
+        var representative = invoicePayments
+            .Where(item => item.DocumentKind == DocumentKind.Invoice)
+            .OrderByDescending(item => item.Amount)
+            .ThenBy(item => item.Id)
+            .FirstOrDefault();
+        if (representative is null)
+        {
+            return;
+        }
+
+        var sourcePayments = InvoicePaymentStateService.SelectStatusSourcePayments(
+            invoicePayments,
+            representative.Id,
+            representative.Amount);
+        var payment = sourcePayments
+            .Where(item => item.Status != PaymentStatus.Cancelled)
+            .Where(item => CalculateOutstandingAmount(item.Amount, item.PaidAmount, item.Status) > 0m)
+            .OrderBy(InvoicePaymentStateService.EffectivePlannedDate)
+            .ThenBy(item => item.Id)
+            .FirstOrDefault()
+            ?? (CalculateOutstandingAmount(representative.Amount, representative.PaidAmount, representative.Status) > 0m
+                ? representative
+                : null);
         if (payment is null)
         {
             return;
@@ -4035,6 +4092,8 @@ public class MoneyOperationsController : ControllerBase
             var overpaymentNote = $"Системно: {DateTime.UtcNow:dd.MM.yyyy HH:mm:ss} — переплата {overpaymentAmount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"))} зачислена на баланс клиента.";
             payment.SystemNotes = $"{payment.SystemNotes.Trim()}\n{overpaymentNote}";
         }
+
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, payment, DateTime.UtcNow, ct);
     }
 
     private static bool NamesLookRelated(string? left, string? right)

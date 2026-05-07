@@ -90,8 +90,9 @@ public class PaymentsController : ControllerBase
         PaymentDomainService.ApplyStatusRules(model, now);
 
         _db.Payments.Add(model);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, model, rawPaidAmount, now, HttpContext, ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, model);
         return Created($"/api/payments/{model.Id}", model);
@@ -127,6 +128,7 @@ public class PaymentsController : ControllerBase
         var originalStatus = e.Status;
         var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
         var originalSystemNotes = e.SystemNotes ?? string.Empty;
+        var originalInvoiceId = e.InvoiceId;
 
         if (e.PlannedDate == default)
         {
@@ -236,7 +238,15 @@ public class PaymentsController : ControllerBase
         e.RescheduleCount = rescheduleCount;
 
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, e, rawPaidAmount, now, HttpContext, ct);
-        await _db.SaveChangesAsync();
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
+        if (originalInvoiceId.HasValue
+            && originalInvoiceId.Value > 0
+            && originalInvoiceId != e.InvoiceId)
+        {
+            await InvoicePaymentStateService.RefreshInvoiceAggregateAsync(_db, originalInvoiceId.Value, now, ct);
+        }
+
+        await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, e);
         return Ok(e);
     }
@@ -391,7 +401,8 @@ public class PaymentsController : ControllerBase
         e.RescheduleCount = rescheduleCount;
 
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, e, rawPaidAmount, now, HttpContext, ct);
-        await _db.SaveChangesAsync();
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
+        await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, e);
         return Ok(e);
     }

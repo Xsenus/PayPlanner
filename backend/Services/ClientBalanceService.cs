@@ -191,6 +191,8 @@ public static class ClientBalanceService
             utcNow,
             actor);
 
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(db, payment, utcNow, ct);
+
         return (true, null, applied);
     }
 

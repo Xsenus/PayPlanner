@@ -67,6 +67,12 @@ namespace PayPlanner.Api.Services
                             && p.Status == PaymentStatus.Pending
                             && p.Date.Date < nowUtc.Date);
 
+            var affectedInvoiceIds = await baseQuery
+                .Where(p => p.InvoiceId.HasValue)
+                .Select(p => p.InvoiceId!.Value)
+                .Distinct()
+                .ToListAsync(ct);
+
             int affected;
 
             if (overdueStatusId.HasValue)
@@ -87,6 +93,8 @@ namespace PayPlanner.Api.Services
 
             if (affected > 0)
             {
+                await InvoicePaymentStateService.RefreshInvoiceAggregatesAsync(db, affectedInvoiceIds, nowUtc, ct);
+                await db.SaveChangesAsync(ct);
                 _logger.LogInformation("Marked {Count} payment(s) as Overdue.", affected);
             }
         }

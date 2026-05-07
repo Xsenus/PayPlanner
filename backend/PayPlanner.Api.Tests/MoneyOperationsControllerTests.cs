@@ -3024,6 +3024,7 @@ public class MoneyOperationsControllerTests
 
         var payment = await db.Payments.SingleAsync();
         Assert.Equal(PaymentStatus.Completed, payment.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Paid, payment.InvoiceWorkflowStatus);
         Assert.Equal(25_000m, payment.PaidAmount);
         Assert.True(payment.IsPaid);
         Assert.Contains("Деньги", payment.SystemNotes);
@@ -3031,6 +3032,104 @@ public class MoneyOperationsControllerTests
         var row = await db.BankStatementImportRows.SingleAsync();
         Assert.Equal(BankStatementImportRowStatus.Created, row.Status);
         Assert.Contains("Автоматически сверено", row.Message);
+    }
+
+    [Fact]
+    public async Task ImportBankStatement_AutoMatchesInstallmentInvoice_UpdatesInstallmentAndParent()
+    {
+        await using var db = await CreateContextAsync();
+
+        var baseDate = DateTime.UtcNow.Date.AddDays(10);
+        var operationDate = baseDate.AddDays(5);
+        var invoice = new Invoice
+        {
+            Number = "55",
+            Date = baseDate,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var parentPayment = new Payment
+        {
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 12_000m,
+            PaidAmount = 0m,
+            Date = baseDate,
+            PlannedDate = baseDate,
+            CounterpartyName = "Клиент рассрочки",
+            Description = "Счет №55",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var firstInstallment = new Payment
+        {
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 6_000m,
+            PaidAmount = 0m,
+            Date = operationDate,
+            PlannedDate = operationDate,
+            CounterpartyName = "Клиент рассрочки",
+            Description = "Рассрочка 1/2",
+            SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker}\nПлатеж 1/2",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var secondInstallment = new Payment
+        {
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 6_000m,
+            PaidAmount = 0m,
+            Date = operationDate.AddMonths(1),
+            PlannedDate = operationDate.AddMonths(1),
+            CounterpartyName = "Клиент рассрочки",
+            Description = "Рассрочка 2/2",
+            SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker}\nПлатеж 2/2",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Payments.AddRange(parentPayment, firstInstallment, secondInstallment);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+
+        var action = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+                $"{operationDate:dd.MM.yyyy};6000;Клиент рассрочки;Оплата по счету №55;501\n",
+                "statement.csv"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        var operationDto = Assert.Single(result.Operations);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, operationDto.MatchStatus);
+
+        db.ChangeTracker.Clear();
+        var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
+        var refreshedFirst = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == firstInstallment.Id);
+        var refreshedSecond = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == secondInstallment.Id);
+
+        Assert.Equal(PaymentStatus.Completed, refreshedFirst.Status);
+        Assert.Equal(6_000m, refreshedFirst.PaidAmount);
+        Assert.True(refreshedFirst.IsPaid);
+        Assert.Equal(PaymentStatus.Pending, refreshedSecond.Status);
+        Assert.Equal(6_000m, refreshedParent.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.False(refreshedParent.IsPaid);
     }
 
     [Fact]
