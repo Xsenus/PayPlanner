@@ -171,7 +171,9 @@ public class PaymentsV2Controller : ControllerBase
         PaymentDomainService.ApplyStatusRules(model, now);
 
         _db.Payments.Add(model);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
+        await _db.SaveChangesAsync(ct);
         return Created($"/api/v2/payments/{model.Id}", model);
     }
 
@@ -206,6 +208,7 @@ public class PaymentsV2Controller : ControllerBase
         var originalStatus = entity.Status;
         var originalRescheduleCount = Math.Max(0, entity.RescheduleCount);
         var originalSystemNotes = entity.SystemNotes ?? string.Empty;
+        var originalInvoiceId = entity.InvoiceId;
 
         if (entity.PlannedDate == default)
         {
@@ -301,12 +304,20 @@ public class PaymentsV2Controller : ControllerBase
 
         entity.RescheduleCount = rescheduleCount;
 
-        await _db.SaveChangesAsync();
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, entity, now, ct);
+        if (originalInvoiceId.HasValue
+            && originalInvoiceId.Value > 0
+            && originalInvoiceId != entity.InvoiceId)
+        {
+            await InvoicePaymentStateService.RefreshInvoiceAggregateAsync(_db, originalInvoiceId.Value, now, ct);
+        }
+
+        await _db.SaveChangesAsync(ct);
         return Ok(entity);
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, CancellationToken ct = default)
     {
         var entity = await _db.Payments.FindAsync(id);
         if (entity is null) return NotFound();
@@ -314,8 +325,15 @@ public class PaymentsV2Controller : ControllerBase
         {
             return Conflict(new { message = InvoiceManagedPaymentRules.DeleteBlockedMessage });
         }
+        var invoiceId = entity.InvoiceId;
         _db.Payments.Remove(entity);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
+        if (invoiceId.HasValue && invoiceId.Value > 0)
+        {
+            await InvoicePaymentStateService.RefreshInvoiceAggregateAsync(_db, invoiceId.Value, DateTime.UtcNow, ct);
+            await _db.SaveChangesAsync(ct);
+        }
+
         return NoContent();
     }
 

@@ -1051,6 +1051,94 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task PaymentsV2_Create_LinkedPayment_RefreshesParentInvoiceAsPartiallyPaid()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "V2 invoice client", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "V2-LINK-1", Date = DateTime.UtcNow.Date.AddDays(7) };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var parentPayment = CreatePayment(invoice.Date, 10_000m, "V2 parent invoice");
+        parentPayment.ClientId = client.Id;
+        parentPayment.DocumentKind = DocumentKind.Invoice;
+        parentPayment.InvoiceId = invoice.Id;
+        parentPayment.Account = invoice.Number;
+        parentPayment.AccountDate = invoice.Date;
+        db.Payments.Add(parentPayment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsV2Controller(db);
+        var linkedPayment = CreatePayment(invoice.Date.AddDays(1), 4_000m, "V2 linked payment");
+        linkedPayment.ClientId = client.Id;
+        linkedPayment.InvoiceId = invoice.Id;
+        linkedPayment.Status = PaymentStatus.Completed;
+        linkedPayment.PaidAmount = 4_000m;
+        linkedPayment.PaidDate = linkedPayment.Date;
+        linkedPayment.LastPaymentDate = linkedPayment.Date;
+
+        var actionResult = await controller.Create(linkedPayment, CancellationToken.None);
+
+        Assert.IsType<CreatedResult>(actionResult);
+        db.ChangeTracker.Clear();
+
+        var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
+        Assert.Equal(4_000m, refreshedParent.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.False(refreshedParent.IsPaid);
+    }
+
+    [Fact]
+    public async Task PaymentsV2_Update_LinkedPayment_RefreshesParentInvoiceAsPaid()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "V2 paid invoice client", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "V2-LINK-2", Date = DateTime.UtcNow.Date.AddDays(7) };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var parentPayment = CreatePayment(invoice.Date, 10_000m, "V2 parent invoice to pay");
+        parentPayment.ClientId = client.Id;
+        parentPayment.DocumentKind = DocumentKind.Invoice;
+        parentPayment.InvoiceId = invoice.Id;
+        parentPayment.Account = invoice.Number;
+        parentPayment.AccountDate = invoice.Date;
+
+        var linkedPayment = CreatePayment(invoice.Date.AddDays(1), 10_000m, "V2 linked payment to update");
+        linkedPayment.ClientId = client.Id;
+        linkedPayment.InvoiceId = invoice.Id;
+        linkedPayment.Account = invoice.Number;
+        linkedPayment.AccountDate = invoice.Date;
+
+        db.Payments.AddRange(parentPayment, linkedPayment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsV2Controller(db);
+        var update = CreatePayment(linkedPayment.Date, linkedPayment.Amount, linkedPayment.Description);
+        update.ClientId = client.Id;
+        update.Status = PaymentStatus.Completed;
+        update.PaidAmount = linkedPayment.Amount;
+        update.PaidDate = linkedPayment.Date;
+        update.LastPaymentDate = linkedPayment.Date;
+
+        var actionResult = await controller.Update(linkedPayment.Id, update, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(actionResult);
+        db.ChangeTracker.Clear();
+
+        var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
+        Assert.Equal(10_000m, refreshedParent.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, refreshedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Paid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.True(refreshedParent.IsPaid);
+    }
+
+    [Fact]
     public async Task RepairInvoiceLinks_ReassignsLinkedPayments_AndDowngradesDuplicateInvoiceDocuments()
     {
         await using var db = await CreateContextAsync();

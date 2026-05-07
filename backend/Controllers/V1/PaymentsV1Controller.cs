@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers.V1;
 
@@ -47,7 +48,7 @@ public class PaymentsV1Controller : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Payment model)
+    public async Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct = default)
     {
         if (model.IncomeTypeId.HasValue)
         {
@@ -60,15 +61,18 @@ public class PaymentsV1Controller : ControllerBase
 
         model.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
         _db.Payments.Add(model);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, DateTime.UtcNow, ct);
+        await _db.SaveChangesAsync(ct);
         return Created($"/api/v1/payments/{model.Id}", model);
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Payment model)
+    public async Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct = default)
     {
         var e = await _db.Payments.FindAsync(id);
         if (e is null) return NotFound();
+        var originalInvoiceId = e.InvoiceId;
 
         if (model.IncomeTypeId.HasValue)
         {
@@ -99,17 +103,32 @@ public class PaymentsV1Controller : ControllerBase
         e.PaymentOrderNumber = model.PaymentOrderNumber;
         e.PaymentDocumentDate = model.PaymentDocumentDate;
 
-        await _db.SaveChangesAsync();
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, DateTime.UtcNow, ct);
+        if (originalInvoiceId.HasValue
+            && originalInvoiceId.Value > 0
+            && originalInvoiceId != e.InvoiceId)
+        {
+            await InvoicePaymentStateService.RefreshInvoiceAggregateAsync(_db, originalInvoiceId.Value, DateTime.UtcNow, ct);
+        }
+
+        await _db.SaveChangesAsync(ct);
         return Ok(e);
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, CancellationToken ct = default)
     {
         var e = await _db.Payments.FindAsync(id);
         if (e is null) return NotFound();
+        var invoiceId = e.InvoiceId;
         _db.Payments.Remove(e);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
+        if (invoiceId.HasValue && invoiceId.Value > 0)
+        {
+            await InvoicePaymentStateService.RefreshInvoiceAggregateAsync(_db, invoiceId.Value, DateTime.UtcNow, ct);
+            await _db.SaveChangesAsync(ct);
+        }
+
         return NoContent();
     }
 }
