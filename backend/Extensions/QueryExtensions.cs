@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Extensions
 {
@@ -195,7 +196,8 @@ namespace PayPlanner.Api.Extensions
                     && child.Id != payment.Id
                     && child.DocumentKind != DocumentKind.Invoice
                     && child.SystemNotes != null
-                    && child.SystemNotes.Contains(InstallmentPaymentMarker)));
+                    && (child.SystemNotes.Contains(InstallmentPaymentMarker)
+                        || child.SystemNotes.Contains(PaymentRemainderTransferRules.PartialRemainderMarker))));
         }
 
         public static IQueryable<Payment> ApplyPaymentSort(this IQueryable<Payment> q, string? sortBy, string? sortDir)

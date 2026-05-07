@@ -7,6 +7,7 @@ using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using Xunit;
@@ -1866,6 +1867,452 @@ public class PaymentsControllerTests
         Assert.False(refreshedParent.IsPaid);
         Assert.Equal(firstInstallment.Date, refreshedParent.PaidDate!.Value);
         Assert.Equal(secondInstallment.Date, refreshedParent.Date);
+    }
+
+    [Fact]
+    public async Task TransferPartialRemainder_CreatesRemainderPayment_AndRefreshesParentInvoice()
+    {
+        await using var db = await CreateContextAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var client = new Client { Name = "Клиент переноса остатка", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "REM-1", Date = today.AddDays(-10) };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var parentPayment = CreatePayment(invoice.Date, 320_000m, "Счет REM-1");
+        parentPayment.ClientId = client.Id;
+        parentPayment.DocumentKind = DocumentKind.Invoice;
+        parentPayment.InvoiceId = invoice.Id;
+        parentPayment.Account = invoice.Number;
+        parentPayment.AccountDate = invoice.Date;
+
+        var firstInstallment = CreatePayment(today, 80_000m, "Рассрочка по счету REM-1 · платеж 1/4");
+        firstInstallment.ClientId = client.Id;
+        firstInstallment.InvoiceId = invoice.Id;
+        firstInstallment.Account = invoice.Number;
+        firstInstallment.AccountDate = invoice.Date;
+        firstInstallment.SystemNotes = $"{InstallmentPaymentMarker} {{\"Sequence\":1,\"Months\":4}}";
+
+        var secondInstallment = CreatePayment(today.AddDays(30), 80_000m, "Рассрочка по счету REM-1 · платеж 2/4");
+        secondInstallment.ClientId = client.Id;
+        secondInstallment.InvoiceId = invoice.Id;
+        secondInstallment.Account = invoice.Number;
+        secondInstallment.AccountDate = invoice.Date;
+        secondInstallment.SystemNotes = $"{InstallmentPaymentMarker} {{\"Sequence\":2,\"Months\":4}}";
+
+        var thirdInstallment = CreatePayment(today.AddDays(60), 80_000m, "Рассрочка по счету REM-1 · платеж 3/4");
+        thirdInstallment.ClientId = client.Id;
+        thirdInstallment.InvoiceId = invoice.Id;
+        thirdInstallment.Account = invoice.Number;
+        thirdInstallment.AccountDate = invoice.Date;
+        thirdInstallment.SystemNotes = $"{InstallmentPaymentMarker} {{\"Sequence\":3,\"Months\":4}}";
+
+        var fourthInstallment = CreatePayment(today.AddDays(90), 80_000m, "Рассрочка по счету REM-1 · платеж 4/4");
+        fourthInstallment.ClientId = client.Id;
+        fourthInstallment.InvoiceId = invoice.Id;
+        fourthInstallment.Account = invoice.Number;
+        fourthInstallment.AccountDate = invoice.Date;
+        fourthInstallment.SystemNotes = $"{InstallmentPaymentMarker} {{\"Sequence\":4,\"Months\":4}}";
+
+        db.Payments.AddRange(parentPayment, firstInstallment, secondInstallment, thirdInstallment, fourthInstallment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var paidAmount = 35_000m;
+        var remainderDate = today.AddDays(45);
+        var update = CreatePayment(today, paidAmount, firstInstallment.Description);
+        update.ClientId = client.Id;
+        update.InvoiceId = invoice.Id;
+        update.Account = invoice.Number;
+        update.AccountDate = invoice.Date;
+        update.Status = PaymentStatus.Completed;
+        update.PaidAmount = paidAmount;
+        update.PaidDate = today;
+        update.LastPaymentDate = today;
+        update.SystemNotes = firstInstallment.SystemNotes;
+
+        var actionResult = await controller.TransferPartialRemainder(
+            firstInstallment.Id,
+            new TransferPaymentRemainderRequest
+            {
+                Payment = update,
+                RemainderDate = remainderDate,
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var response = Assert.IsType<TransferPaymentRemainderResponse>(ok.Value);
+        Assert.True(response.CreatedRemainder);
+        Assert.Equal(firstInstallment.Id, response.Payment.Id);
+        Assert.Equal(45_000m, response.RemainderPayment.Amount);
+        Assert.Equal(remainderDate, response.RemainderPayment.Date);
+        Assert.Contains(PaymentRemainderTransferRules.PartialRemainderMarker, response.RemainderPayment.SystemNotes);
+
+        db.ChangeTracker.Clear();
+        var storedSource = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == firstInstallment.Id);
+        var storedRemainder = await db.Payments.AsNoTracking()
+            .SingleAsync(payment => payment.SystemNotes.Contains(PaymentRemainderTransferRules.PartialRemainderMarker));
+        var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
+
+        Assert.Equal(35_000m, storedSource.Amount);
+        Assert.Equal(35_000m, storedSource.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, storedSource.Status);
+        Assert.True(storedSource.IsPaid);
+        Assert.Equal(invoice.Id, storedRemainder.InvoiceId);
+        Assert.Equal(client.Id, storedRemainder.ClientId);
+        Assert.Equal(invoice.Number, storedRemainder.Account);
+        Assert.Equal(45_000m, storedRemainder.Amount);
+        Assert.Equal(0m, storedRemainder.PaidAmount);
+        Assert.Equal(PaymentStatus.Pending, storedRemainder.Status);
+        Assert.Equal(320_000m, await db.Payments
+            .Where(payment => payment.InvoiceId == invoice.Id && payment.DocumentKind != DocumentKind.Invoice)
+            .SumAsync(payment => payment.Amount));
+        Assert.Equal(35_000m, refreshedParent.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, refreshedParent.InvoiceWorkflowStatus);
+    }
+
+    [Fact]
+    public async Task TransferPartialRemainder_DoesNotCreateDuplicate_OnRepeatedRequest()
+    {
+        await using var db = await CreateContextAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var client = new Client { Name = "Клиент без дублей", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var source = CreatePayment(today, 10_000m, "Платеж с остатком");
+        source.ClientId = client.Id;
+        db.Payments.Add(source);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(today, 4_000m, source.Description);
+        update.ClientId = client.Id;
+        update.PaidAmount = 4_000m;
+        update.PaidDate = today;
+        update.LastPaymentDate = today;
+        var request = new TransferPaymentRemainderRequest
+        {
+            Payment = update,
+            RemainderDate = today.AddDays(14),
+        };
+
+        var firstResult = await controller.TransferPartialRemainder(source.Id, request, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(firstResult);
+        db.ChangeTracker.Clear();
+
+        var secondResult = await controller.TransferPartialRemainder(source.Id, request, CancellationToken.None);
+        var secondOk = Assert.IsType<OkObjectResult>(secondResult);
+        var secondResponse = Assert.IsType<TransferPaymentRemainderResponse>(secondOk.Value);
+
+        Assert.False(secondResponse.CreatedRemainder);
+        Assert.Equal(1, await db.Payments.CountAsync(payment =>
+            payment.SystemNotes.Contains(PaymentRemainderTransferRules.PartialRemainderMarker)));
+        Assert.Equal(6_000m, secondResponse.RemainderPayment.Amount);
+    }
+
+    [Fact]
+    public async Task Delete_RejectsPartialRemainderPayment_AndItsSource()
+    {
+        await using var db = await CreateContextAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var client = new Client { Name = "Клиент с защищенным остатком", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var source = CreatePayment(today, 10_000m, "Платеж с защищенным остатком");
+        source.ClientId = client.Id;
+        db.Payments.Add(source);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(today, 4_000m, source.Description);
+        update.ClientId = client.Id;
+        update.PaidAmount = 4_000m;
+        update.PaidDate = today;
+        update.LastPaymentDate = today;
+
+        var splitResult = await controller.TransferPartialRemainder(
+            source.Id,
+            new TransferPaymentRemainderRequest
+            {
+                Payment = update,
+                RemainderDate = today.AddDays(14),
+            },
+            CancellationToken.None);
+        var splitOk = Assert.IsType<OkObjectResult>(splitResult);
+        var splitResponse = Assert.IsType<TransferPaymentRemainderResponse>(splitOk.Value);
+        db.ChangeTracker.Clear();
+
+        var sourceDelete = await controller.Delete(source.Id, CancellationToken.None);
+        var sourceConflict = Assert.IsType<ConflictObjectResult>(sourceDelete);
+        Assert.Contains(PaymentRemainderTransferRules.SourceDeleteBlockedMessage, sourceConflict.Value?.ToString());
+
+        var remainderDelete = await controller.Delete(splitResponse.RemainderPayment.Id, CancellationToken.None);
+        var remainderConflict = Assert.IsType<ConflictObjectResult>(remainderDelete);
+        Assert.Contains(PaymentRemainderTransferRules.RemainderDeleteBlockedMessage, remainderConflict.Value?.ToString());
+
+        Assert.NotNull(await db.Payments.FindAsync(source.Id));
+        Assert.NotNull(await db.Payments.FindAsync(splitResponse.RemainderPayment.Id));
+    }
+
+    [Fact]
+    public async Task Update_ProtectsPartialRemainderAmounts_ButAllowsPayingRemainder()
+    {
+        await using var db = await CreateContextAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var client = new Client { Name = "Клиент с оплатой остатка", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var source = CreatePayment(today, 10_000m, "Платеж с оплачиваемым остатком");
+        source.ClientId = client.Id;
+        db.Payments.Add(source);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(today, 4_000m, source.Description);
+        update.ClientId = client.Id;
+        update.PaidAmount = 4_000m;
+        update.PaidDate = today;
+        update.LastPaymentDate = today;
+
+        var splitResult = await controller.TransferPartialRemainder(
+            source.Id,
+            new TransferPaymentRemainderRequest
+            {
+                Payment = update,
+                RemainderDate = today.AddDays(14),
+            },
+            CancellationToken.None);
+        var splitOk = Assert.IsType<OkObjectResult>(splitResult);
+        var splitResponse = Assert.IsType<TransferPaymentRemainderResponse>(splitOk.Value);
+        db.ChangeTracker.Clear();
+
+        var sourceAmountChange = CreatePayment(today, 5_000m, "Пытаемся поменять исходник");
+        sourceAmountChange.ClientId = client.Id;
+        sourceAmountChange.PaidAmount = 5_000m;
+        sourceAmountChange.PaidDate = today;
+        sourceAmountChange.LastPaymentDate = today;
+
+        var sourceUpdateResult = await controller.Update(source.Id, sourceAmountChange, CancellationToken.None);
+        var sourceConflict = Assert.IsType<ConflictObjectResult>(sourceUpdateResult);
+        Assert.Contains(PaymentRemainderTransferRules.SourceAmountUpdateBlockedMessage, sourceConflict.Value?.ToString());
+
+        var remainderAmountChange = CreatePayment(today.AddDays(14), 7_000m, "Пытаемся поменять остаток");
+        remainderAmountChange.ClientId = client.Id;
+        remainderAmountChange.PaidAmount = 0m;
+
+        var remainderAmountResult = await controller.Update(
+            splitResponse.RemainderPayment.Id,
+            remainderAmountChange,
+            CancellationToken.None);
+        var remainderConflict = Assert.IsType<ConflictObjectResult>(remainderAmountResult);
+        Assert.Contains(PaymentRemainderTransferRules.RemainderAmountUpdateBlockedMessage, remainderConflict.Value?.ToString());
+
+        var remainderPay = CreatePayment(today.AddDays(14), 6_000m, "Оплачиваем остаток");
+        remainderPay.ClientId = client.Id;
+        remainderPay.PaidAmount = 6_000m;
+        remainderPay.PaidDate = today.AddDays(14);
+        remainderPay.LastPaymentDate = today.AddDays(14);
+        remainderPay.Status = PaymentStatus.Completed;
+
+        var remainderPayResult = await controller.Update(
+            splitResponse.RemainderPayment.Id,
+            remainderPay,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(remainderPayResult);
+        var paidRemainder = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(6_000m, paidRemainder.Amount);
+        Assert.Equal(6_000m, paidRemainder.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, paidRemainder.Status);
+    }
+
+    [Fact]
+    public async Task RollbackPartialRemainderTransfer_RestoresSourceAndRemovesUnpaidRemainder()
+    {
+        await using var db = await CreateContextAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var client = new Client { Name = "Клиент с откатом остатка", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var source = CreatePayment(today, 10_000m, "Платеж с откатом остатка");
+        source.ClientId = client.Id;
+        db.Payments.Add(source);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(today, 4_000m, source.Description);
+        update.ClientId = client.Id;
+        update.PaidAmount = 4_000m;
+        update.PaidDate = today;
+        update.LastPaymentDate = today;
+
+        var splitResult = await controller.TransferPartialRemainder(
+            source.Id,
+            new TransferPaymentRemainderRequest
+            {
+                Payment = update,
+                RemainderDate = today.AddDays(14),
+            },
+            CancellationToken.None);
+        var splitOk = Assert.IsType<OkObjectResult>(splitResult);
+        var splitResponse = Assert.IsType<TransferPaymentRemainderResponse>(splitOk.Value);
+        db.ChangeTracker.Clear();
+
+        var rollbackResult = await controller.RollbackPartialRemainderTransfer(
+            splitResponse.RemainderPayment.Id,
+            CancellationToken.None);
+
+        var rollbackOk = Assert.IsType<OkObjectResult>(rollbackResult);
+        var rollbackResponse = Assert.IsType<RollbackPaymentRemainderTransferResponse>(rollbackOk.Value);
+        db.ChangeTracker.Clear();
+
+        var restoredSource = await db.Payments.FindAsync(source.Id);
+        Assert.NotNull(restoredSource);
+        Assert.Equal(source.Id, rollbackResponse.Payment.Id);
+        Assert.Equal(10_000m, restoredSource!.Amount);
+        Assert.Equal(4_000m, restoredSource.PaidAmount);
+        Assert.False(restoredSource.IsPaid);
+        Assert.DoesNotContain(PaymentRemainderTransferRules.PartialRemainderSourceMarker, restoredSource.SystemNotes);
+        Assert.Null(await db.Payments.FindAsync(splitResponse.RemainderPayment.Id));
+        Assert.Equal(splitResponse.RemainderPayment.Id, rollbackResponse.RemovedRemainderPaymentId);
+    }
+
+    [Fact]
+    public async Task AdjustPartialRemainderTransfer_RecalculatesSourceAndRemainder()
+    {
+        await using var db = await CreateContextAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var client = new Client { Name = "Клиент с корректировкой остатка", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var source = CreatePayment(today, 10_000m, "Платеж с корректировкой остатка");
+        source.ClientId = client.Id;
+        db.Payments.Add(source);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(today, 4_000m, source.Description);
+        update.ClientId = client.Id;
+        update.PaidAmount = 4_000m;
+        update.PaidDate = today;
+        update.LastPaymentDate = today;
+
+        var splitResult = await controller.TransferPartialRemainder(
+            source.Id,
+            new TransferPaymentRemainderRequest
+            {
+                Payment = update,
+                RemainderDate = today.AddDays(14),
+            },
+            CancellationToken.None);
+        var splitOk = Assert.IsType<OkObjectResult>(splitResult);
+        var splitResponse = Assert.IsType<TransferPaymentRemainderResponse>(splitOk.Value);
+        db.ChangeTracker.Clear();
+
+        var newRemainderDate = today.AddDays(30);
+        var adjustResult = await controller.AdjustPartialRemainderTransfer(
+            source.Id,
+            new AdjustPaymentRemainderTransferRequest
+            {
+                PaidAmount = 5_500m,
+                RemainderDate = newRemainderDate,
+            },
+            CancellationToken.None);
+
+        var adjustOk = Assert.IsType<OkObjectResult>(adjustResult);
+        var adjustResponse = Assert.IsType<TransferPaymentRemainderResponse>(adjustOk.Value);
+        db.ChangeTracker.Clear();
+
+        var adjustedSource = await db.Payments.FindAsync(source.Id);
+        var adjustedRemainder = await db.Payments.FindAsync(splitResponse.RemainderPayment.Id);
+        Assert.NotNull(adjustedSource);
+        Assert.NotNull(adjustedRemainder);
+        Assert.False(adjustResponse.CreatedRemainder);
+        Assert.Equal(5_500m, adjustedSource!.Amount);
+        Assert.Equal(5_500m, adjustedSource.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, adjustedSource.Status);
+        Assert.Equal(4_500m, adjustedRemainder!.Amount);
+        Assert.Equal(0m, adjustedRemainder.PaidAmount);
+        Assert.Equal(newRemainderDate, adjustedRemainder.Date);
+        Assert.Contains(PaymentRemainderTransferRules.PartialRemainderSourceMarker, adjustedSource.SystemNotes);
+        Assert.Contains(PaymentRemainderTransferRules.PartialRemainderMarker, adjustedRemainder.SystemNotes);
+    }
+
+    [Fact]
+    public async Task AdjustPartialRemainderTransfer_RejectsAlreadyPaidRemainder()
+    {
+        await using var db = await CreateContextAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var client = new Client { Name = "Клиент с оплаченным остатком", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var source = CreatePayment(today, 10_000m, "Платеж с оплаченным остатком");
+        source.ClientId = client.Id;
+        db.Payments.Add(source);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(today, 4_000m, source.Description);
+        update.ClientId = client.Id;
+        update.PaidAmount = 4_000m;
+        update.PaidDate = today;
+        update.LastPaymentDate = today;
+
+        var splitResult = await controller.TransferPartialRemainder(
+            source.Id,
+            new TransferPaymentRemainderRequest
+            {
+                Payment = update,
+                RemainderDate = today.AddDays(14),
+            },
+            CancellationToken.None);
+        var splitOk = Assert.IsType<OkObjectResult>(splitResult);
+        var splitResponse = Assert.IsType<TransferPaymentRemainderResponse>(splitOk.Value);
+        db.ChangeTracker.Clear();
+
+        var remainder = await db.Payments.FindAsync(splitResponse.RemainderPayment.Id);
+        Assert.NotNull(remainder);
+        remainder!.PaidAmount = remainder.Amount;
+        remainder.IsPaid = true;
+        remainder.Status = PaymentStatus.Completed;
+        remainder.PaidDate = remainder.Date;
+        remainder.LastPaymentDate = remainder.Date;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var adjustResult = await controller.AdjustPartialRemainderTransfer(
+            source.Id,
+            new AdjustPaymentRemainderTransferRequest
+            {
+                PaidAmount = 5_000m,
+                RemainderDate = today.AddDays(30),
+            },
+            CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(adjustResult);
+        Assert.Contains(PaymentRemainderTransferRules.RemainderAlreadyProcessedMessage, conflict.Value?.ToString());
     }
 
     [Fact]

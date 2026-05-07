@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
@@ -110,6 +112,9 @@ public class PaymentsController : ControllerBase
         {
             return Conflict(new { message = InvoiceManagedPaymentRules.UpdateBlockedMessage });
         }
+
+        var transferProtectionError = await ValidatePartialRemainderUpdateAsync(e, model, ct);
+        if (transferProtectionError is not null) return transferProtectionError;
 
         if (model.IncomeTypeId.HasValue)
         {
@@ -264,6 +269,9 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = "Payment is not invoice-managed." });
         }
 
+        var transferProtectionError = await ValidatePartialRemainderUpdateAsync(e, model, ct);
+        if (transferProtectionError is not null) return transferProtectionError;
+
         if (model.IncomeTypeId.HasValue)
         {
             var it = await _db.IncomeTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == model.IncomeTypeId.Value);
@@ -407,9 +415,657 @@ public class PaymentsController : ControllerBase
         return Ok(e);
     }
 
+    [HttpPut("{id:int}/partial-remainder")]
+    public async Task<IActionResult> TransferPartialRemainder(
+        int id,
+        [FromBody] TransferPaymentRemainderRequest request,
+        CancellationToken ct)
+    {
+        if (request.Payment is null)
+        {
+            return BadRequest(new { message = "Не переданы данные платежа." });
+        }
+
+        if (request.RemainderDate == default)
+        {
+            return BadRequest(new { message = "Укажите дату переноса остатка." });
+        }
+
+        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", request.Payment);
+        if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+
+        var source = await LoadPaymentForRemainderTransferAsync(id, ct);
+        if (source is null) return NotFound();
+        if (source.DocumentKind == DocumentKind.Invoice)
+        {
+            return Conflict(new { message = "Остаток переносится по платежу, а не по самой записи счета." });
+        }
+
+        var existingRemainder = await FindPartialRemainderPaymentAsync(source.Id, ct);
+        if (existingRemainder is not null)
+        {
+            PopulateAuditMetadata(_db, source);
+            PopulateAuditMetadata(_db, existingRemainder);
+            return Ok(new TransferPaymentRemainderResponse
+            {
+                Payment = source,
+                RemainderPayment = existingRemainder,
+                CreatedRemainder = false,
+            });
+        }
+
+        if (source.Status == PaymentStatus.Cancelled)
+        {
+            return BadRequest(new { message = "Нельзя перенести остаток по отмененному платежу." });
+        }
+
+        var now = DateTime.UtcNow;
+        var culture = CultureInfo.GetCultureInfo("ru-RU");
+        var actor = User.GetDisplayName();
+        var model = request.Payment;
+        var originalAmount = Math.Round(source.Amount, 2, MidpointRounding.AwayFromZero);
+        var paidAmount = Math.Round(Math.Max(model.PaidAmount, 0m), 2, MidpointRounding.AwayFromZero);
+        var remainderAmount = Math.Round(originalAmount - paidAmount, 2, MidpointRounding.AwayFromZero);
+
+        if (paidAmount <= 0m)
+        {
+            return BadRequest(new { message = "Для переноса остатка укажите фактически оплаченную сумму." });
+        }
+
+        if (remainderAmount <= 0.009m)
+        {
+            return BadRequest(new { message = "Остаток к переносу не образуется." });
+        }
+
+        var invoiceManaged = InvoiceManagedPaymentRules.IsInvoiceManagedPayment(source);
+        var targetType = invoiceManaged ? source.Type : model.Type;
+        if (model.IncomeTypeId.HasValue)
+        {
+            var incomeType = await _db.IncomeTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == model.IncomeTypeId.Value, ct);
+            if (incomeType is null) return BadRequest("Unknown IncomeTypeId");
+            if (incomeType.PaymentType != targetType) return BadRequest("IncomeType.PaymentType mismatches payment.Type");
+        }
+
+        var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, source.Id, ct);
+        if (paidAmount + 0.009m < appliedCreditAmount)
+        {
+            return BadRequest(new
+            {
+                message = $"Оплата не может быть меньше зачтенной суммы с баланса клиента: {appliedCreditAmount.ToString("N2", culture)}."
+            });
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+        var originalDueDate = source.Date.Date;
+        var originalPlannedDate = (source.PlannedDate == default ? source.Date : source.PlannedDate).Date;
+        var originalPaidAmount = source.PaidAmount;
+        var originalStatus = source.Status;
+        var originalRescheduleCount = Math.Max(0, source.RescheduleCount);
+        var originalSystemNotes = source.SystemNotes ?? string.Empty;
+        var originalInvoiceId = source.InvoiceId;
+
+        if (source.PlannedDate == default)
+        {
+            source.PlannedDate = originalPlannedDate;
+        }
+
+        var immutableInvoiceId = source.InvoiceId;
+        var immutableDocumentKind = source.DocumentKind;
+        var immutableAccount = source.Account;
+        var immutableAccountDate = source.AccountDate;
+        var immutableLegacyAccountNumber = source.LegacyAccountNumber;
+        var immutableLegacyAccountDate = source.LegacyAccountDate;
+        var immutableType = source.Type;
+
+        source.Date = model.Date == default ? source.Date : model.Date;
+        source.PlannedDate = model.PlannedDate == default ? source.PlannedDate : model.PlannedDate;
+        source.Amount = paidAmount;
+        source.Type = targetType;
+        source.Status = PaymentStatus.Completed;
+        source.Description = model.Description ?? string.Empty;
+        source.Notes = model.Notes ?? string.Empty;
+        source.ClientId = model.ClientId;
+        source.LegalEntityId = model.LegalEntityId;
+        source.ExpenseClientId = model.ExpenseClientId;
+        source.ExpenseLegalEntityId = model.ExpenseLegalEntityId;
+        source.ClientCaseId = model.ClientCaseId;
+        source.ContractId = model.ContractId;
+        source.DealTypeId = model.DealTypeId;
+        source.IncomeTypeId = model.IncomeTypeId;
+        source.PaymentSourceId = model.PaymentSourceId;
+        source.PaymentStatusId = model.PaymentStatusId;
+        source.InvoiceId = model.InvoiceId;
+        source.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
+        source.DocumentKind = model.DocumentKind == default ? source.DocumentKind : model.DocumentKind;
+        source.AccountDate = model.AccountDate;
+        source.PaidAmount = paidAmount;
+        source.PaidDate = model.PaidDate ?? model.LastPaymentDate ?? source.PaidDate ?? source.Date;
+        source.LastPaymentDate = model.LastPaymentDate ?? source.PaidDate ?? source.LastPaymentDate;
+        source.PaymentOrderNumber = model.PaymentOrderNumber;
+        source.PaymentDocumentDate = model.PaymentDocumentDate;
+        source.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
+
+        if (invoiceManaged)
+        {
+            source.InvoiceId = immutableInvoiceId;
+            source.DocumentKind = immutableDocumentKind;
+            source.Account = immutableAccount;
+            source.AccountDate = immutableAccountDate;
+            source.LegacyAccountNumber = immutableLegacyAccountNumber;
+            source.LegacyAccountDate = immutableLegacyAccountDate;
+            source.Type = immutableType;
+            await SyncInvoiceManagedPaymentBindingsAsync(source, ct);
+        }
+        else
+        {
+            await SyncInvoiceLinkAsync(source, ct);
+        }
+
+        var sourceValidationError = await ValidatePaymentAttributionAsync(source, ct);
+        if (sourceValidationError is not null) return sourceValidationError;
+        PaymentDomainService.Normalize(source);
+        PaymentDomainService.ApplyStatusRules(source, now);
+
+        AppendSourceRemainderAuditNotes(
+            source,
+            originalAmount,
+            paidAmount,
+            remainderAmount,
+            request.RemainderDate.Date,
+            now,
+            actor);
+        source.SystemNotes = ReplaceTechnicalMarkerLine(
+            source.SystemNotes,
+            PaymentRemainderTransferRules.PartialRemainderSourceMarker,
+            PaymentRemainderTransferRules.BuildSourceMarker(
+                source.Id,
+                originalAmount,
+                paidAmount,
+                remainderAmount,
+                request.RemainderDate.Date));
+
+        if (model.PlannedDate != default && originalPlannedDate != source.PlannedDate.Date)
+        {
+            PaymentDomainService.AppendSystemNote(
+                source,
+                $"Изменена плановая дата: {originalPlannedDate:dd.MM.yyyy} → {source.PlannedDate:dd.MM.yyyy}",
+                now,
+                actor);
+        }
+
+        var userChangedDueDate = model.Date != default && model.Date.Date != originalDueDate;
+        var rescheduleCount = originalRescheduleCount;
+        if (userChangedDueDate)
+        {
+            rescheduleCount++;
+            PaymentDomainService.AppendSystemNote(
+                source,
+                $"Дата платежа изменена: {originalDueDate:dd.MM.yyyy} → {source.Date:dd.MM.yyyy}",
+                now,
+                actor);
+        }
+
+        if (Math.Abs(originalPaidAmount - source.PaidAmount) > 0.009m)
+        {
+            PaymentDomainService.AppendSystemNote(
+                source,
+                $"Изменена оплаченная сумма: было {originalPaidAmount.ToString("N2", culture)}, стало {source.PaidAmount.ToString("N2", culture)}",
+                now,
+                actor);
+        }
+
+        if (originalStatus != source.Status)
+        {
+            PaymentDomainService.AppendSystemNote(
+                source,
+                $"Статус обновлён: {originalStatus.ToDisplayString()} → {source.Status.ToDisplayString()}",
+                now,
+                actor);
+        }
+
+        source.RescheduleCount = rescheduleCount;
+
+        var remainderPayment = CreateRemainderPaymentFromSource(
+            source,
+            originalAmount,
+            paidAmount,
+            remainderAmount,
+            request.RemainderDate.Date,
+            now);
+        await CopyPaymentResponsiblesAsync(remainderPayment, source.Responsibles.Select(item => item.UserId), ct);
+        CopyPaymentInvoiceClientCases(remainderPayment, source.InvoiceClientCases.Select(item => item.ClientCaseId));
+
+        PaymentDomainService.Normalize(remainderPayment);
+        PaymentDomainService.ApplyStatusRules(remainderPayment, now);
+
+        var remainderValidationError = await ValidatePaymentAttributionAsync(remainderPayment, ct);
+        if (remainderValidationError is not null) return remainderValidationError;
+
+        _db.Payments.Add(remainderPayment);
+
+        await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, source, paidAmount, now, HttpContext, ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, source, now, ct);
+        if (originalInvoiceId.HasValue
+            && originalInvoiceId.Value > 0
+            && originalInvoiceId != source.InvoiceId)
+        {
+            await InvoicePaymentStateService.RefreshInvoiceAggregateAsync(_db, originalInvoiceId.Value, now, ct);
+        }
+
+        await _db.SaveChangesAsync(ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, remainderPayment, now, ct);
+        await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        PopulateAuditMetadata(_db, source);
+        PopulateAuditMetadata(_db, remainderPayment);
+        return Ok(new TransferPaymentRemainderResponse
+        {
+            Payment = source,
+            RemainderPayment = remainderPayment,
+            CreatedRemainder = true,
+        });
+    }
+
+    [HttpPost("{id:int}/partial-remainder/rollback")]
+    public async Task<IActionResult> RollbackPartialRemainderTransfer(int id, CancellationToken ct)
+    {
+        var pair = await ResolvePartialRemainderTransferPairAsync(id, ct);
+        if (pair is null)
+        {
+            return BadRequest(new { message = "Перенос остатка для платежа не найден." });
+        }
+
+        var validationError = await ValidateRemainderCanBeReworkedAsync(pair.Value, ct);
+        if (validationError is not null) return validationError;
+
+        var now = DateTime.UtcNow;
+        var actor = User.GetDisplayName();
+        var culture = CultureInfo.GetCultureInfo("ru-RU");
+        var source = pair.Value.Source;
+        var remainder = pair.Value.Remainder;
+        var marker = pair.Value.Marker;
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+        source.Amount = marker.SourceOriginalAmount;
+        source.PaidAmount = marker.PaidAmount;
+        source.IsPaid = false;
+        source.PaidDate = null;
+        source.SystemNotes = RemoveTechnicalMarkerLines(
+            source.SystemNotes,
+            PaymentRemainderTransferRules.PartialRemainderSourceMarker);
+        PaymentDomainService.AppendSystemNote(
+            source,
+            $"Перенос остатка отменен: платеж #{remainder.Id} на {marker.RemainderAmount.ToString("N2", culture)} удален, исходная сумма восстановлена до {marker.SourceOriginalAmount.ToString("N2", culture)}.",
+            now,
+            actor);
+        PaymentDomainService.Normalize(source);
+        PaymentDomainService.ApplyStatusRules(source, now);
+
+        _db.Payments.Remove(remainder);
+        await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, source, source.PaidAmount, now, HttpContext, ct);
+        await _db.SaveChangesAsync(ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, source, now, ct);
+        await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        PopulateAuditMetadata(_db, source);
+        return Ok(new RollbackPaymentRemainderTransferResponse
+        {
+            Payment = source,
+            RemovedRemainderPaymentId = remainder.Id,
+        });
+    }
+
+    [HttpPut("{id:int}/partial-remainder/adjust")]
+    public async Task<IActionResult> AdjustPartialRemainderTransfer(
+        int id,
+        [FromBody] AdjustPaymentRemainderTransferRequest request,
+        CancellationToken ct)
+    {
+        if (request.RemainderDate == default)
+        {
+            return BadRequest(new { message = "Укажите дату переноса остатка." });
+        }
+
+        var pair = await ResolvePartialRemainderTransferPairAsync(id, ct);
+        if (pair is null)
+        {
+            return BadRequest(new { message = "Перенос остатка для платежа не найден." });
+        }
+
+        var validationError = await ValidateRemainderCanBeReworkedAsync(pair.Value, ct);
+        if (validationError is not null) return validationError;
+
+        var now = DateTime.UtcNow;
+        var actor = User.GetDisplayName();
+        var culture = CultureInfo.GetCultureInfo("ru-RU");
+        var source = pair.Value.Source;
+        var remainder = pair.Value.Remainder;
+        var marker = pair.Value.Marker;
+        var paidAmount = Math.Round(Math.Max(request.PaidAmount, 0m), 2, MidpointRounding.AwayFromZero);
+        var sourceOriginalAmount = marker.SourceOriginalAmount;
+        var remainderAmount = Math.Round(sourceOriginalAmount - paidAmount, 2, MidpointRounding.AwayFromZero);
+
+        if (paidAmount <= 0m)
+        {
+            return BadRequest(new { message = "Укажите фактически оплаченную сумму." });
+        }
+
+        if (remainderAmount <= 0.009m)
+        {
+            return BadRequest(new { message = "Остаток к переносу не образуется." });
+        }
+
+        var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, source.Id, ct);
+        if (paidAmount + 0.009m < appliedCreditAmount)
+        {
+            return BadRequest(new
+            {
+                message = $"Оплата не может быть меньше зачтенной суммы с баланса клиента: {appliedCreditAmount.ToString("N2", culture)}."
+            });
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+        var remainderDate = request.RemainderDate.Date;
+        source.Amount = paidAmount;
+        source.PaidAmount = paidAmount;
+        source.IsPaid = true;
+        source.Status = PaymentStatus.Completed;
+        source.PaidDate ??= source.LastPaymentDate ?? source.Date;
+        source.LastPaymentDate ??= source.PaidDate;
+        source.SystemNotes = ReplaceTechnicalMarkerLine(
+            source.SystemNotes,
+            PaymentRemainderTransferRules.PartialRemainderSourceMarker,
+            PaymentRemainderTransferRules.BuildSourceMarker(
+                source.Id,
+                sourceOriginalAmount,
+                paidAmount,
+                remainderAmount,
+                remainderDate));
+        PaymentDomainService.AppendSystemNote(
+            source,
+            $"Разделение платежа изменено: оплачено {paidAmount.ToString("N2", culture)} / {sourceOriginalAmount.ToString("N2", culture)}, остаток {remainderAmount.ToString("N2", culture)} перенесен на {remainderDate:dd.MM.yyyy}.",
+            now,
+            actor);
+
+        remainder.Amount = remainderAmount;
+        remainder.PaidAmount = 0m;
+        remainder.IsPaid = false;
+        remainder.PaidDate = null;
+        remainder.LastPaymentDate = null;
+        remainder.Date = remainderDate;
+        remainder.PlannedDate = remainderDate;
+        remainder.Status = remainderDate < now.Date ? PaymentStatus.Overdue : PaymentStatus.Pending;
+        remainder.SystemNotes = ReplaceTechnicalMarkerLine(
+            remainder.SystemNotes,
+            PaymentRemainderTransferRules.PartialRemainderMarker,
+            PaymentRemainderTransferRules.BuildMarker(
+                source.Id,
+                sourceOriginalAmount,
+                paidAmount,
+                remainderAmount,
+                remainderDate));
+        PaymentDomainService.AppendSystemNote(
+            remainder,
+            $"Параметры перенесенного остатка изменены: сумма {remainderAmount.ToString("N2", culture)}, дата {remainderDate:dd.MM.yyyy}.",
+            now,
+            actor);
+
+        PaymentDomainService.Normalize(source);
+        PaymentDomainService.ApplyStatusRules(source, now);
+        PaymentDomainService.Normalize(remainder);
+        PaymentDomainService.ApplyStatusRules(remainder, now);
+
+        var sourceValidationError = await ValidatePaymentAttributionAsync(source, ct);
+        if (sourceValidationError is not null) return sourceValidationError;
+        var remainderValidationError = await ValidatePaymentAttributionAsync(remainder, ct);
+        if (remainderValidationError is not null) return remainderValidationError;
+
+        await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, source, paidAmount, now, HttpContext, ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, source, now, ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, remainder, now, ct);
+        await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        PopulateAuditMetadata(_db, source);
+        PopulateAuditMetadata(_db, remainder);
+        return Ok(new TransferPaymentRemainderResponse
+        {
+            Payment = source,
+            RemainderPayment = remainder,
+            CreatedRemainder = false,
+        });
+    }
+
+    private async Task<Payment?> LoadPaymentForRemainderTransferAsync(int id, CancellationToken ct)
+        => await _db.Payments
+            .Include(payment => payment.Responsibles)
+            .Include(payment => payment.InvoiceClientCases)
+            .FirstOrDefaultAsync(payment => payment.Id == id, ct);
+
+    private async Task<Payment?> FindPartialRemainderPaymentAsync(int sourcePaymentId, CancellationToken ct)
+    {
+        var candidates = await _db.Payments
+            .Include(payment => payment.Responsibles)
+            .Include(payment => payment.InvoiceClientCases)
+            .Where(payment => payment.SystemNotes != null
+                              && payment.SystemNotes.Contains(PaymentRemainderTransferRules.PartialRemainderMarker))
+            .OrderBy(payment => payment.Id)
+            .ToListAsync(ct);
+
+        return candidates.FirstOrDefault(payment =>
+            PaymentRemainderTransferRules.TryReadMarker(payment.SystemNotes, out var marker)
+            && marker.SourcePaymentId == sourcePaymentId);
+    }
+
+    private async Task<PartialRemainderTransferPair?> ResolvePartialRemainderTransferPairAsync(int paymentId, CancellationToken ct)
+    {
+        var current = await LoadPaymentForRemainderTransferAsync(paymentId, ct);
+        if (current is null)
+        {
+            return null;
+        }
+
+        if (PaymentRemainderTransferRules.TryReadMarker(current.SystemNotes, out var currentMarker)
+            && currentMarker.SourcePaymentId > 0)
+        {
+            var source = await LoadPaymentForRemainderTransferAsync(currentMarker.SourcePaymentId, ct);
+            return source is null
+                ? null
+                : new PartialRemainderTransferPair(source, current, currentMarker);
+        }
+
+        var remainder = await FindPartialRemainderPaymentAsync(current.Id, ct);
+        if (remainder is null
+            || !PaymentRemainderTransferRules.TryReadMarker(remainder.SystemNotes, out var marker))
+        {
+            return null;
+        }
+
+        return new PartialRemainderTransferPair(current, remainder, marker);
+    }
+
+    private async Task<ActionResult?> ValidateRemainderCanBeReworkedAsync(
+        PartialRemainderTransferPair pair,
+        CancellationToken ct)
+    {
+        if (pair.Remainder.IsPaid
+            || pair.Remainder.PaidAmount > 0.009m
+            || pair.Remainder.Status == PaymentStatus.Completed)
+        {
+            return Conflict(new { message = PaymentRemainderTransferRules.RemainderAlreadyProcessedMessage });
+        }
+
+        var nestedRemainder = await FindPartialRemainderPaymentAsync(pair.Remainder.Id, ct);
+        if (nestedRemainder is not null)
+        {
+            return Conflict(new { message = PaymentRemainderTransferRules.RemainderAlreadyProcessedMessage });
+        }
+
+        return null;
+    }
+
+    private async Task<ActionResult?> ValidatePartialRemainderUpdateAsync(Payment current, Payment model, CancellationToken ct)
+    {
+        if (PaymentRemainderTransferRules.IsPartialRemainderPayment(current))
+        {
+            if (!AreAmountsEqual(model.Amount, current.Amount))
+            {
+                return Conflict(new { message = PaymentRemainderTransferRules.RemainderAmountUpdateBlockedMessage });
+            }
+
+            if (model.Status == PaymentStatus.Cancelled && current.Status != PaymentStatus.Cancelled)
+            {
+                return Conflict(new { message = PaymentRemainderTransferRules.RemainderCancelBlockedMessage });
+            }
+
+            return null;
+        }
+
+        var transferredRemainder = await FindPartialRemainderPaymentAsync(current.Id, ct);
+        if (transferredRemainder is null)
+        {
+            return null;
+        }
+
+        if (!AreAmountsEqual(model.Amount, current.Amount)
+            || !AreAmountsEqual(model.PaidAmount, current.PaidAmount))
+        {
+            return Conflict(new { message = PaymentRemainderTransferRules.SourceAmountUpdateBlockedMessage });
+        }
+
+        return null;
+    }
+
+    private readonly record struct PartialRemainderTransferPair(
+        Payment Source,
+        Payment Remainder,
+        PaymentRemainderTransferRules.PartialRemainderMarkerData Marker);
+
+    private static void AppendSourceRemainderAuditNotes(
+        Payment source,
+        decimal originalAmount,
+        decimal paidAmount,
+        decimal remainderAmount,
+        DateTime remainderDate,
+        DateTime now,
+        string? actor)
+    {
+        var culture = CultureInfo.GetCultureInfo("ru-RU");
+        PaymentDomainService.AppendSystemNote(
+            source,
+            $"Частичная оплата: {paidAmount.ToString("N2", culture)} / {originalAmount.ToString("N2", culture)}. Остаток {remainderAmount.ToString("N2", culture)} перенесен на {remainderDate:dd.MM.yyyy}.",
+            now,
+            actor);
+    }
+
+    private static Payment CreateRemainderPaymentFromSource(
+        Payment source,
+        decimal originalAmount,
+        decimal paidAmount,
+        decimal remainderAmount,
+        DateTime remainderDate,
+        DateTime now)
+    {
+        var culture = CultureInfo.GetCultureInfo("ru-RU");
+        var description = string.IsNullOrWhiteSpace(source.Description)
+            ? "Остаток после частичной оплаты"
+            : $"{source.Description.Trim()} · остаток";
+        var marker = PaymentRemainderTransferRules.BuildMarker(
+            source.Id,
+            originalAmount,
+            paidAmount,
+            remainderAmount,
+            remainderDate);
+
+        return new Payment
+        {
+            Account = source.Account,
+            AccountDate = source.AccountDate,
+            InvoiceId = source.InvoiceId,
+            LegacyAccountNumber = source.LegacyAccountNumber,
+            LegacyAccountDate = source.LegacyAccountDate,
+            Amount = remainderAmount,
+            ClientId = source.ClientId,
+            LegalEntityId = source.LegalEntityId,
+            ExpenseClientId = source.ExpenseClientId,
+            ExpenseLegalEntityId = source.ExpenseLegalEntityId,
+            ClientCaseId = source.ClientCaseId,
+            ClientCaseReference = source.ClientCaseReference,
+            ContractId = source.ContractId,
+            DocumentKind = DocumentKind.Payment,
+            CreatedAt = now,
+            Date = remainderDate.Date,
+            PlannedDate = remainderDate.Date,
+            DealTypeId = source.DealTypeId,
+            Description = description,
+            CounterpartyName = source.CounterpartyName,
+            IncomeTypeId = source.IncomeTypeId,
+            IsPaid = false,
+            PaidAmount = 0m,
+            LastPaymentDate = null,
+            Notes = source.Notes,
+            IsNotForAccounting = source.IsNotForAccounting,
+            SystemNotes = string.Join('\n', new[]
+            {
+                marker,
+                $"Остаток после частичной оплаты платежа #{source.Id}: исходно {originalAmount.ToString("N2", culture)}, оплачено {paidAmount.ToString("N2", culture)}, остаток {remainderAmount.ToString("N2", culture)}.",
+            }),
+            RescheduleCount = Math.Max(0, source.RescheduleCount) + 1,
+            PaidDate = null,
+            PaymentSourceId = source.PaymentSourceId,
+            ServiceId = source.ServiceId,
+            PaymentStatusId = source.PaymentStatusId,
+            Status = remainderDate.Date < now.Date ? PaymentStatus.Overdue : PaymentStatus.Pending,
+            Type = source.Type,
+        };
+    }
+
+    private async Task CopyPaymentResponsiblesAsync(Payment target, IEnumerable<int> responsibleIds, CancellationToken ct)
+    {
+        var ids = responsibleIds
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray();
+        if (ids.Length == 0)
+        {
+            return;
+        }
+
+        var existingUserIds = await _db.Users
+            .AsNoTracking()
+            .Where(user => ids.Contains(user.Id))
+            .Select(user => user.Id)
+            .ToListAsync(ct);
+
+        foreach (var userId in existingUserIds)
+        {
+            target.Responsibles.Add(new PaymentResponsible
+            {
+                UserId = userId,
+            });
+        }
+    }
+
+    private static void CopyPaymentInvoiceClientCases(Payment target, IEnumerable<int> clientCaseIds)
+    {
+        foreach (var clientCaseId in clientCaseIds.Where(id => id > 0).Distinct())
+        {
+            target.InvoiceClientCases.Add(new InvoiceClientCase
+            {
+                ClientCaseId = clientCaseId,
+            });
+        }
+    }
+
     private async Task SyncInvoiceManagedPaymentBindingsAsync(Payment payment, CancellationToken ct)
     {
-        if (!InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(payment)
+        if (!(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(payment)
+              || InvoiceManagedPaymentRules.IsGeneratedInvoiceRemainderPayment(payment))
             || !payment.InvoiceId.HasValue
             || payment.InvoiceId.Value <= 0)
         {
@@ -658,6 +1314,9 @@ public class PaymentsController : ControllerBase
 
     private static string? NormalizeInvoiceNumber(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool AreAmountsEqual(decimal left, decimal right)
+        => Math.Abs(left - right) <= 0.009m;
 
     private async Task<Payment?> ResolveInvoiceByPaymentHistoryAsync(Payment payment, string lookupNumber, DateTime lookupDate, CancellationToken ct)
     {
@@ -923,6 +1582,45 @@ public class PaymentsController : ControllerBase
         return string.Join("\n", lines);
     }
 
+    private static string ReplaceTechnicalMarkerLine(string? notes, string marker, string replacement)
+    {
+        var lines = SplitSystemNoteLines(notes)
+            .Where(line => !line.StartsWith(marker, StringComparison.Ordinal))
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(replacement))
+        {
+            lines.Insert(0, replacement.Trim());
+        }
+
+        return string.Join("\n", lines);
+    }
+
+    private static string RemoveTechnicalMarkerLines(string? notes, params string[] markers)
+    {
+        var markerSet = markers
+            .Where(marker => !string.IsNullOrWhiteSpace(marker))
+            .ToArray();
+
+        return string.Join(
+            "\n",
+            SplitSystemNoteLines(notes)
+                .Where(line => !markerSet.Any(marker => line.StartsWith(marker, StringComparison.Ordinal))));
+    }
+
+    private static IEnumerable<string> SplitSystemNoteLines(string? notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes))
+        {
+            return Enumerable.Empty<string>();
+        }
+
+        return notes
+            .Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line));
+    }
+
     private static void PopulateAuditMetadata(PaymentContext db, Payment payment)
     {
         var entry = db.Entry(payment);
@@ -1148,6 +1846,17 @@ public class PaymentsController : ControllerBase
             .Include(item => item.Invoice)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (payment is null) return NotFound();
+
+        if (PaymentRemainderTransferRules.IsPartialRemainderPayment(payment))
+        {
+            return Conflict(new { message = PaymentRemainderTransferRules.RemainderDeleteBlockedMessage });
+        }
+
+        var transferredRemainder = await FindPartialRemainderPaymentAsync(payment.Id, ct);
+        if (transferredRemainder is not null)
+        {
+            return Conflict(new { message = PaymentRemainderTransferRules.SourceDeleteBlockedMessage });
+        }
 
         if (InvoiceManagedPaymentRules.IsInvoiceManagedPayment(payment))
         {

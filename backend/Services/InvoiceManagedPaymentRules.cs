@@ -37,9 +37,18 @@ public static class InvoiceManagedPaymentRules
                && payment.SystemNotes.Contains(InstallmentPaymentMarker, StringComparison.Ordinal);
     }
 
+    public static bool IsGeneratedInvoiceRemainderPayment(Payment payment)
+    {
+        return payment.InvoiceId.HasValue
+               && payment.InvoiceId.Value > 0
+               && PaymentRemainderTransferRules.IsPartialRemainderPayment(payment);
+    }
+
     public static bool IsInvoiceManagedPayment(Payment payment)
     {
-        return payment.DocumentKind == DocumentKind.Invoice || IsGeneratedInstallmentPayment(payment);
+        return payment.DocumentKind == DocumentKind.Invoice
+               || IsGeneratedInstallmentPayment(payment)
+               || IsGeneratedInvoiceRemainderPayment(payment);
     }
 
     public static bool ShouldHideRepresentativeInvoice(IEnumerable<Payment> payments)
