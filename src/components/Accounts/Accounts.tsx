@@ -2001,26 +2001,28 @@ export function Accounts({
                     <option value="cancelled">{accountStatusLabels.cancelled}</option>
                   </select>
                 </label>
-                <LookupSelect
-                  label="Клиент / поставщик"
-                  value={selectedClientId}
-                  options={accountClientOptions}
-                  onChange={setSelectedClientId}
-                  placeholder="Все контрагенты"
-                  title="Выбор клиента / поставщика"
-                  dictionaryLabel="Открыть справочник"
-                  searchPlaceholder="Поиск по ФИО, компании, телефону или email"
-                  emptyOptionLabel="Все контрагенты"
-                  emptyOptionDescription="Показать счета всех клиентов и поставщиков"
-                  buttonClassName="border-gray-300 focus:border-blue-500"
-                  noOptionsText="Клиенты не найдены"
-                />
+                <div className="sm:col-span-2 lg:col-span-2">
+                  <LookupSelect
+                    label="Клиент / поставщик"
+                    value={selectedClientId}
+                    options={accountClientOptions}
+                    onChange={setSelectedClientId}
+                    placeholder="Все контрагенты"
+                    title="Выбор клиента / поставщика"
+                    dictionaryLabel="Открыть справочник"
+                    searchPlaceholder="Поиск по ФИО, компании, телефону или email"
+                    emptyOptionLabel="Все контрагенты"
+                    emptyOptionDescription="Показать счета всех клиентов и поставщиков"
+                    buttonClassName="border-gray-300 focus:border-blue-500"
+                    noOptionsText="Клиенты не найдены"
+                  />
+                </div>
                 <label className="flex flex-col gap-1 text-sm lg:col-start-3">
-                  <span className="font-medium text-gray-700">Роль клиента</span>
+                  <span className="flex min-h-7 items-center font-medium text-gray-700">Роль клиента</span>
                   <select
                     value={clientRoleFilter}
                     onChange={(event) => setClientRoleFilter(event.target.value as ClientRoleFilter)}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    className="min-h-[42px] w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   >
                     <option value="all">Любая связь</option>
                     <option value="counterparty">Контрагент / поставщик</option>
