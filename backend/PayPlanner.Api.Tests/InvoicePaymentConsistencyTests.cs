@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using Xunit;
@@ -321,6 +322,116 @@ public class InvoicePaymentConsistencyTests
         Assert.Equal(18_000m, summary.Pending.Amount);
         Assert.Equal(0, summary.Paid.Count);
         Assert.Equal(0, summary.Overdue.Count);
+    }
+
+    [Fact]
+    public async Task RepairPaymentState_DryRunReportsStaleInstallmentParent_WithoutSaving()
+    {
+        await using var db = await CreateContextAsync();
+        var aggregate = await CreateInstallmentInvoiceAggregateAsync(db);
+        var controller = CreateInvoicesController(db);
+
+        var action = await controller.RepairPaymentState(
+            new RepairInvoicePaymentStateRequest
+            {
+                DryRun = true,
+                PaymentIds = [aggregate.InvoicePaymentId],
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var response = Assert.IsType<RepairInvoicePaymentStateResponse>(ok.Value);
+        var item = Assert.Single(response.Items);
+
+        Assert.True(response.DryRun);
+        Assert.Equal(1, response.Scanned);
+        Assert.Equal(1, response.Changed);
+        Assert.Equal(0, response.Applied);
+        Assert.Equal(aggregate.InvoiceEntityId, item.InvoiceId);
+        Assert.Equal(aggregate.InvoicePaymentId, item.RepresentativePaymentId);
+        Assert.Equal(2, item.SourcePaymentCount);
+        Assert.Equal(30_000m, item.Current.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, item.Current.Status);
+        Assert.Equal(15_000m, item.Suggested.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, item.Suggested.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, item.Suggested.WorkflowStatus);
+
+        var storedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == aggregate.InvoicePaymentId);
+        Assert.Equal(30_000m, storedParent.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, storedParent.Status);
+    }
+
+    [Fact]
+    public async Task RepairPaymentState_AppliesSuggestedState_WhenDryRunFalse()
+    {
+        await using var db = await CreateContextAsync();
+        var aggregate = await CreateInstallmentInvoiceAggregateAsync(db);
+        var controller = CreateInvoicesController(db);
+
+        var action = await controller.RepairPaymentState(
+            new RepairInvoicePaymentStateRequest
+            {
+                DryRun = false,
+                PaymentIds = [aggregate.InvoicePaymentId],
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var response = Assert.IsType<RepairInvoicePaymentStateResponse>(ok.Value);
+
+        Assert.False(response.DryRun);
+        Assert.Equal(1, response.Scanned);
+        Assert.Equal(1, response.Changed);
+        Assert.Equal(1, response.Applied);
+
+        db.ChangeTracker.Clear();
+        var storedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == aggregate.InvoicePaymentId);
+
+        Assert.Equal(15_000m, storedParent.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, storedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, storedParent.InvoiceWorkflowStatus);
+        Assert.False(storedParent.IsPaid);
+        Assert.Equal(new DateTime(2026, 5, 10), storedParent.Date);
+        Assert.Equal(new DateTime(2026, 5, 10), storedParent.PlannedDate);
+        Assert.Equal(new DateTime(2026, 4, 10), storedParent.PaidDate);
+        Assert.Equal(new DateTime(2026, 4, 10), storedParent.LastPaymentDate);
+    }
+
+    [Fact]
+    public async Task RepairPaymentState_RemovesStalePartialStatus_FromUnpaidInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = await CreateUnpaidInvoiceWithStalePartialStateAsync(db);
+        var controller = CreateInvoicesController(db);
+
+        var action = await controller.RepairPaymentState(
+            new RepairInvoicePaymentStateRequest
+            {
+                DryRun = false,
+                PaymentIds = [invoice.PaymentId],
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var response = Assert.IsType<RepairInvoicePaymentStateResponse>(ok.Value);
+        var item = Assert.Single(response.Items);
+
+        Assert.Equal(1, response.Applied);
+        Assert.Equal(PaymentStatus.Processing, item.Current.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, item.Current.WorkflowStatus);
+        Assert.Equal(0m, item.Suggested.PaidAmount);
+        Assert.Equal(PaymentStatus.Pending, item.Suggested.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, item.Suggested.WorkflowStatus);
+
+        db.ChangeTracker.Clear();
+        var storedPayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == invoice.PaymentId);
+
+        Assert.Equal(0m, storedPayment.PaidAmount);
+        Assert.Equal(PaymentStatus.Pending, storedPayment.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, storedPayment.InvoiceWorkflowStatus);
+        Assert.False(storedPayment.IsPaid);
+        Assert.Null(storedPayment.PaidDate);
+        Assert.Null(storedPayment.LastPaymentDate);
     }
 
     [Fact]
@@ -748,6 +859,42 @@ public class InvoicePaymentConsistencyTests
         await db.SaveChangesAsync();
 
         return (representativePayment.Id, siblingPayment.Id, invoice.Id, client.Id, clientCase.Id);
+    }
+
+    private static async Task<(int PaymentId, int InvoiceEntityId)> CreateUnpaidInvoiceWithStalePartialStateAsync(PaymentContext db)
+    {
+        var dueDate = DateTime.UtcNow.Date.AddDays(7);
+        var invoice = new Invoice
+        {
+            Number = "STALE-2500",
+            Date = dueDate,
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var payment = new Payment
+        {
+            Amount = 2_500m,
+            CounterpartyName = "Unpaid invoice client",
+            Date = dueDate,
+            PlannedDate = dueDate,
+            PaidAmount = 0m,
+            Description = "Unpaid invoice with stale partial status",
+            DocumentKind = DocumentKind.Invoice,
+            Status = PaymentStatus.Processing,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.PartiallyPaid,
+            IsPaid = false,
+            Type = PaymentType.Income,
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+        };
+
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        return (payment.Id, invoice.Id);
     }
 
     private static async Task<(int InvoicePaymentId, int[] InstallmentPaymentIds, int InvoiceEntityId, int ClientId, int ClientCaseId)> CreateInstallmentInvoiceAggregateAsync(PaymentContext db)

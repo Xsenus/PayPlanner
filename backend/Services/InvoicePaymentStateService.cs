@@ -82,7 +82,100 @@ public static class InvoicePaymentStateService
         }
 
         var statusSources = SelectStatusSourcePayments(payments, representative.Id, representative.Amount);
-        RefreshRepresentativeFromSources(representative, statusSources, utcNow);
+        ApplySnapshot(
+            representative,
+            CalculateRepresentativeState(representative, statusSources, utcNow));
+    }
+
+    public static InvoicePaymentStateEvaluation? EvaluateInvoiceAggregate(
+        IReadOnlyCollection<Payment> payments,
+        DateTime utcNow)
+    {
+        if (payments.Count == 0)
+        {
+            return null;
+        }
+
+        var representative = SelectRepresentativeInvoice(payments);
+        if (representative is null)
+        {
+            return null;
+        }
+
+        var statusSources = SelectStatusSourcePayments(payments, representative.Id, representative.Amount);
+        var current = CaptureState(representative);
+        var suggested = CalculateRepresentativeState(representative, statusSources, utcNow);
+
+        return new InvoicePaymentStateEvaluation(
+            representative.InvoiceId,
+            representative.Id,
+            representative.Account,
+            representative.AccountDate,
+            statusSources.Count,
+            current,
+            suggested,
+            !StatesEqual(current, suggested));
+    }
+
+    public static InvoicePaymentStateSnapshot CalculateRepresentativeState(
+        Payment representative,
+        IReadOnlyCollection<Payment> statusSources,
+        DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(representative);
+
+        var draft = CloneState(representative);
+        RefreshRepresentativeFromSources(draft, statusSources, utcNow);
+        return CaptureState(draft);
+    }
+
+    public static bool ApplySnapshot(Payment representative, InvoicePaymentStateSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(representative);
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        var current = CaptureState(representative);
+        if (StatesEqual(current, snapshot))
+        {
+            return false;
+        }
+
+        representative.PaidAmount = snapshot.PaidAmount;
+        representative.Status = snapshot.Status;
+        representative.InvoiceWorkflowStatus = snapshot.WorkflowStatus;
+        representative.IsPaid = snapshot.IsPaid;
+        representative.Date = snapshot.Date;
+        representative.PlannedDate = snapshot.PlannedDate;
+        representative.PaidDate = snapshot.PaidDate;
+        representative.LastPaymentDate = snapshot.LastPaymentDate;
+        return true;
+    }
+
+    public static InvoicePaymentStateSnapshot CaptureState(Payment payment)
+    {
+        ArgumentNullException.ThrowIfNull(payment);
+
+        return new InvoicePaymentStateSnapshot(
+            NormalizeMoneyAmount(payment.PaidAmount),
+            payment.Status,
+            InvoiceWorkflowStatus.Normalize(payment.InvoiceWorkflowStatus) ?? InvoiceWorkflowStatus.Draft,
+            payment.IsPaid,
+            payment.Date.Date,
+            EffectivePlannedDate(payment),
+            payment.PaidDate?.Date,
+            payment.LastPaymentDate?.Date);
+    }
+
+    public static bool StatesEqual(InvoicePaymentStateSnapshot left, InvoicePaymentStateSnapshot right)
+    {
+        return AreAmountsEqual(left.PaidAmount, right.PaidAmount)
+               && left.Status == right.Status
+               && string.Equals(left.WorkflowStatus, right.WorkflowStatus, StringComparison.Ordinal)
+               && left.IsPaid == right.IsPaid
+               && left.Date.Date == right.Date.Date
+               && left.PlannedDate.Date == right.PlannedDate.Date
+               && NullableDatesEqual(left.PaidDate, right.PaidDate)
+               && NullableDatesEqual(left.LastPaymentDate, right.LastPaymentDate);
     }
 
     public static List<Payment> SelectStatusSourcePayments(
@@ -162,7 +255,7 @@ public static class InvoicePaymentStateService
         }
 
         if (paidAmount > AmountEpsilon
-            || payments.Any(payment => payment.Status is PaymentStatus.Completed or PaymentStatus.Processing))
+            || payments.Any(payment => payment.Status == PaymentStatus.Completed))
         {
             return PaymentStatus.Processing;
         }
@@ -227,7 +320,7 @@ public static class InvoicePaymentStateService
             .Select(payment => payment.PaidDate!.Value.Date)
             .DefaultIfEmpty()
             .Max();
-        if (representative.PaidDate == default)
+        if (representative.PaidDate.HasValue && representative.PaidDate.Value == default)
         {
             representative.PaidDate = null;
         }
@@ -237,7 +330,7 @@ public static class InvoicePaymentStateService
             .Select(payment => (payment.LastPaymentDate ?? payment.PaidDate)!.Value.Date)
             .DefaultIfEmpty()
             .Max();
-        if (representative.LastPaymentDate == default)
+        if (representative.LastPaymentDate.HasValue && representative.LastPaymentDate.Value == default)
         {
             representative.LastPaymentDate = null;
         }
@@ -324,4 +417,47 @@ public static class InvoicePaymentStateService
 
     private static bool AreAmountsEqual(decimal left, decimal right)
         => Math.Abs(left - right) <= 0.01m;
+
+    private static bool NullableDatesEqual(DateTime? left, DateTime? right)
+        => left?.Date == right?.Date;
+
+    private static Payment CloneState(Payment payment)
+        => new()
+        {
+            Account = payment.Account,
+            AccountDate = payment.AccountDate,
+            InvoiceId = payment.InvoiceId,
+            Amount = payment.Amount,
+            InvoiceWorkflowStatus = payment.InvoiceWorkflowStatus,
+            Date = payment.Date,
+            PlannedDate = payment.PlannedDate,
+            PaidAmount = payment.PaidAmount,
+            IsPaid = payment.IsPaid,
+            LastPaymentDate = payment.LastPaymentDate,
+            PaidDate = payment.PaidDate,
+            Status = payment.Status,
+            Type = payment.Type,
+            ExpenseClientId = payment.ExpenseClientId,
+            ExpenseLegalEntityId = payment.ExpenseLegalEntityId,
+        };
 }
+
+public sealed record InvoicePaymentStateSnapshot(
+    decimal PaidAmount,
+    PaymentStatus Status,
+    string WorkflowStatus,
+    bool IsPaid,
+    DateTime Date,
+    DateTime PlannedDate,
+    DateTime? PaidDate,
+    DateTime? LastPaymentDate);
+
+public sealed record InvoicePaymentStateEvaluation(
+    int? InvoiceId,
+    int RepresentativePaymentId,
+    string? Account,
+    DateTime? AccountDate,
+    int SourcePaymentCount,
+    InvoicePaymentStateSnapshot Current,
+    InvoicePaymentStateSnapshot Suggested,
+    bool HasChanges);

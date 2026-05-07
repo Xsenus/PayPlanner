@@ -319,6 +319,144 @@ public class InvoicesController : ControllerBase
         return Ok(dto);
     }
 
+    [HttpPost("repair-payment-state")]
+    [HttpPost("recalculate-payment-state")]
+    public async Task<ActionResult<RepairInvoicePaymentStateResponse>> RepairPaymentState(
+        [FromBody] RepairInvoicePaymentStateRequest? request,
+        CancellationToken ct)
+    {
+        if (!User.IsInRole("admin"))
+        {
+            return Unauthorized();
+        }
+
+        request ??= new RepairInvoicePaymentStateRequest();
+        var dryRun = request.DryRun;
+        var requestedLimit = request.Limit.GetValueOrDefault(5_000);
+        var limit = Math.Clamp(requestedLimit <= 0 ? 5_000 : requestedLimit, 1, 50_000);
+        var invoiceIds = request.InvoiceIds?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToHashSet()
+            ?? new HashSet<int>();
+        var paymentIds = request.PaymentIds?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToHashSet()
+            ?? new HashSet<int>();
+        var hasInvoiceFilter = invoiceIds.Count > 0;
+        var hasPaymentFilter = paymentIds.Count > 0;
+
+        var candidateQuery = _db.Payments
+            .Where(payment => payment.DocumentKind == DocumentKind.Invoice);
+
+        if (hasInvoiceFilter || hasPaymentFilter)
+        {
+            candidateQuery = candidateQuery.Where(payment =>
+                (hasInvoiceFilter
+                    && ((payment.InvoiceId.HasValue && invoiceIds.Contains(payment.InvoiceId.Value))
+                        || invoiceIds.Contains(payment.Id)))
+                || (hasPaymentFilter && paymentIds.Contains(payment.Id)));
+        }
+
+        var candidates = await candidateQuery
+            .OrderBy(payment => payment.InvoiceId ?? int.MaxValue)
+            .ThenBy(payment => payment.Id)
+            .Select(payment => new { payment.Id, payment.InvoiceId })
+            .Take(limit)
+            .ToListAsync(ct);
+
+        var invoiceEntityIds = candidates
+            .Where(candidate => candidate.InvoiceId.HasValue && candidate.InvoiceId.Value > 0)
+            .Select(candidate => candidate.InvoiceId!.Value)
+            .Distinct()
+            .ToList();
+        var standalonePaymentIds = candidates
+            .Where(candidate => !candidate.InvoiceId.HasValue || candidate.InvoiceId.Value <= 0)
+            .Select(candidate => candidate.Id)
+            .Distinct()
+            .ToList();
+
+        var aggregatePayments = invoiceEntityIds.Count == 0
+            ? new List<Payment>()
+            : await _db.Payments
+                .Where(payment => payment.InvoiceId.HasValue && invoiceEntityIds.Contains(payment.InvoiceId.Value))
+                .ToListAsync(ct);
+        var standalonePayments = standalonePaymentIds.Count == 0
+            ? new List<Payment>()
+            : await _db.Payments
+                .Where(payment => standalonePaymentIds.Contains(payment.Id))
+                .ToListAsync(ct);
+
+        var now = DateTime.UtcNow;
+        var scanned = 0;
+        var applied = 0;
+        var items = new List<RepairInvoicePaymentStateItemDto>();
+
+        foreach (var group in aggregatePayments
+            .GroupBy(payment => payment.InvoiceId!.Value)
+            .OrderBy(group => group.Key))
+        {
+            ApplyEvaluation(group.ToList());
+        }
+
+        foreach (var standalonePayment in standalonePayments.OrderBy(payment => payment.Id))
+        {
+            ApplyEvaluation(new List<Payment> { standalonePayment });
+        }
+
+        if (!dryRun && applied > 0)
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return Ok(new RepairInvoicePaymentStateResponse
+        {
+            DryRun = dryRun,
+            Scanned = scanned,
+            Changed = items.Count,
+            Applied = applied,
+            Items = items,
+        });
+
+        void ApplyEvaluation(List<Payment> payments)
+        {
+            var evaluation = InvoicePaymentStateService.EvaluateInvoiceAggregate(payments, now);
+            if (evaluation is null)
+            {
+                return;
+            }
+
+            scanned++;
+            if (!evaluation.HasChanges)
+            {
+                return;
+            }
+
+            items.Add(new RepairInvoicePaymentStateItemDto
+            {
+                InvoiceId = evaluation.InvoiceId,
+                RepresentativePaymentId = evaluation.RepresentativePaymentId,
+                Account = evaluation.Account,
+                AccountDate = evaluation.AccountDate,
+                SourcePaymentCount = evaluation.SourcePaymentCount,
+                Current = evaluation.Current,
+                Suggested = evaluation.Suggested,
+            });
+
+            if (dryRun)
+            {
+                return;
+            }
+
+            var representative = payments.First(payment => payment.Id == evaluation.RepresentativePaymentId);
+            if (InvoicePaymentStateService.ApplySnapshot(representative, evaluation.Suggested))
+            {
+                applied++;
+            }
+        }
+    }
+
     [HttpPost("{id:int}/send-to-signing")]
     public async Task<ActionResult<InvoiceDto>> SendToSigning(int id, CancellationToken ct)
     {
