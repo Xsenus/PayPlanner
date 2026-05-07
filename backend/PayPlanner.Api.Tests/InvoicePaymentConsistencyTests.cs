@@ -3,6 +3,9 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -459,6 +462,44 @@ public class InvoicePaymentConsistencyTests
         Assert.False(storedPayment.IsPaid);
         Assert.Null(storedPayment.PaidDate);
         Assert.Null(storedPayment.LastPaymentDate);
+    }
+
+    [Fact]
+    public async Task InvoicePaymentStateReconciliationService_RepairsStaleInstallmentParent()
+    {
+        await using var db = await CreateContextAsync();
+        var aggregate = await CreateInstallmentInvoiceAggregateAsync(db);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["InvoicePaymentStateReconciliation:BatchSize"] = "2",
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddSingleton(db);
+        await using var provider = services.BuildServiceProvider();
+        var service = new InvoicePaymentStateReconciliationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            configuration,
+            NullLogger<InvoicePaymentStateReconciliationService>.Instance);
+
+        var result = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Scanned);
+        Assert.Equal(1, result.Changed);
+        Assert.Equal(1, result.Applied);
+
+        db.ChangeTracker.Clear();
+        var storedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == aggregate.InvoicePaymentId);
+
+        Assert.Equal(15_000m, storedParent.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, storedParent.Status);
+        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, storedParent.InvoiceWorkflowStatus);
+        Assert.False(storedParent.IsPaid);
+        Assert.Equal(new DateTime(2026, 5, 10), storedParent.Date);
+        Assert.Equal(new DateTime(2026, 5, 10), storedParent.PlannedDate);
+        Assert.Equal(new DateTime(2026, 4, 10), storedParent.PaidDate);
+        Assert.Equal(new DateTime(2026, 4, 10), storedParent.LastPaymentDate);
     }
 
     [Fact]
