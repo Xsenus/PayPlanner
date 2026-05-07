@@ -2614,120 +2614,6 @@ public class InvoicesController : ControllerBase
         return $"{normalizedAccount}::{accountDate.Year}::client:{clientId.Value}::case:{clientCaseId?.ToString() ?? "none"}::type:{type}";
     }
 
-    private static List<Payment> SelectStatusSourcePayments(
-        IReadOnlyCollection<Payment> payments,
-        int representativePaymentId,
-        decimal representativeAmount)
-    {
-        if (payments.Count == 0)
-        {
-            return new List<Payment>();
-        }
-
-        var ordered = payments
-            .OrderBy(EffectivePlannedDate)
-            .ThenBy(payment => payment.Id)
-            .ToList();
-
-        if (ShouldHideRepresentativeInvoice(ordered, representativePaymentId, representativeAmount))
-        {
-            return ordered
-                .Where(payment => payment.Id != representativePaymentId)
-                .ToList();
-        }
-
-        var linkedPayments = ordered
-            .Where(payment => payment.DocumentKind != DocumentKind.Invoice)
-            .ToList();
-
-        return linkedPayments.Count > 0 ? linkedPayments : ordered;
-    }
-
-    private static bool ShouldHideRepresentativeInvoice(
-        IReadOnlyCollection<Payment> payments,
-        int representativePaymentId,
-        decimal representativeAmount)
-    {
-        return payments.Any(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment)
-            || IsLegacyBrokenInstallmentAggregate(payments, representativePaymentId, representativeAmount);
-    }
-
-    private static bool IsLegacyBrokenInstallmentAggregate(
-        IReadOnlyCollection<Payment> payments,
-        int representativePaymentId,
-        decimal representativeAmount)
-    {
-        if (payments.Count < 3 || payments.Any(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment))
-        {
-            return false;
-        }
-
-        var invoiceRows = payments
-            .Where(payment => payment.DocumentKind == DocumentKind.Invoice)
-            .ToList();
-        if (invoiceRows.Count < 2)
-        {
-            return false;
-        }
-
-        var nonInvoiceCount = payments.Count - invoiceRows.Count;
-        if (nonInvoiceCount > 1)
-        {
-            return false;
-        }
-
-        var maxSiblingAmount = payments
-            .Where(payment => payment.Id != representativePaymentId)
-            .Select(payment => payment.Amount)
-            .DefaultIfEmpty(0m)
-            .Max();
-
-        return representativeAmount > maxSiblingAmount;
-    }
-
-    private static PaymentStatus DeriveInvoiceStatus(
-        IReadOnlyCollection<Payment> payments,
-        PaymentStatus fallbackStatus,
-        DateTime? fallbackDueDate)
-    {
-        if (payments.Count == 0)
-        {
-            return fallbackStatus switch
-            {
-                PaymentStatus.Completed => PaymentStatus.Completed,
-                PaymentStatus.Cancelled => PaymentStatus.Cancelled,
-                PaymentStatus.Processing => PaymentStatus.Processing,
-                PaymentStatus.Overdue => PaymentStatus.Overdue,
-                _ when fallbackDueDate.HasValue && fallbackDueDate.Value.Date < DateTime.UtcNow.Date => PaymentStatus.Overdue,
-                _ => PaymentStatus.Pending,
-            };
-        }
-
-        if (payments.All(payment => payment.Status == PaymentStatus.Cancelled))
-        {
-            return PaymentStatus.Cancelled;
-        }
-
-        if (payments.All(payment => payment.Status == PaymentStatus.Completed))
-        {
-            return PaymentStatus.Completed;
-        }
-
-        if (payments.Any(payment => payment.Status == PaymentStatus.Overdue))
-        {
-            return PaymentStatus.Overdue;
-        }
-
-        if (payments.Any(payment =>
-                payment.Status == PaymentStatus.Completed
-                || payment.PaidAmount > 0m))
-        {
-            return PaymentStatus.Processing;
-        }
-
-        return PaymentStatus.Pending;
-    }
-
     private static decimal ResolvePaidAmount(Payment payment)
         => ResolvePaidAmount(payment.Amount, payment.PaidAmount, payment.Status);
 
@@ -3426,6 +3312,7 @@ public class InvoicesController : ControllerBase
                 group => group.Select(entry => entry.Payment).ToList(),
                 StringComparer.OrdinalIgnoreCase);
 
+        var now = DateTime.UtcNow;
         foreach (var item in items)
         {
             var relatedPayments = new List<Payment>();
@@ -3453,13 +3340,13 @@ public class InvoicesController : ControllerBase
                 .Select(group => group.First())
                 .ToList();
 
-            var statusSourcePayments = SelectStatusSourcePayments(relatedPayments, item.Id, item.Amount);
+            var statusSourcePayments = InvoicePaymentStateService.SelectStatusSourcePayments(relatedPayments, item.Id, item.Amount);
             if (statusSourcePayments.Count > 0)
             {
-                item.PaidAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(ResolvePaidAmount));
-                item.OutstandingAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(ResolveOutstandingAmount));
+                item.PaidAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(InvoicePaymentStateService.ResolvePaidAmount));
+                item.OutstandingAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(InvoicePaymentStateService.ResolveOutstandingAmount));
                 item.DueDate = statusSourcePayments
-                    .Select(EffectivePlannedDate)
+                    .Select(InvoicePaymentStateService.EffectivePlannedDate)
                     .Max();
 
                 var paidDates = statusSourcePayments
@@ -3472,7 +3359,12 @@ public class InvoicesController : ControllerBase
                 }
             }
 
-            item.Status = DeriveInvoiceStatus(statusSourcePayments, item.Status, item.DueDate);
+            item.Status = InvoicePaymentStateService.DeriveInvoiceStatus(
+                statusSourcePayments,
+                item.Amount,
+                item.Status,
+                item.DueDate,
+                now);
             item.IsPaid = item.Status == PaymentStatus.Completed;
         }
     }
@@ -3810,7 +3702,7 @@ public class InvoicesController : ControllerBase
             PaymentDomainService.Normalize(payment);
         }
 
-        RefreshInvoiceRepresentativeFromGeneratedPayments(invoicePayment, generatedPayments);
+        RefreshInvoiceRepresentativeFromGeneratedPayments(invoicePayment, generatedPayments, now);
         PaymentDomainService.AppendSystemNote(
             invoicePayment,
             $"Отменены только неоплаченные платежи графика рассрочки ({unpaidGeneratedPayments.Count}). Оплаченные платежи сохранены: {paidGeneratedPayments.Count}. Причина: {reason}",
@@ -3821,50 +3713,17 @@ public class InvoicesController : ControllerBase
 
     private static void RefreshInvoiceRepresentativeFromGeneratedPayments(
         Payment representative,
-        IReadOnlyCollection<Payment> generatedPayments)
+        IReadOnlyCollection<Payment> generatedPayments,
+        DateTime now)
     {
         if (generatedPayments.Count == 0)
         {
             return;
         }
 
-        representative.PaidAmount = NormalizeMoneyAmount(generatedPayments.Sum(ResolvePaidAmount));
-        representative.Status = DeriveInvoiceStatus(generatedPayments, representative.Status, representative.Date);
-        representative.InvoiceWorkflowStatus = InvoiceWorkflowStatus.FromPaymentStatus(
-            representative.Status,
-            representative.PaidAmount,
-            representative.Amount);
-        representative.IsPaid = AreAmountsEqual(representative.PaidAmount, representative.Amount)
-                                && representative.Status == PaymentStatus.Completed;
-
-        var lastPlannedDate = generatedPayments
-            .Select(EffectivePlannedDate)
-            .DefaultIfEmpty(representative.Date)
-            .Max();
-        representative.Date = lastPlannedDate;
-        representative.PlannedDate = lastPlannedDate;
-
-        representative.PaidDate = generatedPayments
-            .Where(payment => payment.PaidDate.HasValue)
-            .Select(payment => payment.PaidDate!.Value)
-            .DefaultIfEmpty()
-            .Max();
-        if (representative.PaidDate == default)
-        {
-            representative.PaidDate = null;
-        }
-
-        representative.LastPaymentDate = generatedPayments
-            .Where(payment => payment.LastPaymentDate.HasValue || payment.PaidDate.HasValue)
-            .Select(payment => payment.LastPaymentDate ?? payment.PaidDate!.Value)
-            .DefaultIfEmpty()
-            .Max();
-        if (representative.LastPaymentDate == default)
-        {
-            representative.LastPaymentDate = null;
-        }
-
-        PaymentDomainService.Normalize(representative);
+        InvoicePaymentStateService.ApplySnapshot(
+            representative,
+            InvoicePaymentStateService.CalculateRepresentativeState(representative, generatedPayments, now));
     }
 
     private ActionResult? CancelGeneratedInstallmentPayments(
@@ -4976,8 +4835,6 @@ public class InvoicesController : ControllerBase
             .ThenBy(payment => payment.Id == 0 ? int.MaxValue : payment.Id)
             .ToList();
         var resultingTotal = resultingInstallments.Sum(payment => payment.Amount);
-        var resultingPaid = resultingInstallments.Sum(payment => payment.PaidAmount);
-
         summary.ChildPayments = generatedInstallments.Count;
         summary.ChildPaymentsTotal = existingGeneratedTotal;
         summary.MissingInstallmentAmount = representative.Amount;
@@ -5023,41 +4880,15 @@ public class InvoicesController : ControllerBase
             summary.Actions.Add($"Обновить сумму счета #{representative.Id} до {resultingTotal:0.00}.");
         }
 
-        if (!AreAmountsEqual(representative.PaidAmount, resultingPaid))
+        var beforeState = InvoicePaymentStateService.CaptureState(representative);
+        InvoicePaymentStateService.ApplySnapshot(
+            representative,
+            InvoicePaymentStateService.CalculateRepresentativeState(representative, resultingInstallments, DateTime.UtcNow));
+        var afterState = InvoicePaymentStateService.CaptureState(representative);
+        if (!AreAmountsEqual(beforeState.PaidAmount, afterState.PaidAmount))
         {
-            representative.PaidAmount = resultingPaid;
             summary.UpdatedInvoicePaidAmounts++;
         }
-
-        representative.Date = resultingInstallments
-            .Select(EffectivePlannedDate)
-            .DefaultIfEmpty(representative.Date)
-            .Max();
-        representative.PlannedDate = representative.Date;
-        representative.Status = DeriveInvoiceStatus(resultingInstallments, representative.Status, representative.Date);
-        representative.IsPaid = AreAmountsEqual(representative.PaidAmount, representative.Amount)
-                                && representative.Status == PaymentStatus.Completed;
-        representative.PaidDate = resultingInstallments
-            .Where(payment => payment.PaidDate.HasValue)
-            .Select(payment => payment.PaidDate!.Value)
-            .DefaultIfEmpty()
-            .Max();
-        if (representative.PaidDate == default)
-        {
-            representative.PaidDate = null;
-        }
-
-        representative.LastPaymentDate = resultingInstallments
-            .Where(payment => payment.LastPaymentDate.HasValue || payment.PaidDate.HasValue)
-            .Select(payment => payment.LastPaymentDate ?? payment.PaidDate!.Value)
-            .DefaultIfEmpty()
-            .Max();
-        if (representative.LastPaymentDate == default)
-        {
-            representative.LastPaymentDate = null;
-        }
-
-        PaymentDomainService.Normalize(representative);
 
         if (effectiveClientId.HasValue
             && effectiveClientId.Value > 0
