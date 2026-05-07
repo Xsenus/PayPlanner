@@ -1929,7 +1929,7 @@ export function Accounts({
                   {typeFilterLabels[typeFilter === 'Expense' ? 'Expense' : 'Income']}
                 </span>
               ) : (
-                <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-gray-200 bg-slate-50 px-1 py-1 shadow-sm">
+                <div className="inline-flex w-fit max-w-full flex-wrap items-center gap-2 self-start rounded-full border border-gray-200 bg-slate-50 px-1 py-1 shadow-sm">
                   {typeOptions.map((option) => {
                     const isActive = option === typeFilter;
                     const buttonLabel =
@@ -2015,7 +2015,7 @@ export function Accounts({
                   buttonClassName="border-gray-300 focus:border-blue-500"
                   noOptionsText="Клиенты не найдены"
                 />
-                <label className="flex flex-col gap-1 text-sm">
+                <label className="flex flex-col gap-1 text-sm lg:col-start-3">
                   <span className="font-medium text-gray-700">Роль клиента</span>
                   <select
                     value={clientRoleFilter}
