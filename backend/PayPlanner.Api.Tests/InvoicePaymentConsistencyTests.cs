@@ -398,6 +398,33 @@ public class InvoicePaymentConsistencyTests
     }
 
     [Fact]
+    public async Task RepairPaymentState_KeepsIsPaidTrue_WhenAggregateRemainsCompleted()
+    {
+        await using var db = await CreateContextAsync();
+        var aggregate = await CreateCompletedInstallmentInvoiceWithStaleDatesAsync(db);
+        var controller = CreateInvoicesController(db);
+
+        var action = await controller.RepairPaymentState(
+            new RepairInvoicePaymentStateRequest
+            {
+                DryRun = true,
+                PaymentIds = [aggregate.InvoicePaymentId],
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var response = Assert.IsType<RepairInvoicePaymentStateResponse>(ok.Value);
+        var item = Assert.Single(response.Items);
+
+        Assert.Equal(PaymentStatus.Completed, item.Suggested.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Paid, item.Suggested.WorkflowStatus);
+        Assert.True(item.Suggested.IsPaid);
+        Assert.Equal(10_000m, item.Suggested.PaidAmount);
+        Assert.Equal(new DateTime(2026, 6, 10), item.Suggested.Date);
+        Assert.Equal(new DateTime(2026, 6, 10), item.Suggested.PlannedDate);
+    }
+
+    [Fact]
     public async Task RepairPaymentState_RemovesStalePartialStatus_FromUnpaidInvoice()
     {
         await using var db = await CreateContextAsync();
@@ -895,6 +922,89 @@ public class InvoicePaymentConsistencyTests
         await db.SaveChangesAsync();
 
         return (payment.Id, invoice.Id);
+    }
+
+    private static async Task<(int InvoicePaymentId, int InvoiceEntityId)> CreateCompletedInstallmentInvoiceWithStaleDatesAsync(PaymentContext db)
+    {
+        var client = new Client
+        {
+            Name = "Completed aggregate client",
+        };
+        var invoice = new Invoice
+        {
+            Number = "PAID-PLAN",
+            Date = new DateTime(2026, 5, 1),
+        };
+
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var representativePayment = new Payment
+        {
+            Amount = 10_000m,
+            CounterpartyName = client.Name,
+            Date = new DateTime(2026, 5, 1),
+            PlannedDate = new DateTime(2026, 5, 1),
+            PaidDate = new DateTime(2026, 5, 1),
+            LastPaymentDate = new DateTime(2026, 5, 1),
+            PaidAmount = 10_000m,
+            Description = "Paid installment invoice",
+            DocumentKind = DocumentKind.Invoice,
+            Status = PaymentStatus.Completed,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.Paid,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            Client = client,
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+        };
+
+        var firstInstallment = new Payment
+        {
+            Amount = 5_000m,
+            CounterpartyName = client.Name,
+            Date = new DateTime(2026, 5, 10),
+            PlannedDate = new DateTime(2026, 5, 10),
+            PaidDate = new DateTime(2026, 5, 10),
+            LastPaymentDate = new DateTime(2026, 5, 10),
+            PaidAmount = 5_000m,
+            Description = "Paid installment 1/2",
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            Client = client,
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 1",
+        };
+
+        var secondInstallment = new Payment
+        {
+            Amount = 5_000m,
+            CounterpartyName = client.Name,
+            Date = new DateTime(2026, 6, 10),
+            PlannedDate = new DateTime(2026, 6, 10),
+            PaidDate = new DateTime(2026, 6, 10),
+            LastPaymentDate = new DateTime(2026, 6, 10),
+            PaidAmount = 5_000m,
+            Description = "Paid installment 2/2",
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            Client = client,
+            InvoiceId = invoice.Id,
+            Account = invoice.Number,
+            AccountDate = invoice.Date,
+            SystemNotes = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} 2",
+        };
+
+        db.Payments.AddRange(representativePayment, firstInstallment, secondInstallment);
+        await db.SaveChangesAsync();
+
+        return (representativePayment.Id, invoice.Id);
     }
 
     private static async Task<(int InvoicePaymentId, int[] InstallmentPaymentIds, int InvoiceEntityId, int ClientId, int ClientCaseId)> CreateInstallmentInvoiceAggregateAsync(PaymentContext db)

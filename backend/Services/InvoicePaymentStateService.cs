@@ -305,8 +305,7 @@ public static class InvoicePaymentStateService
             representative,
             representative.Status,
             representative.PaidAmount);
-        representative.IsPaid = representative.Status == PaymentStatus.Completed
-                                && AreAmountsEqual(representative.PaidAmount, representative.Amount);
+        representative.IsPaid = representative.Status == PaymentStatus.Completed;
 
         var lastPlannedDate = statusSources
             .Select(EffectivePlannedDate)
