@@ -33,18 +33,22 @@
     <Compile Remove=".codex-build\**\*.cs" />
     <Compile Remove="obj\**\*.cs" />
     <Compile Remove="backend\**\*.cs" />
+    <Compile Remove="publish\**\*.cs" />
     <Content Remove="PayPlanner.Api.Tests\**\*" />
     <Content Remove=".codex-build\**\*" />
     <Content Remove="obj\**\*" />
     <Content Remove="backend\**\*" />
+    <Content Remove="publish\**\*" />
     <EmbeddedResource Remove="PayPlanner.Api.Tests\**\*" />
     <EmbeddedResource Remove=".codex-build\**\*" />
     <EmbeddedResource Remove="obj\**\*" />
     <EmbeddedResource Remove="backend\**\*" />
+    <EmbeddedResource Remove="publish\**\*" />
     <None Remove="PayPlanner.Api.Tests\**\*" />
     <None Remove=".codex-build\**\*" />
     <None Remove="obj\**\*" />
     <None Remove="backend\**\*" />
+    <None Remove="publish\**\*" />
   </ItemGroup>
 
 </Project>
