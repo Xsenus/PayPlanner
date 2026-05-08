@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   AlarmClock,
   Bell,
+  CalendarDays,
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   ClipboardList,
   Clock3,
@@ -23,8 +26,12 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
+import { useClients } from '../../hooks/useClients';
+import { useClientCases } from '../../hooks/useClientCases';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
+import type { Client } from '../../types';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import {
   isTaskJournalActive,
   TASK_JOURNAL_EVENT,
@@ -37,8 +44,9 @@ import {
   type TaskJournalType,
   type TaskJournalUpsertPayload,
 } from '../../utils/taskJournalStore';
+import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 
-type ViewMode = 'list' | 'board';
+type ViewMode = 'list' | 'board' | 'calendar';
 type PeriodMode = 'day' | 'week' | 'month';
 type ModalState = { mode: 'create' | 'edit'; task?: TaskJournalItem } | null;
 type TaskJournalProps = {
@@ -91,6 +99,8 @@ const emptyForm = (assigneeName: string, assigneeUserId?: number | null): TaskFo
   dueAt.setHours(dueAt.getHours() + 2);
 
   return {
+    clientId: null,
+    clientCaseId: null,
     objectName: '',
     title: '',
     description: '',
@@ -146,12 +156,62 @@ function addDays(date: Date, days: number) {
   return next;
 }
 
+function addMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
 function startOfWeek(date: Date) {
   const next = new Date(date);
   const day = next.getDay() || 7;
   next.setDate(next.getDate() - day + 1);
   next.setHours(0, 0, 0, 0);
   return next;
+}
+
+function startOfDay(date: Date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function isSameMonth(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
+function toDateKey(date: Date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function formatDateOnly(value: Date) {
+  return value.toLocaleDateString('ru-RU', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function formatPeriodTitle(date: Date, mode: PeriodMode) {
+  if (mode === 'day') {
+    return formatDateOnly(date);
+  }
+
+  if (mode === 'week') {
+    const start = startOfWeek(date);
+    const end = endOfDay(addDays(start, 6));
+    return `${start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })} — ${end.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+  }
+
+  return date.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
 }
 
 function endOfDay(date: Date) {
@@ -170,6 +230,14 @@ function getStatusLabel(status: TaskJournalStatus) {
 
 function getPriorityLabel(priority: TaskJournalPriority) {
   return PRIORITY_OPTIONS.find((item) => item.value === priority)?.label ?? priority;
+}
+
+function getTaskClientName(task: TaskJournalItem) {
+  return task.clientName?.trim() || task.objectName;
+}
+
+function getTaskCaseTitle(task: TaskJournalItem) {
+  return task.clientCaseTitle?.trim() || '';
 }
 
 function priorityClass(priority: TaskJournalPriority) {
@@ -208,10 +276,13 @@ function serializeCsvValue(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
+const WEEKDAY_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
 export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJournalProps) {
   const { user } = useAuth();
   const toast = useToast();
   const { confirm } = useDialog();
+  const { clients } = useClients();
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -223,6 +294,8 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>('all');
   const [modal, setModal] = useState<ModalState>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
+  const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => new Date());
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => new Date());
   const routeTaskRequestRef = useRef(0);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
 
@@ -331,6 +404,20 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
     return Array.from(byId.values());
   }, [assignees]);
 
+  const clientOptions = useMemo<LookupSelectOption[]>(
+    () =>
+      clients
+        .filter((client) => client?.id && client?.name)
+        .map((client) => ({
+          value: String(client.id),
+          label: client.name,
+          description: [client.phone, client.email].filter(Boolean).join(' · ') || undefined,
+          keywords: [String(client.id), client.name, client.phone, client.email, client.company].filter(Boolean),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'ru')),
+    [clients],
+  );
+
   const filteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
     const nowDate = new Date();
@@ -355,9 +442,11 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
               : task.status === statusFilter;
         const assigneeOk = assigneeFilter === 'all' || String(task.assigneeUserId ?? task.assigneeName) === assigneeFilter;
         const typeOk = typeFilter === 'all' || task.type === typeFilter;
-        const periodOk = viewMode === 'list' || due < periodStart || (due >= periodStart && due <= periodEnd);
+        const periodOk = viewMode !== 'board' || due < periodStart || (due >= periodStart && due <= periodEnd);
         const searchOk = !q || [
           task.objectName,
+          task.clientName ?? '',
+          task.clientCaseTitle ?? '',
           task.title,
           task.description,
           task.assigneeName,
@@ -370,6 +459,23 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
       })
       .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
   }, [assigneeFilter, periodMode, search, statusFilter, tasks, typeFilter, viewMode]);
+
+  const shiftCalendarPeriod = (direction: -1 | 1) => {
+    const next =
+      periodMode === 'day'
+        ? addDays(calendarAnchorDate, direction)
+        : periodMode === 'week'
+          ? addDays(calendarAnchorDate, direction * 7)
+          : addMonths(calendarAnchorDate, direction);
+    setCalendarAnchorDate(next);
+    setCalendarSelectedDate(next);
+  };
+
+  const resetCalendarPeriod = () => {
+    const today = new Date();
+    setCalendarAnchorDate(today);
+    setCalendarSelectedDate(today);
+  };
 
   const stats = useMemo(() => {
     const active = tasks.filter((task) => isTaskJournalActive(task.status));
@@ -420,12 +526,16 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
   };
 
   const handleSave = async (form: TaskForm, taskId?: number) => {
-    if (!form.objectName.trim()) {
-      toast.error('Укажите объект задачи.', 'Журнал задач');
+    if (!form.clientId) {
+      toast.error('Укажите клиента задачи.', 'Журнал задач');
       return;
     }
     if (!form.title.trim()) {
-      toast.error('Укажите текст задачи.', 'Журнал задач');
+      toast.error('Укажите наименование задачи.', 'Журнал задач');
+      return;
+    }
+    if (form.status === 'done' && !form.result.trim()) {
+      toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
       return;
     }
 
@@ -452,8 +562,8 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
       closeTaskModal();
       await refreshTasks();
       emitTaskChange();
-    } catch {
-      toast.error('Не удалось сохранить задачу.', 'Журнал задач');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить задачу.'), 'Журнал задач');
     }
   };
 
@@ -481,19 +591,26 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
   };
 
   const setTaskStatus = async (task: TaskJournalItem, status: TaskJournalStatus) => {
+    if (status === 'done' && !task.result.trim()) {
+      toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
+      openTaskEditor({ ...task, status: 'done' }, { syncRoute: true });
+      return;
+    }
+
     try {
       await apiService.updateTaskJournalStatus(task.id, status);
       await refreshTasks();
       emitTaskChange();
-    } catch {
-      toast.error('Не удалось обновить статус задачи.', 'Журнал задач');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось обновить статус задачи.'), 'Журнал задач');
     }
   };
 
   const handleExport = () => {
-    const header = ['Объект', 'Текст задачи', 'Исполнитель', 'Срок', 'Тип', 'Приоритет', 'Статус', 'Результат'];
+    const header = ['Клиент', 'Дело', 'Наименование задачи', 'Исполнитель', 'Срок', 'Тип', 'Приоритет', 'Статус', 'Результат'];
     const rows = filteredTasks.map((task) => [
-      task.objectName,
+      getTaskClientName(task),
+      getTaskCaseTitle(task),
       task.title,
       task.assigneeName,
       formatDateTime(task.dueAt),
@@ -522,7 +639,7 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Рабочий контроль</div>
               <h1 className="mt-2 text-3xl font-semibold text-slate-900">Журнал задач</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                Задачи по объектам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.
+                Задачи по клиентам, делам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.
               </p>
             </div>
 
@@ -561,7 +678,7 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Поиск по объекту, тексту, исполнителю или результату"
+                placeholder="Поиск по клиенту, делу, наименованию, исполнителю или результату"
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
             </label>
@@ -635,6 +752,14 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
                 <LayoutGrid className="h-4 w-4" />
                 Доска
               </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('calendar')}
+                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${viewMode === 'calendar' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+              >
+                <CalendarDays className="h-4 w-4" />
+                Календарь
+              </button>
             </div>
           </div>
         </section>
@@ -651,12 +776,28 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
             onEdit={openTaskEditor}
             onDelete={handleDelete}
             onStatusChange={setTaskStatus}
+            onDone={(task) => setTaskStatus(task, 'done')}
           />
           )
-        ) : (
+        ) : viewMode === 'board' ? (
           <TaskBoard
             columns={boardColumns}
             highlightedTaskId={highlightedTaskId}
+            onEdit={openTaskEditor}
+            onDone={(task) => setTaskStatus(task, 'done')}
+          />
+        ) : (
+          <TaskCalendar
+            tasks={filteredTasks}
+            mode={periodMode}
+            anchorDate={calendarAnchorDate}
+            selectedDate={calendarSelectedDate}
+            highlightedTaskId={highlightedTaskId}
+            loading={loading}
+            onPrevious={() => shiftCalendarPeriod(-1)}
+            onNext={() => shiftCalendarPeriod(1)}
+            onToday={resetCalendarPeriod}
+            onSelectDate={setCalendarSelectedDate}
             onEdit={openTaskEditor}
             onDone={(task) => setTaskStatus(task, 'done')}
           />
@@ -668,6 +809,8 @@ export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJourn
           key={modal.task ? `edit-${modal.task.id}` : 'create'}
           state={modal}
           assignees={assignees}
+          clients={clients}
+          clientOptions={clientOptions}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
           onClose={closeTaskModal}
@@ -707,12 +850,14 @@ function TaskTable({
   onEdit,
   onDelete,
   onStatusChange,
+  onDone,
 }: {
   tasks: TaskJournalItem[];
   highlightedTaskId: number | null;
   onEdit: (task: TaskJournalItem) => void;
   onDelete: (task: TaskJournalItem) => void;
   onStatusChange: (task: TaskJournalItem, status: TaskJournalStatus) => void;
+  onDone: (task: TaskJournalItem) => void;
 }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -720,8 +865,8 @@ function TaskTable({
         <table className="min-w-[1180px] w-full">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              <th className="px-4 py-4">Объект</th>
-              <th className="px-4 py-4">Текст задачи</th>
+              <th className="px-4 py-4">Клиент / дело</th>
+              <th className="px-4 py-4">Наименование задачи</th>
               <th className="px-4 py-4">Исполнитель</th>
               <th className="px-4 py-4">Дата исполнения</th>
               <th className="px-4 py-4">Тип</th>
@@ -750,7 +895,10 @@ function TaskTable({
                   }`}
                 >
                   <td className="max-w-[280px] px-4 py-4">
-                    <div className="font-semibold text-slate-900">{task.objectName}</div>
+                    <div className="font-semibold text-slate-900">{getTaskClientName(task)}</div>
+                    {getTaskCaseTitle(task) ? (
+                      <div className="mt-1 text-sm text-slate-500">{getTaskCaseTitle(task)}</div>
+                    ) : null}
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {task.tags.map((tag) => (
                         <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{tag}</span>
@@ -789,6 +937,11 @@ function TaskTable({
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex justify-end gap-2">
+                      {isTaskJournalActive(task.status) ? (
+                        <button type="button" onClick={() => onDone(task)} className="rounded-xl p-2 text-emerald-600 transition hover:bg-emerald-50 hover:text-emerald-700" title="Завершить">
+                          <CheckCircle2 className="h-4 w-4" />
+                        </button>
+                      ) : null}
                       <button type="button" onClick={() => onEdit(task)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" title="Редактировать">
                         <Pencil className="h-4 w-4" />
                       </button>
@@ -851,7 +1004,10 @@ function TaskBoard({
                       <Pencil className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{task.objectName}</div>
+                  <div className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{getTaskClientName(task)}</div>
+                  {getTaskCaseTitle(task) ? (
+                    <div className="mt-1 text-xs text-slate-500">{getTaskCaseTitle(task)}</div>
+                  ) : null}
                   <h3 className="mt-2 text-sm font-semibold leading-5 text-slate-900">{task.title}</h3>
                   <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
                     <TypeIcon className="h-3.5 w-3.5" />
@@ -883,9 +1039,254 @@ function TaskBoard({
   );
 }
 
+function TaskCalendar({
+  tasks,
+  mode,
+  anchorDate,
+  selectedDate,
+  highlightedTaskId,
+  loading,
+  onPrevious,
+  onNext,
+  onToday,
+  onSelectDate,
+  onEdit,
+  onDone,
+}: {
+  tasks: TaskJournalItem[];
+  mode: PeriodMode;
+  anchorDate: Date;
+  selectedDate: Date;
+  highlightedTaskId: number | null;
+  loading: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+  onToday: () => void;
+  onSelectDate: (date: Date) => void;
+  onEdit: (task: TaskJournalItem) => void;
+  onDone: (task: TaskJournalItem) => void;
+}) {
+  const visibleDays = useMemo(() => {
+    if (mode === 'day') {
+      return [startOfDay(anchorDate)];
+    }
+
+    if (mode === 'week') {
+      const start = startOfWeek(anchorDate);
+      return Array.from({ length: 7 }, (_, index) => addDays(start, index));
+    }
+
+    const firstDay = startOfMonth(anchorDate);
+    const start = startOfWeek(firstDay);
+    return Array.from({ length: 42 }, (_, index) => addDays(start, index));
+  }, [anchorDate, mode]);
+
+  const tasksByDate = useMemo(() => {
+    const map = new Map<string, TaskJournalItem[]>();
+    tasks.forEach((task) => {
+      const key = toDateKey(new Date(task.dueAt));
+      const items = map.get(key) ?? [];
+      items.push(task);
+      map.set(key, items);
+    });
+
+    map.forEach((items) => {
+      items.sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+    });
+
+    return map;
+  }, [tasks]);
+
+  const selectedTasks = tasksByDate.get(toDateKey(selectedDate)) ?? [];
+  const periodTaskCount = visibleDays.reduce((count, day) => count + (tasksByDate.get(toDateKey(day))?.length ?? 0), 0);
+  const calendarGridClass = mode === 'day' ? 'grid-cols-1' : 'grid-cols-7';
+  const calendarMinWidthClass = mode === 'day' ? 'min-w-[320px]' : 'min-w-[860px]';
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            <CalendarDays className="h-4 w-4" />
+            Календарь задач
+          </div>
+          <h2 className="mt-2 text-xl font-semibold text-slate-900">{formatPeriodTitle(anchorDate, mode)}</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {periodTaskCount > 0 ? `Найдено задач в периоде: ${periodTaskCount}` : 'На выбранный период задач нет'}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onPrevious}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+            aria-label="Предыдущий период"
+            title="Предыдущий период"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onToday}
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Сегодня
+          </button>
+          <button
+            type="button"
+            onClick={onNext}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+            aria-label="Следующий период"
+            title="Следующий период"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="px-6 py-12 text-center text-sm text-slate-500">Загружаем календарь задач...</div>
+      ) : (
+        <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+          <div className="overflow-x-auto">
+            {mode !== 'day' ? (
+              <div className="mb-2 grid min-w-[860px] grid-cols-7 gap-2 text-center text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                {WEEKDAY_LABELS.map((label) => (
+                  <div key={label}>{label}</div>
+                ))}
+              </div>
+            ) : null}
+
+            <div className={`grid gap-2 ${calendarMinWidthClass} ${calendarGridClass}`}>
+              {visibleDays.map((day) => {
+                const key = toDateKey(day);
+                const dayTasks = tasksByDate.get(key) ?? [];
+                const isSelected = isSameDay(day, selectedDate);
+                const isCurrentMonth = mode !== 'month' || isSameMonth(day, anchorDate);
+                const isCurrentDay = isSameDay(day, new Date());
+
+                return (
+                  <div
+                    key={key}
+                    className={`min-h-[128px] rounded-xl border p-2 transition ${
+                      isSelected
+                        ? 'border-blue-300 bg-blue-50/60 ring-2 ring-blue-100'
+                        : isCurrentMonth
+                          ? 'border-slate-200 bg-white'
+                          : 'border-slate-100 bg-slate-50/70'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSelectDate(day)}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1 text-left transition hover:bg-white/70"
+                    >
+                      <span className={`text-sm font-semibold ${isCurrentMonth ? 'text-slate-900' : 'text-slate-400'}`}>
+                        {mode === 'day' ? formatDateOnly(day) : day.getDate()}
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        {isCurrentDay ? <span className="h-2 w-2 rounded-full bg-blue-500" /> : null}
+                        {dayTasks.length > 0 ? (
+                          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white">{dayTasks.length}</span>
+                        ) : null}
+                      </span>
+                    </button>
+
+                    <div className="mt-2 space-y-1.5">
+                      {dayTasks.slice(0, mode === 'day' ? 8 : 3).map((task) => (
+                        <button
+                          key={task.id}
+                          type="button"
+                          onClick={() => onEdit(task)}
+                          className={`block w-full rounded-lg border px-2 py-1.5 text-left text-xs transition hover:border-blue-200 hover:bg-blue-50 ${
+                            highlightedTaskId === task.id ? 'border-blue-300 bg-blue-50' : 'border-slate-100 bg-slate-50'
+                          }`}
+                        >
+                          <span className="block truncate font-semibold text-slate-900">{task.title}</span>
+                          <span className="mt-0.5 block truncate text-slate-500">{getTaskClientName(task)}</span>
+                        </button>
+                      ))}
+                      {dayTasks.length > (mode === 'day' ? 8 : 3) ? (
+                        <button
+                          type="button"
+                          onClick={() => onSelectDate(day)}
+                          className="w-full rounded-lg px-2 py-1 text-left text-xs font-semibold text-blue-600 transition hover:bg-blue-50"
+                        >
+                          +{dayTasks.length - (mode === 'day' ? 8 : 3)} еще
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <aside className="rounded-xl border border-slate-200 bg-slate-50/70">
+            <div className="border-b border-slate-200 px-4 py-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Загрузка за день</div>
+              <h3 className="mt-1 font-semibold text-slate-900">{formatDateOnly(selectedDate)}</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {selectedTasks.length > 0 ? `${selectedTasks.length} задач` : 'Задач нет'}
+              </p>
+            </div>
+
+            <div className="max-h-[560px] space-y-2 overflow-y-auto p-3">
+              {selectedTasks.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-400">
+                  На этот день задач не найдено
+                </div>
+              ) : selectedTasks.map((task) => {
+                const TypeIcon = getTypeMeta(task.type).icon;
+                return (
+                  <article key={task.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <button type="button" onClick={() => onEdit(task)} className="min-w-0 text-left">
+                        <div className="truncate text-sm font-semibold text-slate-900">{task.title}</div>
+                        <div className="mt-1 truncate text-xs text-slate-500">{getTaskClientName(task)}</div>
+                        {getTaskCaseTitle(task) ? <div className="mt-0.5 truncate text-xs text-slate-500">{getTaskCaseTitle(task)}</div> : null}
+                      </button>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${statusClass(task.status)}`}>
+                        {getStatusLabel(task.status)}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
+                        <Clock3 className="h-3.5 w-3.5" />
+                        {formatDateTime(task.dueAt)}
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
+                        <TypeIcon className="h-3.5 w-3.5" />
+                        {getTypeMeta(task.type).label}
+                      </span>
+                    </div>
+                    {isTaskJournalActive(task.status) ? (
+                      <button
+                        type="button"
+                        onClick={() => onDone(task)}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        Завершить
+                      </button>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          </aside>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TaskModal({
   state,
   assignees,
+  clients,
+  clientOptions,
   currentUserId,
   currentUserName,
   onClose,
@@ -893,6 +1294,8 @@ function TaskModal({
 }: {
   state: ModalState;
   assignees: TaskJournalAssignee[];
+  clients: Client[];
+  clientOptions: LookupSelectOption[];
   currentUserId: number | null;
   currentUserName: string;
   onClose: () => void;
@@ -901,6 +1304,8 @@ function TaskModal({
   const [form, setForm] = useState<TaskForm>(() => {
     if (state?.task) {
       const rest = {
+        clientId: state.task.clientId ?? null,
+        clientCaseId: state.task.clientCaseId ?? null,
         objectName: state.task.objectName,
         title: state.task.title,
         description: state.task.description,
@@ -920,9 +1325,37 @@ function TaskModal({
     return emptyForm(currentUserName, currentUserId);
   });
   const [tagText, setTagText] = useState(() => form.tags.join(', '));
+  const selectedClient = useMemo(
+    () => clients.find((client) => client.id === form.clientId) ?? null,
+    [clients, form.clientId],
+  );
+  const { cases: clientCases, loading: casesLoading } = useClientCases(form.clientId ?? undefined, {
+    enabled: Boolean(form.clientId),
+  });
 
   const update = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleClientChange = (value: string) => {
+    const clientId = Number(value) || null;
+    const client = clients.find((item) => item.id === clientId);
+    setForm((prev) => ({
+      ...prev,
+      clientId,
+      clientCaseId: null,
+      objectName: client?.name ?? '',
+    }));
+  };
+
+  const handleCaseChange = (value: string) => {
+    const clientCaseId = Number(value) || null;
+    const clientCase = clientCases.find((item) => item.id === clientCaseId);
+    setForm((prev) => ({
+      ...prev,
+      clientCaseId,
+      objectName: clientCase ? `${selectedClient?.name ?? prev.objectName} - ${clientCase.title}` : selectedClient?.name ?? prev.objectName,
+    }));
   };
 
   const toggleArray = <T extends string>(key: 'reminders' | 'channels', value: T) => {
@@ -941,7 +1374,7 @@ function TaskModal({
         <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
           <div>
             <h2 className="text-2xl font-semibold text-slate-900">{state?.mode === 'edit' ? 'Редактировать задачу' : 'Новая задача'}</h2>
-            <p className="mt-1 text-sm text-slate-500">Заполните объект, исполнителя, срок и правила напоминаний.</p>
+            <p className="mt-1 text-sm text-slate-500">Заполните клиента, исполнителя, срок и правила напоминаний.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Закрыть">
             <X className="h-5 w-5" />
@@ -950,8 +1383,20 @@ function TaskModal({
 
         <div className="min-h-0 overflow-y-auto px-6 py-5">
           <div className="grid gap-5 lg:grid-cols-2">
-            <Field label="Объект">
-              <input value={form.objectName} onChange={(event) => update('objectName', event.target.value)} className="form-input" placeholder="Например: ГОРБАТЮК В.Б. - БАНКРОТСТВО" />
+            <Field label="Клиент">
+              <LookupSelect
+                value={form.clientId ? String(form.clientId) : ''}
+                options={clientOptions}
+                onChange={handleClientChange}
+                placeholder="Выберите клиента"
+                title="Выбор клиента"
+                dictionaryLabel="Открыть справочник"
+                searchPlaceholder="Поиск по ФИО, компании, телефону или email"
+                emptyOptionLabel="Клиент не выбран"
+                emptyOptionDescription="Клиент обязателен для задачи"
+                buttonClassName="h-11 border-slate-200 focus:border-blue-400"
+                noOptionsText="Клиенты не найдены"
+              />
             </Field>
             <Field label="Исполнитель">
               <select
@@ -973,8 +1418,22 @@ function TaskModal({
             <Field label="Имя исполнителя">
               <input value={form.assigneeName} onChange={(event) => update('assigneeName', event.target.value)} className="form-input" />
             </Field>
-            <Field label="Текст задачи">
+            <Field label="Наименование задачи">
               <input value={form.title} onChange={(event) => update('title', event.target.value)} className="form-input" placeholder="Что нужно сделать" />
+            </Field>
+            <Field label="Дело">
+              <select
+                aria-label="Дело"
+                value={form.clientCaseId ?? ''}
+                onChange={(event) => handleCaseChange(event.target.value)}
+                disabled={!form.clientId || casesLoading}
+                className="form-input disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                <option value="">Без дела</option>
+                {clientCases.map((clientCase) => (
+                  <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
+                ))}
+              </select>
             </Field>
             <Field label="Дата и время исполнения">
               <input type="datetime-local" value={form.dueAt} onChange={(event) => update('dueAt', event.target.value)} className="form-input" />
@@ -1087,9 +1546,9 @@ function TaskModal({
 
 function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <label className={`block ${className}`}>
+    <div className={`block ${className}`}>
       <span className="mb-2 block text-sm font-semibold text-slate-700">{label}</span>
       {children}
-    </label>
+    </div>
   );
 }

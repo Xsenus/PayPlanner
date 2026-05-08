@@ -284,7 +284,7 @@ export default function TopBar({ title, onSignOut, onOpenProfile, onOpenTask }: 
               <div className="absolute right-0 mt-4 w-[min(92vw,24rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
                 <div className="border-b border-slate-100 px-4 py-3">
                   <div className="text-sm font-semibold text-slate-900">Уведомления</div>
-                  <div className="mt-1 text-xs text-slate-500">Сроки и напоминания из журнала задач</div>
+                  <div className="mt-1 text-xs text-slate-500">Сроки, напоминания и выполненные задачи</div>
                 </div>
 
                 {taskNotifications.length > 0 ? (
