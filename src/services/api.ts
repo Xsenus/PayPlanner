@@ -1759,10 +1759,10 @@ export class ApiService {
     });
   }
 
-  async updateTaskJournalStatus(id: number, status: TaskJournalStatus) {
+  async updateTaskJournalStatus(id: number, status: TaskJournalStatus, result?: string) {
     return this.request<TaskJournalItem>(`/tasks/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, result }),
     });
   }
 

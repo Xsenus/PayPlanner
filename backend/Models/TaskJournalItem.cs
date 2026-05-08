@@ -6,6 +6,12 @@ public class TaskJournalItem
 {
     public int Id { get; set; }
 
+    public int? ClientId { get; set; }
+    public Client? Client { get; set; }
+
+    public int? ClientCaseId { get; set; }
+    public ClientCase? ClientCase { get; set; }
+
     [Required]
     [MaxLength(300)]
     public string ObjectName { get; set; } = string.Empty;

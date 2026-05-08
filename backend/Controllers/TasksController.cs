@@ -7,6 +7,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -38,10 +39,12 @@ public class TasksController : ControllerBase
     };
 
     private readonly PaymentContext _db;
+    private readonly INotificationService _notificationService;
 
-    public TasksController(PaymentContext db)
+    public TasksController(PaymentContext db, INotificationService notificationService)
     {
         _db = db;
+        _notificationService = notificationService;
     }
 
     [HttpGet]
@@ -108,6 +111,8 @@ public class TasksController : ControllerBase
             var term = search.Trim().ToLower();
             query = query.Where(task =>
                 task.ObjectName.ToLower().Contains(term) ||
+                (task.Client != null && task.Client.Name.ToLower().Contains(term)) ||
+                (task.ClientCase != null && task.ClientCase.Title.ToLower().Contains(term)) ||
                 task.Title.ToLower().Contains(term) ||
                 (task.Description ?? "").ToLower().Contains(term) ||
                 task.AssigneeName.ToLower().Contains(term) ||
@@ -129,7 +134,7 @@ public class TasksController : ControllerBase
 
         return Ok(new PagedResponse<TaskJournalItemDto>
         {
-            Items = items.Select(Map).ToList(),
+            Items = items.Select(item => Map(item)).ToList(),
             Total = total,
             Page = page,
             PageSize = pageSize,
@@ -152,13 +157,23 @@ public class TasksController : ControllerBase
 
         var now = DateTime.UtcNow;
         var soon = now.AddHours(1);
-        var tasks = await BuildVisibleTasksQuery(access)
+        var dueTasks = await BuildVisibleTasksQuery(access)
             .Where(task => task.Status != "done" && task.Status != "cancelled" && task.DueAt <= soon)
             .OrderBy(task => task.DueAt)
             .Take(20)
             .ToListAsync(ct);
 
-        return Ok(tasks.Select(task =>
+        var completedSince = now.AddDays(-7);
+        var completedTasks = await BuildVisibleTasksQuery(access)
+            .Where(task =>
+                task.Status == "done"
+                && task.AuthorUserId == access.UserId
+                && (task.UpdatedAt ?? task.CreatedAt) >= completedSince)
+            .OrderByDescending(task => task.UpdatedAt ?? task.CreatedAt)
+            .Take(20)
+            .ToListAsync(ct);
+
+        var dueNotifications = dueTasks.Select(task =>
         {
             var overdue = task.DueAt < now;
             return new TaskJournalNotificationDto
@@ -170,7 +185,25 @@ public class TasksController : ControllerBase
                 Tone = overdue ? "rose" : "amber",
                 DueAt = ToIso(task.DueAt),
             };
-        }).ToList());
+        });
+
+        var completedNotifications = completedTasks.Select(task =>
+        {
+            var completedAt = task.UpdatedAt ?? task.CreatedAt;
+            return new TaskJournalNotificationDto
+            {
+                Id = $"{task.Id}-completed-{completedAt:yyyyMMddHHmmss}",
+                TaskId = task.Id,
+                Title = "Задача выполнена",
+                Description = string.IsNullOrWhiteSpace(task.AssigneeName)
+                    ? task.Title
+                    : $"{task.AssigneeName}: {task.Title}",
+                Tone = "blue",
+                DueAt = ToIso(completedAt),
+            };
+        });
+
+        return Ok(dueNotifications.Concat(completedNotifications).Take(20).ToList());
     }
 
     [HttpGet("assignees")]
@@ -241,6 +274,12 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = validation });
         }
 
+        var binding = await ResolveClientBindingAsync(request, ct);
+        if (binding.Error is not null)
+        {
+            return BadRequest(new { message = binding.Error });
+        }
+
         var assignee = await ResolveAssigneeAsync(request, access.UserId, ct);
         if (assignee is null)
         {
@@ -249,7 +288,9 @@ public class TasksController : ControllerBase
 
         var entity = new TaskJournalItem
         {
-            ObjectName = request.ObjectName.Trim(),
+            ClientId = binding.ClientId,
+            ClientCaseId = binding.ClientCaseId,
+            ObjectName = BuildObjectName(binding.ClientName, binding.ClientCaseTitle),
             Title = request.Title.Trim(),
             Description = NormalizeOptional(request.Description),
             AssigneeUserId = assignee.Value.UserId,
@@ -270,7 +311,7 @@ public class TasksController : ControllerBase
 
         _db.TaskJournalItems.Add(entity);
         await _db.SaveChangesAsync(ct);
-        return Created($"/api/tasks/{entity.Id}", Map(entity));
+        return Created($"/api/tasks/{entity.Id}", Map(entity, binding));
     }
 
     [HttpPut("{id:int}")]
@@ -299,13 +340,25 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = validation });
         }
 
+        var binding = await ResolveClientBindingAsync(request, ct);
+        if (binding.Error is not null)
+        {
+            return BadRequest(new { message = binding.Error });
+        }
+
         var assignee = await ResolveAssigneeAsync(request, entity.AssigneeUserId ?? access.UserId, ct);
         if (assignee is null)
         {
             return BadRequest(new { message = "Указанный исполнитель не найден." });
         }
 
-        entity.ObjectName = request.ObjectName.Trim();
+        var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
+        var becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
+
+        entity.ClientId = binding.ClientId;
+        entity.ClientCaseId = binding.ClientCaseId;
+        entity.ObjectName = BuildObjectName(binding.ClientName, binding.ClientCaseTitle);
         entity.Title = request.Title.Trim();
         entity.Description = NormalizeOptional(request.Description);
         entity.AssigneeUserId = assignee.Value.UserId;
@@ -313,7 +366,7 @@ public class TasksController : ControllerBase
         entity.DueAt = request.DueAt;
         entity.Type = NormalizeEnumValue(request.Type, AllowedTypes, "task");
         entity.Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal");
-        entity.Status = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
+        entity.Status = nextStatus;
         entity.Result = NormalizeOptional(request.Result);
         entity.RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]);
         entity.ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]);
@@ -321,7 +374,11 @@ public class TasksController : ControllerBase
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
-        return Ok(Map(entity));
+        if (becameDone)
+        {
+            await _notificationService.NotifyTaskCompletedAsync(entity, ct);
+        }
+        return Ok(Map(entity, binding));
     }
 
     [HttpPatch("{id:int}/status")]
@@ -344,9 +401,28 @@ public class TasksController : ControllerBase
             return NotFound();
         }
 
-        entity.Status = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
+        var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
+        var nextResult = NormalizeOptional(request.Result) ?? entity.Result;
+        if (string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(nextResult))
+        {
+            return BadRequest(new { message = "Перед завершением задачи заполните результат." });
+        }
+
+        var becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
+
+        entity.Status = nextStatus;
+        if (NormalizeOptional(request.Result) is { } result)
+        {
+            entity.Result = result;
+        }
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        if (becameDone)
+        {
+            await _notificationService.NotifyTaskCompletedAsync(entity, ct);
+        }
         return Ok(Map(entity));
     }
 
@@ -377,7 +453,10 @@ public class TasksController : ControllerBase
 
     private IQueryable<TaskJournalItem> BuildVisibleTasksQuery(TaskAccess access)
     {
-        var query = _db.TaskJournalItems.AsQueryable();
+        var query = _db.TaskJournalItems
+            .Include(task => task.Client)
+            .Include(task => task.ClientCase)
+            .AsQueryable();
         return access.IsAdmin
             ? query
             : query.Where(task => task.AssigneeUserId == access.UserId || task.AuthorUserId == access.UserId);
@@ -431,16 +510,63 @@ public class TasksController : ControllerBase
             : (fallback.Id, string.IsNullOrWhiteSpace(fallback.FullName) ? fallback.Email : fallback.FullName);
     }
 
+    private async Task<TaskClientBinding> ResolveClientBindingAsync(
+        UpsertTaskJournalItemRequest request,
+        CancellationToken ct)
+    {
+        if (!request.ClientId.HasValue || request.ClientId.Value <= 0)
+        {
+            return TaskClientBinding.Invalid("Укажите клиента задачи.");
+        }
+
+        var client = await _db.Clients
+            .AsNoTracking()
+            .Where(item => item.Id == request.ClientId.Value)
+            .Select(item => new { item.Id, item.Name })
+            .FirstOrDefaultAsync(ct);
+        if (client is null)
+        {
+            return TaskClientBinding.Invalid("Указанный клиент не найден.");
+        }
+
+        if (!request.ClientCaseId.HasValue || request.ClientCaseId.Value <= 0)
+        {
+            return TaskClientBinding.Valid(client.Id, client.Name, null, null);
+        }
+
+        var clientCase = await _db.ClientCases
+            .AsNoTracking()
+            .Where(item => item.Id == request.ClientCaseId.Value)
+            .Select(item => new { item.Id, item.ClientId, item.Title })
+            .FirstOrDefaultAsync(ct);
+        if (clientCase is null)
+        {
+            return TaskClientBinding.Invalid("Указанное дело не найдено.");
+        }
+
+        if (clientCase.ClientId != client.Id)
+        {
+            return TaskClientBinding.Invalid("Выбранное дело не относится к указанному клиенту.");
+        }
+
+        return TaskClientBinding.Valid(client.Id, client.Name, clientCase.Id, clientCase.Title);
+    }
+
+    private static string BuildObjectName(string clientName, string? caseTitle)
+        => string.IsNullOrWhiteSpace(caseTitle)
+            ? clientName.Trim()
+            : $"{clientName.Trim()} - {caseTitle.Trim()}";
+
     private static string? ValidateRequest(UpsertTaskJournalItemRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.ObjectName))
+        if (!request.ClientId.HasValue || request.ClientId.Value <= 0)
         {
-            return "Укажите объект задачи.";
+            return "Укажите клиента задачи.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Title))
         {
-            return "Укажите текст задачи.";
+            return "Укажите наименование задачи.";
         }
 
         if (request.DueAt == default)
@@ -448,13 +574,23 @@ public class TasksController : ControllerBase
             return "Укажите дату и время исполнения.";
         }
 
+        if (string.Equals(request.Status, "done", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(request.Result))
+        {
+            return "Перед завершением задачи заполните результат.";
+        }
+
         return null;
     }
 
-    private static TaskJournalItemDto Map(TaskJournalItem entity)
+    private static TaskJournalItemDto Map(TaskJournalItem entity, TaskClientBinding? binding = null)
         => new()
         {
             Id = entity.Id,
+            ClientId = entity.ClientId,
+            ClientName = binding?.ClientName ?? entity.Client?.Name ?? string.Empty,
+            ClientCaseId = entity.ClientCaseId,
+            ClientCaseTitle = binding?.ClientCaseTitle ?? entity.ClientCase?.Title ?? string.Empty,
             ObjectName = entity.ObjectName,
             Title = entity.Title,
             Description = entity.Description ?? string.Empty,
@@ -534,6 +670,20 @@ public class TasksController : ControllerBase
     }
 
     private sealed record TaskAccess(int UserId, string DisplayName, bool IsAdmin, RolePermission? Permission);
+
+    private sealed record TaskClientBinding(
+        int? ClientId,
+        string ClientName,
+        int? ClientCaseId,
+        string? ClientCaseTitle,
+        string? Error)
+    {
+        public static TaskClientBinding Valid(int clientId, string clientName, int? clientCaseId, string? clientCaseTitle)
+            => new(clientId, clientName, clientCaseId, clientCaseTitle, null);
+
+        public static TaskClientBinding Invalid(string error)
+            => new(null, string.Empty, null, null, error);
+    }
 }
 
 public class TaskJournalNotificationDto

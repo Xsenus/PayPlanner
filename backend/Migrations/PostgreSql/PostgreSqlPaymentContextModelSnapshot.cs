@@ -4282,6 +4282,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("text")
                         .HasDefaultValue("[]");
 
+                    b.Property<int?>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ClientId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp without time zone")
@@ -4380,6 +4386,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("AuthorUserId")
                         .HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_TaskJournalItems_ClientCaseId");
+
+                    b.HasIndex("ClientId")
+                        .HasDatabaseName("IX_TaskJournalItems_ClientId");
 
                     b.HasIndex("DeletedAt")
                         .HasDatabaseName("IX_TaskJournalItem_DeletedAt_Audit");
@@ -5620,9 +5632,23 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("AuthorUserId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("AssigneeUser");
 
                     b.Navigation("AuthorUser");
+
+                    b.Navigation("Client");
+
+                    b.Navigation("ClientCase");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TelegramAuthRequest", b =>

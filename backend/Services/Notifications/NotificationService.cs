@@ -345,6 +345,28 @@ public sealed class NotificationService : INotificationService
         return await SendToUserAsync(task.AssigneeUserId.Value, message, channels, eventKey, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCompletedAsync(
+        TaskJournalItem task,
+        CancellationToken cancellationToken = default)
+    {
+        if (!task.AuthorUserId.HasValue)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var message = new NotificationMessage(
+            $"Задача выполнена: {task.Title}",
+            BuildTaskCompletedBody(task),
+            Purpose: NotificationPurposes.TaskReminder);
+
+        return await SendToUserAsync(
+            task.AuthorUserId.Value,
+            message,
+            [NotificationChannels.Email, NotificationChannels.Telegram],
+            $"task:{task.Id}:completed",
+            cancellationToken);
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> SendAsync(
         NotificationRecipient recipient,
         NotificationMessage message,
@@ -1045,6 +1067,32 @@ public sealed class NotificationService : INotificationService
         {
             lines.Add(string.Empty);
             lines.Add(task.Description.Trim());
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildTaskCompletedBody(TaskJournalItem task)
+    {
+        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var lines = new List<string>
+        {
+            "Исполнитель отметил задачу выполненной.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок: {dueText}",
+        };
+
+        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
+        {
+            lines.Add($"Исполнитель: {task.AssigneeName.Trim()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(task.Result))
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Результат: {task.Result.Trim()}");
         }
 
         return string.Join('\n', lines);

@@ -6,6 +6,10 @@ export type TaskJournalChannel = 'inApp' | 'email' | 'telegram';
 
 export interface TaskJournalItem {
   id: number;
+  clientId?: number | null;
+  clientName?: string;
+  clientCaseId?: number | null;
+  clientCaseTitle?: string;
   objectName: string;
   title: string;
   description: string;

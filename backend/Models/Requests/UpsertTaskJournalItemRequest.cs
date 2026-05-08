@@ -2,6 +2,8 @@ namespace PayPlanner.Api.Models.Requests;
 
 public class UpsertTaskJournalItemRequest
 {
+    public int? ClientId { get; set; }
+    public int? ClientCaseId { get; set; }
     public string ObjectName { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }

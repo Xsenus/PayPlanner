@@ -3,6 +3,10 @@ namespace PayPlanner.Api.Models.Responses;
 public class TaskJournalItemDto
 {
     public int Id { get; set; }
+    public int? ClientId { get; set; }
+    public string ClientName { get; set; } = string.Empty;
+    public int? ClientCaseId { get; set; }
+    public string ClientCaseTitle { get; set; } = string.Empty;
     public string ObjectName { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
