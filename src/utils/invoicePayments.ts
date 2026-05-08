@@ -102,6 +102,20 @@ export function isPartialRemainderSourcePayment(payment: Pick<Payment, 'systemNo
   return Boolean(payment.systemNotes?.includes(PARTIAL_REMAINDER_SOURCE_MARKER));
 }
 
+export function needsPartialRemainderTransfer(
+  payment: Pick<Payment, 'amount' | 'paidAmount' | 'status' | 'documentKind' | 'systemNotes'>,
+): boolean {
+  const amount = Number(payment.amount ?? 0);
+  const paidAmount = Number(payment.paidAmount ?? 0);
+  return (
+    payment.documentKind !== 'Invoice'
+    && payment.status !== 'Cancelled'
+    && paidAmount > 0
+    && amount - paidAmount > 0.009
+    && !isPartialRemainderSourcePayment(payment)
+  );
+}
+
 function readStringProperty(value: unknown, propertyName: string): string | null {
   if (!value || typeof value !== 'object') {
     return null;

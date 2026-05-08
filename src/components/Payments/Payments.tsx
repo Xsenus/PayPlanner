@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import { Ban, ChevronDown, Loader2, Lock, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Ban, CalendarPlus, ChevronDown, Loader2, Lock, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -9,11 +9,11 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
-import type { ClientRole, Payment, PaymentPayload, PaymentStatus } from '../../types';
+import type { ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
-import { formatLocalYMD, fromInputToApiDate } from '../../utils/dateUtils';
+import { formatLocalYMD, fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
@@ -252,6 +252,12 @@ export function Payments({
   const [routePaymentPreviewError, setRoutePaymentPreviewError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loadTimeoutReached, setLoadTimeoutReached] = useState(false);
+  const [remainderCandidatesOpen, setRemainderCandidatesOpen] = useState(false);
+  const [remainderCandidatesLoading, setRemainderCandidatesLoading] = useState(false);
+  const [remainderCandidates, setRemainderCandidates] = useState<PartialPaymentRemainderCandidate[]>([]);
+  const [remainderCandidatesTotal, setRemainderCandidatesTotal] = useState(0);
+  const [remainderCandidatesTotalAmount, setRemainderCandidatesTotalAmount] = useState(0);
+  const [remainderCandidateDates, setRemainderCandidateDates] = useState<Record<number, string>>({});
 
   const initialFromRef = useRef(fromDate);
   const initialToRef = useRef(toDate);
@@ -936,6 +942,75 @@ export function Payments({
     [refresh, t, toast],
   );
 
+  const loadRemainderCandidates = useCallback(async () => {
+    setRemainderCandidatesOpen(true);
+    setRemainderCandidatesLoading(true);
+    try {
+      const response = await apiService.getPartialPaymentRemainderCandidates({
+        clientId: selectedClients.length === 1 ? Number(selectedClients[0]) : undefined,
+        clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
+        type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
+        includeFuture: false,
+        page: 1,
+        pageSize: 100,
+      });
+      setRemainderCandidates(response.items ?? []);
+      setRemainderCandidatesTotal(response.total ?? 0);
+      setRemainderCandidatesTotalAmount(response.totalRemainderAmount ?? 0);
+      setRemainderCandidateDates((current) => {
+        const next: Record<number, string> = {};
+        (response.items ?? []).forEach((item) => {
+          next[item.payment.id] = current[item.payment.id] || toDateInputValue(item.suggestedRemainderDate);
+        });
+        return next;
+      });
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, 'Не удалось проверить частичные оплаты без переноса.'),
+        'Платежи',
+      );
+    } finally {
+      setRemainderCandidatesLoading(false);
+    }
+  }, [appliedTypeFilter, clientRoleFilter, selectedClients, toast]);
+
+  const handleTransferExistingRemainder = useCallback(
+    async (candidate: PartialPaymentRemainderCandidate) => {
+      const remainderDate = remainderCandidateDates[candidate.payment.id];
+      if (!remainderDate) {
+        toast.error('Укажите дату, на которую нужно перенести остаток.', 'Платежи');
+        return;
+      }
+
+      const normalizedDate = fromInputToApiDate(remainderDate);
+      if (!normalizedDate) {
+        toast.error('Дата переноса остатка указана неверно.', 'Платежи');
+        return;
+      }
+
+      const confirmed = await confirm({
+        title: 'Создать платеж на остаток',
+        description: `Исходный платеж будет закрыт на оплаченную сумму ${formatCurrencySmart(candidate.paidAmount).full}, а остаток ${formatCurrencySmart(candidate.remainderAmount).full} появится отдельным платежом на выбранную дату.`,
+        confirmLabel: 'Создать остаток',
+        cancelLabel: 'Отмена',
+      });
+      if (!confirmed) return;
+
+      try {
+        await apiService.transferExistingPaymentRemainder(candidate.payment.id, normalizedDate);
+        toast.success('Остаток создан отдельным платежом.', 'Платежи');
+        await refresh();
+        await loadRemainderCandidates();
+      } catch (error) {
+        toast.error(
+          extractDisplayErrorMessage(error, 'Не удалось создать платеж на остаток.'),
+          'Платежи',
+        );
+      }
+    },
+    [confirm, loadRemainderCandidates, refresh, remainderCandidateDates, toast],
+  );
+
   const handleCloseModal = useCallback(() => {
     setIsModalOpen(false);
     setEditingPayment(null);
@@ -1118,6 +1193,34 @@ export function Payments({
             disabled={refreshing}>
             <RotateCcw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             {t('paymentsRefresh') ?? t('invoiceRefresh') ?? 'Обновить'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (remainderCandidatesOpen) {
+                setRemainderCandidatesOpen(false);
+              } else {
+                void loadRemainderCandidates();
+              }
+            }}
+            className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors focus:outline-none ${
+              remainderCandidatesOpen
+                ? 'border-amber-300 bg-amber-50 text-amber-800'
+                : 'border-amber-200 bg-white text-amber-700 hover:bg-amber-50'
+            }`}
+            disabled={remainderCandidatesLoading}>
+            {remainderCandidatesLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <AlertTriangle className="h-4 w-4" />
+            )}
+            Частичные без остатка
+            {remainderCandidatesTotal ? (
+              <span className="inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full bg-amber-100 px-2 text-xs font-semibold text-amber-800">
+                {remainderCandidatesTotal}
+              </span>
+            ) : null}
           </button>
 
           {paymentsPermissions.canCreate && (showIncomeButton || showExpenseButton) ? (
@@ -1312,6 +1415,147 @@ export function Payments({
                 </div>
               }
             />
+          </div>
+        ) : null}
+
+        {remainderCandidatesOpen ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-amber-700">
+                  <AlertTriangle className="h-4 w-4" />
+                  Частичные оплаты без переноса остатка
+                </div>
+                <p className="mt-1 text-sm text-amber-900">
+                  Найдены платежи, где часть уже оплачена, но неоплаченный остаток еще не создан отдельным платежом.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs font-medium text-amber-800">
+                  <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-amber-200">
+                    {`Записей: ${remainderCandidatesTotal.toLocaleString('ru-RU')}`}
+                  </span>
+                  <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-amber-200">
+                    {`Остаток: ${formatCurrencySmart(remainderCandidatesTotalAmount).full}`}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void loadRemainderCandidates()}
+                  disabled={remainderCandidatesLoading}
+                  className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-50 disabled:opacity-60">
+                  {remainderCandidatesLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" />
+                  )}
+                  Проверить снова
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRemainderCandidatesOpen(false)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
+                  <X className="h-4 w-4" />
+                  Закрыть
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-hidden rounded-lg border border-amber-200 bg-white">
+              {remainderCandidatesLoading && remainderCandidates.length === 0 ? (
+                <div className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-amber-700">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Проверяем платежи...
+                </div>
+              ) : remainderCandidates.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-slate-500">
+                  Неразнесенных частичных оплат за прошедшие даты не найдено.
+                </div>
+              ) : (
+                <div className="max-h-[440px] overflow-auto">
+                  <table className="min-w-full divide-y divide-amber-100 text-sm">
+                    <thead className="sticky top-0 bg-amber-50 text-xs uppercase tracking-wide text-amber-700">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-semibold">Платеж</th>
+                        <th className="px-4 py-3 text-left font-semibold">Оплата</th>
+                        <th className="px-4 py-3 text-left font-semibold">Остаток</th>
+                        <th className="px-4 py-3 text-left font-semibold">Новая дата</th>
+                        <th className="px-4 py-3 text-right font-semibold">Действия</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {remainderCandidates.map((candidate) => {
+                        const payment = candidate.payment;
+                        const clientName =
+                          payment.client?.name
+                          || payment.expenseClient?.name
+                          || payment.legalEntityName
+                          || payment.expenseLegalEntityName
+                          || 'Контрагент не указан';
+                        return (
+                          <tr key={payment.id} className="align-top">
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-slate-900">
+                                {payment.description || 'Без описания'}
+                              </div>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {`${clientName} · ${formatDate(payment.date)} · #${payment.id}`}
+                              </div>
+                              {candidate.daysPastDue > 0 ? (
+                                <div className="mt-1 text-xs font-medium text-amber-700">
+                                  {`Просрочено дней: ${candidate.daysPastDue}`}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-3 text-slate-700">
+                              <div>{`Всего: ${formatCurrencySmart(candidate.originalAmount).full}`}</div>
+                              <div className="font-semibold text-emerald-700">
+                                {`Оплачено: ${formatCurrencySmart(candidate.paidAmount).full}`}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-amber-700">
+                              {formatCurrencySmart(candidate.remainderAmount).full}
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                type="date"
+                                value={remainderCandidateDates[payment.id] ?? ''}
+                                onChange={(event) =>
+                                  setRemainderCandidateDates((current) => ({
+                                    ...current,
+                                    [payment.id]: event.target.value,
+                                  }))
+                                }
+                                className="w-[160px] rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-amber-400 focus:outline-none"
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditPayment(payment)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50">
+                                  <Pencil className="h-3.5 w-3.5" />
+                                  Открыть
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleTransferExistingRemainder(candidate)}
+                                  disabled={remainderCandidatesLoading}
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-amber-700 disabled:opacity-60">
+                                  <CalendarPlus className="h-3.5 w-3.5" />
+                                  Создать остаток
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         ) : null}
 

@@ -13,6 +13,7 @@ import {
   isInvoiceManagedPayment,
   isPaymentLinkedToInvoice,
   isTransferredRemainderPayment,
+  needsPartialRemainderTransfer,
   parsePartialRemainderTransferMetadata,
 } from './invoicePayments';
 
@@ -170,6 +171,31 @@ describe('invoicePayments utilities', () => {
       remainderAmount: 6_000,
       remainderDate: '2026-05-20',
     });
+  });
+
+  it('detects partial payments that still need a separate remainder payment', () => {
+    const partialPayment = createPayment({
+      amount: 10_000,
+      paidAmount: 4_000,
+      status: 'Overdue',
+      documentKind: 'Payment',
+    });
+    const alreadySplitSource = createPayment({
+      amount: 10_000,
+      paidAmount: 4_000,
+      status: 'Overdue',
+      systemNotes: `${PARTIAL_REMAINDER_SOURCE_MARKER} {"sourcePaymentId":900}`,
+    });
+    const invoiceDocument = createPayment({
+      amount: 10_000,
+      paidAmount: 4_000,
+      status: 'Overdue',
+      documentKind: 'Invoice',
+    });
+
+    expect(needsPartialRemainderTransfer(partialPayment)).toBe(true);
+    expect(needsPartialRemainderTransfer(alreadySplitSource)).toBe(false);
+    expect(needsPartialRemainderTransfer(invoiceDocument)).toBe(false);
   });
 
   it('hides the representative invoice row when an installment schedule exists', () => {

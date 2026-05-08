@@ -12,6 +12,7 @@ import type { Payment } from '../../types';
 import { useTranslation } from '../../hooks/useTranslation';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { getVisibleNotes } from '../../utils/systemNotes';
+import { needsPartialRemainderTransfer } from '../../utils/invoicePayments';
 
 export type PaymentTableColumnKey =
   | 'date'
@@ -156,6 +157,7 @@ export function PaymentsTable({
       const statusStyle = STATUS_STYLES[payment.status] ?? 'bg-gray-100 text-gray-600';
       const amountText = formatCurrencySmart(payment.amount).full;
       const visibleNotes = getVisibleNotes(payment.notes);
+      const needsRemainderTransfer = needsPartialRemainderTransfer(payment);
       const category =
         payment.dealType?.name || payment.incomeType?.name || payment.paymentSource?.name || '—';
       const statusLabel = statusLabels[payment.status] ?? payment.status;
@@ -241,14 +243,30 @@ export function PaymentsTable({
           );
         case 'status':
           return (
-            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle}`}>
-              {statusLabel}
-            </span>
+            <div className="flex flex-col items-start gap-1">
+              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle}`}>
+                {statusLabel}
+              </span>
+              {needsRemainderTransfer ? (
+                <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
+                  Нужен перенос остатка
+                </span>
+              ) : null}
+            </div>
           );
         case 'category':
           return category;
         case 'amount':
-          return <span className="font-semibold text-gray-900">{amountText}</span>;
+          return (
+            <div className="leading-tight">
+              <span className="font-semibold text-gray-900">{amountText}</span>
+              {needsRemainderTransfer ? (
+                <span className="mt-1 block text-xs font-medium text-amber-700">
+                  {`Остаток: ${formatCurrencySmart(payment.amount - payment.paidAmount).full}`}
+                </span>
+              ) : null}
+            </div>
+          );
         case 'paidDate':
           return payment.paidDate || payment.lastPaymentDate
             ? formatDate(payment.paidDate || payment.lastPaymentDate || '')

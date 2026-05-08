@@ -1771,6 +1771,27 @@ export interface RollbackPaymentRemainderTransferResponse {
   removedRemainderPaymentId: number;
 }
 
+export interface PartialPaymentRemainderCandidate {
+  payment: Payment;
+  originalAmount: number;
+  paidAmount: number;
+  remainderAmount: number;
+  daysPastDue: number;
+  suggestedRemainderDate: string;
+}
+
+export interface PartialPaymentRemainderCandidatesResponse {
+  items: PartialPaymentRemainderCandidate[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalOriginalAmount: number;
+  totalPaidAmount: number;
+  totalRemainderAmount: number;
+  includeFuture: boolean;
+  checkedAt: string;
+}
+
 export interface InvoiceResponsible {
   id: number;
   fullName: string;

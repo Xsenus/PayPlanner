@@ -1741,6 +1741,10 @@ export class ApiService {
     return this.request<TaskJournalNotification[]>('/tasks/notifications');
   }
 
+  async getTaskJournalItem(id: number) {
+    return this.request<TaskJournalItem>(`/tasks/${id}`);
+  }
+
   async createTaskJournalItem(payload: TaskJournalUpsertPayload) {
     return this.request<TaskJournalItem>('/tasks', {
       method: 'POST',
@@ -1832,6 +1836,33 @@ export class ApiService {
         payment,
         remainderDate,
       }),
+    });
+  }
+
+  async getPartialPaymentRemainderCandidates(params?: {
+    from?: string;
+    to?: string;
+    clientId?: number;
+    legalEntityId?: number;
+    caseId?: number;
+    clientRole?: ClientRole;
+    type?: PaymentKind;
+    includeFuture?: boolean;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      ...(params ?? {}),
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 50,
+    });
+    return this.request<PartialPaymentRemainderCandidatesResponse>(`/payments/partial-remainder-candidates${q}`);
+  }
+
+  async transferExistingPaymentRemainder(id: number, remainderDate: string) {
+    return this.request<TransferPaymentRemainderResponse>(`/payments/${id}/partial-remainder/from-existing`, {
+      method: 'POST',
+      body: JSON.stringify({ remainderDate }),
     });
   }
 
@@ -3352,6 +3383,7 @@ import type {
   ApplyClientBalanceResult,
   TransferPaymentRemainderResponse,
   RollbackPaymentRemainderTransferResponse,
+  PartialPaymentRemainderCandidatesResponse,
   CleanedAddress,
   DadataAddressSuggestion,
   ClientReferenceItem,
