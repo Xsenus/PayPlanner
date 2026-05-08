@@ -186,6 +186,47 @@ function MultiSelect({
   );
 }
 
+interface ToolbarIconButtonProps {
+  label: string;
+  icon: JSX.Element;
+  active?: boolean;
+  disabled?: boolean;
+  badge?: number;
+  onClick: () => void;
+}
+
+function ToolbarIconButton({
+  label,
+  icon,
+  active = false,
+  disabled = false,
+  badge,
+  onClick,
+}: ToolbarIconButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className={`relative inline-flex h-10 w-10 items-center justify-center rounded-lg border text-sm font-medium transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
+        active
+          ? 'border-blue-300 bg-blue-50 text-blue-700 shadow-sm'
+          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900'
+      }`}
+    >
+      {icon}
+      <span className="sr-only">{label}</span>
+      {badge ? (
+        <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-900 px-1.5 text-[10px] font-semibold text-white">
+          {badge}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
 function parseAmountInput(raw: string): number | null {
   if (!raw) return null;
   const normalized = raw.replace(/[\s\u00a0]/g, '').replace(',', '.');
@@ -708,13 +749,12 @@ export function Payments({
   );
 
   const summaryGridClass = [
-    'grid w-full gap-4 grid-cols-1',
+    'grid w-full gap-3 grid-cols-1',
     summaryCards.length >= 3
       ? 'sm:grid-cols-2 xl:grid-cols-3'
       : summaryCards.length === 2
       ? 'sm:grid-cols-2 xl:grid-cols-2'
       : 'sm:grid-cols-1 xl:grid-cols-1',
-    'xl:max-w-3xl xl:self-start xl:pl-4',
   ].join(' ');
 
   const handleFromDateChange = useCallback(
@@ -1031,31 +1071,12 @@ export function Payments({
 
   const typeButtonClass = useCallback(
     (target: TypeFilter) => {
-      const common = 'px-4 py-2 text-sm font-medium rounded-full border transition-colors focus:outline-none';
-      if (target === 'all') {
-        const active = typeFilter === 'all';
-        return [
-          common,
-          active
-            ? 'bg-slate-900 text-white border-slate-900 shadow'
-            : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300',
-        ].join(' ');
-      }
-      if (target === 'Income') {
-        const active = typeFilter === 'Income';
-        return [
-          common,
-          active
-            ? 'bg-emerald-600 text-white border-emerald-600 shadow'
-            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:border-emerald-300',
-        ].join(' ');
-      }
-      const active = typeFilter === 'Expense';
+      const active = typeFilter === target;
       return [
-        common,
+        'inline-flex h-8 min-w-[4rem] items-center justify-center rounded-full px-4 text-sm font-semibold transition-colors focus:outline-none',
         active
-          ? 'bg-rose-600 text-white border-rose-600 shadow'
-          : 'bg-rose-50 text-rose-700 border-rose-200 hover:border-rose-300',
+          ? 'bg-blue-600 text-white shadow-sm'
+          : 'text-slate-700 hover:bg-white hover:text-slate-900',
       ].join(' ');
     },
     [typeFilter],
@@ -1072,164 +1093,31 @@ export function Payments({
   const showExpenseButton =
     paymentsPermissions.canCreate &&
     (!lockType || effectiveDefaultType === 'Expense' || effectiveDefaultType === 'all');
+  const fieldLabelClass = 'text-sm font-semibold text-slate-700';
+  const inputClass =
+    'h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100';
 
   return (
-    <div className="p-8">
-      <div className="mx-auto max-w-none space-y-6">
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-          <div className="flex-1 space-y-4">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900">{headingText}</h1>
-              {subtitleText ? (
-                <p className="mt-2 max-w-2xl text-slate-600">{subtitleText}</p>
-              ) : null}
-              {lastUpdatedText ? (
-                <p className="mt-2 text-xs text-slate-500">{lastUpdatedText}</p>
-              ) : null}
-            </div>
-
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
-                {lockType ? (
-                  <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
-                    <Lock className="h-3.5 w-3.5 text-slate-500" />
-                    {lockedTypeMessage}
-                  </span>
-                ) : (
-                  <>
-                    <button type="button" className={typeButtonClass('all')} onClick={() => setTypeFilter('all')}>
-                      {t('paymentsFilterAll') ?? 'Все'}
-                    </button>
-                    <button type="button" className={typeButtonClass('Income')} onClick={() => setTypeFilter('Income')}>
-                      {t('paymentsFilterIncome') ?? t('incomePlural') ?? 'Доходы'}
-                    </button>
-                    <button type="button" className={typeButtonClass('Expense')} onClick={() => setTypeFilter('Expense')}>
-                      {t('paymentsFilterExpense') ?? t('expensePlural') ?? 'Расходы'}
-                    </button>
-                  </>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <select
-                  className="min-w-[180px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-400 focus:outline-none"
-                  value={statusFilter}
-                  onChange={(event) => {
-                    const value = event.target.value as StatusFilter;
-                    setStatusFilter(value);
-                  }}>
-                  <option value="all">{t('paymentsStatusAll') ?? t('allStatuses') ?? 'Все статусы'}</option>
-                  {availableStatuses.map((status) => (
-                    <option key={status} value={status}>
-                      {statusLabels[status] ?? status}
-                    </option>
-                  ))}
-                </select>
-
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="search"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder={t('paymentsSearchPlaceholder') ?? t('search') ?? 'Поиск'}
-                    className="w-64 rounded-lg border border-slate-200 bg-white py-2 pl-10 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
-                  />
-                </div>
-              </div>
-            </div>
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto w-full max-w-[calc(100vw-2rem)] space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">{headingText}</h1>
+            {subtitleText ? (
+              <p className="mt-2 max-w-2xl text-sm text-slate-600">{subtitleText}</p>
+            ) : null}
+            {lastUpdatedText ? (
+              <p className="mt-2 text-xs text-slate-500">{lastUpdatedText}</p>
+            ) : null}
           </div>
 
-          <div className={summaryGridClass}>{summaryCards}</div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setFiltersOpen((prev) => !prev)}
-            aria-expanded={filtersOpen}
-            aria-controls="payments-filters-panel"
-            className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors focus:outline-none ${
-              filtersOpen
-                ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-900'
-            }`}>
-            <SlidersHorizontal className="h-4 w-4" />
-            <span>
-              {filtersOpen
-                ? t('paymentsFiltersHide') ?? t('hideFilters') ?? 'Скрыть фильтры'
-                : t('paymentsFiltersShow') ?? 'Показать фильтры'}
-            </span>
-            {activeFiltersCount ? (
-              <span
-                className={`inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full px-2 text-xs font-semibold ${
-                  filtersOpen ? 'bg-white text-slate-900' : 'bg-slate-900 text-white'
-                }`}>
-                {activeFiltersCount}
-              </span>
-            ) : null}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSettingsOpen((prev) => !prev)}
-            aria-expanded={settingsOpen}
-            aria-controls="payments-settings-panel"
-            className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors focus:outline-none ${
-              settingsOpen
-                ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-900'
-            }`}>
-            <SlidersHorizontal className="h-4 w-4" />
-            <span>{settingsOpen ? 'Скрыть настройки таблицы' : 'Настроить таблицу'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleRefresh}
-            className={`inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900 ${
-              refreshing ? 'cursor-wait opacity-70' : ''
-            }`}
-            disabled={refreshing}>
-            <RotateCcw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            {t('paymentsRefresh') ?? t('invoiceRefresh') ?? 'Обновить'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (remainderCandidatesOpen) {
-                setRemainderCandidatesOpen(false);
-              } else {
-                void loadRemainderCandidates();
-              }
-            }}
-            className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors focus:outline-none ${
-              remainderCandidatesOpen
-                ? 'border-amber-300 bg-amber-50 text-amber-800'
-                : 'border-amber-200 bg-white text-amber-700 hover:bg-amber-50'
-            }`}
-            disabled={remainderCandidatesLoading}>
-            {remainderCandidatesLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <AlertTriangle className="h-4 w-4" />
-            )}
-            Частичные без остатка
-            {remainderCandidatesTotal ? (
-              <span className="inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full bg-amber-100 px-2 text-xs font-semibold text-amber-800">
-                {remainderCandidatesTotal}
-              </span>
-            ) : null}
-          </button>
-
           {paymentsPermissions.canCreate && (showIncomeButton || showExpenseButton) ? (
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-3 lg:justify-end">
               {showIncomeButton ? (
                 <button
                   type="button"
                   onClick={() => handleAddPayment('Income')}
-                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 focus:outline-none">
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-200">
                   <Plus className="h-4 w-4" />
                   {t('addIncome') ?? 'Добавить доход'}
                 </button>
@@ -1238,7 +1126,7 @@ export function Payments({
                 <button
                   type="button"
                   onClick={() => handleAddPayment('Expense')}
-                  className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-rose-700 focus:outline-none">
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-200">
                   <Plus className="h-4 w-4" />
                   {t('addExpense') ?? 'Добавить расход'}
                 </button>
@@ -1247,6 +1135,203 @@ export function Payments({
           ) : null}
         </div>
 
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-4 xl:grid-cols-[minmax(420px,1fr)_minmax(520px,0.95fr)]">
+            <div className="space-y-3">
+              {lockType ? (
+                <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-600">
+                  <Lock className="h-3.5 w-3.5 text-slate-500" />
+                  {lockedTypeMessage}
+                </span>
+              ) : (
+                <div className="inline-flex w-fit items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1 shadow-sm">
+                  <button type="button" className={typeButtonClass('all')} onClick={() => setTypeFilter('all')}>
+                    {t('paymentsFilterAll') ?? 'Все'}
+                  </button>
+                  <button type="button" className={typeButtonClass('Income')} onClick={() => setTypeFilter('Income')}>
+                    {t('paymentsFilterIncome') ?? t('incomePlural') ?? 'Доходные'}
+                  </button>
+                  <button type="button" className={typeButtonClass('Expense')} onClick={() => setTypeFilter('Expense')}>
+                    {t('paymentsFilterExpense') ?? t('expensePlural') ?? 'Расходные'}
+                  </button>
+                </div>
+              )}
+
+              <div className={summaryGridClass}>{summaryCards}</div>
+            </div>
+
+            <div className="rounded-xl bg-slate-50/80 p-3">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="flex flex-col gap-1">
+                  <label className={fieldLabelClass}>
+                    {t('paymentsFilterDateFrom') ?? t('dateFrom') ?? 'Дата от'}
+                  </label>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    max={toDate || undefined}
+                    onChange={(event) => handleFromDateChange(event.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className={fieldLabelClass}>
+                    {t('paymentsFilterDateTo') ?? t('dateTo') ?? 'Дата до'}
+                  </label>
+                  <input
+                    type="date"
+                    value={toDate}
+                    min={fromDate || undefined}
+                    onChange={(event) => handleToDateChange(event.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className={fieldLabelClass}>{t('status') ?? 'Статус'}</label>
+                  <select
+                    className={inputClass}
+                    value={statusFilter}
+                    onChange={(event) => {
+                      const value = event.target.value as StatusFilter;
+                      setStatusFilter(value);
+                    }}>
+                    <option value="all">{t('paymentsStatusAll') ?? t('allStatuses') ?? 'Все статусы'}</option>
+                    {availableStatuses.map((status) => (
+                      <option key={status} value={status}>
+                        {statusLabels[status] ?? status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1 md:col-span-2">
+                  <label className={fieldLabelClass}>
+                    {t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
+                  </label>
+                  <MultiSelect
+                    options={clientOptions}
+                    value={selectedClients}
+                    label={t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
+                    placeholder={t('paymentsFilterClientsPlaceholder') ?? 'Все клиенты'}
+                    emptyLabel={t('paymentsFilterClientsEmpty') ?? 'Клиенты не найдены'}
+                    clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
+                    summaryLabel={(count) =>
+                      formatCountLabel(
+                        t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
+                        count,
+                      )
+                    }
+                    onChange={setSelectedClients}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="payments-client-role-filter" className={fieldLabelClass}>
+                    Роль клиента
+                  </label>
+                  <select
+                    id="payments-client-role-filter"
+                    value={clientRoleFilter}
+                    onChange={(event) => setClientRoleFilter(event.target.value as ClientRoleFilter)}
+                    className={inputClass}
+                  >
+                    <option value="all">Любая связь</option>
+                    <option value="counterparty">Контрагент / поставщик</option>
+                    <option value="expenseClient">Клиент расхода</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1 md:col-span-2">
+                  <label className={fieldLabelClass}>
+                    {t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
+                  </label>
+                  <MultiSelect
+                    options={categoryOptions}
+                    value={selectedCategories}
+                    label={t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
+                    placeholder={t('paymentsFilterCategoriesPlaceholder') ?? 'Все категории'}
+                    emptyLabel={t('paymentsFilterCategoriesEmpty') ?? 'Категории не найдены'}
+                    clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
+                    summaryLabel={(count) =>
+                      formatCountLabel(
+                        t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
+                        count,
+                      )
+                    }
+                    onChange={setSelectedCategories}
+                  />
+                </div>
+
+                <div className="relative flex flex-col gap-1 md:col-span-2 xl:col-span-1">
+                  <label className={fieldLabelClass}>{t('search') ?? 'Поиск'}</label>
+                  <Search className="pointer-events-none absolute bottom-3 left-3 h-4 w-4 text-slate-400" />
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={t('paymentsSearchPlaceholder') ?? 'Номер, клиент или описание'}
+                    className={`${inputClass} pl-10 placeholder:text-slate-400`}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                <ToolbarIconButton
+                  label={filtersOpen ? 'Скрыть фильтры' : 'Показать фильтры'}
+                  icon={<SlidersHorizontal className="h-4 w-4" />}
+                  active={filtersOpen}
+                  badge={activeFiltersCount || undefined}
+                  onClick={() => setFiltersOpen((prev) => !prev)}
+                />
+                <ToolbarIconButton
+                  label={settingsOpen ? 'Скрыть настройки таблицы' : 'Настроить таблицу'}
+                  icon={<SlidersHorizontal className="h-4 w-4" />}
+                  active={settingsOpen}
+                  onClick={() => setSettingsOpen((prev) => !prev)}
+                />
+                <ToolbarIconButton
+                  label={t('paymentsRefresh') ?? t('invoiceRefresh') ?? 'Обновить'}
+                  icon={<RotateCcw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />}
+                  disabled={refreshing}
+                  onClick={() => {
+                    void handleRefresh();
+                  }}
+                />
+                <ToolbarIconButton
+                  label="Частичные без остатка"
+                  icon={
+                    remainderCandidatesLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4" />
+                    )
+                  }
+                  active={remainderCandidatesOpen}
+                  disabled={remainderCandidatesLoading}
+                  badge={remainderCandidatesTotal || undefined}
+                  onClick={() => {
+                    if (remainderCandidatesOpen) {
+                      setRemainderCandidatesOpen(false);
+                    } else {
+                      void loadRemainderCandidates();
+                    }
+                  }}
+                />
+                {activeFiltersCount ? (
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="ml-1 inline-flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-100">
+                    <RotateCcw className="h-4 w-4" />
+                    Сбросить все
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
         {filtersOpen ? (
           <div
             id="payments-filters-panel"
@@ -1265,90 +1350,6 @@ export function Payments({
             </div>
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {t('paymentsFilterDateFrom') ?? t('dateFrom') ?? 'Дата от'}
-                </label>
-                <input
-                  type="date"
-                  value={fromDate}
-                  max={toDate || undefined}
-                  onChange={(event) => handleFromDateChange(event.target.value)}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {t('paymentsFilterDateTo') ?? t('dateTo') ?? 'Дата до'}
-                </label>
-                <input
-                  type="date"
-                  value={toDate}
-                  min={fromDate || undefined}
-                  onChange={(event) => handleToDateChange(event.target.value)}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label htmlFor="payments-client-role-filter" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Роль клиента
-                </label>
-                <select
-                  id="payments-client-role-filter"
-                  value={clientRoleFilter}
-                  onChange={(event) => setClientRoleFilter(event.target.value as ClientRoleFilter)}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-                >
-                  <option value="all">Любая связь</option>
-                  <option value="counterparty">Контрагент / поставщик</option>
-                  <option value="expenseClient">Клиент расхода</option>
-                </select>
-              </div>
-
-              <div className="flex flex-col gap-1 md:col-span-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
-                </label>
-                <MultiSelect
-                  options={clientOptions}
-                  value={selectedClients}
-                  label={t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
-                  placeholder={t('paymentsFilterClientsPlaceholder') ?? 'Все клиенты'}
-                  emptyLabel={t('paymentsFilterClientsEmpty') ?? 'Клиенты не найдены'}
-                  clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
-                  summaryLabel={(count) =>
-                    formatCountLabel(
-                      t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
-                      count,
-                    )
-                  }
-                  onChange={setSelectedClients}
-                />
-              </div>
-
-              <div className="flex flex-col gap-1 md:col-span-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
-                </label>
-                <MultiSelect
-                  options={categoryOptions}
-                  value={selectedCategories}
-                  label={t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
-                  placeholder={t('paymentsFilterCategoriesPlaceholder') ?? 'Все категории'}
-                  emptyLabel={t('paymentsFilterCategoriesEmpty') ?? 'Категории не найдены'}
-                  clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
-                  summaryLabel={(count) =>
-                    formatCountLabel(
-                      t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
-                      count,
-                    )
-                  }
-                  onChange={setSelectedCategories}
-                />
-              </div>
-
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   {t('paymentsFilterAmountMin') ?? 'Сумма от'}
