@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  CalendarRange,
   CheckCircle2,
   ChevronDown,
   FilePlus2,
@@ -8,13 +7,16 @@ import {
   Loader2,
   Pencil,
   Plus,
+  RefreshCw,
   RotateCcw,
   Search,
-  SlidersHorizontal,
+  Table2,
   Trash2,
   WalletCards,
+  X,
 } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
@@ -136,6 +138,69 @@ function formatDate(value?: string | null): string {
   if (!normalized) return value;
   const [y, m, d] = normalized.split('-');
   return `${d}.${m}.${y}`;
+}
+
+function formatRussianCount(value: number, forms: [string, string, string]): string {
+  const absolute = Math.abs(value);
+  const lastTwo = absolute % 100;
+  const last = absolute % 10;
+
+  if (lastTwo >= 11 && lastTwo <= 14) return `${value} ${forms[2]}`;
+  if (last === 1) return `${value} ${forms[0]}`;
+  if (last >= 2 && last <= 4) return `${value} ${forms[1]}`;
+  return `${value} ${forms[2]}`;
+}
+
+function formatPaymentCount(value: number): string {
+  return formatRussianCount(value, ['платёж', 'платежа', 'платежей']);
+}
+
+function formatSupplierCount(value: number): string {
+  return formatRussianCount(value, ['поставщик', 'поставщика', 'поставщиков']);
+}
+
+function formatSupplierWord(value: number): string {
+  return formatSupplierCount(value).replace(/^\d+\s+/, '');
+}
+
+interface IconActionButtonProps {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+  className?: string;
+}
+
+function IconActionButton({
+  label,
+  onClick,
+  children,
+  active = false,
+  disabled = false,
+  className = '',
+}: IconActionButtonProps) {
+  return (
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        title={label}
+        aria-label={label}
+        className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border text-sm font-medium shadow-sm transition focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60 ${
+          active
+            ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+            : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100'
+        } ${className}`}
+      >
+        {children}
+      </button>
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 max-w-[13rem] -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-within:opacity-100">
+        {label}
+      </span>
+    </span>
+  );
 }
 
 function resolvePaymentOperationDate(payment: Payment): string | null {
@@ -378,6 +443,7 @@ export function Accounts({
   const [selectedClientId, setSelectedClientId] = useState('');
   const [clientRoleFilter, setClientRoleFilter] = useState<ClientRoleFilter>('all');
   const [payablesOnly, setPayablesOnly] = useState(false);
+  const [payablesDashboardOpen, setPayablesDashboardOpen] = useState(false);
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
@@ -491,6 +557,17 @@ export function Accounts({
     enabled: payablesOnly,
   });
 
+  const payablesOverdueCount = useMemo(
+    () => payablesDashboard?.dueBuckets.find((bucket) => bucket.key === 'overdue')?.count ?? 0,
+    [payablesDashboard],
+  );
+  const payablesUpcomingCount = useMemo(
+    () => (payablesDashboard?.dueBuckets ?? [])
+      .filter((bucket) => bucket.key === 'today' || bucket.key === 'week')
+      .reduce((sum, bucket) => sum + bucket.count, 0),
+    [payablesDashboard],
+  );
+
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil((accountsTotal || 0) / Math.max(1, pageSize || 1))),
     [accountsTotal, pageSize],
@@ -517,6 +594,21 @@ export function Accounts({
   useEffect(() => {
     setPeriod(normalizeStoredPeriod(savedPeriod, defaultPeriod));
   }, [defaultPeriod, savedPeriod]);
+
+  useEffect(() => {
+    if (!payablesDashboardOpen || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPayablesDashboardOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [payablesDashboardOpen]);
 
   useEffect(() => {
     safeWrite(`${storagePrefix}.period`, period);
@@ -1133,8 +1225,18 @@ export function Accounts({
     setSelectedClientId('');
     setClientRoleFilter('all');
     setPayablesOnly(false);
+    setPayablesDashboardOpen(false);
     setSearch('');
     setPage(1);
+  };
+
+  const openPayablesDashboard = () => {
+    if (!payablesOnly) {
+      setPayablesOnly(true);
+      setTypeFilter('Expense');
+      setStatusFilter('all');
+    }
+    setPayablesDashboardOpen(true);
   };
 
   const typeOptions: FilterType[] = ['All', 'Income', 'Expense'];
@@ -2023,6 +2125,7 @@ export function Accounts({
                         onClick={() => {
                           setTypeFilter(option);
                           setPayablesOnly(false);
+                          setPayablesDashboardOpen(false);
                         }}
                         className={`rounded-full px-4 py-1 text-sm font-medium transition-colors ${
                           isActive ? 'bg-blue-600 text-white shadow' : 'bg-transparent text-gray-600 hover:bg-gray-100'
@@ -2122,59 +2225,38 @@ export function Accounts({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 md:flex-nowrap md:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !payablesOnly;
-                      setPayablesOnly(next);
-                      if (next) {
-                        setTypeFilter('Expense');
-                        setStatusFilter('all');
-                      }
-                    }}
-                    className={`inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                      payablesOnly
-                        ? 'border-rose-200 bg-rose-50 text-rose-700'
-                        : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-100'
-                    }`}
+                  <IconActionButton
+                    label="Кредиторка"
+                    onClick={openPayablesDashboard}
+                    active={payablesOnly}
+                    className={payablesOnly ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 focus:ring-rose-200' : ''}
                   >
                     <WalletCards className="h-4 w-4" />
-                    Кредиторка
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleResetFilters}
-                    className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
-                  >
+                  </IconActionButton>
+                  <IconActionButton label={t('invoiceFiltersReset') ?? 'Сбросить'} onClick={handleResetFilters}>
                     <RotateCcw className="h-4 w-4" />
-                    {t('invoiceFiltersReset') ?? 'Сбросить'}
-                  </button>
-                  <button
-                    type="button"
+                  </IconActionButton>
+                  <IconActionButton
+                    label={t('actFiltersApply') ?? 'Обновить'}
                     onClick={() => {
                       void refreshAccounts();
                       if (payablesOnly) {
                         void refreshPayablesDashboard();
                       }
                     }}
-                    className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 transition hover:bg-blue-100"
+                    active
+                    className="border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100"
                   >
-                    {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarRange className="h-4 w-4" />}
-                    {t('actFiltersApply') ?? 'Обновить'}
-                  </button>
+                    {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  </IconActionButton>
                   <div className="relative">
-                    <button
-                      type="button"
+                    <IconActionButton
+                      label={t('tableSettings') ?? 'Таблица'}
                       onClick={() => setColumnsOpen((prev) => !prev)}
-                      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                        columnsOpen
-                          ? 'border-blue-200 bg-blue-50 text-blue-700'
-                          : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100'
-                      }`}
+                      active={columnsOpen}
                     >
-                      <SlidersHorizontal className="h-4 w-4" />
-                      {t('tableSettings') ?? 'Таблица'}
-                    </button>
+                      <Table2 className="h-4 w-4" />
+                    </IconActionButton>
                   </div>
                 </div>
               </div>
@@ -2205,135 +2287,178 @@ export function Accounts({
           </div>
         </div>
 
-        {payablesOnly ? (
-          <div className="mb-6 rounded-2xl border border-rose-100 bg-white p-4 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">
-                  Доска кредиторки
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Открытые расходные обязательства по поставщикам и срокам оплаты.
-                </p>
-              </div>
-              {payablesDashboardLoading ? (
-                <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Загрузка
-                </span>
-              ) : null}
-            </div>
-
-            {payablesDashboardError ? (
-              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {payablesDashboardError}
-              </div>
-            ) : (
-              <>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
-                    <p className="text-xs uppercase text-slate-500">Всего к оплате</p>
-                    <p className="mt-1 text-lg font-semibold text-slate-900">
-                      {formatCurrencySmart(payablesDashboard?.totalOutstanding ?? 0).full}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {payablesDashboard?.paymentCount ?? 0} платежей
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3">
-                    <p className="text-xs uppercase text-rose-600">Просрочено</p>
-                    <p className="mt-1 text-lg font-semibold text-rose-700">
-                      {formatCurrencySmart(payablesDashboard?.overdueOutstanding ?? 0).full}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
-                    <p className="text-xs uppercase text-amber-700">Ближайшие 7 дней</p>
-                    <p className="mt-1 text-lg font-semibold text-amber-700">
-                      {formatCurrencySmart(payablesDashboard?.upcomingOutstanding ?? 0).full}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
-                    <p className="text-xs uppercase text-blue-700">Поставщики</p>
-                    <p className="mt-1 text-lg font-semibold text-blue-700">
-                      {payablesDashboard?.supplierCount ?? 0}
-                    </p>
-                  </div>
+        {payablesDashboardOpen && typeof document !== 'undefined' ? createPortal(
+          <div
+            className="fixed inset-0 z-[2200] flex items-center justify-center bg-slate-900/45 p-4"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setPayablesDashboardOpen(false);
+              }
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="payables-dashboard-title"
+              className="flex max-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+                <div>
+                  <h2 id="payables-dashboard-title" className="text-lg font-semibold text-slate-900">
+                    Доска кредиторки
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Открытые расходные обязательства по поставщикам и срокам оплаты.
+                  </p>
                 </div>
+                <div className="flex items-center gap-2">
+                  {payablesDashboardLoading ? (
+                    <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Загрузка
+                    </span>
+                  ) : null}
+                  <IconActionButton
+                    label="Обновить кредиторку"
+                    onClick={() => void refreshPayablesDashboard()}
+                    active
+                    className="border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100"
+                  >
+                    {payablesDashboardLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  </IconActionButton>
+                  <IconActionButton
+                    label="Закрыть"
+                    onClick={() => setPayablesDashboardOpen(false)}
+                  >
+                    <X className="h-4 w-4" />
+                  </IconActionButton>
+                </div>
+              </div>
 
-                <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
-                  <div className="rounded-xl border border-slate-200">
-                    <div className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">
-                      Сроки оплаты
-                    </div>
-                    <div className="divide-y divide-slate-100">
-                      {(payablesDashboard?.dueBuckets ?? []).map((bucket) => (
-                        <div
-                          key={bucket.key}
-                          className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
-                        >
-                          <div>
-                            <p className="font-medium text-slate-800">{bucket.label}</p>
-                            <p className="text-xs text-slate-500">{bucket.count} платежей</p>
-                          </div>
-                          <p className="font-semibold text-slate-900">
-                            {formatCurrencySmart(bucket.amount).full}
-                          </p>
-                        </div>
-                      ))}
-                      {(payablesDashboard?.dueBuckets ?? []).length === 0 ? (
-                        <div className="px-4 py-6 text-center text-sm text-slate-500">
-                          Нет открытой кредиторки за выбранный период.
-                        </div>
-                      ) : null}
-                    </div>
+              <div className="overflow-y-auto px-6 py-5">
+                {payablesDashboardError ? (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {payablesDashboardError}
                   </div>
-
-                  <div className="rounded-xl border border-slate-200">
-                    <div className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">
-                      Поставщики с долгом
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="flex min-h-28 flex-col items-center justify-center rounded-xl border border-slate-100 bg-slate-50 px-4 py-4 text-center">
+                        <p className="text-xs uppercase text-slate-500">Всего к оплате</p>
+                        <p className="mt-2 text-xl font-semibold text-slate-900">
+                          {formatCurrencySmart(payablesDashboard?.totalOutstanding ?? 0).full}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatPaymentCount(payablesDashboard?.paymentCount ?? 0)}
+                        </p>
+                      </div>
+                      <div className="flex min-h-28 flex-col items-center justify-center rounded-xl border border-rose-100 bg-rose-50 px-4 py-4 text-center">
+                        <p className="text-xs uppercase text-rose-600">Просрочено</p>
+                        <p className="mt-2 text-xl font-semibold text-rose-700">
+                          {formatCurrencySmart(payablesDashboard?.overdueOutstanding ?? 0).full}
+                        </p>
+                        <p className="mt-1 text-xs text-rose-500">
+                          {formatPaymentCount(payablesOverdueCount)}
+                        </p>
+                      </div>
+                      <div className="flex min-h-28 flex-col items-center justify-center rounded-xl border border-amber-100 bg-amber-50 px-4 py-4 text-center">
+                        <p className="text-xs uppercase text-amber-700">Ближайшие 7 дней</p>
+                        <p className="mt-2 text-xl font-semibold text-amber-700">
+                          {formatCurrencySmart(payablesDashboard?.upcomingOutstanding ?? 0).full}
+                        </p>
+                        <p className="mt-1 text-xs text-amber-600">
+                          {formatPaymentCount(payablesUpcomingCount)}
+                        </p>
+                      </div>
+                      <div className="flex min-h-28 flex-col items-center justify-center rounded-xl border border-blue-100 bg-blue-50 px-4 py-4 text-center">
+                        <p className="text-xs uppercase text-blue-700">Поставщики</p>
+                        <p className="mt-2 text-xl font-semibold text-blue-700">
+                          {payablesDashboard?.supplierCount ?? 0}
+                        </p>
+                        <p className="mt-1 text-xs text-blue-600">
+                          {formatSupplierWord(payablesDashboard?.supplierCount ?? 0)} с долгом
+                        </p>
+                      </div>
                     </div>
-                    <div className="max-h-80 divide-y divide-slate-100 overflow-auto">
-                      {(payablesDashboard?.suppliers ?? []).slice(0, 8).map((supplier) => (
-                        <div key={`${supplier.supplierId ?? 'none'}:${supplier.supplierName}`} className="px-4 py-3 text-sm">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="truncate font-medium text-slate-800">
-                                {supplier.supplierName}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-500">
-                                {supplier.paymentCount} платежей
-                                {supplier.caseCount > 0 ? `, дел: ${supplier.caseCount}` : ''}
-                              </p>
-                              {supplier.nearestDueDate ? (
-                                <p className="mt-1 text-xs text-slate-500">
-                                  Ближайший срок: {formatDate(supplier.nearestDueDate)}
-                                </p>
-                              ) : null}
-                            </div>
-                            <div className="text-right">
+
+                    <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+                      <div className="rounded-xl border border-slate-200">
+                        <div className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">
+                          Сроки оплаты
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                          {(payablesDashboard?.dueBuckets ?? []).map((bucket) => (
+                            <div
+                              key={bucket.key}
+                              className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+                            >
+                              <div>
+                                <p className="font-medium text-slate-800">{bucket.label}</p>
+                                <p className="text-xs text-slate-500">{formatPaymentCount(bucket.count)}</p>
+                              </div>
                               <p className="font-semibold text-slate-900">
-                                {formatCurrencySmart(supplier.totalOutstanding).full}
+                                {formatCurrencySmart(bucket.amount).full}
                               </p>
-                              {supplier.overdueOutstanding > 0 ? (
-                                <p className="mt-1 text-xs font-medium text-rose-700">
-                                  Просрочено {formatCurrencySmart(supplier.overdueOutstanding).full}
-                                </p>
-                              ) : null}
                             </div>
-                          </div>
+                          ))}
+                          {(payablesDashboard?.dueBuckets ?? []).length === 0 ? (
+                            <div className="px-4 py-6 text-center text-sm text-slate-500">
+                              Нет открытой кредиторки за выбранный период.
+                            </div>
+                          ) : null}
                         </div>
-                      ))}
-                      {(payablesDashboard?.suppliers ?? []).length === 0 ? (
-                        <div className="px-4 py-6 text-center text-sm text-slate-500">
-                          Поставщики с открытым долгом не найдены.
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200">
+                        <div className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">
+                          Поставщики с долгом
                         </div>
-                      ) : null}
+                        <div className="max-h-80 divide-y divide-slate-100 overflow-auto">
+                          {(payablesDashboard?.suppliers ?? []).slice(0, 8).map((supplier) => (
+                            <div key={`${supplier.supplierId ?? 'none'}:${supplier.supplierName}`} className="px-4 py-3 text-sm">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium text-slate-800">
+                                    {supplier.supplierName}
+                                  </p>
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    {formatPaymentCount(supplier.paymentCount)}
+                                    {supplier.caseCount > 0 ? `, дел: ${supplier.caseCount}` : ''}
+                                  </p>
+                                  {supplier.nearestDueDate ? (
+                                    <p className="mt-1 text-xs text-slate-500">
+                                      Ближайший срок: {formatDate(supplier.nearestDueDate)}
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <div className="text-right">
+                                  <p className="font-semibold text-slate-900">
+                                    {formatCurrencySmart(supplier.totalOutstanding).full}
+                                  </p>
+                                  {supplier.overdueOutstanding > 0 ? (
+                                    <p className="mt-1 text-xs font-medium text-rose-700">
+                                      Просрочено {formatCurrencySmart(supplier.overdueOutstanding).full}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                          {(payablesDashboard?.suppliers ?? []).length === 0 ? (
+                            <div className="px-4 py-6 text-center text-sm text-slate-500">
+                              Поставщики с открытым долгом не найдены.
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+                  </>
+                )}
+              </div>
+            </section>
+          </div>,
+          document.body,
         ) : null}
 
         {columnsOpen ? (
