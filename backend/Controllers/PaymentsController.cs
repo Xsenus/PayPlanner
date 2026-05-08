@@ -17,8 +17,15 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class PaymentsController : ControllerBase
 {
+    private const decimal AmountTolerance = 0.009m;
+    private const string LegacyPartialPaymentNoteText = "Частичная оплата";
+
     private static readonly Regex RemainderDateHintRegex = new(
         @"(?:Остаток[^\r\n]{0,120}(?:->|→|перенесен(?:о)?\s+на)|перенесен(?:о)?\s+на)\s*(\d{2}\.\d{2}\.\d{4})",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    private static readonly Regex LegacyPartialRemainderNoteRegex = new(
+        @"Частичная\s+оплата:\s*(?<paid>[\d\s.,]+)\s*/\s*(?<original>[\d\s.,]+)[^\r\n]*?Остаток\s*(?<remainder>[\d\s.,]+)(?:\s*(?:->|→|перенес[^\d\r\n]{0,60}))?\s*(?<date>\d{2}\.\d{2}\.\d{4})",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private readonly PaymentContext _db;
@@ -450,7 +457,9 @@ public class PaymentsController : ControllerBase
                 payment.DocumentKind != DocumentKind.Invoice
                 && payment.Status != PaymentStatus.Cancelled
                 && payment.PaidAmount > 0m
-                && payment.Amount > payment.PaidAmount + 0.009m);
+                && (payment.Amount > payment.PaidAmount + AmountTolerance
+                    || (payment.SystemNotes != null && payment.SystemNotes.Contains(LegacyPartialPaymentNoteText))
+                    || (payment.Notes != null && payment.Notes.Contains(LegacyPartialPaymentNoteText))));
 
         if (!includeFuture)
         {
@@ -468,29 +477,18 @@ public class PaymentsController : ControllerBase
             .AsNoTracking()
             .ToListAsync(ct);
 
-        var candidates = rawCandidates
-            .Where(payment =>
-                !sourceIdsWithRemainders.Contains(payment.Id)
-                && !PaymentRemainderTransferRules.IsPartialRemainderSourcePayment(payment))
-            .Select(payment =>
+        var candidates = new List<PartialPaymentRemainderCandidateDto>();
+        foreach (var payment in rawCandidates)
+        {
+            if (sourceIdsWithRemainders.Contains(payment.Id)
+                || PaymentRemainderTransferRules.IsPartialRemainderSourcePayment(payment)
+                || !TryBuildPartialRemainderCandidate(payment, today, out var candidate))
             {
-                var originalAmount = Math.Round(payment.Amount, 2, MidpointRounding.AwayFromZero);
-                var paidAmount = Math.Round(payment.PaidAmount, 2, MidpointRounding.AwayFromZero);
-                var remainderAmount = Math.Round(originalAmount - paidAmount, 2, MidpointRounding.AwayFromZero);
+                continue;
+            }
 
-                return new PartialPaymentRemainderCandidateDto
-                {
-                    Payment = payment,
-                    OriginalAmount = originalAmount,
-                    PaidAmount = paidAmount,
-                    RemainderAmount = remainderAmount,
-                    DaysPastDue = payment.Date.Date < today ? (today - payment.Date.Date).Days : 0,
-                    SuggestedRemainderDate = TryInferSuggestedRemainderDate(payment, out var hintedDate)
-                        ? hintedDate
-                        : today,
-                };
-            })
-            .ToList();
+            candidates.Add(candidate);
+        }
 
         var total = candidates.Count;
         var pageItems = candidates
@@ -512,6 +510,42 @@ public class PaymentsController : ControllerBase
         });
     }
 
+    private static bool TryBuildPartialRemainderCandidate(
+        Payment payment,
+        DateTime today,
+        out PartialPaymentRemainderCandidateDto candidate)
+    {
+        candidate = default!;
+
+        var paidAmount = Math.Round(payment.PaidAmount, 2, MidpointRounding.AwayFromZero);
+        if (paidAmount <= 0m)
+        {
+            return false;
+        }
+
+        var originalAmount = ResolveStoredPartialRemainderOriginalAmount(payment);
+        var remainderAmount = Math.Round(originalAmount - paidAmount, 2, MidpointRounding.AwayFromZero);
+        if (remainderAmount <= AmountTolerance)
+        {
+            return false;
+        }
+
+        var suggestedDate = TryInferSuggestedRemainderDate(payment, out var hintedDate)
+            ? hintedDate
+            : today;
+
+        candidate = new PartialPaymentRemainderCandidateDto
+        {
+            Payment = payment,
+            OriginalAmount = originalAmount,
+            PaidAmount = paidAmount,
+            RemainderAmount = remainderAmount,
+            DaysPastDue = payment.Date.Date < today ? (today - payment.Date.Date).Days : 0,
+            SuggestedRemainderDate = suggestedDate,
+        };
+        return true;
+    }
+
     [HttpPost("{id:int}/partial-remainder/from-existing")]
     public async Task<IActionResult> TransferExistingPartialRemainder(
         int id,
@@ -526,14 +560,16 @@ public class PaymentsController : ControllerBase
         var source = await _db.Payments.AsNoTracking().FirstOrDefaultAsync(payment => payment.Id == id, ct);
         if (source is null) return NotFound();
 
+        var originalAmount = ResolveStoredPartialRemainderOriginalAmount(source);
         var paidAmount = Math.Round(source.PaidAmount, 2, MidpointRounding.AwayFromZero);
-        var remainderAmount = Math.Round(source.Amount - paidAmount, 2, MidpointRounding.AwayFromZero);
-        if (paidAmount <= 0m || remainderAmount <= 0.009m)
+        var remainderAmount = Math.Round(originalAmount - paidAmount, 2, MidpointRounding.AwayFromZero);
+        if (paidAmount <= 0m || remainderAmount <= AmountTolerance)
         {
             return BadRequest(new { message = "У платежа нет частично оплаченного остатка для переноса." });
         }
 
         var transferModel = CreateStoredPaymentTransferModel(source);
+        transferModel.Amount = originalAmount;
         _skipRemainderTransferFormRequirements = true;
         try
         {
@@ -603,7 +639,11 @@ public class PaymentsController : ControllerBase
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         var actor = User.GetDisplayName();
         var model = request.Payment;
-        var originalAmount = Math.Round(source.Amount, 2, MidpointRounding.AwayFromZero);
+        var sourceAmount = Math.Round(source.Amount, 2, MidpointRounding.AwayFromZero);
+        var modelAmount = Math.Round(Math.Max(model.Amount, 0m), 2, MidpointRounding.AwayFromZero);
+        var originalAmount = _skipRemainderTransferFormRequirements && modelAmount > sourceAmount + AmountTolerance
+            ? modelAmount
+            : sourceAmount;
         var paidAmount = Math.Round(Math.Max(model.PaidAmount, 0m), 2, MidpointRounding.AwayFromZero);
         var remainderAmount = Math.Round(originalAmount - paidAmount, 2, MidpointRounding.AwayFromZero);
 
@@ -612,7 +652,7 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = "Для переноса остатка укажите фактически оплаченную сумму." });
         }
 
-        if (remainderAmount <= 0.009m)
+        if (remainderAmount <= AmountTolerance)
         {
             return BadRequest(new { message = "Остаток к переносу не образуется." });
         }
@@ -1025,6 +1065,85 @@ public class PaymentsController : ControllerBase
         return sourceIds;
     }
 
+    private static decimal ResolveStoredPartialRemainderOriginalAmount(Payment payment)
+    {
+        var storedAmount = Math.Round(payment.Amount, 2, MidpointRounding.AwayFromZero);
+        var paidAmount = Math.Round(payment.PaidAmount, 2, MidpointRounding.AwayFromZero);
+
+        if (TryReadLegacyPartialRemainderHint(payment, out var hint)
+            && storedAmount <= paidAmount + AmountTolerance
+            && hint.OriginalAmount > storedAmount + AmountTolerance
+            && hint.OriginalAmount > paidAmount + AmountTolerance)
+        {
+            return hint.OriginalAmount;
+        }
+
+        return storedAmount;
+    }
+
+    private static bool TryReadLegacyPartialRemainderHint(Payment payment, out LegacyPartialRemainderHint hint)
+    {
+        foreach (var text in new[] { payment.SystemNotes, payment.Notes })
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var matches = LegacyPartialRemainderNoteRegex.Matches(text);
+            for (var index = matches.Count - 1; index >= 0; index--)
+            {
+                var match = matches[index];
+                if (!TryParseLegacyMoney(match.Groups["paid"].Value, out var paidAmount)
+                    || !TryParseLegacyMoney(match.Groups["original"].Value, out var originalAmount)
+                    || !TryParseLegacyMoney(match.Groups["remainder"].Value, out var remainderAmount)
+                    || !DateTime.TryParseExact(
+                        match.Groups["date"].Value,
+                        "dd.MM.yyyy",
+                        CultureInfo.GetCultureInfo("ru-RU"),
+                        DateTimeStyles.None,
+                        out var remainderDate))
+                {
+                    continue;
+                }
+
+                paidAmount = Math.Round(paidAmount, 2, MidpointRounding.AwayFromZero);
+                originalAmount = Math.Round(originalAmount, 2, MidpointRounding.AwayFromZero);
+                remainderAmount = Math.Round(remainderAmount, 2, MidpointRounding.AwayFromZero);
+                var calculatedRemainder = Math.Round(originalAmount - paidAmount, 2, MidpointRounding.AwayFromZero);
+                if (paidAmount <= 0m
+                    || originalAmount <= paidAmount + AmountTolerance
+                    || remainderAmount <= AmountTolerance
+                    || Math.Abs(calculatedRemainder - remainderAmount) > 0.01m)
+                {
+                    continue;
+                }
+
+                hint = new LegacyPartialRemainderHint(
+                    originalAmount,
+                    paidAmount,
+                    remainderAmount,
+                    remainderDate.Date);
+                return true;
+            }
+        }
+
+        hint = default;
+        return false;
+    }
+
+    private static bool TryParseLegacyMoney(string rawValue, out decimal amount)
+    {
+        var normalized = Regex.Replace(rawValue.Trim(), @"[\s\u00A0\u202F]+", string.Empty)
+            .Replace(',', '.');
+
+        return decimal.TryParse(
+            normalized,
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out amount);
+    }
+
     private static bool TryInferSuggestedRemainderDate(Payment payment, out DateTime suggestedDate)
     {
         foreach (var text in new[] { payment.SystemNotes, payment.Notes })
@@ -1055,6 +1174,12 @@ public class PaymentsController : ControllerBase
         suggestedDate = default;
         return false;
     }
+
+    private readonly record struct LegacyPartialRemainderHint(
+        decimal OriginalAmount,
+        decimal PaidAmount,
+        decimal RemainderAmount,
+        DateTime RemainderDate);
 
     private static Payment CreateStoredPaymentTransferModel(Payment source)
     {

@@ -2411,6 +2411,52 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task GetPartialRemainderCandidates_ReturnsLegacyShrunkPartialPaymentFromSystemNote()
+    {
+        await using var db = await CreateContextAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var suggestedRemainderDate = today.AddDays(12);
+        var client = new Client { Name = "Клиент старого сжатого платежа", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var candidate = CreatePayment(today.AddDays(-18), 35_000m, "Сжатый платеж с остатком");
+        candidate.ClientId = client.Id;
+        candidate.PaidAmount = 35_000m;
+        candidate.PaidDate = today.AddDays(-18);
+        candidate.LastPaymentDate = today.AddDays(-18);
+        candidate.IsPaid = true;
+        candidate.Status = PaymentStatus.Completed;
+        candidate.SystemNotes =
+            $"Системно: Частичная оплата: 35 000.00 / 80 000.00 • Остаток 45 000.00 → {suggestedRemainderDate:dd.MM.yyyy}";
+        db.Payments.Add(candidate);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.GetPartialRemainderCandidates(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            includeFuture: false,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PartialPaymentRemainderCandidatesResponse>(ok.Value);
+
+        var item = Assert.Single(response.Items);
+        Assert.Equal(candidate.Id, item.Payment.Id);
+        Assert.Equal(80_000m, item.OriginalAmount);
+        Assert.Equal(35_000m, item.PaidAmount);
+        Assert.Equal(45_000m, item.RemainderAmount);
+        Assert.Equal(suggestedRemainderDate, item.SuggestedRemainderDate);
+        Assert.Equal(45_000m, response.TotalRemainderAmount);
+    }
+
+    [Fact]
     public async Task BackfillLegacyPartialRemainderLinks_CreatesStructuredLinksFromMarkers()
     {
         await using var db = await CreateContextAsync();
@@ -2510,6 +2556,68 @@ public class PaymentsControllerTests
         Assert.Equal(12_000m, transferLink.SourceOriginalAmount);
         Assert.Equal(5_000m, transferLink.PaidAmount);
         Assert.Equal(7_000m, transferLink.RemainderAmount);
+        Assert.Equal(remainderDate, transferLink.RemainderDate);
+        Assert.Equal(source.Id, response.Payment.Id);
+        Assert.Equal(storedRemainder.Id, response.RemainderPayment.Id);
+    }
+
+    [Fact]
+    public async Task TransferExistingPartialRemainder_UsesLegacyOriginalAmountFromSystemNote()
+    {
+        await using var db = await CreateContextAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var client = new Client { Name = "Клиент переноса сжатого остатка", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var source = CreatePayment(today.AddDays(-20), 35_000m, "Сжатый старый платеж");
+        source.ClientId = client.Id;
+        source.PaidAmount = 35_000m;
+        source.PaidDate = today.AddDays(-19);
+        source.LastPaymentDate = today.AddDays(-19);
+        source.IsPaid = true;
+        source.Status = PaymentStatus.Completed;
+        source.SystemNotes =
+            $"Системно: Частичная оплата: 35 000.00 / 80 000.00 • Остаток 45 000.00 → {today.AddDays(10):dd.MM.yyyy}";
+        db.Payments.Add(source);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var remainderDate = today.AddDays(10);
+
+        var actionResult = await controller.TransferExistingPartialRemainder(
+            source.Id,
+            new TransferExistingPaymentRemainderRequest { RemainderDate = remainderDate },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var response = Assert.IsType<TransferPaymentRemainderResponse>(ok.Value);
+        Assert.True(response.CreatedRemainder);
+
+        db.ChangeTracker.Clear();
+        var storedSource = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == source.Id);
+        var storedRemainder = await db.Payments.AsNoTracking()
+            .SingleAsync(payment => payment.SystemNotes.Contains(PaymentRemainderTransferRules.PartialRemainderMarker));
+        var transferLink = await db.PaymentRemainderTransfers.AsNoTracking().SingleAsync();
+
+        Assert.Equal(35_000m, storedSource.Amount);
+        Assert.Equal(35_000m, storedSource.PaidAmount);
+        Assert.True(storedSource.IsPaid);
+        Assert.Equal(PaymentStatus.Completed, storedSource.Status);
+        Assert.Contains(PaymentRemainderTransferRules.PartialRemainderSourceMarker, storedSource.SystemNotes);
+
+        Assert.Equal(45_000m, storedRemainder.Amount);
+        Assert.Equal(0m, storedRemainder.PaidAmount);
+        Assert.False(storedRemainder.IsPaid);
+        Assert.Equal(remainderDate, storedRemainder.Date);
+        Assert.Equal(client.Id, storedRemainder.ClientId);
+        Assert.Equal(source.Id, transferLink.SourcePaymentId);
+        Assert.Equal(storedRemainder.Id, transferLink.RemainderPaymentId);
+        Assert.Equal(80_000m, transferLink.SourceOriginalAmount);
+        Assert.Equal(35_000m, transferLink.PaidAmount);
+        Assert.Equal(45_000m, transferLink.RemainderAmount);
         Assert.Equal(remainderDate, transferLink.RemainderDate);
         Assert.Equal(source.Id, response.Payment.Id);
         Assert.Equal(storedRemainder.Id, response.RemainderPayment.Id);
