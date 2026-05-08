@@ -93,6 +93,28 @@ export function isPaymentsListPath(): boolean {
   return /^\/payments\/?$/i.test(window.location.pathname);
 }
 
+export function getPathTaskId(): number | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const match = window.location.pathname.match(/^\/tasks\/(\d+)\/?$/i);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number(match[1]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function isTasksListPath(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return /^\/tasks\/?$/i.test(window.location.pathname);
+}
+
 export function getPathClientId(): number | null {
   if (typeof window === 'undefined') {
     return null;
@@ -211,6 +233,10 @@ export function getInitialTab(): Tab {
     return isPaymentsTab(urlTab as Tab) ? (urlTab as Tab) : 'payments';
   }
 
+  if (getPathTaskId() || isTasksListPath()) {
+    return 'tasks';
+  }
+
   if (getPathContractId()) {
     return 'contractDetail';
   }
@@ -256,6 +282,10 @@ export function getInitialTab(): Tab {
 }
 
 export function getTabHref(tab: Tab): string {
+  if (tab === 'tasks') {
+    return '/tasks';
+  }
+
   if (tab === 'clients') {
     return '/clients';
   }
@@ -300,6 +330,10 @@ export function getInitialInvoiceId(): number | null {
 
 export function getInitialPaymentId(): number | null {
   return getPathPaymentId();
+}
+
+export function getInitialTaskId(): number | null {
+  return getPathTaskId();
 }
 
 export function getInitialClientId(): number | null {

@@ -26,6 +26,7 @@ import {
   getInitialInvoiceId,
   getInitialPaymentId,
   getInitialTab,
+  getInitialTaskId,
   getInitialUserId,
   LAST_TAB_STORAGE_KEY,
 } from './appRouting';
@@ -131,6 +132,7 @@ function AppContent() {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(getInitialUserId);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(getInitialPaymentId);
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(getInitialTaskId);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [initialClientSection, setInitialClientSection] = useState<'accounts' | 'acts' | undefined>(undefined);
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -355,6 +357,18 @@ function AppContent() {
     [permissions.payments.canView],
   );
 
+  const openTaskDetail = useCallback(
+    (taskId: number) => {
+      if (!permissions.tasks.canView || !(taskId > 0)) {
+        return;
+      }
+
+      setSelectedTaskId(taskId);
+      setActiveTab('tasks');
+    },
+    [permissions.tasks.canView],
+  );
+
   const applyActReturnContext = useCallback((context: ActReturnContext) => {
     setActReturnContext(context);
     if (context.tab === 'acts' || context.tab === 'actsIncome' || context.tab === 'actsExpense') {
@@ -471,6 +485,12 @@ function AppContent() {
         setSelectedPaymentId(null);
       }
 
+      if (tab !== 'tasks') {
+        setSelectedTaskId(null);
+      } else if (tab !== activeTab) {
+        setSelectedTaskId(null);
+      }
+
       if (tab !== 'contractDetail') {
         setContractReturnTab(null);
       }
@@ -497,6 +517,8 @@ function AppContent() {
     const url = new URL(window.location.href);
     if (activeTab === 'clients') {
       url.pathname = '/clients';
+    } else if (activeTab === 'tasks') {
+      url.pathname = selectedTaskId ? `/tasks/${selectedTaskId}` : '/tasks';
     } else if (activeTab === 'clientDetail') {
       url.pathname = selectedClientId ? `/clients/${selectedClientId}` : '/clients';
     } else if (activeTab === 'accounts' || activeTab === 'accountsIncome' || activeTab === 'accountsExpense') {
@@ -514,6 +536,8 @@ function AppContent() {
     } else if (activeTab === 'contractDetail') {
       url.pathname = selectedContractId ? `/contracts/${selectedContractId}` : '/contracts';
     } else if (/^\/clients(?:\/\d+)?\/?$/i.test(url.pathname)) {
+      url.pathname = '/';
+    } else if (/^\/tasks(?:\/\d+)?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
     } else if (/^\/invoices(?:\/\d+)?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
@@ -562,6 +586,7 @@ function AppContent() {
     selectedContractId,
     selectedInvoiceId,
     selectedPaymentId,
+    selectedTaskId,
     selectedUserId,
   ]);
 
@@ -697,7 +722,7 @@ function AppContent() {
 
       case 'tasks':
         return permissions.tasks.canView
-          ? <TaskJournal />
+          ? <TaskJournal routeTaskId={selectedTaskId} onRouteTaskChange={setSelectedTaskId} />
           : renderNoAccess('Журнал задач недоступен для вашей роли.');
 
       case 'reports':
@@ -1149,6 +1174,7 @@ function AppContent() {
             title={tabNames[activeTab] ?? ''}
             onSignOut={signOut}
             onOpenProfile={handleOpenProfile}
+            onOpenTask={openTaskDetail}
           />
           <main className="flex-1">
             <RouteErrorBoundary

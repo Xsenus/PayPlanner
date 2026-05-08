@@ -7,16 +7,19 @@ import {
   getInitialContractReturnTab,
   getInitialPaymentId,
   getInitialTab,
+  getInitialTaskId,
   getTabHref,
   getPathActId,
   getPathClientId,
   getPathContractId,
   getPathPaymentId,
+  getPathTaskId,
   isActCreatePath,
   isActsListPath,
   isClientsListPath,
   isContractsListPath,
   isPaymentsListPath,
+  isTasksListPath,
 } from './appRouting';
 
 describe('App payment routing helpers', () => {
@@ -50,6 +53,28 @@ describe('App payment routing helpers', () => {
     window.history.replaceState({}, '', '/payments/880?ppTab=profile');
 
     expect(getInitialTab()).toBe('payments');
+  });
+});
+
+describe('App task routing helpers', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    window.localStorage.clear();
+  });
+
+  it('parses a task id from the pathname', () => {
+    window.history.replaceState({}, '', '/tasks/58');
+
+    expect(getPathTaskId()).toBe(58);
+    expect(getInitialTaskId()).toBe(58);
+    expect(getInitialTab()).toBe('tasks');
+  });
+
+  it('detects the tasks list pathname', () => {
+    window.history.replaceState({}, '', '/tasks');
+
+    expect(isTasksListPath()).toBe(true);
+    expect(getInitialTab()).toBe('tasks');
   });
 });
 
@@ -124,6 +149,7 @@ describe('App sidebar routing helpers', () => {
 
   it('builds real href values for menu tabs', () => {
     expect(getTabHref('calendar')).toBe('/?ppTab=calendar');
+    expect(getTabHref('tasks')).toBe('/tasks');
     expect(getTabHref('clients')).toBe('/clients');
     expect(getTabHref('accountsIncome')).toBe('/invoices?ppTab=accountsIncome');
     expect(getTabHref('paymentsExpense')).toBe('/payments?ppTab=paymentsExpense');

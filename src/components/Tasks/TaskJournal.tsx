@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlarmClock,
   Bell,
@@ -41,6 +41,10 @@ import {
 type ViewMode = 'list' | 'board';
 type PeriodMode = 'day' | 'week' | 'month';
 type ModalState = { mode: 'create' | 'edit'; task?: TaskJournalItem } | null;
+type TaskJournalProps = {
+  routeTaskId?: number | null;
+  onRouteTaskChange?: (taskId: number | null) => void;
+};
 
 type TaskForm = TaskJournalUpsertPayload & { dueAt: string };
 
@@ -204,7 +208,7 @@ function serializeCsvValue(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-export function TaskJournal() {
+export function TaskJournal({ routeTaskId = null, onRouteTaskChange }: TaskJournalProps) {
   const { user } = useAuth();
   const toast = useToast();
   const { confirm } = useDialog();
@@ -218,9 +222,35 @@ export function TaskJournal() {
   const [assigneeFilter, setAssigneeFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>('all');
   const [modal, setModal] = useState<ModalState>(null);
+  const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
+  const routeTaskRequestRef = useRef(0);
+  const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
 
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
+
+  const openTaskEditor = useCallback(
+    (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
+      setModal({ mode: 'edit', task });
+      setHighlightedTaskId(task.id);
+
+      if (options?.syncRoute ?? true) {
+        onRouteTaskChange?.(task.id);
+      }
+    },
+    [onRouteTaskChange],
+  );
+
+  const openTaskCreate = useCallback(() => {
+    setModal({ mode: 'create' });
+    setHighlightedTaskId(null);
+    onRouteTaskChange?.(null);
+  }, [onRouteTaskChange]);
+
+  const closeTaskModal = useCallback(() => {
+    setModal(null);
+    onRouteTaskChange?.(null);
+  }, [onRouteTaskChange]);
 
   const refreshTasks = useCallback(async () => {
     setLoading(true);
@@ -244,6 +274,56 @@ export function TaskJournal() {
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
     return () => window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
   }, [refreshTasks]);
+
+  useEffect(() => {
+    if (!(routeTaskId && routeTaskId > 0)) {
+      routeTaskRequestRef.current += 1;
+      lastOpenedRouteTaskIdRef.current = null;
+      return;
+    }
+
+    if (lastOpenedRouteTaskIdRef.current === routeTaskId) {
+      return;
+    }
+
+    const showTask = (task: TaskJournalItem) => {
+      setViewMode('list');
+      setStatusFilter('all');
+      setAssigneeFilter('all');
+      setTypeFilter('all');
+      setSearch('');
+      openTaskEditor(task, { syncRoute: false });
+      lastOpenedRouteTaskIdRef.current = routeTaskId;
+    };
+
+    const existingTask = tasks.find((task) => task.id === routeTaskId);
+    if (existingTask) {
+      showTask(existingTask);
+      return;
+    }
+
+    const requestId = routeTaskRequestRef.current + 1;
+    routeTaskRequestRef.current = requestId;
+
+    void (async () => {
+      try {
+        const task = await apiService.getTaskJournalItem(routeTaskId);
+        if (routeTaskRequestRef.current !== requestId) {
+          return;
+        }
+
+        setTasks((previous) => (previous.some((item) => item.id === task.id) ? previous : [task, ...previous]));
+        showTask(task);
+      } catch {
+        if (routeTaskRequestRef.current !== requestId) {
+          return;
+        }
+
+        toast.error('Задача из уведомления не найдена или уже удалена.', 'Журнал задач');
+        onRouteTaskChange?.(null);
+      }
+    })();
+  }, [onRouteTaskChange, openTaskEditor, routeTaskId, tasks, toast]);
 
   const assigneeOptions = useMemo(() => {
     const byId = new Map<number, TaskJournalAssignee>();
@@ -369,7 +449,7 @@ export function TaskJournal() {
         await apiService.createTaskJournalItem(normalized);
         toast.success('Задача создана.', 'Журнал задач');
       }
-      setModal(null);
+      closeTaskModal();
       await refreshTasks();
       emitTaskChange();
     } catch {
@@ -389,6 +469,10 @@ export function TaskJournal() {
     try {
       await apiService.deleteTaskJournalItem(task.id);
       toast.success('Задача удалена.', 'Журнал задач');
+      if (routeTaskId === task.id) {
+        onRouteTaskChange?.(null);
+      }
+      setHighlightedTaskId((previous) => (previous === task.id ? null : previous));
       await refreshTasks();
       emitTaskChange();
     } catch {
@@ -453,7 +537,7 @@ export function TaskJournal() {
               </button>
               <button
                 type="button"
-                onClick={() => setModal({ mode: 'create' })}
+                onClick={openTaskCreate}
                 className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
               >
                 <Plus className="h-4 w-4" />
@@ -563,7 +647,8 @@ export function TaskJournal() {
           ) : (
           <TaskTable
             tasks={filteredTasks}
-            onEdit={(task) => setModal({ mode: 'edit', task })}
+            highlightedTaskId={highlightedTaskId}
+            onEdit={openTaskEditor}
             onDelete={handleDelete}
             onStatusChange={setTaskStatus}
           />
@@ -571,7 +656,8 @@ export function TaskJournal() {
         ) : (
           <TaskBoard
             columns={boardColumns}
-            onEdit={(task) => setModal({ mode: 'edit', task })}
+            highlightedTaskId={highlightedTaskId}
+            onEdit={openTaskEditor}
             onDone={(task) => setTaskStatus(task, 'done')}
           />
         )}
@@ -579,11 +665,12 @@ export function TaskJournal() {
 
       {modal ? (
         <TaskModal
+          key={modal.task ? `edit-${modal.task.id}` : 'create'}
           state={modal}
           assignees={assignees}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
-          onClose={() => setModal(null)}
+          onClose={closeTaskModal}
           onSave={handleSave}
         />
       ) : null}
@@ -616,11 +703,13 @@ function MetricCard({ label, value, icon: Icon, tone }: { label: string; value: 
 
 function TaskTable({
   tasks,
+  highlightedTaskId,
   onEdit,
   onDelete,
   onStatusChange,
 }: {
   tasks: TaskJournalItem[];
+  highlightedTaskId: number | null;
   onEdit: (task: TaskJournalItem) => void;
   onDelete: (task: TaskJournalItem) => void;
   onStatusChange: (task: TaskJournalItem, status: TaskJournalStatus) => void;
@@ -651,9 +740,15 @@ function TaskTable({
             ) : tasks.map((task) => {
               const TypeIcon = getTypeMeta(task.type).icon;
               const isOverdue = isTaskJournalActive(task.status) && new Date(task.dueAt).getTime() < Date.now();
+              const isHighlighted = highlightedTaskId === task.id;
 
               return (
-                <tr key={task.id} className="align-top transition hover:bg-slate-50">
+                <tr
+                  key={task.id}
+                  className={`align-top transition ${
+                    isHighlighted ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-200' : 'hover:bg-slate-50'
+                  }`}
+                >
                   <td className="max-w-[280px] px-4 py-4">
                     <div className="font-semibold text-slate-900">{task.objectName}</div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -714,10 +809,12 @@ function TaskTable({
 
 function TaskBoard({
   columns,
+  highlightedTaskId,
   onEdit,
   onDone,
 }: {
   columns: Array<{ key: string; title: string; tone: string; items: TaskJournalItem[] }>;
+  highlightedTaskId: number | null;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
 }) {
@@ -738,8 +835,14 @@ function TaskBoard({
               </div>
             ) : column.items.map((task) => {
               const TypeIcon = getTypeMeta(task.type).icon;
+              const isHighlighted = highlightedTaskId === task.id;
               return (
-                <article key={task.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <article
+                  key={task.id}
+                  className={`rounded-xl border bg-white p-4 shadow-sm ${
+                    isHighlighted ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'
+                  }`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${priorityClass(task.priority)}`}>
                       {getPriorityLabel(task.priority)}
