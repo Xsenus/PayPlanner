@@ -116,6 +116,117 @@ public class StatsSummaryServiceTests
     }
 
     [Fact]
+    public async Task GetAsync_ExcludesRepresentativeInvoice_WhenInstallmentChildIsOutsideSelectedRange()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client
+        {
+            Name = "Installment calendar client",
+            IsActive = true,
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Calendar installment",
+            Status = ClientCaseStatus.Open,
+        };
+
+        var installmentInvoice = new Invoice
+        {
+            Number = "179",
+            Date = new DateTime(2025, 12, 16),
+        };
+
+        var regularInvoice = new Invoice
+        {
+            Number = "51",
+            Date = new DateTime(2026, 5, 3),
+        };
+
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.Invoices.AddRange(installmentInvoice, regularInvoice);
+        await db.SaveChangesAsync();
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                Amount = 26_500m,
+                PaidAmount = 26_500m,
+                Date = new DateTime(2026, 5, 25),
+                PlannedDate = new DateTime(2026, 5, 25),
+                Description = "Representative invoice in selected range",
+                DocumentKind = DocumentKind.Invoice,
+                Status = PaymentStatus.Completed,
+                Type = PaymentType.Income,
+                ClientId = client.Id,
+                ClientCaseId = clientCase.Id,
+                InvoiceId = installmentInvoice.Id,
+                Account = installmentInvoice.Number,
+                AccountDate = installmentInvoice.Date,
+                Notes = string.Empty,
+                SystemNotes = string.Empty,
+            },
+            new Payment
+            {
+                Amount = 26_500m,
+                PaidAmount = 26_500m,
+                Date = new DateTime(2026, 4, 23),
+                PlannedDate = new DateTime(2026, 4, 23),
+                Description = "Generated installment outside selected range",
+                DocumentKind = DocumentKind.Payment,
+                Status = PaymentStatus.Completed,
+                Type = PaymentType.Income,
+                ClientId = client.Id,
+                ClientCaseId = clientCase.Id,
+                InvoiceId = installmentInvoice.Id,
+                Account = installmentInvoice.Number,
+                AccountDate = installmentInvoice.Date,
+                Notes = string.Empty,
+                SystemNotes = InvoiceManagedPaymentRules.InstallmentPaymentMarker,
+            },
+            new Payment
+            {
+                Amount = 37_000m,
+                PaidAmount = 37_000m,
+                Date = new DateTime(2026, 5, 15),
+                PlannedDate = new DateTime(2026, 5, 15),
+                Description = "Regular completed invoice",
+                DocumentKind = DocumentKind.Invoice,
+                Status = PaymentStatus.Completed,
+                Type = PaymentType.Income,
+                ClientId = client.Id,
+                ClientCaseId = clientCase.Id,
+                InvoiceId = regularInvoice.Id,
+                Account = regularInvoice.Number,
+                AccountDate = regularInvoice.Date,
+                Notes = string.Empty,
+                SystemNotes = string.Empty,
+            });
+        await db.SaveChangesAsync();
+
+        var service = new StatsSummaryService(db);
+
+        var summary = await service.GetAsync(
+            null,
+            null,
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            PaymentType.Income,
+            PaymentStatus.Completed,
+            null,
+            null,
+            CancellationToken.None);
+
+        Assert.Equal(37_000m, summary.Income.CompletedAmount);
+        Assert.Equal(37_000m, summary.Income.TotalAmount);
+        Assert.Equal(1, summary.Income.CompletedCount);
+        Assert.Equal(1, summary.Income.TotalCount);
+    }
+
+    [Fact]
     public async Task GetAsync_FiltersExpenseStatsByClientRole()
     {
         await using var db = await CreateContextAsync();

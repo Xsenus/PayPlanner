@@ -30,6 +30,7 @@ namespace PayPlanner.Api.Services
 
             var qry = _db.Payments
                 .AsNoTracking()
+                .ExcludeInstallmentParentInvoices(_db)
                 .Where(x => x.Date >= f && x.Date <= t);
 
             if (clientId.HasValue)
