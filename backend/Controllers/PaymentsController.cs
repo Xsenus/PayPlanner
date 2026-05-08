@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,8 +17,13 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class PaymentsController : ControllerBase
 {
+    private static readonly Regex RemainderDateHintRegex = new(
+        @"(?:Остаток[^\r\n]{0,120}(?:->|→|перенесен(?:о)?\s+на)|перенесен(?:о)?\s+на)\s*(\d{2}\.\d{2}\.\d{4})",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
+    private bool _skipRemainderTransferFormRequirements;
     public PaymentsController(PaymentContext db, IFormRequirementsService formRequirements)
     {
         _db = db;
@@ -415,6 +421,137 @@ public class PaymentsController : ControllerBase
         return Ok(e);
     }
 
+    [HttpGet("partial-remainder-candidates")]
+    public async Task<ActionResult<PartialPaymentRemainderCandidatesResponse>> GetPartialRemainderCandidates(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? clientId,
+        [FromQuery] int? caseId,
+        [FromQuery] int? legalEntityId = null,
+        [FromQuery] string? clientRole = null,
+        [FromQuery] PaymentType? type = null,
+        [FromQuery] bool includeFuture = false,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var now = DateTime.UtcNow;
+        var today = now.Date;
+        var sourceIdsWithRemainders = await GetPartialRemainderSourceIdsAsync(ct);
+
+        var query = _db.Payments
+            .AsQueryable()
+            .WithPaymentIncludes()
+            .ApplyPaymentFilters(from, to, clientId, caseId, null, clientRole, legalEntityId)
+            .Where(payment =>
+                payment.DocumentKind != DocumentKind.Invoice
+                && payment.Status != PaymentStatus.Cancelled
+                && payment.PaidAmount > 0m
+                && payment.Amount > payment.PaidAmount + 0.009m);
+
+        if (!includeFuture)
+        {
+            query = query.Where(payment => payment.Date < today);
+        }
+
+        if (type.HasValue)
+        {
+            query = query.Where(payment => payment.Type == type.Value);
+        }
+
+        var rawCandidates = await query
+            .OrderByDescending(payment => payment.Date)
+            .ThenByDescending(payment => payment.Id)
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        var candidates = rawCandidates
+            .Where(payment =>
+                !sourceIdsWithRemainders.Contains(payment.Id)
+                && !PaymentRemainderTransferRules.IsPartialRemainderSourcePayment(payment))
+            .Select(payment =>
+            {
+                var originalAmount = Math.Round(payment.Amount, 2, MidpointRounding.AwayFromZero);
+                var paidAmount = Math.Round(payment.PaidAmount, 2, MidpointRounding.AwayFromZero);
+                var remainderAmount = Math.Round(originalAmount - paidAmount, 2, MidpointRounding.AwayFromZero);
+
+                return new PartialPaymentRemainderCandidateDto
+                {
+                    Payment = payment,
+                    OriginalAmount = originalAmount,
+                    PaidAmount = paidAmount,
+                    RemainderAmount = remainderAmount,
+                    DaysPastDue = payment.Date.Date < today ? (today - payment.Date.Date).Days : 0,
+                    SuggestedRemainderDate = TryInferSuggestedRemainderDate(payment, out var hintedDate)
+                        ? hintedDate
+                        : today,
+                };
+            })
+            .ToList();
+
+        var total = candidates.Count;
+        var pageItems = candidates
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        return Ok(new PartialPaymentRemainderCandidatesResponse
+        {
+            Items = pageItems,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+            TotalOriginalAmount = candidates.Sum(item => item.OriginalAmount),
+            TotalPaidAmount = candidates.Sum(item => item.PaidAmount),
+            TotalRemainderAmount = candidates.Sum(item => item.RemainderAmount),
+            IncludeFuture = includeFuture,
+            CheckedAt = now,
+        });
+    }
+
+    [HttpPost("{id:int}/partial-remainder/from-existing")]
+    public async Task<IActionResult> TransferExistingPartialRemainder(
+        int id,
+        [FromBody] TransferExistingPaymentRemainderRequest request,
+        CancellationToken ct)
+    {
+        if (request.RemainderDate == default)
+        {
+            return BadRequest(new { message = "Укажите дату переноса остатка." });
+        }
+
+        var source = await _db.Payments.AsNoTracking().FirstOrDefaultAsync(payment => payment.Id == id, ct);
+        if (source is null) return NotFound();
+
+        var paidAmount = Math.Round(source.PaidAmount, 2, MidpointRounding.AwayFromZero);
+        var remainderAmount = Math.Round(source.Amount - paidAmount, 2, MidpointRounding.AwayFromZero);
+        if (paidAmount <= 0m || remainderAmount <= 0.009m)
+        {
+            return BadRequest(new { message = "У платежа нет частично оплаченного остатка для переноса." });
+        }
+
+        var transferModel = CreateStoredPaymentTransferModel(source);
+        _skipRemainderTransferFormRequirements = true;
+        try
+        {
+            return await TransferPartialRemainder(
+                id,
+                new TransferPaymentRemainderRequest
+                {
+                    Payment = transferModel,
+                    RemainderDate = request.RemainderDate.Date,
+                },
+                ct);
+        }
+        finally
+        {
+            _skipRemainderTransferFormRequirements = false;
+        }
+    }
+
     [HttpPut("{id:int}/partial-remainder")]
     public async Task<IActionResult> TransferPartialRemainder(
         int id,
@@ -431,8 +568,11 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = "Укажите дату переноса остатка." });
         }
 
-        var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", request.Payment);
-        if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+        if (!_skipRemainderTransferFormRequirements)
+        {
+            var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", request.Payment);
+            if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+        }
 
         var source = await LoadPaymentForRemainderTransferAsync(id, ct);
         if (source is null) return NotFound();
@@ -654,6 +794,15 @@ public class PaymentsController : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        UpsertPartialRemainderTransfer(
+            source.Id,
+            remainderPayment.Id,
+            originalAmount,
+            paidAmount,
+            remainderAmount,
+            request.RemainderDate.Date,
+            now);
+        await _db.SaveChangesAsync(ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, remainderPayment, now, ct);
         await _db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -704,6 +853,7 @@ public class PaymentsController : ControllerBase
         PaymentDomainService.Normalize(source);
         PaymentDomainService.ApplyStatusRules(source, now);
 
+        await RemovePartialRemainderTransferAsync(source.Id, remainder.Id, ct);
         _db.Payments.Remove(remainder);
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, source, source.PaidAmount, now, HttpContext, ct);
         await _db.SaveChangesAsync(ct);
@@ -825,6 +975,14 @@ public class PaymentsController : ControllerBase
         var remainderValidationError = await ValidatePaymentAttributionAsync(remainder, ct);
         if (remainderValidationError is not null) return remainderValidationError;
 
+        UpsertPartialRemainderTransfer(
+            source.Id,
+            remainder.Id,
+            sourceOriginalAmount,
+            paidAmount,
+            remainderAmount,
+            remainderDate,
+            now);
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, source, paidAmount, now, HttpContext, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, source, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, remainder, now, ct);
@@ -841,6 +999,108 @@ public class PaymentsController : ControllerBase
         });
     }
 
+    private async Task<HashSet<int>> GetPartialRemainderSourceIdsAsync(CancellationToken ct)
+    {
+        var sourceIds = await _db.PaymentRemainderTransfers
+            .AsNoTracking()
+            .Select(item => item.SourcePaymentId)
+            .ToHashSetAsync(ct);
+
+        var markerLines = await _db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.SystemNotes != null
+                              && payment.SystemNotes.Contains(PaymentRemainderTransferRules.PartialRemainderMarker))
+            .Select(payment => payment.SystemNotes)
+            .ToListAsync(ct);
+
+        foreach (var systemNotes in markerLines)
+        {
+            if (PaymentRemainderTransferRules.TryReadMarker(systemNotes, out var marker)
+                && marker.SourcePaymentId > 0)
+            {
+                sourceIds.Add(marker.SourcePaymentId);
+            }
+        }
+
+        return sourceIds;
+    }
+
+    private static bool TryInferSuggestedRemainderDate(Payment payment, out DateTime suggestedDate)
+    {
+        foreach (var text in new[] { payment.SystemNotes, payment.Notes })
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var match = RemainderDateHintRegex.Match(text);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            if (DateTime.TryParseExact(
+                    match.Groups[1].Value,
+                    "dd.MM.yyyy",
+                    CultureInfo.GetCultureInfo("ru-RU"),
+                    DateTimeStyles.None,
+                    out suggestedDate))
+            {
+                suggestedDate = suggestedDate.Date;
+                return true;
+            }
+        }
+
+        suggestedDate = default;
+        return false;
+    }
+
+    private static Payment CreateStoredPaymentTransferModel(Payment source)
+    {
+        var effectivePaidDate = source.LastPaymentDate ?? source.PaidDate ?? source.Date;
+        return new Payment
+        {
+            Id = source.Id,
+            Account = source.Account,
+            AccountDate = source.AccountDate,
+            Amount = source.Amount,
+            ClientCaseId = source.ClientCaseId,
+            ClientCaseReference = source.ClientCaseReference,
+            ClientId = source.ClientId,
+            LegalEntityId = source.LegalEntityId,
+            ContractId = source.ContractId,
+            CounterpartyName = source.CounterpartyName,
+            CreatedAt = source.CreatedAt,
+            Date = source.Date,
+            DealTypeId = source.DealTypeId,
+            Description = source.Description,
+            DocumentKind = source.DocumentKind,
+            ExpenseClientId = source.ExpenseClientId,
+            ExpenseLegalEntityId = source.ExpenseLegalEntityId,
+            IncomeTypeId = source.IncomeTypeId,
+            InvoiceId = source.InvoiceId,
+            IsNotForAccounting = source.IsNotForAccounting,
+            IsPaid = source.IsPaid,
+            LastPaymentDate = effectivePaidDate,
+            LegacyAccountDate = source.LegacyAccountDate,
+            LegacyAccountNumber = source.LegacyAccountNumber,
+            Notes = source.Notes,
+            PaidAmount = source.PaidAmount,
+            PaidDate = effectivePaidDate,
+            PaymentDocumentDate = source.PaymentDocumentDate,
+            PaymentOrderNumber = source.PaymentOrderNumber,
+            PaymentSourceId = source.PaymentSourceId,
+            PaymentStatusId = source.PaymentStatusId,
+            PlannedDate = source.PlannedDate == default ? source.Date : source.PlannedDate,
+            RescheduleCount = source.RescheduleCount,
+            ServiceId = source.ServiceId,
+            Status = source.Status,
+            SystemNotes = source.SystemNotes,
+            Type = source.Type,
+        };
+    }
+
     private async Task<Payment?> LoadPaymentForRemainderTransferAsync(int id, CancellationToken ct)
         => await _db.Payments
             .Include(payment => payment.Responsibles)
@@ -849,7 +1109,18 @@ public class PaymentsController : ControllerBase
 
     private async Task<Payment?> FindPartialRemainderPaymentAsync(int sourcePaymentId, CancellationToken ct)
     {
-        var candidates = await _db.Payments
+        var structuredRemainderId = await _db.PaymentRemainderTransfers
+            .AsNoTracking()
+            .Where(link => link.SourcePaymentId == sourcePaymentId)
+            .Select(link => (int?)link.RemainderPaymentId)
+            .FirstOrDefaultAsync(ct);
+
+        if (structuredRemainderId.HasValue)
+        {
+            return await LoadPaymentForRemainderTransferAsync(structuredRemainderId.Value, ct);
+        }
+
+        var legacyCandidates = await _db.Payments
             .Include(payment => payment.Responsibles)
             .Include(payment => payment.InvoiceClientCases)
             .Where(payment => payment.SystemNotes != null
@@ -857,9 +1128,74 @@ public class PaymentsController : ControllerBase
             .OrderBy(payment => payment.Id)
             .ToListAsync(ct);
 
-        return candidates.FirstOrDefault(payment =>
+        return legacyCandidates.FirstOrDefault(payment =>
             PaymentRemainderTransferRules.TryReadMarker(payment.SystemNotes, out var marker)
             && marker.SourcePaymentId == sourcePaymentId);
+    }
+
+    private async Task<bool> IsPartialRemainderPaymentAsync(Payment payment, CancellationToken ct)
+        => PaymentRemainderTransferRules.IsPartialRemainderPayment(payment)
+           || await _db.PaymentRemainderTransfers
+               .AsNoTracking()
+               .AnyAsync(link => link.RemainderPaymentId == payment.Id, ct);
+
+    private static PaymentRemainderTransferRules.PartialRemainderMarkerData ToMarkerData(PaymentRemainderTransfer link)
+        => new(
+            link.SourcePaymentId,
+            Math.Round(link.SourceOriginalAmount, 2, MidpointRounding.AwayFromZero),
+            Math.Round(link.PaidAmount, 2, MidpointRounding.AwayFromZero),
+            Math.Round(link.RemainderAmount, 2, MidpointRounding.AwayFromZero),
+            link.RemainderDate.Date);
+
+    private void UpsertPartialRemainderTransfer(
+        int sourcePaymentId,
+        int remainderPaymentId,
+        decimal sourceOriginalAmount,
+        decimal paidAmount,
+        decimal remainderAmount,
+        DateTime remainderDate,
+        DateTime now)
+    {
+        var link = _db.PaymentRemainderTransfers.Local.FirstOrDefault(item =>
+                       item.SourcePaymentId == sourcePaymentId
+                       || item.RemainderPaymentId == remainderPaymentId)
+                   ?? _db.PaymentRemainderTransfers.FirstOrDefault(item =>
+                       item.SourcePaymentId == sourcePaymentId
+                       || item.RemainderPaymentId == remainderPaymentId);
+
+        if (link is null)
+        {
+            _db.PaymentRemainderTransfers.Add(new PaymentRemainderTransfer
+            {
+                SourcePaymentId = sourcePaymentId,
+                RemainderPaymentId = remainderPaymentId,
+                SourceOriginalAmount = sourceOriginalAmount,
+                PaidAmount = paidAmount,
+                RemainderAmount = remainderAmount,
+                RemainderDate = remainderDate.Date,
+                CreatedAt = now,
+            });
+            return;
+        }
+
+        link.SourcePaymentId = sourcePaymentId;
+        link.RemainderPaymentId = remainderPaymentId;
+        link.SourceOriginalAmount = sourceOriginalAmount;
+        link.PaidAmount = paidAmount;
+        link.RemainderAmount = remainderAmount;
+        link.RemainderDate = remainderDate.Date;
+        link.UpdatedAt = now;
+    }
+
+    private async Task RemovePartialRemainderTransferAsync(int sourcePaymentId, int remainderPaymentId, CancellationToken ct)
+    {
+        var link = await _db.PaymentRemainderTransfers.FirstOrDefaultAsync(item =>
+            item.SourcePaymentId == sourcePaymentId
+            || item.RemainderPaymentId == remainderPaymentId, ct);
+        if (link is not null)
+        {
+            _db.PaymentRemainderTransfers.Remove(link);
+        }
     }
 
     private async Task<PartialRemainderTransferPair?> ResolvePartialRemainderTransferPairAsync(int paymentId, CancellationToken ct)
@@ -870,13 +1206,35 @@ public class PaymentsController : ControllerBase
             return null;
         }
 
+        var structuredAsRemainder = await _db.PaymentRemainderTransfers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(link => link.RemainderPaymentId == paymentId, ct);
+        if (structuredAsRemainder is not null)
+        {
+            var source = await LoadPaymentForRemainderTransferAsync(structuredAsRemainder.SourcePaymentId, ct);
+            return source is null
+                ? null
+                : new PartialRemainderTransferPair(source, current, ToMarkerData(structuredAsRemainder), structuredAsRemainder.Id);
+        }
+
+        var structuredAsSource = await _db.PaymentRemainderTransfers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(link => link.SourcePaymentId == paymentId, ct);
+        if (structuredAsSource is not null)
+        {
+            var structuredRemainderPayment = await LoadPaymentForRemainderTransferAsync(structuredAsSource.RemainderPaymentId, ct);
+            return structuredRemainderPayment is null
+                ? null
+                : new PartialRemainderTransferPair(current, structuredRemainderPayment, ToMarkerData(structuredAsSource), structuredAsSource.Id);
+        }
+
         if (PaymentRemainderTransferRules.TryReadMarker(current.SystemNotes, out var currentMarker)
             && currentMarker.SourcePaymentId > 0)
         {
             var source = await LoadPaymentForRemainderTransferAsync(currentMarker.SourcePaymentId, ct);
             return source is null
                 ? null
-                : new PartialRemainderTransferPair(source, current, currentMarker);
+                : new PartialRemainderTransferPair(source, current, currentMarker, null);
         }
 
         var remainder = await FindPartialRemainderPaymentAsync(current.Id, ct);
@@ -886,7 +1244,7 @@ public class PaymentsController : ControllerBase
             return null;
         }
 
-        return new PartialRemainderTransferPair(current, remainder, marker);
+        return new PartialRemainderTransferPair(current, remainder, marker, null);
     }
 
     private async Task<ActionResult?> ValidateRemainderCanBeReworkedAsync(
@@ -911,7 +1269,7 @@ public class PaymentsController : ControllerBase
 
     private async Task<ActionResult?> ValidatePartialRemainderUpdateAsync(Payment current, Payment model, CancellationToken ct)
     {
-        if (PaymentRemainderTransferRules.IsPartialRemainderPayment(current))
+        if (await IsPartialRemainderPaymentAsync(current, ct))
         {
             if (!AreAmountsEqual(model.Amount, current.Amount))
             {
@@ -944,7 +1302,8 @@ public class PaymentsController : ControllerBase
     private readonly record struct PartialRemainderTransferPair(
         Payment Source,
         Payment Remainder,
-        PaymentRemainderTransferRules.PartialRemainderMarkerData Marker);
+        PaymentRemainderTransferRules.PartialRemainderMarkerData Marker,
+        int? TransferId);
 
     private static void AppendSourceRemainderAuditNotes(
         Payment source,
@@ -1847,7 +2206,7 @@ public class PaymentsController : ControllerBase
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (payment is null) return NotFound();
 
-        if (PaymentRemainderTransferRules.IsPartialRemainderPayment(payment))
+        if (await IsPartialRemainderPaymentAsync(payment, ct))
         {
             return Conflict(new { message = PaymentRemainderTransferRules.RemainderDeleteBlockedMessage });
         }

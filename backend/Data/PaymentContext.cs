@@ -724,6 +724,37 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.ClientCaseId, e.Date, e.Type, e.Status }).HasDatabaseName("IX_Payments_ClientCaseId_Date_Type_Status");
         });
 
+        modelBuilder.Entity<PaymentRemainderTransfer>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SourceOriginalAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.PaidAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RemainderAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.RemainderDate).HasColumnType("date");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.SourcePayment)
+                .WithMany()
+                .HasForeignKey(e => e.SourcePaymentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.RemainderPayment)
+                .WithMany()
+                .HasForeignKey(e => e.RemainderPaymentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.SourcePaymentId)
+                .IsUnique()
+                .HasDatabaseName("IX_PaymentRemainderTransfers_SourcePaymentId");
+
+            entity.HasIndex(e => e.RemainderPaymentId)
+                .IsUnique()
+                .HasDatabaseName("IX_PaymentRemainderTransfers_RemainderPaymentId");
+
+            entity.HasIndex(e => e.RemainderDate)
+                .HasDatabaseName("IX_PaymentRemainderTransfers_RemainderDate");
+        });
+
         modelBuilder.Entity<PaymentResponsible>(entity =>
         {
             entity.HasKey(x => new { x.PaymentId, x.UserId });
@@ -2253,6 +2284,8 @@ public class PaymentContext : DbContext
     /// Платежи клиентов.
     /// </summary>
     public DbSet<Payment> Payments { get; set; }
+
+    public DbSet<PaymentRemainderTransfer> PaymentRemainderTransfers { get; set; }
 
     public DbSet<ClientBalanceTransaction> ClientBalanceTransactions { get; set; }
 

@@ -3424,6 +3424,54 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("Payments");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.PaymentRemainderTransfer", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<decimal>("PaidAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("RemainderAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("RemainderDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("RemainderPaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("SourceOriginalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("SourcePaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RemainderDate")
+                        .HasDatabaseName("IX_PaymentRemainderTransfers_RemainderDate");
+
+                    b.HasIndex("RemainderPaymentId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PaymentRemainderTransfers_RemainderPaymentId");
+
+                    b.HasIndex("SourcePaymentId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PaymentRemainderTransfers_SourcePaymentId");
+
+                    b.ToTable("PaymentRemainderTransfers");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentResponsible", b =>
                 {
                     b.Property<int>("PaymentId")
@@ -5343,6 +5391,25 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("PaymentStatusEntity");
 
                     b.Navigation("Service");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.PaymentRemainderTransfer", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Payment", "RemainderPayment")
+                        .WithMany()
+                        .HasForeignKey("RemainderPaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Payment", "SourcePayment")
+                        .WithMany()
+                        .HasForeignKey("SourcePaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("RemainderPayment");
+
+                    b.Navigation("SourcePayment");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.PaymentResponsible", b =>
