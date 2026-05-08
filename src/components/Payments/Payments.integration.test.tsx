@@ -162,6 +162,7 @@ vi.mock('../../services/api', () => ({
     deletePayment: vi.fn(),
     getClientBalance: vi.fn(),
     applyClientBalance: vi.fn(),
+    getPartialPaymentRemainderCandidates: vi.fn(),
   },
 }));
 
@@ -178,8 +179,20 @@ describe('Payments integration', () => {
     vi.mocked(apiService.deletePayment).mockReset();
     vi.mocked(apiService.getClientBalance).mockReset();
     vi.mocked(apiService.applyClientBalance).mockReset();
+    vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockReset();
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 0 });
     vi.mocked(apiService.applyClientBalance).mockResolvedValue({ appliedAmount: 0, balance: 0 });
+    vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 100,
+      totalOriginalAmount: 0,
+      totalPaidAmount: 0,
+      totalRemainderAmount: 0,
+      includeFuture: false,
+      checkedAt: '2026-05-08T00:00:00Z',
+    });
     usePaymentsPagedMock.mockReset();
     usePaymentsPagedMock.mockReturnValue(paymentsPagedResult);
     paymentsPagedResult.payments = [];
@@ -223,7 +236,6 @@ describe('Payments integration', () => {
   it('passes the selected client role into the paged payments query', async () => {
     render(<Payments />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Показать фильтры/i }));
     fireEvent.change(screen.getByLabelText('Роль клиента'), {
       target: { value: 'expenseClient' },
     });
@@ -231,6 +243,38 @@ describe('Payments integration', () => {
     await waitFor(() => {
       const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
       expect(lastCall).toMatchObject({ clientRole: 'expenseClient' });
+    });
+  });
+
+  it('preloads partial remainder candidates and highlights the toolbar action', async () => {
+    vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockResolvedValueOnce({
+      items: [],
+      total: 3,
+      page: 1,
+      pageSize: 100,
+      totalOriginalAmount: 80_000,
+      totalPaidAmount: 20_000,
+      totalRemainderAmount: 60_000,
+      includeFuture: false,
+      checkedAt: '2026-05-08T00:00:00Z',
+    });
+
+    render(<Payments />);
+
+    await waitFor(() => {
+      expect(apiService.getPartialPaymentRemainderCandidates).toHaveBeenCalledWith(
+        expect.objectContaining({
+          includeFuture: false,
+          page: 1,
+          pageSize: 100,
+        }),
+      );
+    });
+
+    const action = screen.getByRole('button', { name: 'Частичные без остатка' });
+    await waitFor(() => {
+      expect(action.className).toContain('border-amber');
+      expect(action.textContent).toContain('3');
     });
   });
 

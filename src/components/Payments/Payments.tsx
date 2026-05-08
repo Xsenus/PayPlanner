@@ -18,6 +18,7 @@ import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
+import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { apiService } from '../../services/api';
 import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from '../../utils/invoicePayments';
@@ -192,6 +193,7 @@ interface ToolbarIconButtonProps {
   active?: boolean;
   disabled?: boolean;
   badge?: number;
+  warning?: boolean;
   onClick: () => void;
 }
 
@@ -201,8 +203,17 @@ function ToolbarIconButton({
   active = false,
   disabled = false,
   badge,
+  warning = false,
   onClick,
 }: ToolbarIconButtonProps) {
+  const toneClass = active
+    ? warning
+      ? 'border-amber-300 bg-amber-100 text-amber-800 shadow-sm'
+      : 'border-blue-300 bg-blue-50 text-blue-700 shadow-sm'
+    : warning
+      ? 'border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400 hover:bg-amber-100'
+      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900';
+
   return (
     <button
       type="button"
@@ -210,16 +221,12 @@ function ToolbarIconButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className={`relative inline-flex h-10 w-10 items-center justify-center rounded-lg border text-sm font-medium transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
-        active
-          ? 'border-blue-300 bg-blue-50 text-blue-700 shadow-sm'
-          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900'
-      }`}
+      className={`relative inline-flex h-10 w-10 items-center justify-center rounded-lg border text-sm font-medium transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${toneClass}`}
     >
       {icon}
       <span className="sr-only">{label}</span>
       {badge ? (
-        <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-900 px-1.5 text-[10px] font-semibold text-white">
+        <span className={`absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold text-white ${warning ? 'bg-amber-600' : 'bg-slate-900'}`}>
           {badge}
         </span>
       ) : null}
@@ -268,12 +275,11 @@ export function Payments({
 
   const [fromDate, setFromDate] = useState(() => defaultFromDate());
   const [toDate, setToDate] = useState(() => defaultToDate());
-  const [selectedClients, setSelectedClients] = useState<string[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState('');
   const [clientRoleFilter, setClientRoleFilter] = useState<ClientRoleFilter>('all');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [minAmount, setMinAmount] = useState('');
   const [maxAmount, setMaxAmount] = useState('');
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(defaultType ?? 'all');
@@ -303,6 +309,7 @@ export function Payments({
   const initialFromRef = useRef(fromDate);
   const initialToRef = useRef(toDate);
   const routePaymentRequestRef = useRef(0);
+  const toastRef = useRef(toast);
   const [autoRetryScheduled, setAutoRetryScheduled] = useState(false);
   const autoRetryAttemptsRef = useRef(0);
   const autoRetryTimerRef = useRef<number | null>(null);
@@ -334,9 +341,14 @@ export function Payments({
     minColumnWidth: 120,
   });
 
+  useEffect(() => {
+    toastRef.current = toast;
+  }, [toast]);
+
   const minAmountValue = useMemo(() => parseAmountInput(minAmount), [minAmount]);
   const maxAmountValue = useMemo(() => parseAmountInput(maxAmount), [maxAmount]);
   const appliedTypeFilter: TypeFilter = lockType ? (defaultType ?? 'all') : typeFilter;
+  const selectedClientIds = useMemo(() => (selectedClientId ? [selectedClientId] : []), [selectedClientId]);
 
   const {
     payments,
@@ -349,7 +361,7 @@ export function Payments({
   } = usePaymentsPaged({
     from: fromInputToApiDate(fromDate),
     to: fromInputToApiDate(toDate),
-    clientIds: selectedClients,
+    clientIds: selectedClientIds,
     clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
     categoryTokens: selectedCategories,
     type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
@@ -363,13 +375,14 @@ export function Payments({
     pageSize,
   });
 
-  const clientOptions = useMemo<MultiSelectOption[]>(
+  const clientLookupOptions = useMemo<LookupSelectOption[]>(
     () =>
       clients
         .filter((client) => client?.id && client?.name)
         .map((client) => ({
           value: String(client.id),
           label: client.name ?? `#${client.id}`,
+          keywords: [String(client.id), client.name ?? ''],
         }))
         .sort((a, b) => a.label.localeCompare(b.label, 'ru')),
     [clients],
@@ -557,7 +570,7 @@ export function Payments({
       [
         fromDate,
         toDate,
-        selectedClients.join(','),
+        selectedClientId,
         clientRoleFilter,
         selectedCategories.join(','),
         minAmount || '',
@@ -574,7 +587,7 @@ export function Payments({
       minAmount,
       searchQuery,
       selectedCategories,
-      selectedClients,
+      selectedClientId,
       statusFilter,
       toDate,
     ],
@@ -653,7 +666,7 @@ export function Payments({
     if (fromDate !== initialFromRef.current || toDate !== initialToRef.current) {
       count += 1;
     }
-    if (selectedClients.length) {
+    if (selectedClientId) {
       count += 1;
     }
     if (clientRoleFilter !== 'all') {
@@ -686,7 +699,7 @@ export function Payments({
     minAmount,
     searchQuery,
     selectedCategories,
-    selectedClients,
+    selectedClientId,
     statusFilter,
     toDate,
     typeFilter,
@@ -780,7 +793,7 @@ export function Payments({
   const handleResetFilters = useCallback(() => {
     setFromDate(defaultFromDate());
     setToDate(defaultToDate());
-    setSelectedClients([]);
+    setSelectedClientId('');
     setClientRoleFilter('all');
     setSelectedCategories([]);
     setMinAmount('');
@@ -982,12 +995,15 @@ export function Payments({
     [refresh, t, toast],
   );
 
-  const loadRemainderCandidates = useCallback(async () => {
-    setRemainderCandidatesOpen(true);
+  const loadRemainderCandidates = useCallback(async (options: { openPanel?: boolean; showError?: boolean } = {}) => {
+    const { openPanel = true, showError = true } = options;
+    if (openPanel) {
+      setRemainderCandidatesOpen(true);
+    }
     setRemainderCandidatesLoading(true);
     try {
       const response = await apiService.getPartialPaymentRemainderCandidates({
-        clientId: selectedClients.length === 1 ? Number(selectedClients[0]) : undefined,
+        clientId: selectedClientId ? Number(selectedClientId) : undefined,
         clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
         type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
         includeFuture: false,
@@ -1005,14 +1021,20 @@ export function Payments({
         return next;
       });
     } catch (error) {
-      toast.error(
-        extractDisplayErrorMessage(error, 'Не удалось проверить частичные оплаты без переноса.'),
-        'Платежи',
-      );
+      if (showError) {
+        toastRef.current.error(
+          extractDisplayErrorMessage(error, 'Не удалось проверить частичные оплаты без переноса.'),
+          'Платежи',
+        );
+      }
     } finally {
       setRemainderCandidatesLoading(false);
     }
-  }, [appliedTypeFilter, clientRoleFilter, selectedClients, toast]);
+  }, [appliedTypeFilter, clientRoleFilter, selectedClientId]);
+
+  useEffect(() => {
+    void loadRemainderCandidates({ openPanel: false, showError: false });
+  }, [loadRemainderCandidates]);
 
   const handleTransferExistingRemainder = useCallback(
     async (candidate: PartialPaymentRemainderCandidate) => {
@@ -1094,8 +1116,10 @@ export function Payments({
     paymentsPermissions.canCreate &&
     (!lockType || effectiveDefaultType === 'Expense' || effectiveDefaultType === 'all');
   const fieldLabelClass = 'text-sm font-semibold text-slate-700';
+  const centeredFieldLabelClass = `${fieldLabelClass} text-center`;
   const inputClass =
     'h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100';
+  const centeredDateInputClass = `${inputClass} text-center`;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1119,7 +1143,7 @@ export function Payments({
                   onClick={() => handleAddPayment('Income')}
                   className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-200">
                   <Plus className="h-4 w-4" />
-                  {t('addIncome') ?? 'Добавить доход'}
+                  Доход
                 </button>
               ) : null}
               {showExpenseButton ? (
@@ -1128,7 +1152,7 @@ export function Payments({
                   onClick={() => handleAddPayment('Expense')}
                   className="inline-flex h-10 items-center gap-2 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-200">
                   <Plus className="h-4 w-4" />
-                  {t('addExpense') ?? 'Добавить расход'}
+                  Расход
                 </button>
               ) : null}
             </div>
@@ -1163,7 +1187,7 @@ export function Payments({
             <div className="rounded-xl bg-slate-50/80 p-3">
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 <div className="flex flex-col gap-1">
-                  <label className={fieldLabelClass}>
+                  <label className={centeredFieldLabelClass}>
                     {t('paymentsFilterDateFrom') ?? t('dateFrom') ?? 'Дата от'}
                   </label>
                   <input
@@ -1171,12 +1195,12 @@ export function Payments({
                     value={fromDate}
                     max={toDate || undefined}
                     onChange={(event) => handleFromDateChange(event.target.value)}
-                    className={inputClass}
+                    className={centeredDateInputClass}
                   />
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <label className={fieldLabelClass}>
+                  <label className={centeredFieldLabelClass}>
                     {t('paymentsFilterDateTo') ?? t('dateTo') ?? 'Дата до'}
                   </label>
                   <input
@@ -1184,7 +1208,7 @@ export function Payments({
                     value={toDate}
                     min={fromDate || undefined}
                     onChange={(event) => handleToDateChange(event.target.value)}
-                    className={inputClass}
+                    className={centeredDateInputClass}
                   />
                 </div>
 
@@ -1207,23 +1231,19 @@ export function Payments({
                 </div>
 
                 <div className="flex flex-col gap-1 md:col-span-2">
-                  <label className={fieldLabelClass}>
-                    {t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
-                  </label>
-                  <MultiSelect
-                    options={clientOptions}
-                    value={selectedClients}
-                    label={t('paymentsFilterClientsLabel') ?? t('clients') ?? 'Клиенты'}
-                    placeholder={t('paymentsFilterClientsPlaceholder') ?? 'Все клиенты'}
-                    emptyLabel={t('paymentsFilterClientsEmpty') ?? 'Клиенты не найдены'}
-                    clearLabel={t('paymentsFiltersClear') ?? 'Очистить'}
-                    summaryLabel={(count) =>
-                      formatCountLabel(
-                        t('paymentsFiltersSelectedCount') ?? 'Выбрано: {{count}}',
-                        count,
-                      )
-                    }
-                    onChange={setSelectedClients}
+                  <LookupSelect
+                    label="Клиент / поставщик"
+                    value={selectedClientId}
+                    options={clientLookupOptions}
+                    onChange={setSelectedClientId}
+                    placeholder="Все контрагенты"
+                    title="Выбор клиента / поставщика"
+                    dictionaryLabel="Открыть справочник"
+                    searchPlaceholder="Поиск по ФИО, компании, телефону или email"
+                    emptyOptionLabel="Все контрагенты"
+                    emptyOptionDescription="Показать платежи всех клиентов и поставщиков"
+                    buttonClassName="border-slate-200 focus:border-blue-400"
+                    noOptionsText="Клиенты не найдены"
                   />
                 </div>
 
@@ -1243,7 +1263,19 @@ export function Payments({
                   </select>
                 </div>
 
-                <div className="flex flex-col gap-1 md:col-span-2">
+                <div className="relative flex flex-col gap-1 md:col-span-2">
+                  <label className={fieldLabelClass}>{t('search') ?? 'Поиск'}</label>
+                  <Search className="pointer-events-none absolute bottom-3 left-3 h-4 w-4 text-slate-400" />
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={t('paymentsSearchPlaceholder') ?? 'Номер, клиент или описание'}
+                    className={`${inputClass} pl-10 placeholder:text-slate-400`}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
                   <label className={fieldLabelClass}>
                     {t('paymentsFilterCategoriesLabel') ?? t('category') ?? 'Категории'}
                   </label>
@@ -1262,29 +1294,41 @@ export function Payments({
                     }
                     onChange={setSelectedCategories}
                   />
-                </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-center text-xs font-semibold text-slate-500">
+                        {t('paymentsFilterAmountMin') ?? 'Сумма от'}
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        value={minAmount}
+                        onChange={(event) => setMinAmount(event.target.value)}
+                        placeholder="0"
+                        className={`${inputClass} text-center`}
+                      />
+                    </div>
 
-                <div className="relative flex flex-col gap-1 md:col-span-2 xl:col-span-1">
-                  <label className={fieldLabelClass}>{t('search') ?? 'Поиск'}</label>
-                  <Search className="pointer-events-none absolute bottom-3 left-3 h-4 w-4 text-slate-400" />
-                  <input
-                    type="search"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder={t('paymentsSearchPlaceholder') ?? 'Номер, клиент или описание'}
-                    className={`${inputClass} pl-10 placeholder:text-slate-400`}
-                  />
+                    <div className="flex flex-col gap-1">
+                      <label className="text-center text-xs font-semibold text-slate-500">
+                        {t('paymentsFilterAmountMax') ?? 'Сумма до'}
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        value={maxAmount}
+                        onChange={(event) => setMaxAmount(event.target.value)}
+                        placeholder="0"
+                        className={`${inputClass} text-center`}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                <ToolbarIconButton
-                  label={filtersOpen ? 'Скрыть фильтры' : 'Показать фильтры'}
-                  icon={<SlidersHorizontal className="h-4 w-4" />}
-                  active={filtersOpen}
-                  badge={activeFiltersCount || undefined}
-                  onClick={() => setFiltersOpen((prev) => !prev)}
-                />
                 <ToolbarIconButton
                   label={settingsOpen ? 'Скрыть настройки таблицы' : 'Настроить таблицу'}
                   icon={<SlidersHorizontal className="h-4 w-4" />}
@@ -1311,11 +1355,12 @@ export function Payments({
                   active={remainderCandidatesOpen}
                   disabled={remainderCandidatesLoading}
                   badge={remainderCandidatesTotal || undefined}
+                  warning={remainderCandidatesTotal > 0}
                   onClick={() => {
                     if (remainderCandidatesOpen) {
                       setRemainderCandidatesOpen(false);
                     } else {
-                      void loadRemainderCandidates();
+                      void loadRemainderCandidates({ openPanel: true });
                     }
                   }}
                 />
@@ -1332,57 +1377,6 @@ export function Payments({
             </div>
           </div>
         </div>
-        {filtersOpen ? (
-          <div
-            id="payments-filters-panel"
-            className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium text-slate-600">
-                {t('paymentsFiltersTitle') ?? 'Дополнительные фильтры'}
-              </p>
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-900">
-                <RotateCcw className="h-3.5 w-3.5" />
-                {t('paymentsFiltersReset') ?? 'Сбросить фильтры'}
-              </button>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {t('paymentsFilterAmountMin') ?? 'Сумма от'}
-                </label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  value={minAmount}
-                  onChange={(event) => setMinAmount(event.target.value)}
-                  placeholder="0"
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {t('paymentsFilterAmountMax') ?? 'Сумма до'}
-                </label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  value={maxAmount}
-                  onChange={(event) => setMaxAmount(event.target.value)}
-                  placeholder="0"
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-slate-400 focus:outline-none"
-                />
-              </div>
-            </div>
-          </div>
-        ) : null}
-
         {settingsOpen ? (
           <div id="payments-settings-panel">
             <TableColumnSettings
@@ -1444,20 +1438,22 @@ export function Payments({
                   type="button"
                   onClick={() => void loadRemainderCandidates()}
                   disabled={remainderCandidatesLoading}
-                  className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-50 disabled:opacity-60">
+                  aria-label="Проверить снова"
+                  title="Проверить снова"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-amber-200 bg-white text-amber-700 transition hover:bg-amber-50 disabled:opacity-60">
                   {remainderCandidatesLoading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <RotateCcw className="h-4 w-4" />
                   )}
-                  Проверить снова
                 </button>
                 <button
                   type="button"
                   onClick={() => setRemainderCandidatesOpen(false)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
+                  aria-label="Закрыть"
+                  title="Закрыть"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50">
                   <X className="h-4 w-4" />
-                  Закрыть
                 </button>
               </div>
             </div>
@@ -1517,7 +1513,7 @@ export function Payments({
                             <td className="px-4 py-3 font-semibold text-amber-700">
                               {formatCurrencySmart(candidate.remainderAmount).full}
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3 align-middle">
                               <input
                                 type="date"
                                 value={remainderCandidateDates[payment.id] ?? ''}
@@ -1527,23 +1523,24 @@ export function Payments({
                                     [payment.id]: event.target.value,
                                   }))
                                 }
-                                className="w-[160px] rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-amber-400 focus:outline-none"
+                                className="h-10 w-[160px] rounded-lg border border-slate-200 px-3 text-center text-sm text-slate-700 shadow-sm focus:border-amber-400 focus:outline-none"
                               />
                             </td>
-                            <td className="px-4 py-3">
-                              <div className="flex justify-end gap-2">
+                            <td className="px-4 py-3 align-middle">
+                              <div className="flex items-center justify-end gap-2">
                                 <button
                                   type="button"
                                   onClick={() => handleEditPayment(payment)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50">
+                                  aria-label="Открыть"
+                                  title="Открыть"
+                                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50">
                                   <Pencil className="h-3.5 w-3.5" />
-                                  Открыть
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => void handleTransferExistingRemainder(candidate)}
                                   disabled={remainderCandidatesLoading}
-                                  className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-amber-700 disabled:opacity-60">
+                                  className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-amber-600 px-3 text-xs font-medium text-white transition hover:bg-amber-700 disabled:opacity-60">
                                   <CalendarPlus className="h-3.5 w-3.5" />
                                   Создать остаток
                                 </button>
