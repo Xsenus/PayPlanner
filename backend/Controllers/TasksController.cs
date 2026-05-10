@@ -61,12 +61,7 @@ public class TasksController : ControllerBase
     private readonly INotificationService _notificationService;
     private readonly string _taskFilesRoot;
 
-    public TasksController(PaymentContext db, INotificationService notificationService)
-        : this(db, notificationService, null)
-    {
-    }
-
-    public TasksController(PaymentContext db, INotificationService notificationService, IWebHostEnvironment? environment)
+    public TasksController(PaymentContext db, INotificationService notificationService, IWebHostEnvironment? environment = null)
     {
         _db = db;
         _notificationService = notificationService;
