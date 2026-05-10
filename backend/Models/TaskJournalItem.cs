@@ -37,6 +37,8 @@ public class TaskJournalItem
 
     public DateTime DueAt { get; set; }
 
+    public int PlannedDurationMinutes { get; set; } = 60;
+
     [MaxLength(32)]
     public string Type { get; set; } = "task";
 
@@ -52,6 +54,10 @@ public class TaskJournalItem
     public string RemindersJson { get; set; } = "[]";
     public string ChannelsJson { get; set; } = "[]";
     public string TagsJson { get; set; } = "[]";
+
+    public ICollection<TaskJournalParticipant> Participants { get; set; } = new List<TaskJournalParticipant>();
+    public ICollection<TaskJournalComment> Comments { get; set; } = new List<TaskJournalComment>();
+    public ICollection<TaskJournalFile> Files { get; set; } = new List<TaskJournalFile>();
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }

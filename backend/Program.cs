@@ -117,6 +117,7 @@ builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
 builder.Services.AddHostedService<InvoicePaymentStateReconciliationService>();
 builder.Services.AddHostedService<TaskJournalReminderNotificationService>();
+builder.Services.AddHostedService<TaskJournalAutomationSchedulerService>();
 builder.Services.AddHostedService<TelegramBotPollingService>();
 builder.Services.AddHostedService<MoneyBalanceReconciliationSchedulerService>();
 builder.Services.AddHostedService<UserActivityRetentionService>();

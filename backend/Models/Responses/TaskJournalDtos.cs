@@ -15,6 +15,7 @@ public class TaskJournalItemDto
     public int? AuthorUserId { get; set; }
     public string AuthorName { get; set; } = string.Empty;
     public string DueAt { get; set; } = string.Empty;
+    public int PlannedDurationMinutes { get; set; } = 60;
     public string Type { get; set; } = "task";
     public string Priority { get; set; } = "normal";
     public string Status { get; set; } = "new";
@@ -22,8 +23,49 @@ public class TaskJournalItemDto
     public IReadOnlyList<string> Reminders { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> Channels { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> Tags { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<TaskJournalParticipantDto> Participants { get; set; } = Array.Empty<TaskJournalParticipantDto>();
     public string CreatedAt { get; set; } = string.Empty;
     public string? UpdatedAt { get; set; }
+}
+
+public class TaskJournalParticipantDto
+{
+    public int Id { get; set; }
+    public int? UserId { get; set; }
+    public string Role { get; set; } = "assignee";
+    public string DisplayName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public string ApprovalStatus { get; set; } = "pending";
+    public string Resolution { get; set; } = string.Empty;
+    public string? RespondedAt { get; set; }
+}
+
+public class TaskJournalCommentDto
+{
+    public int Id { get; set; }
+    public int TaskJournalItemId { get; set; }
+    public int? AuthorUserId { get; set; }
+    public string AuthorName { get; set; } = string.Empty;
+    public string Kind { get; set; } = "comment";
+    public string Text { get; set; } = string.Empty;
+    public string CreatedAt { get; set; } = string.Empty;
+    public string? UpdatedAt { get; set; }
+}
+
+public class TaskJournalFileDto
+{
+    public int Id { get; set; }
+    public int TaskJournalItemId { get; set; }
+    public string DocumentKey { get; set; } = string.Empty;
+    public int Version { get; set; }
+    public string OriginalFileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "application/octet-stream";
+    public long SizeBytes { get; set; }
+    public int? UploadedByUserId { get; set; }
+    public string UploadedByName { get; set; } = string.Empty;
+    public string UploadedAt { get; set; } = string.Empty;
+    public bool IsLatestVersion { get; set; }
 }
 
 public class TaskJournalAssigneeDto
@@ -31,4 +73,26 @@ public class TaskJournalAssigneeDto
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+}
+
+public class TaskJournalCaseAutomationCandidateDto
+{
+    public int ClientId { get; set; }
+    public string ClientName { get; set; } = string.Empty;
+    public int ClientCaseId { get; set; }
+    public string ClientCaseTitle { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public int ActiveTaskCount { get; set; }
+    public int CompletedTaskCount { get; set; }
+    public int DaysWithoutActiveTask { get; set; }
+    public string? LastTaskAt { get; set; }
+    public string SuggestedTitle { get; set; } = string.Empty;
+    public string SuggestedDescription { get; set; } = string.Empty;
+    public string SuggestedDueAt { get; set; } = string.Empty;
+}
+
+public class TaskJournalAutomationCreateResultDto
+{
+    public IReadOnlyList<TaskJournalItemDto> CreatedTasks { get; set; } = Array.Empty<TaskJournalItemDto>();
+    public int SkippedCount { get; set; }
 }

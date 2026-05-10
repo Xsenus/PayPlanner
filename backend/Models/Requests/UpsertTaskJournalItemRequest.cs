@@ -10,6 +10,7 @@ public class UpsertTaskJournalItemRequest
     public int? AssigneeUserId { get; set; }
     public string? AssigneeName { get; set; }
     public DateTime DueAt { get; set; }
+    public int? PlannedDurationMinutes { get; set; }
     public string Type { get; set; } = "task";
     public string Priority { get; set; } = "normal";
     public string Status { get; set; } = "new";
@@ -17,4 +18,15 @@ public class UpsertTaskJournalItemRequest
     public List<string> Reminders { get; set; } = [];
     public List<string> Channels { get; set; } = [];
     public List<string> Tags { get; set; } = [];
+    public List<TaskJournalParticipantRequest> Participants { get; set; } = [];
+}
+
+public class TaskJournalParticipantRequest
+{
+    public int? UserId { get; set; }
+    public string? Name { get; set; }
+    public string Role { get; set; } = "assignee";
+    public int? SortOrder { get; set; }
+    public string? ApprovalStatus { get; set; }
+    public string? Resolution { get; set; }
 }

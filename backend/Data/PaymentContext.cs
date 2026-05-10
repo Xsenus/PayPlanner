@@ -1661,6 +1661,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Description).HasMaxLength(4000);
             entity.Property(e => e.AssigneeName).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AuthorName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.PlannedDurationMinutes).HasDefaultValue(60);
             entity.Property(e => e.Type).HasMaxLength(32).HasDefaultValue("task").IsRequired();
             entity.Property(e => e.Priority).HasMaxLength(32).HasDefaultValue("normal").IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue("new").IsRequired();
@@ -1688,6 +1689,85 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_TaskJournalItems_ClientCaseId");
             entity.HasIndex(e => e.AssigneeUserId).HasDatabaseName("IX_TaskJournalItems_AssigneeUserId");
             entity.HasIndex(e => e.AuthorUserId).HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
+        });
+
+        modelBuilder.Entity<TaskJournalParticipant>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Role).HasMaxLength(32).HasDefaultValue("assignee").IsRequired();
+            entity.Property(e => e.DisplayName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Email).HasMaxLength(320).HasDefaultValue("").IsRequired();
+            entity.Property(e => e.ApprovalStatus).HasMaxLength(32).HasDefaultValue("pending").IsRequired();
+            entity.Property(e => e.Resolution).HasMaxLength(4000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany(e => e.Participants)
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.TaskJournalItemId).HasDatabaseName("IX_TaskJournalParticipants_TaskJournalItemId");
+            entity.HasIndex(e => e.UserId).HasDatabaseName("IX_TaskJournalParticipants_UserId");
+            entity.HasIndex(e => new { e.TaskJournalItemId, e.Role }).HasDatabaseName("IX_TaskJournalParticipants_Task_Role");
+            entity.HasIndex(e => new { e.TaskJournalItemId, e.Role, e.SortOrder }).HasDatabaseName("IX_TaskJournalParticipants_Task_Role_Order");
+        });
+
+        modelBuilder.Entity<TaskJournalComment>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.AuthorName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Kind).HasMaxLength(32).HasDefaultValue("comment").IsRequired();
+            entity.Property(e => e.Text).HasMaxLength(4000).IsRequired();
+            entity.Property(e => e.MetadataJson).HasColumnType("text").HasDefaultValue("{}").IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany(e => e.Comments)
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.AuthorUser)
+                .WithMany()
+                .HasForeignKey(e => e.AuthorUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.TaskJournalItemId).HasDatabaseName("IX_TaskJournalComments_TaskJournalItemId");
+            entity.HasIndex(e => e.AuthorUserId).HasDatabaseName("IX_TaskJournalComments_AuthorUserId");
+            entity.HasIndex(e => new { e.TaskJournalItemId, e.CreatedAt }).HasDatabaseName("IX_TaskJournalComments_Task_CreatedAt");
+            entity.HasIndex(e => e.Kind).HasDatabaseName("IX_TaskJournalComments_Kind");
+        });
+
+        modelBuilder.Entity<TaskJournalFile>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DocumentKey).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.OriginalFileName).HasMaxLength(260).IsRequired();
+            entity.Property(e => e.StoredFileName).HasMaxLength(260).IsRequired();
+            entity.Property(e => e.StoragePath).HasMaxLength(600).IsRequired();
+            entity.Property(e => e.ContentType).HasMaxLength(200).HasDefaultValue("application/octet-stream").IsRequired();
+            entity.Property(e => e.UploadedByName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.UploadedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany(e => e.Files)
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.UploadedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.UploadedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.TaskJournalItemId).HasDatabaseName("IX_TaskJournalFiles_TaskJournalItemId");
+            entity.HasIndex(e => e.UploadedByUserId).HasDatabaseName("IX_TaskJournalFiles_UploadedByUserId");
+            entity.HasIndex(e => new { e.TaskJournalItemId, e.DocumentKey, e.Version })
+                .IsUnique()
+                .HasDatabaseName("IX_TaskJournalFiles_Task_Document_Version");
         });
 
         modelBuilder.Entity<NotificationDelivery>(entity =>
@@ -2350,6 +2430,9 @@ public class PaymentContext : DbContext
     public DbSet<UserActivityLog> UserActivityLogs { get; set; }
     public DbSet<ObjectAuditEvent> ObjectAuditEvents { get; set; }
     public DbSet<TaskJournalItem> TaskJournalItems { get; set; }
+    public DbSet<TaskJournalParticipant> TaskJournalParticipants { get; set; }
+    public DbSet<TaskJournalComment> TaskJournalComments { get; set; }
+    public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<NotificationDelivery> NotificationDeliveries { get; set; }
     public DbSet<NotificationSender> NotificationSenders { get; set; }
     public DbSet<NotificationBotSubscription> NotificationBotSubscriptions { get; set; }

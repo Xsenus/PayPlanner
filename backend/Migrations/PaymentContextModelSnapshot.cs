@@ -4145,6 +4145,136 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("SystemSettings");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalComment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AuthorName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AuthorUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("comment");
+
+                    b.Property<string>("MetadataJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("{}");
+
+                    b.Property<int>("TaskJournalItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorUserId")
+                        .HasDatabaseName("IX_TaskJournalComments_AuthorUserId");
+
+                    b.HasIndex("Kind")
+                        .HasDatabaseName("IX_TaskJournalComments_Kind");
+
+                    b.HasIndex("TaskJournalItemId")
+                        .HasDatabaseName("IX_TaskJournalComments_TaskJournalItemId");
+
+                    b.HasIndex("TaskJournalItemId", "CreatedAt")
+                        .HasDatabaseName("IX_TaskJournalComments_Task_CreatedAt");
+
+                    b.ToTable("TaskJournalComments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalFile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("application/octet-stream");
+
+                    b.Property<string>("DocumentKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StoragePath")
+                        .IsRequired()
+                        .HasMaxLength(600)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StoredFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TaskJournalItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UploadedByName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("UploadedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskJournalItemId")
+                        .HasDatabaseName("IX_TaskJournalFiles_TaskJournalItemId");
+
+                    b.HasIndex("UploadedByUserId")
+                        .HasDatabaseName("IX_TaskJournalFiles_UploadedByUserId");
+
+                    b.HasIndex("TaskJournalItemId", "DocumentKey", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TaskJournalFiles_Task_Document_Version");
+
+                    b.ToTable("TaskJournalFiles");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>
                 {
                     b.Property<int>("Id")
@@ -4224,6 +4354,11 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT")
                         .HasDefaultValue("normal");
+
+                    b.Property<int>("PlannedDurationMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(60);
 
                     b.Property<string>("RemindersJson")
                         .IsRequired()
@@ -4306,6 +4441,79 @@ namespace PayPlanner.Api.Migrations
                         .HasDatabaseName("IX_TaskJournalItem_UpdatedAt_Audit");
 
                     b.ToTable("TaskJournalItems");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalParticipant", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ApprovalStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("pending");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(320)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
+                    b.Property<string>("Resolution")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RespondedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("assignee");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TaskJournalItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskJournalItemId")
+                        .HasDatabaseName("IX_TaskJournalParticipants_TaskJournalItemId");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("IX_TaskJournalParticipants_UserId");
+
+                    b.HasIndex("TaskJournalItemId", "Role")
+                        .HasDatabaseName("IX_TaskJournalParticipants_Task_Role");
+
+                    b.HasIndex("TaskJournalItemId", "Role", "SortOrder")
+                        .HasDatabaseName("IX_TaskJournalParticipants_Task_Role_Order");
+
+                    b.ToTable("TaskJournalParticipants");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TaxSystemDictionaryItem", b =>
@@ -5496,6 +5704,42 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Batch");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalComment", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany("Comments")
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AuthorUser");
+
+                    b.Navigation("TaskJournalItem");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalFile", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany("Files")
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("TaskJournalItem");
+
+                    b.Navigation("UploadedByUser");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "AssigneeUser")
@@ -5525,6 +5769,24 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Client");
 
                     b.Navigation("ClientCase");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalParticipant", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany("Participants")
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("TaskJournalItem");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TelegramAuthRequest", b =>
@@ -5751,6 +6013,15 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Files");
 
                     b.Navigation("Operations");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>
+                {
+                    b.Navigation("Comments");
+
+                    b.Navigation("Files");
+
+                    b.Navigation("Participants");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
