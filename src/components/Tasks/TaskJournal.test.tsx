@@ -8,10 +8,21 @@ import type { TaskJournalItem } from '../../utils/taskJournalStore';
 const apiMock = vi.hoisted(() => ({
   getTaskJournalItems: vi.fn(),
   getTaskJournalAssignees: vi.fn(),
+  getTaskJournalCaseAutomationCandidates: vi.fn(),
+  createTaskJournalCaseAutomationTask: vi.fn(),
+  createTaskJournalCaseAutomationTasks: vi.fn(),
+  downloadTaskJournalCalendar: vi.fn(),
   getTaskJournalItem: vi.fn(),
   createTaskJournalItem: vi.fn(),
   updateTaskJournalItem: vi.fn(),
   updateTaskJournalStatus: vi.fn(),
+  updateTaskJournalApproval: vi.fn(),
+  getTaskJournalComments: vi.fn(),
+  createTaskJournalComment: vi.fn(),
+  getTaskJournalFiles: vi.fn(),
+  uploadTaskJournalFile: vi.fn(),
+  downloadTaskJournalFile: vi.fn(),
+  deleteTaskJournalFile: vi.fn(),
   deleteTaskJournalItem: vi.fn(),
 }));
 
@@ -68,6 +79,32 @@ function todayAt(hours: number, minutes = 0) {
   return value.toISOString();
 }
 
+function dateKey(date: Date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function createDataTransfer() {
+  const values = new Map<string, string>();
+  return {
+    types: [] as string[],
+    effectAllowed: '',
+    dropEffect: '',
+    setData(type: string, value: string) {
+      values.set(type, value);
+      if (!this.types.includes(type)) {
+        this.types.push(type);
+      }
+    },
+    getData(type: string) {
+      return values.get(type) ?? '';
+    },
+  };
+}
+
 function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
   return {
     id: 101,
@@ -83,6 +120,7 @@ function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
     authorUserId: 8,
     authorName: 'Постановщик',
     dueAt: todayAt(11),
+    plannedDurationMinutes: 60,
     type: 'task',
     priority: 'normal',
     status: 'new',
@@ -96,7 +134,10 @@ function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
   };
 }
 
-async function renderJournal(tasks: TaskJournalItem[] = [createTask()]) {
+async function renderJournal(
+  tasks: TaskJournalItem[] = [createTask()],
+  options: { initialView?: 'list' | 'board' | 'calendar' } = {},
+) {
   apiMock.getTaskJournalItems.mockResolvedValue({
     items: tasks,
     total: tasks.length,
@@ -107,8 +148,8 @@ async function renderJournal(tasks: TaskJournalItem[] = [createTask()]) {
     { id: 7, name: 'Администратор', email: 'admin@example.com' },
   ]);
 
-  render(<TaskJournal />);
-  await screen.findByText('Тестовая задача');
+  render(<TaskJournal initialView={options.initialView} />);
+  await screen.findAllByText('Тестовая задача');
 }
 
 describe('TaskJournal', () => {
@@ -120,9 +161,50 @@ describe('TaskJournal', () => {
     casesState.cases = [
       { id: 100, clientId: 10, title: 'БАНКРОТСТВО', status: 'Open', createdAt: todayAt(8) } as ClientCase,
     ];
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([]);
+    apiMock.createTaskJournalCaseAutomationTask.mockResolvedValue(createTask({
+      type: 'control',
+      priority: 'high',
+      title: 'Проверить движение по делу',
+      description: 'Автоконтроль: по делу нет активной задачи.',
+      tags: ['автоконтроль'],
+    }));
+    apiMock.createTaskJournalCaseAutomationTasks.mockResolvedValue({
+      createdTasks: [createTask({ id: 202, title: 'Проверить движение по делу', type: 'control' })],
+      skippedCount: 0,
+    });
+    apiMock.downloadTaskJournalCalendar.mockResolvedValue({ blob: new Blob(['ics']), fileName: 'task-calendar.ics' });
     apiMock.createTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalStatus.mockResolvedValue(createTask({ status: 'done', result: 'Готово' }));
+    apiMock.updateTaskJournalApproval.mockResolvedValue(createTask({ status: 'inProgress' }));
+    apiMock.getTaskJournalComments.mockResolvedValue([]);
+    apiMock.createTaskJournalComment.mockResolvedValue({
+      id: 501,
+      taskJournalItemId: 101,
+      authorUserId: 7,
+      authorName: 'Администратор',
+      kind: 'comment',
+      text: 'Комментарий по задаче',
+      createdAt: todayAt(12),
+      updatedAt: null,
+    });
+    apiMock.getTaskJournalFiles.mockResolvedValue([]);
+    apiMock.uploadTaskJournalFile.mockResolvedValue({
+      id: 601,
+      taskJournalItemId: 101,
+      documentKey: 'doc-1',
+      version: 1,
+      originalFileName: 'document.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 12,
+      uploadedByUserId: 7,
+      uploadedByName: 'Администратор',
+      uploadedAt: todayAt(12),
+      isLatestVersion: true,
+    });
+    apiMock.downloadTaskJournalFile.mockResolvedValue({ blob: new Blob(['file']), fileName: 'document.pdf' });
+    apiMock.deleteTaskJournalFile.mockResolvedValue(undefined);
     apiMock.deleteTaskJournalItem.mockResolvedValue(undefined);
   });
 
@@ -145,7 +227,8 @@ describe('TaskJournal', () => {
     expect(screen.getAllByText('Наименование задачи').length).toBeGreaterThan(0);
     expect(screen.getByText('Дело')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Создать задачу' }));
+    const submitButtons = screen.getAllByRole('button', { name: 'Создать задачу' });
+    fireEvent.click(submitButtons[submitButtons.length - 1]);
 
     expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
     expect(toastMock.error).toHaveBeenCalledWith('Укажите клиента задачи.', 'Журнал задач');
@@ -162,7 +245,8 @@ describe('TaskJournal', () => {
     fireEvent.change(screen.getByPlaceholderText('Что нужно сделать'), { target: { value: 'Подготовить документы' } });
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Дело' }), { target: { value: '100' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Создать задачу' }));
+    const submitButtons = screen.getAllByRole('button', { name: 'Создать задачу' });
+    fireEvent.click(submitButtons[submitButtons.length - 1]);
 
     await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
@@ -170,6 +254,59 @@ describe('TaskJournal', () => {
       clientCaseId: 100,
       title: 'Подготовить документы',
     }));
+  });
+
+  it('creates a control task from case automation candidate', async () => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
+      {
+        clientId: 10,
+        clientName: 'Иванов Иван Иванович',
+        clientCaseId: 100,
+        clientCaseTitle: 'БАНКРОТСТВО',
+        reason: 'Нет активной задачи уже 20 дн.',
+        activeTaskCount: 0,
+        completedTaskCount: 2,
+        daysWithoutActiveTask: 20,
+        lastTaskAt: todayAt(8),
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Автоконтроль: по делу нет активной задачи.',
+        suggestedDueAt: todayAt(9),
+      },
+    ]);
+    await renderJournal();
+
+    expect(screen.getByText('Автоконтроль дел')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('task-automation-create-100'));
+
+    await waitFor(() => expect(apiMock.createTaskJournalCaseAutomationTask).toHaveBeenCalledWith(100));
+    expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
+    expect(toastMock.success).toHaveBeenCalledWith('Контрольная задача создана.', 'Автоконтроль дел');
+    expect(await screen.findByRole('heading', { name: 'Редактировать задачу' })).toBeTruthy();
+  });
+
+  it('creates control tasks for all automation candidates', async () => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
+      {
+        clientId: 10,
+        clientName: 'Иванов Иван Иванович',
+        clientCaseId: 100,
+        clientCaseTitle: 'БАНКРОТСТВО',
+        reason: 'Нет активной задачи',
+        activeTaskCount: 0,
+        completedTaskCount: 0,
+        daysWithoutActiveTask: 1,
+        lastTaskAt: null,
+        suggestedTitle: 'Проверить движение по делу',
+        suggestedDescription: 'Автоконтроль',
+        suggestedDueAt: todayAt(9),
+      },
+    ]);
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать все' }));
+
+    await waitFor(() => expect(apiMock.createTaskJournalCaseAutomationTasks).toHaveBeenCalledWith({ limit: 1 }));
+    expect(toastMock.success).toHaveBeenCalledWith('Создано контрольных задач: 1.', 'Автоконтроль дел');
   });
 
   it('opens edit form instead of completing an active task without result', async () => {
@@ -191,5 +328,116 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Календарь задач')).toBeTruthy();
     expect(screen.getByText('Загрузка за день')).toBeTruthy();
     expect(screen.getAllByText('Тестовая задача').length).toBeGreaterThan(0);
+  });
+
+  it('can open directly in calendar mode from the journal submenu', async () => {
+    await renderJournal([createTask()], { initialView: 'calendar' });
+
+    expect(screen.getByText('Календарь задач')).toBeTruthy();
+    expect(screen.getByText('Загрузка за день')).toBeTruthy();
+  });
+
+  it('opens quick create form from a calendar date', async () => {
+    await renderJournal([createTask()], { initialView: 'calendar' });
+
+    fireEvent.click(screen.getAllByTitle('Создать задачу на дату')[0]);
+
+    expect(await screen.findByRole('heading', { name: 'Новая задача' })).toBeTruthy();
+    const dueInput = document.querySelector('input[type="datetime-local"]') as HTMLInputElement | null;
+    expect(dueInput?.value).toMatch(/T09:00$/);
+  });
+
+  it('moves a task to another calendar day by drag and drop', async () => {
+    await renderJournal([createTask()], { initialView: 'calendar' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Неделя' }));
+    const currentKey = dateKey(new Date());
+    const targetDay = Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="task-calendar-day-"]'))
+      .find((element) => element.dataset.testid !== `task-calendar-day-${currentKey}`);
+    expect(targetDay).toBeTruthy();
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.dragStart(screen.getByTestId('task-calendar-task-101'), { dataTransfer });
+    fireEvent.dragOver(targetDay!, { dataTransfer });
+    fireEvent.drop(targetDay!, { dataTransfer });
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      clientId: 10,
+      title: 'Тестовая задача',
+      dueAt: expect.any(String),
+    }));
+    expect(apiMock.updateTaskJournalItem.mock.calls[0][1].dueAt).not.toEqual(createTask().dueAt);
+  });
+
+  it('updates task duration from the calendar load panel', async () => {
+    await renderJournal([createTask({ plannedDurationMinutes: 60 })], { initialView: 'calendar' });
+
+    fireEvent.click(screen.getByRole('button', { name: '+15 мин' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      plannedDurationMinutes: 75,
+    }));
+  });
+
+  it('loads task history and adds a comment from the edit form', async () => {
+    apiMock.getTaskJournalComments.mockResolvedValueOnce([
+      {
+        id: 500,
+        taskJournalItemId: 101,
+        authorUserId: null,
+        authorName: 'Система',
+        kind: 'system',
+        text: 'Задача создана.',
+        createdAt: todayAt(9),
+        updatedAt: null,
+      },
+    ]);
+
+    await renderJournal();
+
+    fireEvent.click(screen.getAllByTitle('Редактировать')[0]);
+    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+
+    expect(await screen.findByText('Задача создана.')).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText('Введите комментарий'), { target: { value: 'Комментарий по задаче' } });
+    fireEvent.click(screen.getByRole('button', { name: /Добавить комментарий/i }));
+
+    await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий по задаче'));
+    expect(await screen.findAllByText('Комментарий по задаче')).toHaveLength(1);
+  });
+
+  it('shows task files and uploads a new version', async () => {
+    apiMock.getTaskJournalFiles.mockResolvedValueOnce([
+      {
+        id: 600,
+        taskJournalItemId: 101,
+        documentKey: 'doc-1',
+        version: 1,
+        originalFileName: 'document.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 1024,
+        uploadedByUserId: 7,
+        uploadedByName: 'Администратор',
+        uploadedAt: todayAt(10),
+        isLatestVersion: true,
+      },
+    ]);
+
+    await renderJournal();
+
+    fireEvent.click(screen.getAllByTitle('Редактировать')[0]);
+    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+    expect((await screen.findAllByText('document.pdf')).length).toBeGreaterThan(0);
+
+    const fileInputs = document.querySelectorAll('input[type="file"]');
+    fireEvent.change(fileInputs[1], {
+      target: {
+        files: [new File(['updated'], 'document-v2.pdf', { type: 'application/pdf' })],
+      },
+    });
+
+    await waitFor(() => expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledWith(101, expect.any(File), 'doc-1'));
   });
 });

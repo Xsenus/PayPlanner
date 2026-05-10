@@ -1737,6 +1737,51 @@ export class ApiService {
     return this.request<TaskJournalAssignee[]>('/tasks/assignees');
   }
 
+  async getTaskJournalCaseAutomationCandidates(params?: { inactiveDays?: number; limit?: number }) {
+    const q = buildQuery({
+      inactiveDays: params?.inactiveDays,
+      limit: params?.limit,
+    });
+    return this.request<TaskJournalCaseAutomationCandidate[]>(`/tasks/automation/case-candidates${q}`);
+  }
+
+  async createTaskJournalCaseAutomationTask(clientCaseId: number) {
+    return this.request<TaskJournalItem>(`/tasks/automation/case-candidates/${clientCaseId}/task`, {
+      method: 'POST',
+    });
+  }
+
+  async createTaskJournalCaseAutomationTasks(params?: { limit?: number }) {
+    const q = buildQuery({
+      limit: params?.limit,
+    });
+    return this.request<TaskJournalAutomationCreateResult>(`/tasks/automation/case-candidates/tasks${q}`, {
+      method: 'POST',
+    });
+  }
+
+  async downloadTaskJournalCalendar(params?: { from?: string; to?: string }) {
+    const q = buildQuery({
+      from: params?.from,
+      to: params?.to,
+    });
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/tasks/calendar.ics${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || 'task-calendar.ics',
+    };
+  }
+
   async getTaskJournalNotifications() {
     return this.request<TaskJournalNotification[]>('/tasks/notifications');
   }
@@ -1764,6 +1809,63 @@ export class ApiService {
       method: 'PATCH',
       body: JSON.stringify({ status, result }),
     });
+  }
+
+  async updateTaskJournalApproval(id: number, decision: 'approved' | 'revisionRequested', resolution?: string, participantId?: number) {
+    return this.request<TaskJournalItem>(`/tasks/${id}/approval`, {
+      method: 'PATCH',
+      body: JSON.stringify({ decision, resolution, participantId }),
+    });
+  }
+
+  async getTaskJournalComments(id: number) {
+    return this.request<TaskJournalComment[]>(`/tasks/${id}/comments`);
+  }
+
+  async createTaskJournalComment(id: number, text: string) {
+    return this.request<TaskJournalComment>(`/tasks/${id}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+  }
+
+  async getTaskJournalFiles(id: number) {
+    return this.request<TaskJournalFile[]>(`/tasks/${id}/files`);
+  }
+
+  async uploadTaskJournalFile(id: number, file: File, documentKey?: string) {
+    const form = new FormData();
+    form.append('file', file);
+    if (documentKey) {
+      form.append('documentKey', documentKey);
+    }
+
+    return this.request<TaskJournalFile>(`/tasks/${id}/files`, {
+      method: 'POST',
+      body: form,
+    });
+  }
+
+  async downloadTaskJournalFile(taskId: number, fileId: number) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/tasks/${taskId}/files/${fileId}/download`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')),
+    };
+  }
+
+  async deleteTaskJournalFile(taskId: number, fileId: number) {
+    return this.request<void>(`/tasks/${taskId}/files/${fileId}`, { method: 'DELETE' });
   }
 
   async deleteTaskJournalItem(id: number) {
@@ -3397,6 +3499,10 @@ import type { RolePermissions } from '../types/permissions';
 import type { CreateUserActivityInput, UserActivityFiltersResponse, UserActivityLogItem, UserActivityLogResponse, UserActivityStatus } from '../types/userActivity';
 import type {
   TaskJournalAssignee,
+  TaskJournalAutomationCreateResult,
+  TaskJournalCaseAutomationCandidate,
+  TaskJournalComment,
+  TaskJournalFile,
   TaskJournalItem,
   TaskJournalNotification,
   TaskJournalStatus,

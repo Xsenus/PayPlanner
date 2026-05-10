@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type MouseEvent } from 'react';
 import {
   Calendar,
+  CalendarDays,
   BarChart,
   Calculator,
   ListTodo,
@@ -123,7 +124,19 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       items.push({ id: 'calendar', tab: 'calendar' as Tab, label: t('calendar') ?? 'Календарь', icon: Calendar });
     }
     if (permissions.tasks.canView) {
-      items.push({ id: 'tasks', tab: 'tasks' as Tab, label: 'Журнал задач', icon: ListTodo });
+      items.push({
+        id: 'tasks',
+        tab: 'tasks' as Tab,
+        label: 'Журнал задач',
+        icon: ListTodo,
+        children: [
+          {
+            id: 'tasksCalendar' as Tab,
+            label: 'Календарь',
+            icon: CalendarDays,
+          },
+        ],
+      });
     }
     if (permissions.reports.canView) {
       items.push({ id: 'reports', tab: 'reports' as Tab, label: t('reports') ?? 'Отчёты', icon: BarChart });
@@ -361,7 +374,8 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         }
         const hasActiveChild = item.children.some((child) => child.id === activeTab);
         const generalPaymentsActive = item.id === 'payments' && activeTab === 'payments';
-        if ((hasActiveChild || generalPaymentsActive) && !next[item.id]) {
+        const generalTasksActive = item.id === 'tasks' && activeTab === 'tasks';
+        if ((hasActiveChild || generalPaymentsActive || generalTasksActive) && !next[item.id]) {
           next[item.id] = true;
           changed = true;
         }

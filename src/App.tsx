@@ -85,6 +85,7 @@ function AppContent() {
     () => ({
       calendar: 'Календарь',
       tasks: 'Журнал задач',
+      tasksCalendar: 'Журнал задач: календарь',
       reports: 'Отчеты',
       calculator: 'Калькулятор',
       legalEntities: 'Юр. лица',
@@ -155,6 +156,7 @@ function AppContent() {
       [
         { tab: 'calendar' as Tab, allowed: permissions.calendar.canView },
         { tab: 'tasks' as Tab, allowed: permissions.tasks.canView },
+        { tab: 'tasksCalendar' as Tab, allowed: permissions.tasks.canView },
         { tab: 'reports' as Tab, allowed: permissions.reports.canView },
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
@@ -196,6 +198,7 @@ function AppContent() {
         case 'calendar':
           return permissions.calendar.canView;
         case 'tasks':
+        case 'tasksCalendar':
           return permissions.tasks.canView;
         case 'reports':
           return permissions.reports.canView;
@@ -519,6 +522,8 @@ function AppContent() {
       url.pathname = '/clients';
     } else if (activeTab === 'tasks') {
       url.pathname = selectedTaskId ? `/tasks/${selectedTaskId}` : '/tasks';
+    } else if (activeTab === 'tasksCalendar') {
+      url.pathname = '/tasks/calendar';
     } else if (activeTab === 'clientDetail') {
       url.pathname = selectedClientId ? `/clients/${selectedClientId}` : '/clients';
     } else if (activeTab === 'accounts' || activeTab === 'accountsIncome' || activeTab === 'accountsExpense') {
@@ -537,7 +542,7 @@ function AppContent() {
       url.pathname = selectedContractId ? `/contracts/${selectedContractId}` : '/contracts';
     } else if (/^\/clients(?:\/\d+)?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
-    } else if (/^\/tasks(?:\/\d+)?\/?$/i.test(url.pathname)) {
+    } else if (/^\/tasks(?:\/(?:\d+|calendar))?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
     } else if (/^\/invoices(?:\/\d+)?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
@@ -722,7 +727,12 @@ function AppContent() {
 
       case 'tasks':
         return permissions.tasks.canView
-          ? <TaskJournal routeTaskId={selectedTaskId} onRouteTaskChange={setSelectedTaskId} />
+          ? <TaskJournal key="tasks-list" routeTaskId={selectedTaskId} onRouteTaskChange={setSelectedTaskId} />
+          : renderNoAccess('Журнал задач недоступен для вашей роли.');
+
+      case 'tasksCalendar':
+        return permissions.tasks.canView
+          ? <TaskJournal key="tasks-calendar" initialView="calendar" onRouteTaskChange={setSelectedTaskId} />
           : renderNoAccess('Журнал задач недоступен для вашей роли.');
 
       case 'reports':

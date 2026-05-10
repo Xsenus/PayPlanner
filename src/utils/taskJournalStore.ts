@@ -1,8 +1,32 @@
-export type TaskJournalStatus = 'new' | 'inProgress' | 'waiting' | 'done' | 'cancelled';
+export type TaskJournalStatus =
+  | 'new'
+  | 'inProgress'
+  | 'waiting'
+  | 'onApproval'
+  | 'revision'
+  | 'overdueApproval'
+  | 'done'
+  | 'cancelled';
 export type TaskJournalPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type TaskJournalType = 'task' | 'budget' | 'contact' | 'document' | 'reminder' | 'control';
 export type TaskJournalReminder = 'atDue' | 'before15m' | 'before1h' | 'before1d' | 'dailyOverdue';
 export type TaskJournalChannel = 'inApp' | 'email' | 'telegram';
+export type TaskJournalParticipantRole = 'assignee' | 'observer' | 'approver';
+export type TaskJournalApprovalStatus = 'pending' | 'approved' | 'revisionRequested';
+export type TaskJournalCommentKind = 'comment' | 'system';
+
+export interface TaskJournalParticipant {
+  id?: number;
+  userId?: number | null;
+  role: TaskJournalParticipantRole;
+  displayName: string;
+  name?: string;
+  email?: string;
+  sortOrder?: number;
+  approvalStatus?: TaskJournalApprovalStatus;
+  resolution?: string;
+  respondedAt?: string | null;
+}
 
 export interface TaskJournalItem {
   id: number;
@@ -18,6 +42,7 @@ export interface TaskJournalItem {
   authorUserId?: number | null;
   authorName: string;
   dueAt: string;
+  plannedDurationMinutes: number;
   type: TaskJournalType;
   priority: TaskJournalPriority;
   status: TaskJournalStatus;
@@ -25,6 +50,7 @@ export interface TaskJournalItem {
   reminders: TaskJournalReminder[];
   channels: TaskJournalChannel[];
   tags: string[];
+  participants?: TaskJournalParticipant[];
   createdAt: string;
   updatedAt: string;
 }
@@ -38,10 +64,55 @@ export interface TaskJournalNotification {
   dueAt: string;
 }
 
+export interface TaskJournalComment {
+  id: number;
+  taskJournalItemId: number;
+  authorUserId?: number | null;
+  authorName: string;
+  kind: TaskJournalCommentKind;
+  text: string;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface TaskJournalFile {
+  id: number;
+  taskJournalItemId: number;
+  documentKey: string;
+  version: number;
+  originalFileName: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedByUserId?: number | null;
+  uploadedByName: string;
+  uploadedAt: string;
+  isLatestVersion: boolean;
+}
+
 export interface TaskJournalAssignee {
   id: number;
   name: string;
   email: string;
+}
+
+export interface TaskJournalCaseAutomationCandidate {
+  clientId: number;
+  clientName: string;
+  clientCaseId: number;
+  clientCaseTitle: string;
+  reason: string;
+  activeTaskCount: number;
+  completedTaskCount: number;
+  daysWithoutActiveTask: number;
+  lastTaskAt?: string | null;
+  suggestedTitle: string;
+  suggestedDescription: string;
+  suggestedDueAt: string;
+}
+
+export interface TaskJournalAutomationCreateResult {
+  createdTasks: TaskJournalItem[];
+  skippedCount: number;
 }
 
 export type TaskJournalUpsertPayload = Omit<TaskJournalItem, 'id' | 'createdAt' | 'updatedAt' | 'authorUserId' | 'authorName'>;
@@ -69,6 +140,7 @@ function seedTasks(): TaskJournalItem[] {
       assigneeName: 'Андрей Кожеваткин',
       authorName: 'Робот PayPlanner',
       dueAt: addHours(base, -5),
+      plannedDurationMinutes: 60,
       type: 'task',
       priority: 'urgent',
       status: 'inProgress',
@@ -87,6 +159,7 @@ function seedTasks(): TaskJournalItem[] {
       assigneeName: 'Финансовый отдел',
       authorName: 'Календарь платежей',
       dueAt: addHours(base, 3),
+      plannedDurationMinutes: 45,
       type: 'budget',
       priority: 'high',
       status: 'new',
@@ -105,6 +178,7 @@ function seedTasks(): TaskJournalItem[] {
       assigneeName: 'Секретарь',
       authorName: 'Робот PayPlanner',
       dueAt: addHours(base, 26),
+      plannedDurationMinutes: 30,
       type: 'contact',
       priority: 'normal',
       status: 'new',
@@ -123,6 +197,7 @@ function seedTasks(): TaskJournalItem[] {
       assigneeName: 'Руководитель практики',
       authorName: 'Контроль качества',
       dueAt: addHours(base, 76),
+      plannedDurationMinutes: 60,
       type: 'control',
       priority: 'normal',
       status: 'waiting',
@@ -155,7 +230,12 @@ export function loadTaskJournalItems(): TaskJournalItem[] {
     }
 
     const parsed = JSON.parse(raw) as TaskJournalItem[];
-    return Array.isArray(parsed) ? parsed : seedTasks();
+    return Array.isArray(parsed)
+      ? parsed.map((task) => ({
+          ...task,
+          plannedDurationMinutes: task.plannedDurationMinutes ?? 60,
+        }))
+      : seedTasks();
   } catch {
     return seedTasks();
   }

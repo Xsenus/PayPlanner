@@ -5,6 +5,7 @@ export const LAST_TAB_STORAGE_KEY = 'pp.last_active_tab';
 const ALL_TABS: Tab[] = [
   'calendar',
   'tasks',
+  'tasksCalendar',
   'reports',
   'calculator',
   'legalEntities',
@@ -113,6 +114,14 @@ export function isTasksListPath(): boolean {
   }
 
   return /^\/tasks\/?$/i.test(window.location.pathname);
+}
+
+export function isTasksCalendarPath(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return /^\/tasks\/calendar\/?$/i.test(window.location.pathname);
 }
 
 export function getPathClientId(): number | null {
@@ -237,6 +246,10 @@ export function getInitialTab(): Tab {
     return 'tasks';
   }
 
+  if (isTasksCalendarPath()) {
+    return 'tasksCalendar';
+  }
+
   if (getPathContractId()) {
     return 'contractDetail';
   }
@@ -284,6 +297,10 @@ export function getInitialTab(): Tab {
 export function getTabHref(tab: Tab): string {
   if (tab === 'tasks') {
     return '/tasks';
+  }
+
+  if (tab === 'tasksCalendar') {
+    return '/tasks/calendar';
   }
 
   if (tab === 'clients') {

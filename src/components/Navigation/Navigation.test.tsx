@@ -11,6 +11,7 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 const expandedSections = {
+  tasks: true,
   contacts: true,
   accounts: true,
   money: true,
@@ -40,10 +41,21 @@ describe('Navigation links', () => {
   it('renders navigation destinations as real links', () => {
     renderNavigation();
 
-    expect(screen.getByRole('link', { name: /Календарь/i }).getAttribute('href')).toBe(getTabHref('calendar'));
+    expect(findLinkByHref(getTabHref('calendar'))).toBeTruthy();
+    expect(findLinkByHref(getTabHref('tasksCalendar'))).toBeTruthy();
     expect(screen.getByRole('link', { name: /Клиенты/i }).getAttribute('href')).toBe(getTabHref('clients'));
     expect(findLinkByHref(getTabHref('accountsIncome'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('moneyEMoney'))).toBeTruthy();
+  });
+
+  it('opens the task calendar submenu inside the single page app', () => {
+    const onTabChange = renderNavigation();
+    const link = findLinkByHref(getTabHref('tasksCalendar'));
+
+    expect(link).toBeTruthy();
+    fireEvent.click(link!);
+
+    expect(onTabChange).toHaveBeenCalledWith('tasksCalendar');
   });
 
   it('keeps normal left clicks inside the single page app', () => {
