@@ -387,6 +387,84 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task PaymentsV2_FiltersByInvoiceIdAndActId()
+    {
+        await using var db = await CreateContextAsync();
+
+        var invoice = new Invoice
+        {
+            Number = "INV-PAY-V2-REL",
+            Date = new DateTime(2026, 4, 20),
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var invoiceDocument = CreatePayment(invoice.Date, 12_000m, "Счет-документ для связанных платежей");
+        invoiceDocument.DocumentKind = DocumentKind.Invoice;
+        invoiceDocument.InvoiceId = invoice.Id;
+        invoiceDocument.Account = invoice.Number;
+        invoiceDocument.AccountDate = invoice.Date;
+
+        var linkedPayment = CreatePayment(invoice.Date.AddDays(1), 5_000m, "Платеж по связанному счету");
+        linkedPayment.InvoiceId = invoice.Id;
+        linkedPayment.Account = invoice.Number;
+        linkedPayment.AccountDate = invoice.Date;
+
+        var unrelatedPayment = CreatePayment(invoice.Date.AddDays(2), 6_000m, "Посторонний платеж");
+        db.Payments.AddRange(invoiceDocument, linkedPayment, unrelatedPayment);
+        await db.SaveChangesAsync();
+
+        var act = new Act
+        {
+            Number = "ACT-PAY-V2-REL",
+            Date = invoice.Date.AddDays(3),
+            Amount = 12_000m,
+            CreationMode = ActCreationMode.Manual,
+            InvoiceId = invoiceDocument.Id,
+            Status = ActStatus.Created,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsV2Controller(db);
+
+        var invoiceResult = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            invoiceId: invoiceDocument.Id,
+            excludeInstallmentParents: false,
+            excludeInvoiceDocuments: true,
+            sortBy: "date",
+            sortDir: "asc",
+            ct: CancellationToken.None);
+
+        var invoiceOk = Assert.IsType<OkObjectResult>(invoiceResult.Result);
+        var invoiceResponse = Assert.IsType<PaymentsPageResponse>(invoiceOk.Value);
+        Assert.Collection(invoiceResponse.Items, item => Assert.Equal(linkedPayment.Id, item.Id));
+
+        var actResult = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            actId: act.Id,
+            excludeInstallmentParents: false,
+            excludeInvoiceDocuments: true,
+            sortBy: "date",
+            sortDir: "asc",
+            ct: CancellationToken.None);
+
+        var actOk = Assert.IsType<OkObjectResult>(actResult.Result);
+        var actResponse = Assert.IsType<PaymentsPageResponse>(actOk.Value);
+        Assert.Collection(actResponse.Items, item => Assert.Equal(linkedPayment.Id, item.Id));
+        Assert.DoesNotContain(actResponse.Items, item => item.Id == unrelatedPayment.Id);
+    }
+
+    [Fact]
     public async Task PaymentsV2_FiltersExpensePaymentsByClientRole()
     {
         await using var db = await CreateContextAsync();

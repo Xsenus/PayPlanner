@@ -27,6 +27,8 @@ public class PaymentsV2Controller : ControllerBase
         [FromQuery] int? caseId,
         [FromQuery] int? legalEntityId = null,
         [FromQuery] int? contractId = null,
+        [FromQuery] int? invoiceId = null,
+        [FromQuery] int? actId = null,
         [FromQuery] bool excludeInstallmentParents = true,
         [FromQuery] bool excludeInvoiceDocuments = false,
         [FromQuery] string? clientIds = null,
@@ -56,6 +58,33 @@ public class PaymentsV2Controller : ControllerBase
             query = query.Where(payment =>
                 payment.ContractId == contractId.Value
                 || _db.ContractPayments.Any(link => link.ContractId == contractId.Value && link.PaymentId == payment.Id));
+        }
+
+        if (invoiceId.HasValue)
+        {
+            query = query.Where(payment =>
+                payment.Id == invoiceId.Value
+                || _db.Payments.Any(invoice =>
+                    invoice.Id == invoiceId.Value
+                    && invoice.InvoiceId.HasValue
+                    && payment.InvoiceId == invoice.InvoiceId.Value));
+        }
+
+        if (actId.HasValue)
+        {
+            query = query.Where(payment =>
+                _db.Acts.Any(act =>
+                    act.Id == actId.Value
+                    && (
+                        (act.InvoiceId.HasValue
+                            && (payment.Id == act.InvoiceId.Value
+                                || _db.Payments.Any(invoice =>
+                                    invoice.Id == act.InvoiceId.Value
+                                    && invoice.InvoiceId.HasValue
+                                    && payment.InvoiceId == invoice.InvoiceId.Value)))
+                        || (!act.InvoiceId.HasValue
+                            && act.InvoiceNumber != null
+                            && payment.Account == act.InvoiceNumber))));
         }
 
         if (excludeInvoiceDocuments)

@@ -124,6 +124,80 @@ public class InvoicesControllerListTests
     }
 
     [Fact]
+    public async Task Get_FiltersByActIdAndPaymentId()
+    {
+        await using var db = await CreateContextAsync();
+
+        var invoice = await CreateInvoiceDocumentAsync(db, "INV-REL-1", new DateTime(2026, 4, 21), 18_000m);
+        var outsideInvoice = await CreateInvoiceDocumentAsync(db, "INV-REL-OUT", new DateTime(2026, 4, 22), 19_000m);
+
+        var linkedPayment = CreatePayment(new DateTime(2026, 4, 23), 9_000m, "Платеж по счету INV-REL-1");
+        linkedPayment.InvoiceId = invoice.InvoiceId;
+        linkedPayment.Account = invoice.Account;
+        linkedPayment.AccountDate = invoice.AccountDate;
+        db.Payments.Add(linkedPayment);
+
+        var act = new Act
+        {
+            Number = "ACT-INV-REL",
+            Date = new DateTime(2026, 4, 24),
+            Amount = 18_000m,
+            CreationMode = ActCreationMode.Manual,
+            InvoiceId = invoice.Id,
+            Status = ActStatus.Created,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+
+        var actResult = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            actId: act.Id);
+
+        var actItems = ExtractInvoiceItems(Assert.IsType<OkObjectResult>(actResult));
+        Assert.Collection(actItems, item => Assert.Equal(invoice.Id, item.Id));
+
+        var paymentResult = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            paymentId: linkedPayment.Id);
+
+        var paymentItems = ExtractInvoiceItems(Assert.IsType<OkObjectResult>(paymentResult));
+        Assert.Collection(paymentItems, item => Assert.Equal(invoice.Id, item.Id));
+        Assert.DoesNotContain(paymentItems, item => item.Id == outsideInvoice.Id);
+    }
+
+    [Fact]
     public async Task Get_FiltersExpenseInvoicesByClientRole()
     {
         await using var db = await CreateContextAsync();

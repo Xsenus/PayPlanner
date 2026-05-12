@@ -1279,6 +1279,90 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task Get_FiltersByInvoiceIdAndPaymentId()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var invoice = await CreateInvoiceAsync(
+            db,
+            "INV-ACT-REL",
+            new DateTime(2026, 4, 27),
+            client.Id,
+            [
+                new InvoiceLineItem { Name = "Услуга", Quantity = 1m, Unit = "усл.", Price = 8_000m, SortOrder = 0 },
+            ]);
+
+        var linkedPayment = new Payment
+        {
+            Amount = 4_000m,
+            CounterpartyName = "Тестовый клиент",
+            Date = invoice.Date.AddDays(1),
+            PlannedDate = invoice.Date.AddDays(1),
+            Description = "Платеж по счету INV-ACT-REL",
+            DocumentKind = DocumentKind.Payment,
+            InvoiceId = invoice.InvoiceId,
+            ClientId = client.Id,
+            Account = invoice.Account,
+            AccountDate = invoice.AccountDate,
+            Notes = string.Empty,
+            Status = PaymentStatus.Pending,
+            SystemNotes = string.Empty,
+            Type = PaymentType.Income,
+        };
+        db.Payments.Add(linkedPayment);
+        await db.SaveChangesAsync();
+
+        var linkedAct = await CreateManualActAsync(db, client.Id, "ACT-INV-FILTER", 8_000m, ActStatus.Created, invoice.Id);
+        var outsideAct = await CreateManualActAsync(db, client.Id, "ACT-OUT-FILTER", 9_000m, ActStatus.Created);
+
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var invoiceAction = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            type: null,
+            clientId: null,
+            contractId: null,
+            clientIds: null,
+            responsibleId: null,
+            search: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            invoiceId: invoice.Id);
+
+        var invoiceOk = Assert.IsType<OkObjectResult>(invoiceAction);
+        var invoiceItems = Assert.IsAssignableFrom<IEnumerable<ActDto>>(invoiceOk.Value?.GetType().GetProperty("items")?.GetValue(invoiceOk.Value)).ToList();
+        Assert.Collection(invoiceItems, item => Assert.Equal(linkedAct.Id, item.Id));
+
+        var paymentAction = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            type: null,
+            clientId: null,
+            contractId: null,
+            clientIds: null,
+            responsibleId: null,
+            search: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            paymentId: linkedPayment.Id);
+
+        var paymentOk = Assert.IsType<OkObjectResult>(paymentAction);
+        var paymentItems = Assert.IsAssignableFrom<IEnumerable<ActDto>>(paymentOk.Value?.GetType().GetProperty("items")?.GetValue(paymentOk.Value)).ToList();
+        Assert.Collection(paymentItems, item => Assert.Equal(linkedAct.Id, item.Id));
+        Assert.DoesNotContain(paymentItems, item => item.Id == outsideAct.Id);
+    }
+
+    [Fact]
     public async Task Get_OmitsLineItemsByDefault_AndCanIncludeThem()
     {
         await using var db = await CreateContextAsync();

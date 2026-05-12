@@ -37,7 +37,8 @@ public class ContractsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId,
         [FromQuery] string? search, [FromQuery] string? sortBy, [FromQuery] string? sortDir, [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20, CancellationToken ct = default, [FromQuery] string? status = null)
+        [FromQuery] int pageSize = 20, CancellationToken ct = default, [FromQuery] string? status = null,
+        [FromQuery] int? invoiceId = null, [FromQuery] int? actId = null, [FromQuery] int? paymentId = null)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
@@ -47,9 +48,9 @@ public class ContractsController : ControllerBase
             return ValidationError(nameof(status), "Unknown contract status.");
         }
 
-        var query = ApplySort(ApplyFilters(BuildContractsListCountQuery(), from, to, clientId, normalizedStatus, search), sortBy, sortDir);
+        var query = ApplySort(ApplyFilters(BuildContractsListCountQuery(), from, to, clientId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir);
         var total = await query.CountAsync(ct);
-        var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(), from, to, clientId, normalizedStatus, search), sortBy, sortDir)
+        var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(), from, to, clientId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
@@ -864,11 +865,39 @@ public class ContractsController : ControllerBase
         }
     }
 
-    private static IQueryable<Contract> ApplyFilters(IQueryable<Contract> query, DateTime? from, DateTime? to, int? clientId, string? status, string? search)
+    private static IQueryable<Contract> ApplyFilters(
+        IQueryable<Contract> query,
+        DateTime? from,
+        DateTime? to,
+        int? clientId,
+        int? invoiceId,
+        int? actId,
+        int? paymentId,
+        string? status,
+        string? search)
     {
         if (from.HasValue) query = query.Where(c => c.Date >= from.Value.Date);
         if (to.HasValue) query = query.Where(c => c.Date <= to.Value.Date);
         if (clientId.HasValue) query = query.Where(c => c.ClientContracts.Any(link => link.ClientId == clientId.Value));
+        if (invoiceId.HasValue)
+        {
+            query = query.Where(c =>
+                c.ContractInvoices.Any(link => link.InvoiceId == invoiceId.Value)
+                || c.Payments.Any(payment => payment.Id == invoiceId.Value && payment.DocumentKind == DocumentKind.Invoice));
+        }
+        if (actId.HasValue)
+        {
+            query = query.Where(c =>
+                c.ContractActs.Any(link => link.ActId == actId.Value)
+                || c.ContractInvoices.Any(link => link.Invoice != null && link.Invoice.Acts.Any(act => act.Id == actId.Value))
+                || c.Payments.Any(payment => payment.DocumentKind == DocumentKind.Invoice && payment.Acts.Any(act => act.Id == actId.Value)));
+        }
+        if (paymentId.HasValue)
+        {
+            query = query.Where(c =>
+                c.ContractPayments.Any(link => link.PaymentId == paymentId.Value)
+                || c.Payments.Any(payment => payment.Id == paymentId.Value && payment.DocumentKind != DocumentKind.Invoice));
+        }
         if (!string.IsNullOrWhiteSpace(status)) query = query.Where(c => c.Status == status);
         if (!string.IsNullOrWhiteSpace(search))
         {

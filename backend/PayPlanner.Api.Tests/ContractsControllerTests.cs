@@ -123,6 +123,89 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task Get_FiltersByRelatedInvoiceActAndPayment()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-REL-FILTER",
+            Date = new DateTime(2026, 4, 21),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+        var outsideContract = new Contract
+        {
+            Number = "CT-REL-OUT",
+            Date = new DateTime(2026, 4, 22),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+        };
+        db.Contracts.AddRange(contract, outsideContract);
+        await db.SaveChangesAsync();
+
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-CT-REL", new DateTime(2026, 4, 23), 14_000m);
+        invoicePayment.ContractId = contract.Id;
+        var act = await CreateActAsync(db, invoicePayment.Id, new DateTime(2026, 4, 24), 6_000m);
+        var payment = await CreateStandalonePaymentAsync(db, new DateTime(2026, 4, 25), 5_000m);
+        payment.ContractId = contract.Id;
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+
+        var invoiceResult = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            search: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            invoiceId: invoicePayment.Id);
+        var invoiceItems = GetAnonymousProperty<IEnumerable<ContractDto>>(Assert.IsType<OkObjectResult>(invoiceResult).Value!, "items").ToList();
+        Assert.Collection(invoiceItems, item => Assert.Equal(contract.Id, item.Id));
+
+        var actResult = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            search: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            actId: act.Id);
+        var actItems = GetAnonymousProperty<IEnumerable<ContractDto>>(Assert.IsType<OkObjectResult>(actResult).Value!, "items").ToList();
+        Assert.Collection(actItems, item => Assert.Equal(contract.Id, item.Id));
+
+        var paymentResult = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            search: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            paymentId: payment.Id);
+        var paymentItems = GetAnonymousProperty<IEnumerable<ContractDto>>(Assert.IsType<OkObjectResult>(paymentResult).Value!, "items").ToList();
+        Assert.Collection(paymentItems, item => Assert.Equal(contract.Id, item.Id));
+        Assert.DoesNotContain(paymentItems, item => item.Id == outsideContract.Id);
+    }
+
+    [Fact]
     public async Task SigningWorkflowActions_UpdateStatusAndTimestamps()
     {
         await using var db = await CreateContextAsync();

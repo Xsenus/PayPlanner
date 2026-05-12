@@ -65,7 +65,9 @@ public class ActsController : ControllerBase
         [FromQuery] bool includeLineItems = false,
         [FromQuery] string? workflowStatus = null,
         [FromQuery] int? legalEntityId = null,
-        [FromQuery] int? caseId = null)
+        [FromQuery] int? caseId = null,
+        [FromQuery] int? invoiceId = null,
+        [FromQuery] int? paymentId = null)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
@@ -113,6 +115,31 @@ public class ActsController : ControllerBase
                 || (act.InvoiceId.HasValue && (
                     _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == act.InvoiceId.Value)
                     || _db.Payments.Any(payment => payment.Id == act.InvoiceId.Value && payment.ContractId == contractId.Value))));
+        }
+
+        if (invoiceId.HasValue)
+        {
+            query = query.Where(act =>
+                act.InvoiceId == invoiceId.Value
+                || (!act.InvoiceId.HasValue
+                    && act.InvoiceNumber != null
+                    && _db.Payments.Any(invoice =>
+                        invoice.Id == invoiceId.Value
+                        && invoice.Account == act.InvoiceNumber)));
+        }
+
+        if (paymentId.HasValue)
+        {
+            query = query.Where(act =>
+                act.InvoiceId.HasValue
+                && _db.Payments.Any(payment =>
+                    payment.Id == paymentId.Value
+                    && (
+                        payment.Id == act.InvoiceId.Value
+                        || (payment.InvoiceId.HasValue
+                            && _db.Payments.Any(invoice =>
+                                invoice.Id == act.InvoiceId.Value
+                                && invoice.InvoiceId == payment.InvoiceId.Value)))));
         }
 
         var total = await query.CountAsync(ct);
@@ -266,12 +293,15 @@ public class ActsController : ControllerBase
         [FromQuery] ActStatus? status,
         [FromQuery] PaymentType? type,
         [FromQuery] int? clientId,
+        [FromQuery] int? contractId,
         [FromQuery] int? responsibleId,
-        [FromQuery] string? search,
         CancellationToken ct = default,
+        [FromQuery] string? search = null,
         [FromQuery] string? workflowStatus = null,
         [FromQuery] int? legalEntityId = null,
-        [FromQuery] int? caseId = null)
+        [FromQuery] int? caseId = null,
+        [FromQuery] int? invoiceId = null,
+        [FromQuery] int? paymentId = null)
     {
         var normalizedWorkflowStatus = NormalizeActWorkflowStatusOrNull(workflowStatus);
         if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
@@ -300,6 +330,40 @@ public class ActsController : ControllerBase
         if (normalizedWorkflowStatus is not null)
         {
             query = query.Where(act => act.WorkflowStatus == normalizedWorkflowStatus);
+        }
+
+        if (contractId.HasValue)
+        {
+            query = query.Where(act =>
+                _db.ContractActs.Any(link => link.ContractId == contractId.Value && link.ActId == act.Id)
+                || (act.InvoiceId.HasValue && (
+                    _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == act.InvoiceId.Value)
+                    || _db.Payments.Any(payment => payment.Id == act.InvoiceId.Value && payment.ContractId == contractId.Value))));
+        }
+
+        if (invoiceId.HasValue)
+        {
+            query = query.Where(act =>
+                act.InvoiceId == invoiceId.Value
+                || (!act.InvoiceId.HasValue
+                    && act.InvoiceNumber != null
+                    && _db.Payments.Any(invoice =>
+                        invoice.Id == invoiceId.Value
+                        && invoice.Account == act.InvoiceNumber)));
+        }
+
+        if (paymentId.HasValue)
+        {
+            query = query.Where(act =>
+                act.InvoiceId.HasValue
+                && _db.Payments.Any(payment =>
+                    payment.Id == paymentId.Value
+                    && (
+                        payment.Id == act.InvoiceId.Value
+                        || (payment.InvoiceId.HasValue
+                            && _db.Payments.Any(invoice =>
+                                invoice.Id == act.InvoiceId.Value
+                                && invoice.InvoiceId == payment.InvoiceId.Value)))));
         }
 
         var groups = await query

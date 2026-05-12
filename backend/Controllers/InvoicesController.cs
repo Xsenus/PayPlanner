@@ -74,7 +74,9 @@ public class InvoicesController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default,
-        [FromQuery] string? workflowStatus = null)
+        [FromQuery] string? workflowStatus = null,
+        [FromQuery] int? actId = null,
+        [FromQuery] int? paymentId = null)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
@@ -99,6 +101,8 @@ public class InvoicesController : ControllerBase
                 legalEntityId,
                 ParseIntList(clientIds),
                 contractId,
+                actId,
+                paymentId,
                 caseId,
                 effectiveResponsibleId,
                 search,
@@ -143,6 +147,7 @@ public class InvoicesController : ControllerBase
             type,
             clientRole,
             ParseIntList(clientIds));
+        query = ApplyRelatedDocumentFilters(query, actId, paymentId);
 
         if (normalizedWorkflowStatus is not null)
         {
@@ -176,14 +181,17 @@ public class InvoicesController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] PaymentStatus? status,
         [FromQuery] int? clientId,
-        [FromQuery] int? caseId,
-        [FromQuery] int? responsibleId,
-        [FromQuery] string? search,
-        [FromQuery] PaymentType? type,
+        [FromQuery] int? contractId = null,
+        [FromQuery] int? caseId = null,
+        [FromQuery] int? responsibleId = null,
+        [FromQuery] string? search = null,
+        [FromQuery] PaymentType? type = null,
         [FromQuery] string? clientRole = null,
         [FromQuery] int? legalEntityId = null,
         CancellationToken ct = default,
-        [FromQuery] string? workflowStatus = null)
+        [FromQuery] string? workflowStatus = null,
+        [FromQuery] int? actId = null,
+        [FromQuery] int? paymentId = null)
     {
         var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId);
         if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
@@ -204,7 +212,9 @@ public class InvoicesController : ControllerBase
             clientId,
             legalEntityId,
             clientIds: null,
-            contractId: null,
+            contractId,
+            actId,
+            paymentId,
             caseId,
             effectiveResponsibleId,
             search,
@@ -2439,6 +2449,35 @@ public class InvoicesController : ControllerBase
         return query;
     }
 
+    private IQueryable<InvoiceQueryItem> ApplyRelatedDocumentFilters(
+        IQueryable<InvoiceQueryItem> query,
+        int? actId,
+        int? paymentId)
+    {
+        if (actId.HasValue)
+        {
+            query = query.Where(x =>
+                _db.Acts.Any(act =>
+                    act.Id == actId.Value
+                    && (act.InvoiceId == x.Payment.Id
+                        || (!act.InvoiceId.HasValue
+                            && act.InvoiceNumber != null
+                            && act.InvoiceNumber == (x.Payment.Invoice != null ? x.Payment.Invoice.Number : x.Payment.Account)))));
+        }
+
+        if (paymentId.HasValue)
+        {
+            query = query.Where(x =>
+                x.Payment.Id == paymentId.Value
+                || _db.Payments.Any(payment =>
+                    payment.Id == paymentId.Value
+                    && payment.InvoiceId.HasValue
+                    && x.Payment.InvoiceId == payment.InvoiceId.Value));
+        }
+
+        return query;
+    }
+
     private static string? NormalizeClientRole(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -3168,6 +3207,8 @@ public class InvoicesController : ControllerBase
         int? legalEntityId,
         IReadOnlySet<int>? clientIds,
         int? contractId,
+        int? actId,
+        int? paymentId,
         int? caseId,
         int? responsibleId,
         string? search,
@@ -3179,6 +3220,7 @@ public class InvoicesController : ControllerBase
     {
         var query = BuildInvoiceQuery();
         query = ApplyFilters(query, from, to, null, clientId, legalEntityId, contractId, caseId, responsibleId, search, type, clientRole, clientIds);
+        query = ApplyRelatedDocumentFilters(query, actId, paymentId);
         if (!string.IsNullOrWhiteSpace(workflowStatus))
         {
             query = query.Where(x => x.Payment.InvoiceWorkflowStatus == workflowStatus);
