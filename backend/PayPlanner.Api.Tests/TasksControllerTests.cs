@@ -65,6 +65,34 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateTask_BindsLegalEntityAndLegalEntityCase()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var legalEntity = await CreateLegalEntityAsync(db, "ООО Ромашка");
+        var clientCase = await CreateLegalEntityCaseAsync(db, legalEntity.Id, "КОРПОРАТИВНЫЙ СПОР");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            LegalEntityId = legalEntity.Id,
+            ClientCaseId = clientCase.Id,
+            Title = "Проверить документы юрлица",
+            DueAt = DateTime.UtcNow.AddHours(2),
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+
+        Assert.Null(dto.ClientId);
+        Assert.Equal(legalEntity.Id, dto.LegalEntityId);
+        Assert.Equal(clientCase.Id, dto.ClientCaseId);
+        Assert.Equal("ООО Ромашка", dto.LegalEntityName);
+        Assert.Equal("КОРПОРАТИВНЫЙ СПОР", dto.ClientCaseTitle);
+        Assert.Equal("ООО Ромашка - КОРПОРАТИВНЫЙ СПОР", dto.ObjectName);
+    }
+
+    [Fact]
     public async Task CreateTask_NormalizesPlannedDuration()
     {
         await using var db = await CreateContextAsync();
@@ -820,6 +848,14 @@ public class TasksControllerTests
         return client;
     }
 
+    private static async Task<LegalEntity> CreateLegalEntityAsync(PaymentContext db, string shortName)
+    {
+        var legalEntity = new LegalEntity { ShortName = shortName };
+        db.LegalEntities.Add(legalEntity);
+        await db.SaveChangesAsync();
+        return legalEntity;
+    }
+
     private static async Task<ClientCase> CreateCaseAsync(
         PaymentContext db,
         int clientId,
@@ -829,6 +865,23 @@ public class TasksControllerTests
         var clientCase = new ClientCase
         {
             ClientId = clientId,
+            Title = title,
+            Status = status,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        return clientCase;
+    }
+
+    private static async Task<ClientCase> CreateLegalEntityCaseAsync(
+        PaymentContext db,
+        int legalEntityId,
+        string title,
+        ClientCaseStatus status = ClientCaseStatus.Open)
+    {
+        var clientCase = new ClientCase
+        {
+            LegalEntityId = legalEntityId,
             Title = title,
             Status = status,
         };

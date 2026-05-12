@@ -9,6 +9,9 @@ public class TaskJournalItem
     public int? ClientId { get; set; }
     public Client? Client { get; set; }
 
+    public int? LegalEntityId { get; set; }
+    public LegalEntity? LegalEntity { get; set; }
+
     public int? ClientCaseId { get; set; }
     public ClientCase? ClientCase { get; set; }
 

@@ -4365,6 +4365,9 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
 
+                    b.Property<int?>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ObjectName")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -4449,6 +4452,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_TaskJournalItem_IsDeleted");
+
+                    b.HasIndex("LegalEntityId")
+                        .HasDatabaseName("IX_TaskJournalItems_LegalEntityId");
 
                     b.HasIndex("Priority")
                         .HasDatabaseName("IX_TaskJournalItems_Priority");
@@ -5791,6 +5797,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("AssigneeUser");
 
                     b.Navigation("AuthorUser");
@@ -5798,6 +5809,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Client");
 
                     b.Navigation("ClientCase");
+
+                    b.Navigation("LegalEntity");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalParticipant", b =>

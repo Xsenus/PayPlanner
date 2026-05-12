@@ -137,6 +137,10 @@ public class TasksController : ControllerBase
             query = query.Where(task =>
                 task.ObjectName.ToLower().Contains(term) ||
                 (task.Client != null && task.Client.Name.ToLower().Contains(term)) ||
+                (task.LegalEntity != null && (
+                    task.LegalEntity.ShortName.ToLower().Contains(term) ||
+                    (task.LegalEntity.FullName ?? "").ToLower().Contains(term) ||
+                    (task.LegalEntity.Inn ?? "").ToLower().Contains(term))) ||
                 (task.ClientCase != null && task.ClientCase.Title.ToLower().Contains(term)) ||
                 task.Title.ToLower().Contains(term) ||
                 (task.Description ?? "").ToLower().Contains(term) ||
@@ -333,16 +337,22 @@ public class TasksController : ControllerBase
         var candidates = await _db.ClientCases
             .AsNoTracking()
             .Where(clientCase =>
-                clientCase.ClientId.HasValue &&
-                clientCase.Client != null &&
+                ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
+                 (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
                 clientCase.Status != ClientCaseStatus.Closed)
             .Select(clientCase => new
             {
                 clientCase.Id,
                 clientCase.Title,
                 clientCase.CreatedAt,
-                ClientId = clientCase.ClientId!.Value,
-                ClientName = clientCase.Client!.Name,
+                clientCase.ClientId,
+                ClientName = clientCase.Client != null ? clientCase.Client.Name : string.Empty,
+                clientCase.LegalEntityId,
+                LegalEntityName = clientCase.LegalEntity != null
+                    ? (clientCase.LegalEntity.ShortName != string.Empty
+                        ? clientCase.LegalEntity.ShortName
+                        : clientCase.LegalEntity.FullName ?? string.Empty)
+                    : string.Empty,
                 ActiveTaskCount = _db.TaskJournalItems.Count(task =>
                     task.ClientCaseId == clientCase.Id &&
                     ActiveTaskStatuses.Contains(task.Status)),
@@ -355,7 +365,7 @@ public class TasksController : ControllerBase
             })
             .Where(item => item.ActiveTaskCount == 0)
             .OrderBy(item => item.LastTaskAt ?? item.CreatedAt)
-            .ThenBy(item => item.ClientName)
+            .ThenBy(item => item.ClientName != string.Empty ? item.ClientName : item.LegalEntityName)
             .ThenBy(item => item.Title)
             .Take(limit)
             .ToListAsync(ct);
@@ -374,6 +384,8 @@ public class TasksController : ControllerBase
             {
                 ClientId = item.ClientId,
                 ClientName = item.ClientName,
+                LegalEntityId = item.LegalEntityId,
+                LegalEntityName = item.LegalEntityName,
                 ClientCaseId = item.Id,
                 ClientCaseTitle = item.Title,
                 Reason = reason,
@@ -404,13 +416,14 @@ public class TasksController : ControllerBase
 
         var clientCase = await _db.ClientCases
             .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
             .FirstOrDefaultAsync(item =>
                 item.Id == clientCaseId &&
-                item.ClientId.HasValue &&
-                item.Client != null &&
+                ((item.ClientId.HasValue && item.Client != null) ||
+                 (item.LegalEntityId.HasValue && item.LegalEntity != null)) &&
                 item.Status != ClientCaseStatus.Closed,
                 ct);
-        if (clientCase is null || clientCase.Client is null || !clientCase.ClientId.HasValue)
+        if (clientCase is null)
         {
             return NotFound(new { message = "Дело для автоконтроля не найдено или уже закрыто." });
         }
@@ -444,12 +457,18 @@ public class TasksController : ControllerBase
             0,
             "pending",
             null);
-        var binding = TaskClientBinding.Valid(clientCase.ClientId.Value, clientCase.Client.Name, clientCase.Id, clientCase.Title);
+        var binding = BuildCaseBinding(clientCase);
+        if (binding.Error is not null)
+        {
+            return NotFound(new { message = "Дело для автоконтроля не найдено или уже закрыто." });
+        }
+
         var entity = new TaskJournalItem
         {
-            ClientId = clientCase.ClientId.Value,
+            ClientId = binding.ClientId,
+            LegalEntityId = binding.LegalEntityId,
             ClientCaseId = clientCase.Id,
-            ObjectName = BuildObjectName(clientCase.Client.Name, clientCase.Title),
+            ObjectName = BuildObjectName(binding.OwnerName, clientCase.Title),
             Title = "Проверить движение по делу",
             Description = "Автоконтроль: по делу нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.",
             AssigneeUserId = access.UserId,
@@ -495,9 +514,10 @@ public class TasksController : ControllerBase
         limit = Math.Clamp(limit, 1, 100);
         var candidates = await _db.ClientCases
             .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
             .Where(clientCase =>
-                clientCase.ClientId.HasValue &&
-                clientCase.Client != null &&
+                ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
+                 (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
                 clientCase.Status != ClientCaseStatus.Closed)
             .Select(clientCase => new
             {
@@ -511,7 +531,11 @@ public class TasksController : ControllerBase
             })
             .Where(item => item.ActiveTaskCount == 0)
             .OrderBy(item => item.LastTaskAt ?? item.Case.CreatedAt)
-            .ThenBy(item => item.Case.Client!.Name)
+            .ThenBy(item => item.Case.Client != null
+                ? item.Case.Client.Name
+                : item.Case.LegalEntity != null
+                    ? item.Case.LegalEntity.ShortName
+                    : string.Empty)
             .ThenBy(item => item.Case.Title)
             .Take(limit)
             .ToListAsync(ct);
@@ -519,15 +543,16 @@ public class TasksController : ControllerBase
         var created = new List<(TaskJournalItem Entity, TaskClientBinding Binding)>();
         foreach (var item in candidates)
         {
-            if (item.Case.Client is null || !item.Case.ClientId.HasValue)
+            var binding = BuildCaseBinding(item.Case);
+            if (binding.Error is not null)
             {
                 continue;
             }
 
-            var entity = BuildAutomationTaskEntity(item.Case, item.Case.Client, access, item.LastTaskAt);
+            var entity = BuildAutomationTaskEntity(item.Case, binding, access, item.LastTaskAt);
             AddTaskHistory(entity, access, "Задача создана автоматически из массового автоконтроля дел.");
             _db.TaskJournalItems.Add(entity);
-            created.Add((entity, TaskClientBinding.Valid(item.Case.ClientId.Value, item.Case.Client.Name, item.Case.Id, item.Case.Title)));
+            created.Add((entity, binding));
         }
 
         if (created.Count > 0)
@@ -904,8 +929,9 @@ public class TasksController : ControllerBase
         var entity = new TaskJournalItem
         {
             ClientId = binding.ClientId,
+            LegalEntityId = binding.LegalEntityId,
             ClientCaseId = binding.ClientCaseId,
-            ObjectName = BuildObjectName(binding.ClientName, binding.ClientCaseTitle),
+            ObjectName = BuildObjectName(binding.OwnerName, binding.ClientCaseTitle),
             Title = request.Title.Trim(),
             Description = NormalizeOptional(request.Description),
             AssigneeUserId = participants.PrimaryAssigneeUserId,
@@ -982,8 +1008,9 @@ public class TasksController : ControllerBase
         var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus);
 
         entity.ClientId = binding.ClientId;
+        entity.LegalEntityId = binding.LegalEntityId;
         entity.ClientCaseId = binding.ClientCaseId;
-        entity.ObjectName = BuildObjectName(binding.ClientName, binding.ClientCaseTitle);
+        entity.ObjectName = BuildObjectName(binding.OwnerName, binding.ClientCaseTitle);
         entity.Title = request.Title.Trim();
         entity.Description = NormalizeOptional(request.Description);
         entity.AssigneeUserId = participants.PrimaryAssigneeUserId;
@@ -1210,6 +1237,7 @@ public class TasksController : ControllerBase
     {
         var query = _db.TaskJournalItems
             .Include(task => task.Client)
+            .Include(task => task.LegalEntity)
             .Include(task => task.ClientCase)
             .Include(task => task.Participants)
                 .ThenInclude(participant => participant.User)
@@ -1373,42 +1401,80 @@ public class TasksController : ControllerBase
         UpsertTaskJournalItemRequest request,
         CancellationToken ct)
     {
-        if (!request.ClientId.HasValue || request.ClientId.Value <= 0)
+        var hasClient = request.ClientId is > 0;
+        var hasLegalEntity = request.LegalEntityId is > 0;
+        if (hasClient == hasLegalEntity)
         {
-            return TaskClientBinding.Invalid("Укажите клиента задачи.");
+            return TaskClientBinding.Invalid("Укажите одного контрагента задачи: клиента или юрлицо.");
         }
 
-        var client = await _db.Clients
+        if (hasClient)
+        {
+            var client = await _db.Clients
+                .AsNoTracking()
+                .Where(item => item.Id == request.ClientId!.Value)
+                .Select(item => new { item.Id, item.Name })
+                .FirstOrDefaultAsync(ct);
+            if (client is null)
+            {
+                return TaskClientBinding.Invalid("Указанный клиент не найден.");
+            }
+
+            if (!request.ClientCaseId.HasValue || request.ClientCaseId.Value <= 0)
+            {
+                return TaskClientBinding.Valid(client.Id, client.Name, null, string.Empty, null, null);
+            }
+
+            var clientCase = await _db.ClientCases
+                .AsNoTracking()
+                .Where(item => item.Id == request.ClientCaseId.Value)
+                .Select(item => new { item.Id, item.ClientId, item.LegalEntityId, item.Title })
+                .FirstOrDefaultAsync(ct);
+            if (clientCase is null)
+            {
+                return TaskClientBinding.Invalid("Указанное дело не найдено.");
+            }
+
+            if (clientCase.ClientId != client.Id)
+            {
+                return TaskClientBinding.Invalid("Выбранное дело не относится к указанному клиенту.");
+            }
+
+            return TaskClientBinding.Valid(client.Id, client.Name, null, string.Empty, clientCase.Id, clientCase.Title);
+        }
+
+        var legalEntity = await _db.LegalEntities
             .AsNoTracking()
-            .Where(item => item.Id == request.ClientId.Value)
-            .Select(item => new { item.Id, item.Name })
+            .Where(item => item.Id == request.LegalEntityId!.Value)
+            .Select(item => new { item.Id, item.ShortName, item.FullName })
             .FirstOrDefaultAsync(ct);
-        if (client is null)
+        if (legalEntity is null)
         {
-            return TaskClientBinding.Invalid("Указанный клиент не найден.");
+            return TaskClientBinding.Invalid("Указанное юрлицо не найдено.");
         }
 
+        var legalEntityName = GetLegalEntityName(legalEntity.Id, legalEntity.ShortName, legalEntity.FullName);
         if (!request.ClientCaseId.HasValue || request.ClientCaseId.Value <= 0)
         {
-            return TaskClientBinding.Valid(client.Id, client.Name, null, null);
+            return TaskClientBinding.Valid(null, string.Empty, legalEntity.Id, legalEntityName, null, null);
         }
 
-        var clientCase = await _db.ClientCases
+        var legalEntityCase = await _db.ClientCases
             .AsNoTracking()
             .Where(item => item.Id == request.ClientCaseId.Value)
-            .Select(item => new { item.Id, item.ClientId, item.Title })
+            .Select(item => new { item.Id, item.ClientId, item.LegalEntityId, item.Title })
             .FirstOrDefaultAsync(ct);
-        if (clientCase is null)
+        if (legalEntityCase is null)
         {
             return TaskClientBinding.Invalid("Указанное дело не найдено.");
         }
 
-        if (clientCase.ClientId != client.Id)
+        if (legalEntityCase.LegalEntityId != legalEntity.Id)
         {
-            return TaskClientBinding.Invalid("Выбранное дело не относится к указанному клиенту.");
+            return TaskClientBinding.Invalid("Выбранное дело не относится к указанному юрлицу.");
         }
 
-        return TaskClientBinding.Valid(client.Id, client.Name, clientCase.Id, clientCase.Title);
+        return TaskClientBinding.Valid(null, string.Empty, legalEntity.Id, legalEntityName, legalEntityCase.Id, legalEntityCase.Title);
     }
 
     private static string BuildObjectName(string clientName, string? caseTitle)
@@ -1416,11 +1482,52 @@ public class TasksController : ControllerBase
             ? clientName.Trim()
             : $"{clientName.Trim()} - {caseTitle.Trim()}";
 
+    private static TaskClientBinding BuildCaseBinding(ClientCase clientCase)
+    {
+        if (clientCase.ClientId.HasValue && clientCase.Client is not null)
+        {
+            return TaskClientBinding.Valid(
+                clientCase.ClientId.Value,
+                clientCase.Client.Name,
+                null,
+                string.Empty,
+                clientCase.Id,
+                clientCase.Title);
+        }
+
+        if (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity is not null)
+        {
+            return TaskClientBinding.Valid(
+                null,
+                string.Empty,
+                clientCase.LegalEntityId.Value,
+                GetLegalEntityName(clientCase.LegalEntity),
+                clientCase.Id,
+                clientCase.Title);
+        }
+
+        return TaskClientBinding.Invalid("У дела нет владельца.");
+    }
+
+    private static string GetLegalEntityName(LegalEntity? entity)
+        => entity is null
+            ? string.Empty
+            : GetLegalEntityName(entity.Id, entity.ShortName, entity.FullName);
+
+    private static string GetLegalEntityName(int id, string? shortName, string? fullName)
+        => !string.IsNullOrWhiteSpace(shortName)
+            ? shortName.Trim()
+            : !string.IsNullOrWhiteSpace(fullName)
+                ? fullName.Trim()
+                : $"Юрлицо #{id}";
+
     private static string? ValidateRequest(UpsertTaskJournalItemRequest request)
     {
-        if (!request.ClientId.HasValue || request.ClientId.Value <= 0)
+        var hasClient = request.ClientId is > 0;
+        var hasLegalEntity = request.LegalEntityId is > 0;
+        if (hasClient == hasLegalEntity)
         {
-            return "Укажите клиента задачи.";
+            return "Укажите одного контрагента задачи: клиента или юрлицо.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Title))
@@ -1448,6 +1555,8 @@ public class TasksController : ControllerBase
             Id = entity.Id,
             ClientId = entity.ClientId,
             ClientName = binding?.ClientName ?? entity.Client?.Name ?? string.Empty,
+            LegalEntityId = entity.LegalEntityId,
+            LegalEntityName = binding?.LegalEntityName ?? GetLegalEntityName(entity.LegalEntity),
             ClientCaseId = entity.ClientCaseId,
             ClientCaseTitle = binding?.ClientCaseTitle ?? entity.ClientCase?.Title ?? string.Empty,
             ObjectName = entity.ObjectName,
@@ -1530,6 +1639,7 @@ public class TasksController : ControllerBase
             var description = string.Join("\\n", new[]
             {
                 task.Client?.Name,
+                GetLegalEntityName(task.LegalEntity),
                 task.ClientCase?.Title,
                 TaskStatusLabel(task.Status),
                 task.Description,
@@ -1564,7 +1674,7 @@ public class TasksController : ControllerBase
 
     private static TaskJournalItem BuildAutomationTaskEntity(
         ClientCase clientCase,
-        Client client,
+        TaskClientBinding binding,
         TaskAccess access,
         DateTime? lastTaskAt)
     {
@@ -1581,9 +1691,10 @@ public class TasksController : ControllerBase
 
         return new TaskJournalItem
         {
-            ClientId = clientCase.ClientId!.Value,
+            ClientId = binding.ClientId,
+            LegalEntityId = binding.LegalEntityId,
             ClientCaseId = clientCase.Id,
-            ObjectName = BuildObjectName(client.Name, clientCase.Title),
+            ObjectName = BuildObjectName(binding.OwnerName, clientCase.Title),
             Title = "Проверить движение по делу",
             Description = "Автоконтроль: по делу нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.",
             AssigneeUserId = access.UserId,
@@ -1919,6 +2030,7 @@ public class TasksController : ControllerBase
         var changes = new List<string>();
 
         AddIfChanged(changes, "Клиент", entity.ClientId, binding.ClientId);
+        AddIfChanged(changes, "Юрлицо", entity.LegalEntityId, binding.LegalEntityId);
         AddIfChanged(changes, "Дело", entity.ClientCaseId, binding.ClientCaseId);
         AddIfChanged(changes, "Наименование", entity.Title, request.Title.Trim());
         AddIfChanged(changes, "Описание", NormalizeOptional(entity.Description), NormalizeOptional(request.Description));
@@ -2057,15 +2169,25 @@ public class TasksController : ControllerBase
     private sealed record TaskClientBinding(
         int? ClientId,
         string ClientName,
+        int? LegalEntityId,
+        string LegalEntityName,
         int? ClientCaseId,
         string? ClientCaseTitle,
         string? Error)
     {
-        public static TaskClientBinding Valid(int clientId, string clientName, int? clientCaseId, string? clientCaseTitle)
-            => new(clientId, clientName, clientCaseId, clientCaseTitle, null);
+        public string OwnerName => ClientId.HasValue ? ClientName : LegalEntityName;
+
+        public static TaskClientBinding Valid(
+            int? clientId,
+            string clientName,
+            int? legalEntityId,
+            string legalEntityName,
+            int? clientCaseId,
+            string? clientCaseTitle)
+            => new(clientId, clientName, legalEntityId, legalEntityName, clientCaseId, clientCaseTitle, null);
 
         public static TaskClientBinding Invalid(string error)
-            => new(null, string.Empty, null, null, error);
+            => new(null, string.Empty, null, string.Empty, null, null, error);
     }
 }
 

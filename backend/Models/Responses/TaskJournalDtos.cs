@@ -5,6 +5,8 @@ public class TaskJournalItemDto
     public int Id { get; set; }
     public int? ClientId { get; set; }
     public string ClientName { get; set; } = string.Empty;
+    public int? LegalEntityId { get; set; }
+    public string LegalEntityName { get; set; } = string.Empty;
     public int? ClientCaseId { get; set; }
     public string ClientCaseTitle { get; set; } = string.Empty;
     public string ObjectName { get; set; } = string.Empty;
@@ -77,8 +79,10 @@ public class TaskJournalAssigneeDto
 
 public class TaskJournalCaseAutomationCandidateDto
 {
-    public int ClientId { get; set; }
+    public int? ClientId { get; set; }
     public string ClientName { get; set; } = string.Empty;
+    public int? LegalEntityId { get; set; }
+    public string LegalEntityName { get; set; } = string.Empty;
     public int ClientCaseId { get; set; }
     public string ClientCaseTitle { get; set; } = string.Empty;
     public string Reason { get; set; } = string.Empty;

@@ -89,9 +89,10 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             var cutoff = now.AddDays(-settings.InactiveDays);
             var candidates = await context.ClientCases
                 .Include(item => item.Client)
+                .Include(item => item.LegalEntity)
                 .Where(clientCase =>
-                    clientCase.ClientId.HasValue &&
-                    clientCase.Client != null &&
+                    ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
+                     (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
                     clientCase.Status != ClientCaseStatus.Closed)
                 .Select(clientCase => new
                 {
@@ -105,7 +106,11 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 })
                 .Where(item => item.ActiveTaskCount == 0 && (item.LastTaskAt ?? item.Case.CreatedAt) <= cutoff)
                 .OrderBy(item => item.LastTaskAt ?? item.Case.CreatedAt)
-                .ThenBy(item => item.Case.Client!.Name)
+                .ThenBy(item => item.Case.Client != null
+                    ? item.Case.Client.Name
+                    : item.Case.LegalEntity != null
+                        ? item.Case.LegalEntity.ShortName
+                        : string.Empty)
                 .ThenBy(item => item.Case.Title)
                 .Take(settings.Limit)
                 .ToListAsync(cancellationToken);
@@ -113,7 +118,8 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             var created = 0;
             foreach (var candidate in candidates)
             {
-                if (candidate.Case.Client is null || !candidate.Case.ClientId.HasValue)
+                var owner = ResolveCaseOwner(candidate.Case);
+                if (owner is null)
                 {
                     continue;
                 }
@@ -129,7 +135,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     continue;
                 }
 
-                var task = BuildAutomationTask(candidate.Case, candidate.Case.Client, assignee, candidate.LastTaskAt, now);
+                var task = BuildAutomationTask(candidate.Case, owner, assignee, candidate.LastTaskAt, now);
                 context.TaskJournalItems.Add(task);
                 created += 1;
             }
@@ -195,7 +201,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
 
     private static TaskJournalItem BuildAutomationTask(
         ClientCase clientCase,
-        Client client,
+        CaseOwnerBinding owner,
         User assignee,
         DateTime? lastTaskAt,
         DateTime now)
@@ -205,9 +211,10 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity).TotalDays));
         var task = new TaskJournalItem
         {
-            ClientId = clientCase.ClientId!.Value,
+            ClientId = owner.ClientId,
+            LegalEntityId = owner.LegalEntityId,
             ClientCaseId = clientCase.Id,
-            ObjectName = BuildObjectName(client.Name, clientCase.Title),
+            ObjectName = BuildObjectName(owner.Name, clientCase.Title),
             Title = "Проверить движение по делу",
             Description = "Автоконтроль: по делу давно нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.",
             AssigneeUserId = assignee.Id,
@@ -256,6 +263,28 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     private static string DisplayName(User user)
         => string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName.Trim();
 
+    private static CaseOwnerBinding? ResolveCaseOwner(ClientCase clientCase)
+    {
+        if (clientCase.ClientId.HasValue && clientCase.Client is not null)
+        {
+            return new CaseOwnerBinding(clientCase.ClientId.Value, null, clientCase.Client.Name);
+        }
+
+        if (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity is not null)
+        {
+            return new CaseOwnerBinding(null, clientCase.LegalEntityId.Value, GetLegalEntityName(clientCase.LegalEntity));
+        }
+
+        return null;
+    }
+
+    private static string GetLegalEntityName(LegalEntity entity)
+        => !string.IsNullOrWhiteSpace(entity.ShortName)
+            ? entity.ShortName.Trim()
+            : !string.IsNullOrWhiteSpace(entity.FullName)
+                ? entity.FullName.Trim()
+                : $"Юрлицо #{entity.Id}";
+
     private static string BuildObjectName(string clientName, string? caseTitle)
         => string.IsNullOrWhiteSpace(caseTitle) ? clientName.Trim() : $"{clientName.Trim()} - {caseTitle.Trim()}";
 
@@ -297,6 +326,8 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         int InactiveDays,
         int Limit,
         int? DefaultAssigneeUserId);
+
+    private sealed record CaseOwnerBinding(int? ClientId, int? LegalEntityId, string Name);
 }
 
 public sealed record TaskJournalAutomationSchedulerResult(

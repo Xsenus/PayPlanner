@@ -1661,6 +1661,11 @@ public class PaymentContext : DbContext
                 .HasForeignKey(e => e.ClientId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.LegalEntity)
+                .WithMany()
+                .HasForeignKey(e => e.LegalEntityId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(e => e.ClientCase)
                 .WithMany()
                 .HasForeignKey(e => e.ClientCaseId)
@@ -1696,6 +1701,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Type).HasDatabaseName("IX_TaskJournalItems_Type");
             entity.HasIndex(e => e.Priority).HasDatabaseName("IX_TaskJournalItems_Priority");
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_TaskJournalItems_ClientId");
+            entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_TaskJournalItems_LegalEntityId");
             entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_TaskJournalItems_ClientCaseId");
             entity.HasIndex(e => e.AssigneeUserId).HasDatabaseName("IX_TaskJournalItems_AssigneeUserId");
             entity.HasIndex(e => e.AuthorUserId).HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
