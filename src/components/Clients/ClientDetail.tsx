@@ -174,6 +174,9 @@ type PaymentTableColumnKey =
   | "category"
   | "caseContact"
   | "details"
+  | "linkedContract"
+  | "linkedInvoice"
+  | "linkedActs"
   | "status";
 
 type InvoiceTableColumnKey =
@@ -184,6 +187,9 @@ type InvoiceTableColumnKey =
   | "status"
   | "dueDate"
   | "responsible"
+  | "linkedContract"
+  | "linkedActs"
+  | "linkedPayments"
   | "createdAt";
 
 type ActTableColumnKey =
@@ -192,6 +198,9 @@ type ActTableColumnKey =
   | "title"
   | "amount"
   | "status"
+  | "linkedContract"
+  | "linkedInvoice"
+  | "linkedPayments"
   | "responsible";
 
 type ContractTableColumnKey =
@@ -200,6 +209,9 @@ type ContractTableColumnKey =
   | "date"
   | "clients"
   | "amount"
+  | "linkedInvoices"
+  | "linkedActs"
+  | "linkedPayments"
   | "validUntil"
   | "createdAt";
 
@@ -253,6 +265,9 @@ const PAYMENT_TABLE_COLUMNS: Array<{
   { key: "category", label: "Категория / источник", defaultWidth: 250 },
   { key: "caseContact", label: "Дело и контакт", defaultWidth: 240 },
   { key: "details", label: "Документы и комментарии", defaultWidth: 300 },
+  { key: "linkedContract", label: "Договор", defaultWidth: 180 },
+  { key: "linkedInvoice", label: "Счет", defaultWidth: 180 },
+  { key: "linkedActs", label: "Акты", defaultWidth: 190 },
   { key: "status", label: "Статус и прогресс", defaultWidth: 240 },
 ];
 
@@ -268,6 +283,9 @@ const INVOICE_TABLE_COLUMNS: Array<{
   { key: "status", label: "Статус", defaultWidth: 170 },
   { key: "dueDate", label: "Срок оплаты", defaultWidth: 170 },
   { key: "responsible", label: "Ответственный", defaultWidth: 180 },
+  { key: "linkedContract", label: "Договор", defaultWidth: 180 },
+  { key: "linkedActs", label: "Акты", defaultWidth: 190 },
+  { key: "linkedPayments", label: "Платежи", defaultWidth: 210 },
   { key: "createdAt", label: "Создан", defaultWidth: 150 },
 ];
 
@@ -317,6 +335,9 @@ const ACT_TABLE_COLUMNS: Array<{
   { key: "title", label: "Название", defaultWidth: 260 },
   { key: "amount", label: "Сумма", defaultWidth: 160 },
   { key: "status", label: "Статус", defaultWidth: 160 },
+  { key: "linkedContract", label: "Договор", defaultWidth: 180 },
+  { key: "linkedInvoice", label: "Счет", defaultWidth: 180 },
+  { key: "linkedPayments", label: "Платежи", defaultWidth: 210 },
   { key: "responsible", label: "Ответственный", defaultWidth: 180 },
 ];
 
@@ -330,6 +351,9 @@ const CONTRACT_TABLE_COLUMNS: Array<{
   { key: "date", label: "Дата договора", defaultWidth: 150 },
   { key: "clients", label: "Клиенты", defaultWidth: 260 },
   { key: "amount", label: "Сумма договора", defaultWidth: 170 },
+  { key: "linkedInvoices", label: "Счета", defaultWidth: 190 },
+  { key: "linkedActs", label: "Акты", defaultWidth: 190 },
+  { key: "linkedPayments", label: "Платежи", defaultWidth: 210 },
   { key: "validUntil", label: "Действует до", defaultWidth: 170 },
   { key: "createdAt", label: "Создано", defaultWidth: 150 },
 ];
@@ -416,6 +440,18 @@ const ACT_STATUS_CLASSES: Record<ActStatus, string> = {
   Signed: "bg-emerald-100 text-emerald-700 border border-emerald-200",
   Terminated: "bg-rose-100 text-rose-700 border border-rose-200",
 };
+
+const RELATED_FILTER_ALL = "all";
+
+function parseRelatedFilterId(value: string): number | undefined {
+  if (value === RELATED_FILTER_ALL) return undefined;
+  const id = Number(value);
+  return Number.isFinite(id) && id > 0 ? id : undefined;
+}
+
+function uniqById<T extends { id: number }>(items: T[]): T[] {
+  return [...new Map(items.map((item) => [item.id, item])).values()];
+}
 
 function ClientSectionFilterPanel({
   children,
@@ -2157,6 +2193,27 @@ export function ClientDetail({
   const [contractActionError, setContractActionError] = useState<string | null>(
     null,
   );
+  const [relatedContractFilter, setRelatedContractFilter] =
+    useState(RELATED_FILTER_ALL);
+  const [relatedInvoiceFilter, setRelatedInvoiceFilter] =
+    useState(RELATED_FILTER_ALL);
+  const [relatedActFilter, setRelatedActFilter] = useState(RELATED_FILTER_ALL);
+  const [relatedPaymentFilter, setRelatedPaymentFilter] =
+    useState(RELATED_FILTER_ALL);
+  const [relatedDocumentLookupLoading, setRelatedDocumentLookupLoading] =
+    useState(false);
+  const [relatedDocumentLookupError, setRelatedDocumentLookupError] =
+    useState<string | null>(null);
+  const [relatedDocumentContracts, setRelatedDocumentContracts] = useState<
+    Contract[]
+  >([]);
+  const [relatedDocumentInvoices, setRelatedDocumentInvoices] = useState<
+    Invoice[]
+  >([]);
+  const [relatedDocumentActs, setRelatedDocumentActs] = useState<Act[]>([]);
+  const [relatedDocumentPayments, setRelatedDocumentPayments] = useState<
+    Payment[]
+  >([]);
 
   const resolvedActPeriod = useMemo(
     () => resolvePeriod(actPeriod),
@@ -2174,6 +2231,91 @@ export function ClientDetail({
   const actTo = resolvedActPeriod.to ?? "";
   const contractFrom = resolvedContractPeriod.from ?? "";
   const contractTo = resolvedContractPeriod.to ?? "";
+  const relatedContractId = parseRelatedFilterId(relatedContractFilter);
+  const relatedInvoiceId = parseRelatedFilterId(relatedInvoiceFilter);
+  const relatedActId = parseRelatedFilterId(relatedActFilter);
+  const relatedPaymentId = parseRelatedFilterId(relatedPaymentFilter);
+
+  useEffect(() => {
+    setRelatedContractFilter(RELATED_FILTER_ALL);
+    setRelatedInvoiceFilter(RELATED_FILTER_ALL);
+    setRelatedActFilter(RELATED_FILTER_ALL);
+    setRelatedPaymentFilter(RELATED_FILTER_ALL);
+    setRelatedDocumentContracts([]);
+    setRelatedDocumentInvoices([]);
+    setRelatedDocumentActs([]);
+    setRelatedDocumentPayments([]);
+  }, [clientId]);
+
+  useEffect(() => {
+    if (
+      activeSection !== "payments" &&
+      activeSection !== "accounts" &&
+      activeSection !== "acts" &&
+      activeSection !== "contracts"
+    ) {
+      return;
+    }
+
+    let alive = true;
+    setRelatedDocumentLookupLoading(true);
+    setRelatedDocumentLookupError(null);
+
+    Promise.allSettled([
+      apiService.getContracts({ clientId, page: 1, pageSize: 200 }),
+      apiService.getInvoices({ clientId, page: 1, pageSize: 200 }),
+      apiService.getActs({ clientId, page: 1, pageSize: 200 }),
+      apiService.getPaymentsV2({
+        clientId,
+        page: 1,
+        pageSize: 500,
+        sortBy: "date",
+        sortDir: "desc",
+      }),
+    ])
+      .then(([contractsResult, invoicesResult, actsResult, paymentsResult]) => {
+        if (!alive) return;
+
+        if (contractsResult.status === "fulfilled") {
+          setRelatedDocumentContracts(contractsResult.value.items ?? []);
+        }
+        if (invoicesResult.status === "fulfilled") {
+          setRelatedDocumentInvoices(invoicesResult.value.items ?? []);
+        }
+        if (actsResult.status === "fulfilled") {
+          setRelatedDocumentActs(actsResult.value.items ?? []);
+        }
+        if (paymentsResult.status === "fulfilled") {
+          setRelatedDocumentPayments(paymentsResult.value.items ?? []);
+        }
+
+        const failed = [
+          contractsResult,
+          invoicesResult,
+          actsResult,
+          paymentsResult,
+        ].some((result) => result.status === "rejected");
+        setRelatedDocumentLookupError(
+          failed ? "Не все связанные документы удалось загрузить." : null,
+        );
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setRelatedDocumentLookupError(
+          extractDisplayErrorMessage(
+            error,
+            "Не удалось загрузить связанные документы.",
+          ),
+        );
+      })
+      .finally(() => {
+        if (alive) setRelatedDocumentLookupLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [activeSection, clientId]);
 
   const handleActFromChange = useCallback((value: string) => {
     setActPeriod((prev) => {
@@ -2236,6 +2378,9 @@ export function ClientDetail({
     to: resolvedActPeriod.to,
     status: actStatusFilter === "all" ? undefined : actStatusFilter,
     clientId,
+    contractId: relatedContractId,
+    invoiceId: relatedInvoiceId,
+    paymentId: relatedPaymentId,
     search: debouncedActSearch || undefined,
     sortBy: actSort.key,
     sortDir: actSort.direction,
@@ -2249,6 +2394,9 @@ export function ClientDetail({
     resolvedActPeriod.from,
     resolvedActPeriod.to,
     actStatusFilter,
+    relatedContractId,
+    relatedInvoiceId,
+    relatedPaymentId,
     debouncedActSearch,
     clientId,
     actPageSize,
@@ -2282,6 +2430,9 @@ export function ClientDetail({
     to: resolvedInvoicePeriod.to,
     status: invoiceStatusFilter === "all" ? undefined : invoiceStatusFilter,
     clientId,
+    contractId: relatedContractId,
+    actId: relatedActId,
+    paymentId: relatedPaymentId,
     clientRole: invoiceViewConfig.clientRole,
     search: debouncedInvoiceSearch || undefined,
     type: invoiceViewConfig.type,
@@ -2300,6 +2451,9 @@ export function ClientDetail({
     resolvedInvoicePeriod.from,
     resolvedInvoicePeriod.to,
     invoiceStatusFilter,
+    relatedContractId,
+    relatedActId,
+    relatedPaymentId,
     debouncedInvoiceSearch,
   ]);
 
@@ -2345,6 +2499,9 @@ export function ClientDetail({
     to: resolvedContractPeriod.to,
     search: debouncedContractSearch || undefined,
     clientId,
+    invoiceId: relatedInvoiceId,
+    actId: relatedActId,
+    paymentId: relatedPaymentId,
     sortBy: contractSort.key,
     sortDir: contractSort.direction,
     page: contractPage,
@@ -2358,6 +2515,9 @@ export function ClientDetail({
     resolvedContractPeriod.to,
     debouncedContractSearch,
     clientId,
+    relatedInvoiceId,
+    relatedActId,
+    relatedPaymentId,
     contractPageSize,
   ]);
 
@@ -2516,6 +2676,13 @@ export function ClientDetail({
     }
   };
 
+  const resetRelatedDocumentFilters = () => {
+    setRelatedContractFilter(RELATED_FILTER_ALL);
+    setRelatedInvoiceFilter(RELATED_FILTER_ALL);
+    setRelatedActFilter(RELATED_FILTER_ALL);
+    setRelatedPaymentFilter(RELATED_FILTER_ALL);
+  };
+
   const resetPaymentFilters = () => {
     setMonthFrom("");
     setMonthTo("");
@@ -2524,6 +2691,7 @@ export function ClientDetail({
     setPaymentViewMode(defaultPaymentViewMode);
     setPaymentViewModeTouched(false);
     setSelectedCaseId("all");
+    resetRelatedDocumentFilters();
     setPaymentSearch("");
     setPaymentPage(1);
   };
@@ -2533,12 +2701,14 @@ export function ClientDetail({
     setInvoiceStatusFilter("all");
     setInvoiceViewMode(defaultInvoiceViewMode);
     setInvoiceViewModeTouched(false);
+    resetRelatedDocumentFilters();
     setInvoiceSearch("");
     setInvoicePage(1);
   };
 
   const resetContractFilters = () => {
     setContractPeriod({ mode: "preset", preset: "year_to_date" });
+    resetRelatedDocumentFilters();
     setContractSearch("");
     setContractPage(1);
   };
@@ -3174,6 +3344,9 @@ export function ClientDetail({
     from: fromDateStr,
     to: toDateStr,
     clientId,
+    contractId: relatedContractId,
+    invoiceId: relatedInvoiceId,
+    actId: relatedActId,
     clientRole: paymentViewConfig.clientRole,
     caseId: caseIdForQuery,
     type: paymentViewConfig.type,
@@ -3186,6 +3359,259 @@ export function ClientDetail({
   });
 
   const visiblePayments = payments;
+  const relatedContractOptions = useMemo(
+    () =>
+      uniqById([...relatedDocumentContracts, ...clientContracts]).sort((a, b) =>
+        (a.number || "").localeCompare(b.number || "", "ru"),
+      ),
+    [clientContracts, relatedDocumentContracts],
+  );
+  const relatedInvoiceOptions = useMemo(
+    () =>
+      uniqById([...relatedDocumentInvoices, ...clientInvoices]).sort(
+        (a, b) =>
+          new Date(b.date).getTime() - new Date(a.date).getTime() ||
+          b.id - a.id,
+      ),
+    [clientInvoices, relatedDocumentInvoices],
+  );
+  const relatedActOptions = useMemo(
+    () =>
+      uniqById([...relatedDocumentActs, ...clientActs]).sort(
+        (a, b) =>
+          new Date(b.date).getTime() - new Date(a.date).getTime() ||
+          b.id - a.id,
+      ),
+    [clientActs, relatedDocumentActs],
+  );
+  const relatedPaymentOptions = useMemo(
+    () =>
+      uniqById([...relatedDocumentPayments, ...visiblePayments])
+        .filter((payment) => payment.documentKind !== "Invoice")
+        .sort(
+          (a, b) =>
+            new Date(b.date).getTime() - new Date(a.date).getTime() ||
+            b.id - a.id,
+        ),
+    [relatedDocumentPayments, visiblePayments],
+  );
+  const relatedContractById = useMemo(
+    () => new Map(relatedContractOptions.map((contract) => [contract.id, contract])),
+    [relatedContractOptions],
+  );
+  const relatedInvoiceById = useMemo(
+    () => new Map(relatedInvoiceOptions.map((invoice) => [invoice.id, invoice])),
+    [relatedInvoiceOptions],
+  );
+  const relatedInvoiceByEntityId = useMemo(() => {
+    const map = new Map<number, Invoice>();
+    relatedInvoiceOptions.forEach((invoice) => {
+      if (invoice.invoiceEntityId) {
+        map.set(invoice.invoiceEntityId, invoice);
+      }
+    });
+    return map;
+  }, [relatedInvoiceOptions]);
+  const relatedActById = useMemo(
+    () => new Map(relatedActOptions.map((act) => [act.id, act])),
+    [relatedActOptions],
+  );
+  const relatedPaymentById = useMemo(
+    () => new Map(relatedPaymentOptions.map((payment) => [payment.id, payment])),
+    [relatedPaymentOptions],
+  );
+
+  const formatContractFilterLabel = useCallback((contract: Contract) => {
+    const title = contract.title?.trim();
+    return `Договор №${contract.number}${title ? ` · ${title}` : ""}`;
+  }, []);
+  const formatInvoiceFilterLabel = useCallback(
+    (invoice: Invoice) => `Счет №${invoice.number} от ${toRuDate(invoice.date)}`,
+    [],
+  );
+  const formatActFilterLabel = useCallback(
+    (act: Act) => `Акт №${act.number} от ${toRuDate(act.date)}`,
+    [],
+  );
+  const formatPaymentFilterLabel = useCallback((payment: Payment) => {
+    const description = payment.description?.trim();
+    return `${toRuDate(payment.date)} · ${formatCurrencySmart(payment.amount).full}${description ? ` · ${description}` : ""}`;
+  }, []);
+
+  const selectedRelatedContract = relatedContractId
+    ? relatedContractById.get(relatedContractId)
+    : null;
+  const selectedRelatedInvoice = relatedInvoiceId
+    ? relatedInvoiceById.get(relatedInvoiceId)
+    : null;
+  const selectedRelatedAct = relatedActId
+    ? relatedActById.get(relatedActId)
+    : null;
+  const selectedRelatedPayment = relatedPaymentId
+    ? relatedPaymentById.get(relatedPaymentId)
+    : null;
+
+  const getInvoiceActs = useCallback(
+    (invoice: Invoice) => {
+      const explicitIds = new Set<number>([
+        ...(invoice.actIds ?? []),
+        ...((invoice.acts ?? []).map((act) => act.id)),
+      ]);
+      return relatedActOptions.filter(
+        (act) =>
+          explicitIds.has(act.id) ||
+          act.invoiceId === invoice.id ||
+          (!act.invoiceId && Boolean(act.invoiceNumber) && act.invoiceNumber === invoice.number),
+      );
+    },
+    [relatedActOptions],
+  );
+
+  const getInvoicePayments = useCallback(
+    (invoice: Invoice) =>
+      relatedPaymentOptions.filter((payment) => {
+        if (payment.id === invoice.id) return false;
+        if (!payment.invoiceId) return false;
+        return (
+          payment.invoiceId === invoice.invoiceEntityId ||
+          payment.invoiceId === invoice.id
+        );
+      }),
+    [relatedPaymentOptions],
+  );
+
+  const getPaymentInvoice = useCallback(
+    (payment: Payment) => {
+      if (payment.documentKind === "Invoice") {
+        return relatedInvoiceById.get(payment.id) ?? null;
+      }
+      if (!payment.invoiceId) return null;
+      return (
+        relatedInvoiceByEntityId.get(payment.invoiceId) ??
+        relatedInvoiceById.get(payment.invoiceId) ??
+        null
+      );
+    },
+    [relatedInvoiceByEntityId, relatedInvoiceById],
+  );
+
+  const getActInvoice = useCallback(
+    (act: Act) =>
+      act.invoiceId
+        ? relatedInvoiceById.get(act.invoiceId) ?? null
+        : relatedInvoiceOptions.find((invoice) => invoice.number === act.invoiceNumber) ?? null,
+    [relatedInvoiceById, relatedInvoiceOptions],
+  );
+
+  const getActPayments = useCallback(
+    (act: Act) => {
+      const invoice = getActInvoice(act);
+      return invoice ? getInvoicePayments(invoice) : [];
+    },
+    [getActInvoice, getInvoicePayments],
+  );
+
+  type RelatedChip = {
+    key: string;
+    label: string;
+    title?: string;
+    tone?: "contract" | "invoice" | "act" | "payment";
+  };
+
+  const createContractChip = useCallback(
+    (contract: Contract): RelatedChip => ({
+      key: `contract-${contract.id}`,
+      label: `Договор №${contract.number}`,
+      title: formatContractFilterLabel(contract),
+      tone: "contract",
+    }),
+    [formatContractFilterLabel],
+  );
+  const createInvoiceChip = useCallback(
+    (invoice: Invoice): RelatedChip => ({
+      key: `invoice-${invoice.id}`,
+      label: `Счет №${invoice.number}`,
+      title: formatInvoiceFilterLabel(invoice),
+      tone: "invoice",
+    }),
+    [formatInvoiceFilterLabel],
+  );
+  const createActChip = useCallback(
+    (act: Act): RelatedChip => ({
+      key: `act-${act.id}`,
+      label: `Акт №${act.number}`,
+      title: formatActFilterLabel(act),
+      tone: "act",
+    }),
+    [formatActFilterLabel],
+  );
+  const createPaymentChip = useCallback(
+    (payment: Payment): RelatedChip => ({
+      key: `payment-${payment.id}`,
+      label: `Платеж ${formatCurrencySmart(payment.amount).full}`,
+      title: formatPaymentFilterLabel(payment),
+      tone: "payment",
+    }),
+    [formatPaymentFilterLabel],
+  );
+
+  const renderRelatedChips = useCallback((chips: RelatedChip[]) => {
+    if (chips.length === 0) {
+      return <span className="text-xs text-slate-400">—</span>;
+    }
+
+    const toneClasses: Record<NonNullable<RelatedChip["tone"]>, string> = {
+      contract: "border-blue-100 bg-blue-50 text-blue-700",
+      invoice: "border-emerald-100 bg-emerald-50 text-emerald-700",
+      act: "border-amber-100 bg-amber-50 text-amber-700",
+      payment: "border-slate-200 bg-slate-50 text-slate-700",
+    };
+
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {chips.map((chip) => (
+          <span
+            key={chip.key}
+            title={chip.title ?? chip.label}
+            className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${toneClasses[chip.tone ?? "payment"]}`}
+          >
+            <span className="truncate">{chip.label}</span>
+          </span>
+        ))}
+      </div>
+    );
+  }, []);
+
+  function renderRelatedFilterSelect<T extends { id: number }>(
+    label: string,
+    value: string,
+    onChange: (value: string) => void,
+    options: T[],
+    emptyLabel: string,
+    getLabel: (item: T) => string,
+    className = "w-full sm:w-56",
+  ) {
+    return (
+      <ClientSectionFilterField label={label} className={className}>
+        <select
+          value={value}
+          onChange={(event) => {
+            onChange(event.target.value);
+          }}
+          disabled={relatedDocumentLookupLoading && options.length === 0}
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:bg-slate-100"
+        >
+          <option value={RELATED_FILTER_ALL}>{emptyLabel}</option>
+          {options.map((item) => (
+            <option key={item.id} value={item.id}>
+              {getLabel(item)}
+            </option>
+          ))}
+        </select>
+      </ClientSectionFilterField>
+    );
+  }
+
   const {
     fetchInvoice: fetchInvoiceById,
     fetchPayments: fetchInvoicePayments,
@@ -3349,6 +3775,27 @@ export function ClientDetail({
         badges.push(`Дело: ${caseTitle}`);
       }
     }
+    if (relatedContractId) {
+      badges.push(
+        selectedRelatedContract
+          ? formatContractFilterLabel(selectedRelatedContract)
+          : `Договор #${relatedContractId}`,
+      );
+    }
+    if (relatedInvoiceId) {
+      badges.push(
+        selectedRelatedInvoice
+          ? formatInvoiceFilterLabel(selectedRelatedInvoice)
+          : `Счет #${relatedInvoiceId}`,
+      );
+    }
+    if (relatedActId) {
+      badges.push(
+        selectedRelatedAct
+          ? formatActFilterLabel(selectedRelatedAct)
+          : `Акт #${relatedActId}`,
+      );
+    }
     if (paymentSearch.trim()) {
       badges.push(`Поиск: ${paymentSearch.trim()}`);
     }
@@ -3362,9 +3809,18 @@ export function ClientDetail({
     paymentTypeFilter,
     paymentViewConfig.label,
     paymentViewMode,
+    relatedContractId,
+    relatedInvoiceId,
+    relatedActId,
     selectedCaseId,
+    selectedRelatedContract,
+    selectedRelatedInvoice,
+    selectedRelatedAct,
     statusFilter,
     supplierCaseSummaries,
+    formatContractFilterLabel,
+    formatInvoiceFilterLabel,
+    formatActFilterLabel,
   ]);
 
   const invoiceFilterBadges = useMemo(() => {
@@ -3379,6 +3835,27 @@ export function ClientDetail({
     if (invoiceStatusFilter !== "all") {
       badges.push(`Статус: ${invoiceStatusLabels[invoiceStatusFilter]}`);
     }
+    if (relatedContractId) {
+      badges.push(
+        selectedRelatedContract
+          ? formatContractFilterLabel(selectedRelatedContract)
+          : `Договор #${relatedContractId}`,
+      );
+    }
+    if (relatedActId) {
+      badges.push(
+        selectedRelatedAct
+          ? formatActFilterLabel(selectedRelatedAct)
+          : `Акт #${relatedActId}`,
+      );
+    }
+    if (relatedPaymentId) {
+      badges.push(
+        selectedRelatedPayment
+          ? formatPaymentFilterLabel(selectedRelatedPayment)
+          : `Платеж #${relatedPaymentId}`,
+      );
+    }
     if (invoiceSearch.trim()) {
       badges.push(`Поиск: ${invoiceSearch.trim()}`);
     }
@@ -3390,8 +3867,17 @@ export function ClientDetail({
     invoiceStatusLabels,
     invoiceViewConfig.label,
     invoiceViewMode,
+    relatedContractId,
+    relatedActId,
+    relatedPaymentId,
+    selectedRelatedContract,
+    selectedRelatedAct,
+    selectedRelatedPayment,
     defaultInvoiceViewMode,
     today,
+    formatContractFilterLabel,
+    formatActFilterLabel,
+    formatPaymentFilterLabel,
   ]);
 
   const actFilterBadges = useMemo(() => {
@@ -3409,11 +3895,46 @@ export function ClientDetail({
     if (actStatusFilter !== "all") {
       badges.push(`Статус: ${statusLabels[actStatusFilter]}`);
     }
+    if (relatedContractId) {
+      badges.push(
+        selectedRelatedContract
+          ? formatContractFilterLabel(selectedRelatedContract)
+          : `Договор #${relatedContractId}`,
+      );
+    }
+    if (relatedInvoiceId) {
+      badges.push(
+        selectedRelatedInvoice
+          ? formatInvoiceFilterLabel(selectedRelatedInvoice)
+          : `Счет #${relatedInvoiceId}`,
+      );
+    }
+    if (relatedPaymentId) {
+      badges.push(
+        selectedRelatedPayment
+          ? formatPaymentFilterLabel(selectedRelatedPayment)
+          : `Платеж #${relatedPaymentId}`,
+      );
+    }
     if (actSearch.trim()) {
       badges.push(`Поиск: ${actSearch.trim()}`);
     }
     return badges;
-  }, [actPeriod, actSearch, actStatusFilter, today]);
+  }, [
+    actPeriod,
+    actSearch,
+    actStatusFilter,
+    relatedContractId,
+    relatedInvoiceId,
+    relatedPaymentId,
+    selectedRelatedContract,
+    selectedRelatedInvoice,
+    selectedRelatedPayment,
+    today,
+    formatContractFilterLabel,
+    formatInvoiceFilterLabel,
+    formatPaymentFilterLabel,
+  ]);
 
   const contractFilterBadges = useMemo(() => {
     const badges: string[] = [];
@@ -3424,8 +3945,42 @@ export function ClientDetail({
     if (contractSearch.trim()) {
       badges.push(`Поиск: ${contractSearch.trim()}`);
     }
+    if (relatedInvoiceId) {
+      badges.push(
+        selectedRelatedInvoice
+          ? formatInvoiceFilterLabel(selectedRelatedInvoice)
+          : `Счет #${relatedInvoiceId}`,
+      );
+    }
+    if (relatedActId) {
+      badges.push(
+        selectedRelatedAct
+          ? formatActFilterLabel(selectedRelatedAct)
+          : `Акт #${relatedActId}`,
+      );
+    }
+    if (relatedPaymentId) {
+      badges.push(
+        selectedRelatedPayment
+          ? formatPaymentFilterLabel(selectedRelatedPayment)
+          : `Платеж #${relatedPaymentId}`,
+      );
+    }
     return badges;
-  }, [contractPeriod, contractSearch, today]);
+  }, [
+    contractPeriod,
+    contractSearch,
+    relatedInvoiceId,
+    relatedActId,
+    relatedPaymentId,
+    selectedRelatedInvoice,
+    selectedRelatedAct,
+    selectedRelatedPayment,
+    today,
+    formatInvoiceFilterLabel,
+    formatActFilterLabel,
+    formatPaymentFilterLabel,
+  ]);
 
   useEffect(() => {
     if (activeSection !== "payments") setPaymentTableSettingsOpen(false);
@@ -3442,6 +3997,9 @@ export function ClientDetail({
     paymentPageSize,
     paymentTypeFilter,
     paymentViewMode,
+    relatedContractId,
+    relatedInvoiceId,
+    relatedActId,
     statusFilter,
     toDateStr,
     debouncedPaymentSearch,
@@ -4104,6 +4662,7 @@ export function ClientDetail({
   const resetActFilters = () => {
     setActPeriod({ mode: "preset", preset: "year_to_date" });
     setActStatusFilter("all");
+    resetRelatedDocumentFilters();
     setActSearch("");
     setActPage(1);
   };
@@ -6650,6 +7209,34 @@ export function ClientDetail({
                   </select>
                 </div>
 
+                {renderRelatedFilterSelect(
+                  "Договор",
+                  relatedContractFilter,
+                  setRelatedContractFilter,
+                  relatedContractOptions,
+                  "Все договоры",
+                  formatContractFilterLabel,
+                  "w-full sm:w-64",
+                )}
+                {renderRelatedFilterSelect(
+                  "Счет",
+                  relatedInvoiceFilter,
+                  setRelatedInvoiceFilter,
+                  relatedInvoiceOptions,
+                  "Все счета",
+                  formatInvoiceFilterLabel,
+                  "w-full sm:w-64",
+                )}
+                {renderRelatedFilterSelect(
+                  "Акт",
+                  relatedActFilter,
+                  setRelatedActFilter,
+                  relatedActOptions,
+                  "Все акты",
+                  formatActFilterLabel,
+                  "w-full sm:w-64",
+                )}
+
                 <div className="relative min-w-[240px] flex-1">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                   <input
@@ -6931,8 +7518,35 @@ export function ClientDetail({
                   <option value="Cancelled">
                     {invoiceStatusLabels.Cancelled}
                   </option>
-                </select>
-              </ClientSectionFilterField>
+                  </select>
+                </ClientSectionFilterField>
+              {renderRelatedFilterSelect(
+                "Договор",
+                relatedContractFilter,
+                setRelatedContractFilter,
+                relatedContractOptions,
+                "Все договоры",
+                formatContractFilterLabel,
+                "w-full sm:w-64",
+              )}
+              {renderRelatedFilterSelect(
+                "Акт",
+                relatedActFilter,
+                setRelatedActFilter,
+                relatedActOptions,
+                "Все акты",
+                formatActFilterLabel,
+                "w-full sm:w-64",
+              )}
+              {renderRelatedFilterSelect(
+                "Платеж",
+                relatedPaymentFilter,
+                setRelatedPaymentFilter,
+                relatedPaymentOptions,
+                "Все платежи",
+                formatPaymentFilterLabel,
+                "w-full sm:w-64",
+              )}
               <ClientSectionFilterField
                 label="Поиск"
                 className="min-w-[260px] flex-1"
@@ -7012,6 +7626,15 @@ export function ClientDetail({
             </div>
 
             <div className="p-6">
+              {relatedDocumentLookupError &&
+              (activeSection === "payments" ||
+                activeSection === "accounts" ||
+                activeSection === "acts" ||
+                activeSection === "contracts") ? (
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                  {relatedDocumentLookupError}
+                </div>
+              ) : null}
               {activeSection === "cases" ? (
                 <div className="space-y-4">
                   {!caseCardsAvailable ? (
@@ -7563,6 +8186,15 @@ export function ClientDetail({
                               const systemNoteExpandable =
                                 visibleSystemNotes.length > 180 ||
                                 visibleSystemNotes.split(/\r?\n/).length > 4;
+                              const paymentInvoice = getPaymentInvoice(payment);
+                              const paymentActs = paymentInvoice
+                                ? getInvoiceActs(paymentInvoice)
+                                : [];
+                              const paymentContract = payment.contractId
+                                ? relatedContractById.get(payment.contractId)
+                                : paymentInvoice?.contractId
+                                  ? relatedContractById.get(paymentInvoice.contractId)
+                                  : null;
 
                               return (
                                 <tr
@@ -7826,6 +8458,18 @@ export function ClientDetail({
                                             </div>
                                           ) : null}
                                         </>
+                                      ) : column.key === "linkedContract" ? (
+                                        renderRelatedChips(
+                                          paymentContract ? [createContractChip(paymentContract)] : [],
+                                        )
+                                      ) : column.key === "linkedInvoice" ? (
+                                        renderRelatedChips(
+                                          paymentInvoice ? [createInvoiceChip(paymentInvoice)] : [],
+                                        )
+                                      ) : column.key === "linkedActs" ? (
+                                        renderRelatedChips(
+                                          paymentActs.slice(0, 3).map(createActChip),
+                                        )
                                       ) : (
                                         <>
                                           <div
@@ -7992,8 +8636,15 @@ export function ClientDetail({
                         <thead className="bg-gray-50">
                           <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                             {visibleInvoiceTableColumns.map((column) => {
-                              const sortKey = column.key as InvoicesSortKey;
-                              const isActive = invoiceSort.key === sortKey;
+                              const sortKey =
+                                column.key === "linkedContract" ||
+                                column.key === "linkedActs" ||
+                                column.key === "linkedPayments"
+                                  ? null
+                                  : (column.key as InvoicesSortKey);
+                              const isActive = sortKey
+                                ? invoiceSort.key === sortKey
+                                : false;
                               const direction = isActive
                                 ? invoiceSort.direction
                                 : undefined;
@@ -8010,12 +8661,39 @@ export function ClientDetail({
                                     handleInvoiceColumnDrop(column.key, event)
                                   }
                                 >
-                                  <button
-                                    type="button"
-                                    onClick={() => handleInvoiceSort(sortKey)}
-                                    className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500"
-                                  >
-                                    <span
+                                  {sortKey ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleInvoiceSort(sortKey)}
+                                      className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                                    >
+                                      <span
+                                        className="inline-flex min-w-0 select-none items-center gap-2"
+                                        draggable
+                                        onDragStart={(event) =>
+                                          handleInvoiceColumnDragStart(
+                                            column.key,
+                                            event,
+                                          )
+                                        }
+                                        onDragEnd={handleInvoiceColumnDragEnd}
+                                        title="Перетащите, чтобы изменить порядок"
+                                      >
+                                        <GripVertical className="h-4 w-4 text-slate-400" />
+                                        <span className="truncate">
+                                          {column.label}
+                                        </span>
+                                      </span>
+                                      <span className="text-gray-400">
+                                        {isActive
+                                          ? direction === "asc"
+                                            ? "▲"
+                                            : "▼"
+                                          : ""}
+                                      </span>
+                                    </button>
+                                  ) : (
+                                    <div
                                       className="inline-flex min-w-0 select-none items-center gap-2"
                                       draggable
                                       onDragStart={(event) =>
@@ -8031,15 +8709,8 @@ export function ClientDetail({
                                       <span className="truncate">
                                         {column.label}
                                       </span>
-                                    </span>
-                                    <span className="text-gray-400">
-                                      {isActive
-                                        ? direction === "asc"
-                                          ? "▲"
-                                          : "▼"
-                                        : ""}
-                                    </span>
-                                  </button>
+                                    </div>
+                                  )}
                                   <div
                                     role="separator"
                                     aria-label={`Изменить ширину колонки ${column.label}`}
@@ -8210,6 +8881,23 @@ export function ClientDetail({
                                     <span className="text-gray-900">
                                       {invoice.responsibleName ?? "—"}
                                     </span>
+                                  ) : column.key === "linkedContract" ? (
+                                    (() => {
+                                      const contract = invoice.contractId
+                                        ? relatedContractById.get(invoice.contractId)
+                                        : null;
+                                      return renderRelatedChips(
+                                        contract ? [createContractChip(contract)] : [],
+                                      );
+                                    })()
+                                  ) : column.key === "linkedActs" ? (
+                                    renderRelatedChips(
+                                      getInvoiceActs(invoice).slice(0, 3).map(createActChip),
+                                    )
+                                  ) : column.key === "linkedPayments" ? (
+                                    renderRelatedChips(
+                                      getInvoicePayments(invoice).slice(0, 3).map(createPaymentChip),
+                                    )
                                   ) : (
                                     <span className="text-gray-900">
                                       {toRuDate(invoice.createdAt)}
@@ -8397,6 +9085,33 @@ export function ClientDetail({
                         ))}
                       </select>
                     </div>
+                    {renderRelatedFilterSelect(
+                      "Договор",
+                      relatedContractFilter,
+                      setRelatedContractFilter,
+                      relatedContractOptions,
+                      "Все договоры",
+                      formatContractFilterLabel,
+                      "w-full sm:w-64",
+                    )}
+                    {renderRelatedFilterSelect(
+                      "Счет",
+                      relatedInvoiceFilter,
+                      setRelatedInvoiceFilter,
+                      relatedInvoiceOptions,
+                      "Все счета",
+                      formatInvoiceFilterLabel,
+                      "w-full sm:w-64",
+                    )}
+                    {renderRelatedFilterSelect(
+                      "Платеж",
+                      relatedPaymentFilter,
+                      setRelatedPaymentFilter,
+                      relatedPaymentOptions,
+                      "Все платежи",
+                      formatPaymentFilterLabel,
+                      "w-full sm:w-64",
+                    )}
                     <div className="relative flex-1 min-w-[220px]">
                       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                       <input
@@ -8503,7 +9218,10 @@ export function ClientDetail({
                           <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                             {visibleActTableColumns.map((column) => {
                               const sortKey =
-                                column.key === "title"
+                                column.key === "title" ||
+                                column.key === "linkedContract" ||
+                                column.key === "linkedInvoice" ||
+                                column.key === "linkedPayments"
                                   ? null
                                   : (column.key as ActsSortKey);
                               const isActive = sortKey
@@ -8679,6 +9397,29 @@ export function ClientDetail({
                                           >
                                             {actStatusLabels[act.status]}
                                           </span>
+                                        ) : column.key === "linkedContract" ? (
+                                          (() => {
+                                            const invoice = getActInvoice(act);
+                                            const contract = act.contractId
+                                              ? relatedContractById.get(act.contractId)
+                                              : invoice?.contractId
+                                                ? relatedContractById.get(invoice.contractId)
+                                                : null;
+                                            return renderRelatedChips(
+                                              contract ? [createContractChip(contract)] : [],
+                                            );
+                                          })()
+                                        ) : column.key === "linkedInvoice" ? (
+                                          (() => {
+                                            const invoice = getActInvoice(act);
+                                            return renderRelatedChips(
+                                              invoice ? [createInvoiceChip(invoice)] : [],
+                                            );
+                                          })()
+                                        ) : column.key === "linkedPayments" ? (
+                                          renderRelatedChips(
+                                            getActPayments(act).slice(0, 3).map(createPaymentChip),
+                                          )
                                         ) : column.key === "responsible" ? (
                                           <span className="text-gray-900">
                                             {act.responsibleName ??
@@ -8772,6 +9513,33 @@ export function ClientDetail({
                         className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                       />
                     </div>
+                    {renderRelatedFilterSelect(
+                      "Счет",
+                      relatedInvoiceFilter,
+                      setRelatedInvoiceFilter,
+                      relatedInvoiceOptions,
+                      "Все счета",
+                      formatInvoiceFilterLabel,
+                      "w-full sm:w-64",
+                    )}
+                    {renderRelatedFilterSelect(
+                      "Акт",
+                      relatedActFilter,
+                      setRelatedActFilter,
+                      relatedActOptions,
+                      "Все акты",
+                      formatActFilterLabel,
+                      "w-full sm:w-64",
+                    )}
+                    {renderRelatedFilterSelect(
+                      "Платеж",
+                      relatedPaymentFilter,
+                      setRelatedPaymentFilter,
+                      relatedPaymentOptions,
+                      "Все платежи",
+                      formatPaymentFilterLabel,
+                      "w-full sm:w-64",
+                    )}
                     <div className="relative flex-1 min-w-[220px]">
                       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                       <input
@@ -8932,7 +9700,10 @@ export function ClientDetail({
                                 const sortKey =
                                   column.key === "clients" ||
                                   column.key === "validUntil" ||
-                                  column.key === "title"
+                                  column.key === "title" ||
+                                  column.key === "linkedInvoices" ||
+                                  column.key === "linkedActs" ||
+                                  column.key === "linkedPayments"
                                     ? null
                                     : (column.key as ContractsSortKey);
                                 const isActive = sortKey
@@ -9094,6 +9865,33 @@ export function ClientDetail({
                                             ).full
                                           : "—"}
                                       </span>
+                                    ) : column.key === "linkedInvoices" ? (
+                                      (() => {
+                                        const invoices = (contract.invoiceIds ?? [])
+                                          .map((id) => relatedInvoiceById.get(id))
+                                          .filter((item): item is Invoice => Boolean(item));
+                                        return renderRelatedChips(
+                                          invoices.slice(0, 3).map(createInvoiceChip),
+                                        );
+                                      })()
+                                    ) : column.key === "linkedActs" ? (
+                                      (() => {
+                                        const acts = (contract.actIds ?? [])
+                                          .map((id) => relatedActById.get(id))
+                                          .filter((item): item is Act => Boolean(item));
+                                        return renderRelatedChips(
+                                          acts.slice(0, 3).map(createActChip),
+                                        );
+                                      })()
+                                    ) : column.key === "linkedPayments" ? (
+                                      (() => {
+                                        const contractPayments = (contract.paymentIds ?? [])
+                                          .map((id) => relatedPaymentById.get(id))
+                                          .filter((item): item is Payment => Boolean(item));
+                                        return renderRelatedChips(
+                                          contractPayments.slice(0, 3).map(createPaymentChip),
+                                        );
+                                      })()
                                     ) : column.key === "validUntil" ? (
                                       <span className="text-gray-900">
                                         {contract.isOpenEnded

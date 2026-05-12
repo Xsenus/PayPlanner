@@ -918,6 +918,8 @@ export class ApiService {
     legalEntityId?: number;
     caseId?: number;
     contractId?: number;
+    invoiceId?: number;
+    paymentId?: number;
     clientIds?: string;
     responsibleId?: number;
     search?: string;
@@ -944,6 +946,9 @@ export class ApiService {
     clientId?: number;
     legalEntityId?: number;
     caseId?: number;
+    contractId?: number;
+    invoiceId?: number;
+    paymentId?: number;
     responsibleId?: number;
     search?: string;
   }) {
@@ -992,6 +997,9 @@ export class ApiService {
     to?: string;
     clientId?: number;
     legalEntityId?: number;
+    invoiceId?: number;
+    actId?: number;
+    paymentId?: number;
     status?: ContractStatus;
     search?: string;
     sortBy?: ContractsSortKey;
@@ -1434,6 +1442,8 @@ export class ApiService {
     clientIds?: string;
     clientRole?: InvoiceClientRole;
     contractId?: number;
+    actId?: number;
+    paymentId?: number;
     caseId?: number;
     responsibleId?: number;
     search?: string;
@@ -1463,6 +1473,9 @@ export class ApiService {
     clientId?: number;
     clientRole?: InvoiceClientRole;
     legalEntityId?: number;
+    contractId?: number;
+    actId?: number;
+    paymentId?: number;
     caseId?: number;
     responsibleId?: number;
     search?: string;
@@ -2012,6 +2025,8 @@ export class ApiService {
     legalEntityId?: number;
     caseId?: number;
     contractId?: number;
+    invoiceId?: number;
+    actId?: number;
     clientIds?: string;
     clientRole?: ClientRole;
     excludeInvoiceDocuments?: boolean;

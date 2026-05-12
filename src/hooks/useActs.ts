@@ -23,6 +23,9 @@ export interface ActsFilters {
   type?: PaymentKind;
   clientId?: number;
   legalEntityId?: number;
+  contractId?: number;
+  invoiceId?: number;
+  paymentId?: number;
   caseId?: number;
   responsibleId?: number;
   search?: string;
@@ -61,6 +64,9 @@ function makeSummaryKey(filters: ActsFilters): string {
     type: filters.type ?? null,
     clientId: filters.clientId ?? null,
     legalEntityId: filters.legalEntityId ?? null,
+    contractId: filters.contractId ?? null,
+    invoiceId: filters.invoiceId ?? null,
+    paymentId: filters.paymentId ?? null,
     caseId: filters.caseId ?? null,
     responsibleId: filters.responsibleId ?? null,
     search: filters.search ?? null,
@@ -113,6 +119,9 @@ export function useActs(filters: ActsFilters): UseActsResult {
           type: filters.type,
           clientId: filters.clientId,
           legalEntityId: filters.legalEntityId,
+          contractId: filters.contractId,
+          invoiceId: filters.invoiceId,
+          paymentId: filters.paymentId,
           caseId: filters.caseId,
           responsibleId: filters.responsibleId,
           search: filters.search,
@@ -143,7 +152,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.legalEntityId, filters.caseId, filters.responsibleId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
+    [enabled, filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.legalEntityId, filters.contractId, filters.invoiceId, filters.paymentId, filters.caseId, filters.responsibleId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
   );
 
   const fetchSummary = useCallback(
@@ -166,6 +175,9 @@ export function useActs(filters: ActsFilters): UseActsResult {
           type: filters.type,
           clientId: filters.clientId,
           legalEntityId: filters.legalEntityId,
+          contractId: filters.contractId,
+          invoiceId: filters.invoiceId,
+          paymentId: filters.paymentId,
           caseId: filters.caseId,
           responsibleId: filters.responsibleId,
           search: filters.search,
@@ -182,7 +194,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.legalEntityId, filters.caseId, filters.responsibleId, filters.search],
+    [enabled, filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.legalEntityId, filters.contractId, filters.invoiceId, filters.paymentId, filters.caseId, filters.responsibleId, filters.search],
   );
 
   useEffect(() => {

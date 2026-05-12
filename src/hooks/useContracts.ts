@@ -9,6 +9,9 @@ export interface ContractsFilters {
   from?: string;
   to?: string;
   clientId?: number;
+  invoiceId?: number;
+  actId?: number;
+  paymentId?: number;
   status?: ContractStatus;
   search?: string;
   sortBy?: ContractsSortKey;
@@ -74,6 +77,9 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
           from: filters.from,
           to: filters.to,
           clientId: filters.clientId,
+          invoiceId: filters.invoiceId,
+          actId: filters.actId,
+          paymentId: filters.paymentId,
           search: filters.search,
           sortBy: filters.sortBy,
           sortDir: filters.sortDir,
@@ -102,7 +108,7 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.clientId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
+    [enabled, filters.from, filters.to, filters.clientId, filters.invoiceId, filters.actId, filters.paymentId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
   );
 
   useEffect(() => {

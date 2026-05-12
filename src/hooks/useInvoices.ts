@@ -21,6 +21,9 @@ export interface InvoicesFilters {
   workflowStatus?: InvoiceWorkflowStatus;
   clientId?: number;
   legalEntityId?: number;
+  contractId?: number;
+  actId?: number;
+  paymentId?: number;
   caseId?: number;
   clientRole?: InvoiceClientRole;
   responsibleId?: number;
@@ -60,6 +63,9 @@ function makeSummaryKey(filters: InvoicesFilters): string {
     status: filters.status ?? null,
     clientId: filters.clientId ?? null,
     legalEntityId: filters.legalEntityId ?? null,
+    contractId: filters.contractId ?? null,
+    actId: filters.actId ?? null,
+    paymentId: filters.paymentId ?? null,
     caseId: filters.caseId ?? null,
     clientRole: filters.clientRole ?? null,
     responsibleId: filters.responsibleId ?? null,
@@ -113,6 +119,9 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           status: filters.status,
           clientId: filters.clientId,
           legalEntityId: filters.legalEntityId,
+          contractId: filters.contractId,
+          actId: filters.actId,
+          paymentId: filters.paymentId,
           caseId: filters.caseId,
           clientRole: filters.clientRole,
           responsibleId: filters.responsibleId,
@@ -151,6 +160,9 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.status,
       filters.clientId,
       filters.legalEntityId,
+      filters.contractId,
+      filters.actId,
+      filters.paymentId,
       filters.caseId,
       filters.clientRole,
       filters.responsibleId,
@@ -183,6 +195,9 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           status: filters.status,
           clientId: filters.clientId,
           legalEntityId: filters.legalEntityId,
+          contractId: filters.contractId,
+          actId: filters.actId,
+          paymentId: filters.paymentId,
           caseId: filters.caseId,
           clientRole: filters.clientRole,
           responsibleId: filters.responsibleId,
@@ -207,6 +222,9 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       filters.status,
       filters.clientId,
       filters.legalEntityId,
+      filters.contractId,
+      filters.actId,
+      filters.paymentId,
       filters.caseId,
       filters.clientRole,
       filters.responsibleId,
