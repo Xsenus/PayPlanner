@@ -98,6 +98,22 @@ public class ContractsController : ControllerBase
         return Ok(dto);
     }
 
+    [HttpPost("{id:int}/mark-not-signed")]
+    public async Task<ActionResult<ContractDto>> MarkNotSigned(int id, CancellationToken ct)
+    {
+        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (contract is null) return NotFound();
+
+        contract.Status = ContractStatus.NotSigned;
+        contract.SentForSigningAt = null;
+        contract.ConcludedAt = null;
+        contract.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        return Ok(dto);
+    }
+
     [HttpPost("{id:int}/terminate")]
     public async Task<ActionResult<ContractDto>> Terminate(int id, [FromBody] TerminateContractRequest request, CancellationToken ct)
     {
@@ -137,6 +153,7 @@ public class ContractsController : ControllerBase
         var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (contract is null) return NotFound();
         if (!string.Equals(contract.Status, ContractStatus.Draft, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(contract.Status, ContractStatus.NotSigned, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.OnSigning, StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest("Аннулирование доступно только для черновиков и договоров на подписании.");

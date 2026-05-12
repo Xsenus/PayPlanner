@@ -238,7 +238,7 @@ const VALUE_LABELS: Record<string, string> = {
   onsigning: 'На подписании',
   created: 'Создан',
   transferred: 'Передан',
-  concluded: 'Заключен',
+  concluded: 'Подписан',
   terminated: 'Расторгнут',
   open: 'Открыто',
   closed: 'Закрыто',

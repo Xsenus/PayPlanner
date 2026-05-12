@@ -1,6 +1,7 @@
 export type PaymentStatus = 'Pending' | 'Completed' | 'Overdue' | 'Cancelled' | 'Processing';
 export type InvoiceWorkflowStatus =
   | 'Draft'
+  | 'NotSigned'
   | 'OnSigning'
   | 'SignedByClient'
   | 'Paid'
@@ -1127,6 +1128,7 @@ export interface ContractStatusReport {
   to: string;
   contractCount: number;
   draftCount: number;
+  notSignedCount: number;
   onSigningCount: number;
   concludedCount: number;
   terminatedCount: number;
@@ -1529,7 +1531,7 @@ export interface PaymentStatusEntity {
 }
 
 export type ActStatus = 'Created' | 'Transferred' | 'Signed' | 'Terminated';
-export type ActWorkflowStatus = 'Draft' | 'OnSigning' | 'Signed' | 'Cancelled';
+export type ActWorkflowStatus = 'Draft' | 'NotSigned' | 'OnSigning' | 'Signed' | 'Cancelled';
 export type ActCreationMode = 'Manual' | 'Full' | 'Partial';
 export type DocumentKind = 'Invoice' | 'Accrual' | 'Payment';
 
@@ -1643,7 +1645,7 @@ export interface ContractLegalEntity {
 }
 
 export type ContractBillingMode = 'Fixed' | 'Actual';
-export type ContractStatus = 'Draft' | 'OnSigning' | 'Concluded' | 'Terminated' | 'Cancelled';
+export type ContractStatus = 'Draft' | 'NotSigned' | 'OnSigning' | 'Concluded' | 'Terminated' | 'Cancelled';
 
 export interface Contract {
   id: number;

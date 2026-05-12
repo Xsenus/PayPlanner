@@ -379,6 +379,7 @@ public static class InvoicePaymentStateService
 
         var normalizedCurrent = InvoiceWorkflowStatus.Normalize(representative.InvoiceWorkflowStatus);
         if (normalizedCurrent == InvoiceWorkflowStatus.OnSigning
+            || normalizedCurrent == InvoiceWorkflowStatus.NotSigned
             || normalizedCurrent == InvoiceWorkflowStatus.SignedByClient)
         {
             return normalizedCurrent;

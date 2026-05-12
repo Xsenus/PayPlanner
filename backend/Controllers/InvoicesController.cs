@@ -499,6 +499,22 @@ public class InvoicesController : ControllerBase
         return Ok(dto);
     }
 
+    [HttpPost("{id:int}/mark-not-signed")]
+    public async Task<ActionResult<InvoiceDto>> MarkNotSigned(int id, CancellationToken ct)
+    {
+        var payment = await _db.Payments.FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.NotSigned;
+        payment.InvoiceSentForSigningAt = null;
+        payment.InvoiceSignedAt = null;
+        var dto = await SaveAndReloadInvoiceAsync(payment, ct);
+        return Ok(dto);
+    }
+
     [HttpPost("{id:int}/cancel")]
     public async Task<ActionResult<InvoiceDto>> Cancel(int id, [FromBody] CancelInvoiceRequest request, CancellationToken ct)
     {

@@ -313,6 +313,21 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Статус документа</span>
+              <select
+                value={form.status}
+                onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as ContractStatus }))}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              >
+                <option value="Draft">Черновик</option>
+                <option value="NotSigned">Не подписан</option>
+                <option value="OnSigning">На подписании</option>
+                <option value="Concluded">Подписан</option>
+                <option value="Terminated">Расторгнут</option>
+                <option value="Cancelled">Аннулирован</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Действует до</span>
               <input type="date" value={form.validUntil} onChange={(e) => setForm((prev) => ({ ...prev, validUntil: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" disabled={form.isOpenEnded} />
             </label>

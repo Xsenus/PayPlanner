@@ -748,6 +748,7 @@ public class ReportsControllerTests
             InvoicePayment("INV-4", PaymentType.Income, PaymentStatus.Pending, InvoiceWorkflowStatus.PartiallyPaid, 4_000m, 1_500m, new DateTime(2026, 5, 4)),
             InvoicePayment("INV-5", PaymentType.Income, PaymentStatus.Overdue, InvoiceWorkflowStatus.Overdue, 5_000m, 1_000m, new DateTime(2026, 5, 5)),
             InvoicePayment("INV-6", PaymentType.Expense, PaymentStatus.Cancelled, InvoiceWorkflowStatus.Cancelled, 6_000m, 100m, new DateTime(2026, 5, 6)),
+            InvoicePayment("INV-7", PaymentType.Income, PaymentStatus.Pending, InvoiceWorkflowStatus.NotSigned, 7_000m, 0m, new DateTime(2026, 5, 7)),
             InvoicePayment("INV-OLD", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 99_999m, 99_999m, new DateTime(2026, 4, 30)),
             InvoicePayment("PAY-1", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 88_888m, 88_888m, new DateTime(2026, 5, 7), DocumentKind.Payment));
         await db.SaveChangesAsync();
@@ -760,14 +761,14 @@ public class ReportsControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<InvoiceStatusReportDto>(ok.Value);
-        Assert.Equal(6, report.InvoiceCount);
-        Assert.Equal(4, report.IncomeCount);
+        Assert.Equal(7, report.InvoiceCount);
+        Assert.Equal(5, report.IncomeCount);
         Assert.Equal(2, report.ExpenseCount);
         Assert.Equal(1, report.PaidCount);
         Assert.Equal(1, report.OverdueCount);
-        Assert.Equal(21_000m, report.TotalAmount);
+        Assert.Equal(28_000m, report.TotalAmount);
         Assert.Equal(6_100m, report.PaidAmount);
-        Assert.Equal(14_900m, report.OutstandingAmount);
+        Assert.Equal(21_900m, report.OutstandingAmount);
 
         Assert.Collection(
             report.Statuses,
@@ -777,7 +778,7 @@ public class ReportsControllerTests
                 Assert.Equal("Просрочен", item.StatusLabel);
                 Assert.Equal(5_000m, item.TotalAmount);
                 Assert.Equal(4_000m, item.OutstandingAmount);
-                Assert.Equal(23.8m, item.Share);
+                Assert.Equal(17.9m, item.Share);
             },
             item =>
             {
@@ -785,7 +786,15 @@ public class ReportsControllerTests
                 Assert.Equal("На подписании", item.StatusLabel);
                 Assert.Equal(2_000m, item.TotalAmount);
                 Assert.Equal(500m, item.PaidAmount);
-                Assert.Equal(9.5m, item.Share);
+                Assert.Equal(7.1m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(InvoiceWorkflowStatus.NotSigned, item.Status);
+                Assert.Equal("Не подписан", item.StatusLabel);
+                Assert.Equal(7_000m, item.TotalAmount);
+                Assert.Equal(7_000m, item.OutstandingAmount);
+                Assert.Equal(25m, item.Share);
             },
             item =>
             {
@@ -793,14 +802,14 @@ public class ReportsControllerTests
                 Assert.Equal("Частично оплачен", item.StatusLabel);
                 Assert.Equal(4_000m, item.TotalAmount);
                 Assert.Equal(2_500m, item.OutstandingAmount);
-                Assert.Equal(19.0m, item.Share);
+                Assert.Equal(14.3m, item.Share);
             },
             item =>
             {
                 Assert.Equal(InvoiceWorkflowStatus.Draft, item.Status);
                 Assert.Equal("Черновик", item.StatusLabel);
                 Assert.Equal(1_000m, item.TotalAmount);
-                Assert.Equal(4.8m, item.Share);
+                Assert.Equal(3.6m, item.Share);
             },
             item =>
             {
@@ -808,7 +817,7 @@ public class ReportsControllerTests
                 Assert.Equal("Оплачен", item.StatusLabel);
                 Assert.Equal(3_000m, item.TotalAmount);
                 Assert.Equal(0m, item.OutstandingAmount);
-                Assert.Equal(14.3m, item.Share);
+                Assert.Equal(10.7m, item.Share);
             },
             item =>
             {
@@ -816,7 +825,7 @@ public class ReportsControllerTests
                 Assert.Equal("Аннулирован", item.StatusLabel);
                 Assert.Equal(6_000m, item.TotalAmount);
                 Assert.Equal(5_900m, item.OutstandingAmount);
-                Assert.Equal(28.6m, item.Share);
+                Assert.Equal(21.4m, item.Share);
             });
     }
 
@@ -829,6 +838,7 @@ public class ReportsControllerTests
             Act("ACT-2", ActStatus.Transferred, ActWorkflowStatus.OnSigning, 2_000m, new DateTime(2026, 5, 2)),
             Act("ACT-3", ActStatus.Signed, ActWorkflowStatus.Signed, 3_000m, new DateTime(2026, 5, 3)),
             Act("ACT-4", ActStatus.Terminated, ActWorkflowStatus.Cancelled, 4_000m, new DateTime(2026, 5, 4)),
+            Act("ACT-5", ActStatus.Created, ActWorkflowStatus.NotSigned, 5_000m, new DateTime(2026, 5, 5)),
             Act("ACT-OLD", ActStatus.Signed, ActWorkflowStatus.Signed, 99_999m, new DateTime(2026, 4, 30)));
         await db.SaveChangesAsync();
         var controller = CreateController(db);
@@ -840,14 +850,14 @@ public class ReportsControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<ActStatusReportDto>(ok.Value);
-        Assert.Equal(4, report.ActCount);
-        Assert.Equal(1, report.CreatedCount);
+        Assert.Equal(5, report.ActCount);
+        Assert.Equal(2, report.CreatedCount);
         Assert.Equal(1, report.TransferredCount);
         Assert.Equal(1, report.SignedCount);
         Assert.Equal(1, report.TerminatedCount);
-        Assert.Equal(10_000m, report.TotalAmount);
+        Assert.Equal(15_000m, report.TotalAmount);
         Assert.Equal(3_000m, report.SignedAmount);
-        Assert.Equal(7_000m, report.PendingAmount);
+        Assert.Equal(12_000m, report.PendingAmount);
 
         Assert.Collection(
             report.Statuses,
@@ -856,28 +866,36 @@ public class ReportsControllerTests
                 Assert.Equal(ActWorkflowStatus.OnSigning, item.WorkflowStatus);
                 Assert.Equal("На подписании", item.WorkflowStatusLabel);
                 Assert.Equal(2_000m, item.TotalAmount);
-                Assert.Equal(20m, item.Share);
+                Assert.Equal(13.3m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(ActWorkflowStatus.NotSigned, item.WorkflowStatus);
+                Assert.Equal("Не подписан", item.WorkflowStatusLabel);
+                Assert.Equal(5_000m, item.TotalAmount);
+                Assert.Equal(5_000m, item.PendingAmount);
+                Assert.Equal(33.3m, item.Share);
             },
             item =>
             {
                 Assert.Equal(ActWorkflowStatus.Draft, item.WorkflowStatus);
                 Assert.Equal("Черновик", item.WorkflowStatusLabel);
                 Assert.Equal(1_000m, item.TotalAmount);
-                Assert.Equal(10m, item.Share);
+                Assert.Equal(6.7m, item.Share);
             },
             item =>
             {
                 Assert.Equal(ActWorkflowStatus.Signed, item.WorkflowStatus);
                 Assert.Equal("Подписан", item.WorkflowStatusLabel);
                 Assert.Equal(3_000m, item.SignedAmount);
-                Assert.Equal(30m, item.Share);
+                Assert.Equal(20m, item.Share);
             },
             item =>
             {
                 Assert.Equal(ActWorkflowStatus.Cancelled, item.WorkflowStatus);
                 Assert.Equal("Отменен", item.WorkflowStatusLabel);
                 Assert.Equal(4_000m, item.PendingAmount);
-                Assert.Equal(40m, item.Share);
+                Assert.Equal(26.7m, item.Share);
             });
     }
 
@@ -891,6 +909,7 @@ public class ReportsControllerTests
             Contract("C-3", ContractStatus.Concluded, 3_000m, new DateTime(2026, 5, 3), true, null),
             Contract("C-4", ContractStatus.Terminated, 4_000m, new DateTime(2026, 5, 4), false, new DateTime(2026, 5, 25)),
             Contract("C-5", ContractStatus.Cancelled, 5_000m, new DateTime(2026, 5, 5), false, null),
+            Contract("C-6", ContractStatus.NotSigned, 6_000m, new DateTime(2026, 5, 6), false, new DateTime(2026, 5, 28)),
             Contract("C-OLD", ContractStatus.Concluded, 99_999m, new DateTime(2026, 4, 30), false, null));
         await db.SaveChangesAsync();
         var controller = CreateController(db);
@@ -902,15 +921,16 @@ public class ReportsControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<ContractStatusReportDto>(ok.Value);
-        Assert.Equal(5, report.ContractCount);
+        Assert.Equal(6, report.ContractCount);
         Assert.Equal(1, report.DraftCount);
+        Assert.Equal(1, report.NotSignedCount);
         Assert.Equal(1, report.OnSigningCount);
         Assert.Equal(1, report.ConcludedCount);
         Assert.Equal(1, report.TerminatedCount);
         Assert.Equal(1, report.CancelledCount);
         Assert.Equal(1, report.OpenEndedCount);
-        Assert.Equal(15_000m, report.TotalAmount);
-        Assert.Equal(6_000m, report.ActiveAmount);
+        Assert.Equal(21_000m, report.TotalAmount);
+        Assert.Equal(12_000m, report.ActiveAmount);
         Assert.Equal(9_000m, report.ClosedAmount);
 
         Assert.Collection(
@@ -921,7 +941,15 @@ public class ReportsControllerTests
                 Assert.Equal("На подписании", item.StatusLabel);
                 Assert.Equal(2_000m, item.TotalAmount);
                 Assert.Equal(0, item.ExpiringCount);
-                Assert.Equal(13.3m, item.Share);
+                Assert.Equal(9.5m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(ContractStatus.NotSigned, item.Status);
+                Assert.Equal("Не подписан", item.StatusLabel);
+                Assert.Equal(6_000m, item.TotalAmount);
+                Assert.Equal(1, item.ExpiringCount);
+                Assert.Equal(28.6m, item.Share);
             },
             item =>
             {
@@ -929,15 +957,15 @@ public class ReportsControllerTests
                 Assert.Equal("Черновик", item.StatusLabel);
                 Assert.Equal(1_000m, item.TotalAmount);
                 Assert.Equal(1, item.ExpiringCount);
-                Assert.Equal(6.7m, item.Share);
+                Assert.Equal(4.8m, item.Share);
             },
             item =>
             {
                 Assert.Equal(ContractStatus.Concluded, item.Status);
-                Assert.Equal("Заключен", item.StatusLabel);
+                Assert.Equal("Подписан", item.StatusLabel);
                 Assert.Equal(3_000m, item.TotalAmount);
                 Assert.Equal(1, item.OpenEndedCount);
-                Assert.Equal(20m, item.Share);
+                Assert.Equal(14.3m, item.Share);
             },
             item =>
             {
@@ -945,14 +973,14 @@ public class ReportsControllerTests
                 Assert.Equal("Расторгнут", item.StatusLabel);
                 Assert.Equal(4_000m, item.TotalAmount);
                 Assert.Equal(1, item.ExpiringCount);
-                Assert.Equal(26.7m, item.Share);
+                Assert.Equal(19.0m, item.Share);
             },
             item =>
             {
                 Assert.Equal(ContractStatus.Cancelled, item.Status);
                 Assert.Equal("Аннулирован", item.StatusLabel);
                 Assert.Equal(5_000m, item.TotalAmount);
-                Assert.Equal(33.3m, item.Share);
+                Assert.Equal(23.8m, item.Share);
             });
     }
 

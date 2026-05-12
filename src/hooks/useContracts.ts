@@ -80,6 +80,7 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
           invoiceId: filters.invoiceId,
           actId: filters.actId,
           paymentId: filters.paymentId,
+          status: filters.status,
           search: filters.search,
           sortBy: filters.sortBy,
           sortDir: filters.sortDir,
@@ -108,7 +109,7 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.clientId, filters.invoiceId, filters.actId, filters.paymentId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
+    [enabled, filters.from, filters.to, filters.clientId, filters.invoiceId, filters.actId, filters.paymentId, filters.status, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
   );
 
   useEffect(() => {

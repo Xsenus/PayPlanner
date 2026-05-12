@@ -2416,7 +2416,7 @@ function ContractStatusReportSection({
           </div>
           <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по статусам договоров</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
-            Сводка договоров по этапам: черновики, подписание, заключенные, расторгнутые и аннулированные договоры.
+            Сводка договоров по этапам: черновики, не подписанные, на подписании, подписанные, расторгнутые и аннулированные договоры.
           </p>
         </div>
         <button
@@ -2446,7 +2446,7 @@ function ContractStatusReportSection({
               value={String(report.contractCount)}
               icon={FolderKanban}
               tone="rate"
-              subtitle={`${report.draftCount} черн. · ${report.onSigningCount} на подп.`}
+              subtitle={`${report.draftCount} черн. · ${report.notSignedCount} не подп. · ${report.onSigningCount} на подп.`}
             />
             <MetricCard
               title="Сумма"
@@ -2460,7 +2460,7 @@ function ContractStatusReportSection({
               value={formatCurrency(report.activeAmount)}
               icon={CheckCircle2}
               tone="income"
-              subtitle={`${report.concludedCount} заключено`}
+              subtitle={`${report.concludedCount} подписано`}
             />
             <MetricCard
               title="Закрыто"

@@ -20,7 +20,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
-import type { Client, Contract } from '../../types';
+import type { Client, Contract, ContractStatus } from '../../types';
 import { getContractBillingModeLabel, getContractEffectiveAmount, getContractExecutionMetrics } from '../../utils/contracts';
 import { toRuDate, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -47,6 +47,7 @@ const CONTRACT_COLUMNS = [
   { key: 'validUntil', label: 'Окончание действия', defaultVisible: true, defaultWidth: 180 },
   { key: 'terminationDate', label: 'Дата расторжения', defaultVisible: false, defaultWidth: 180 },
   { key: 'amount', label: 'Сумма', defaultVisible: true, defaultWidth: 150, sortKey: 'amount' as const },
+  { key: 'status', label: 'Статус', defaultVisible: true, defaultWidth: 160 },
   { key: 'description', label: 'Описание', defaultVisible: true, defaultWidth: 280 },
   { key: 'clients', label: 'Клиенты', defaultVisible: true, defaultWidth: 320 },
   { key: 'createdAt', label: 'Создан', defaultVisible: false, defaultWidth: 150, sortKey: 'createdAt' as const },
@@ -84,6 +85,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [clientFilter, setClientFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | ContractStatus>('all');
   const [search, setSearch] = useState('');
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
   const [page, setPage] = useState(1);
@@ -129,6 +131,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     from: from || undefined,
     to: to || undefined,
     clientId: Number.isNaN(clientIdFilter) ? undefined : clientIdFilter,
+    status: statusFilter === 'all' ? undefined : statusFilter,
     search: debouncedSearch || undefined,
     sortBy: sortState.key,
     sortDir: sortState.direction,
@@ -138,7 +141,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
 
   useEffect(() => {
     setPage(1);
-  }, [from, to, clientFilter, debouncedSearch, sortState, pageSize]);
+  }, [from, to, clientFilter, statusFilter, debouncedSearch, sortState, pageSize]);
 
   useEffect(() => {
     void apiService
@@ -171,6 +174,24 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     [columnsByKey, orderedVisibleColumns],
   );
 
+  const contractStatusLabels: Record<ContractStatus, string> = {
+    Draft: 'Черновик',
+    NotSigned: 'Не подписан',
+    OnSigning: 'На подписании',
+    Concluded: 'Подписан',
+    Terminated: 'Расторгнут',
+    Cancelled: 'Аннулирован',
+  };
+
+  const contractStatusClasses: Record<ContractStatus, string> = {
+    Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
+    NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+    OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
+    Concluded: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    Terminated: 'bg-orange-100 text-orange-700 border border-orange-200',
+    Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
+  };
+
   const handleSort = (key: ContractsSortKey) => {
     setSortState((prev) => {
       if (prev.key === key) {
@@ -184,6 +205,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     setFrom('');
     setTo('');
     setClientFilter('all');
+    setStatusFilter('all');
     setSearch('');
   };
 
@@ -271,6 +293,14 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
             </span>
           </div>
         );
+      case 'status': {
+        const status = contract.status ?? 'Draft';
+        return (
+          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${contractStatusClasses[status]}`}>
+            {contractStatusLabels[status]}
+          </span>
+        );
+      }
       case 'description':
         return contract.description?.trim() ? (
           <div className="truncate text-slate-700" title={contract.description}>
@@ -364,7 +394,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
         </div>
 
         <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <label className="flex flex-col gap-1 text-sm text-slate-700">
               {t('contractsFrom') ?? 'С даты'}
               <input
@@ -397,6 +427,21 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
               buttonClassName="border-gray-300 text-slate-700 focus:border-blue-500"
               noOptionsText="Клиенты не найдены"
             />
+            <label className="flex flex-col gap-1 text-sm text-slate-700">
+              Статус
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ContractStatus))}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              >
+                <option value="all">Все статусы</option>
+                {(['Terminated', 'Concluded', 'NotSigned', 'Draft', 'OnSigning', 'Cancelled'] as ContractStatus[]).map((status) => (
+                  <option key={status} value={status}>
+                    {contractStatusLabels[status]}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="flex flex-col gap-1 text-sm text-slate-700">
               {t('search') ?? 'Поиск'}
               <div className="relative">

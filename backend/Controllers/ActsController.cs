@@ -253,6 +253,24 @@ public class ActsController : ControllerBase
         return Ok(Map(act));
     }
 
+    [HttpPost("{id:int}/mark-not-signed")]
+    public async Task<ActionResult<ActDto>> MarkNotSigned(int id, CancellationToken ct)
+    {
+        var act = await LoadActForWorkflowAsync(id, ct);
+        if (act is null)
+        {
+            return NotFound();
+        }
+
+        act.Status = ActStatus.Created;
+        act.WorkflowStatus = ActWorkflowStatus.NotSigned;
+        act.SentForSigningAt = null;
+        act.SignedAt = null;
+        act.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return Ok(Map(act));
+    }
+
     [HttpPost("{id:int}/cancel")]
     public async Task<ActionResult<ActDto>> Cancel(int id, [FromBody] CancelActRequest request, CancellationToken ct)
     {

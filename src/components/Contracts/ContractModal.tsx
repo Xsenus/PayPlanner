@@ -408,8 +408,9 @@ export function ContractModal({
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               >
                 <option value="Draft">Черновик</option>
+                <option value="NotSigned">Не подписан</option>
                 <option value="OnSigning">На подписании</option>
-                <option value="Concluded">Заключен</option>
+                <option value="Concluded">Подписан</option>
                 <option value="Terminated">Расторгнут</option>
                 <option value="Cancelled">Отменен</option>
               </select>

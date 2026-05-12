@@ -1494,6 +1494,7 @@ export function ActModal({
                     className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
                   >
                     <option value="Draft">Черновик</option>
+                    <option value="NotSigned">Не подписан</option>
                     <option value="OnSigning">На подписании</option>
                     <option value="Signed">Подписан</option>
                     <option value="Cancelled">Отменен</option>

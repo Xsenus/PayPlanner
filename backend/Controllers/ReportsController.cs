@@ -1707,18 +1707,20 @@ public class ReportsController : ControllerBase
         {
             InvoiceWorkflowStatus.Overdue => 0,
             InvoiceWorkflowStatus.OnSigning => 1,
-            InvoiceWorkflowStatus.SignedByClient => 2,
-            InvoiceWorkflowStatus.PartiallyPaid => 3,
-            InvoiceWorkflowStatus.Draft => 4,
-            InvoiceWorkflowStatus.Paid => 5,
-            InvoiceWorkflowStatus.Cancelled => 6,
-            _ => 7,
+            InvoiceWorkflowStatus.NotSigned => 2,
+            InvoiceWorkflowStatus.SignedByClient => 3,
+            InvoiceWorkflowStatus.PartiallyPaid => 4,
+            InvoiceWorkflowStatus.Draft => 5,
+            InvoiceWorkflowStatus.Paid => 6,
+            InvoiceWorkflowStatus.Cancelled => 7,
+            _ => 8,
         };
 
     private static string FormatInvoiceWorkflowStatusLabel(string status)
         => status switch
         {
             InvoiceWorkflowStatus.Draft => "Черновик",
+            InvoiceWorkflowStatus.NotSigned => "Не подписан",
             InvoiceWorkflowStatus.OnSigning => "На подписании",
             InvoiceWorkflowStatus.SignedByClient => "Подписан клиентом",
             InvoiceWorkflowStatus.Paid => "Оплачен",
@@ -1814,16 +1816,18 @@ public class ReportsController : ControllerBase
         => status switch
         {
             ActWorkflowStatus.OnSigning => 0,
-            ActWorkflowStatus.Draft => 1,
-            ActWorkflowStatus.Signed => 2,
-            ActWorkflowStatus.Cancelled => 3,
-            _ => 4,
+            ActWorkflowStatus.NotSigned => 1,
+            ActWorkflowStatus.Draft => 2,
+            ActWorkflowStatus.Signed => 3,
+            ActWorkflowStatus.Cancelled => 4,
+            _ => 5,
         };
 
     private static string FormatActWorkflowStatusLabel(string status)
         => status switch
         {
             ActWorkflowStatus.Draft => "Черновик",
+            ActWorkflowStatus.NotSigned => "Не подписан",
             ActWorkflowStatus.OnSigning => "На подписании",
             ActWorkflowStatus.Signed => "Подписан",
             ActWorkflowStatus.Cancelled => "Отменен",
@@ -1885,7 +1889,7 @@ public class ReportsController : ControllerBase
             .ThenByDescending(item => item.TotalAmount)
             .ToList();
 
-        var activeStatuses = new[] { ContractStatus.Draft, ContractStatus.OnSigning, ContractStatus.Concluded };
+        var activeStatuses = new[] { ContractStatus.Draft, ContractStatus.NotSigned, ContractStatus.OnSigning, ContractStatus.Concluded };
 
         return new ContractStatusReportDto
         {
@@ -1893,6 +1897,7 @@ public class ReportsController : ControllerBase
             To = to,
             ContractCount = normalizedRows.Count,
             DraftCount = normalizedRows.Count(item => item.Status == ContractStatus.Draft),
+            NotSignedCount = normalizedRows.Count(item => item.Status == ContractStatus.NotSigned),
             OnSigningCount = normalizedRows.Count(item => item.Status == ContractStatus.OnSigning),
             ConcludedCount = normalizedRows.Count(item => item.Status == ContractStatus.Concluded),
             TerminatedCount = normalizedRows.Count(item => item.Status == ContractStatus.Terminated),
@@ -1916,19 +1921,21 @@ public class ReportsController : ControllerBase
         => status switch
         {
             ContractStatus.OnSigning => 0,
-            ContractStatus.Draft => 1,
-            ContractStatus.Concluded => 2,
-            ContractStatus.Terminated => 3,
-            ContractStatus.Cancelled => 4,
-            _ => 5,
+            ContractStatus.NotSigned => 1,
+            ContractStatus.Draft => 2,
+            ContractStatus.Concluded => 3,
+            ContractStatus.Terminated => 4,
+            ContractStatus.Cancelled => 5,
+            _ => 6,
         };
 
     private static string FormatContractStatusLabel(string status)
         => status switch
         {
             ContractStatus.Draft => "Черновик",
+            ContractStatus.NotSigned => "Не подписан",
             ContractStatus.OnSigning => "На подписании",
-            ContractStatus.Concluded => "Заключен",
+            ContractStatus.Concluded => "Подписан",
             ContractStatus.Terminated => "Расторгнут",
             ContractStatus.Cancelled => "Аннулирован",
             _ => status,

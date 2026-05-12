@@ -6,7 +6,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { useTranslation } from '../../hooks/useTranslation';
 import { apiService } from '../../services/api';
-import type { Act, ActInput, ActResponsible, ActStatus, Client, PaymentKind } from '../../types';
+import type { Act, ActInput, ActResponsible, ActStatus, ActWorkflowStatus, Client, PaymentKind } from '../../types';
 import { normalizeAct, normalizeActResponsibleArray, normalizeClientArray } from '../../utils/acts';
 import { toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -22,7 +22,7 @@ interface ActDetailPageProps {
 }
 
 type DocumentFormat = 'word' | 'pdf';
-type PageAction = 'send' | 'transferred' | 'signed' | 'cancel' | 'delete';
+type PageAction = 'send' | 'notSigned' | 'transferred' | 'signed' | 'cancel' | 'delete';
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -261,6 +261,29 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     },
   };
 
+  const workflowStatusMeta: Record<ActWorkflowStatus, { label: string; className: string }> = {
+    Draft: {
+      label: 'Черновик',
+      className: 'bg-slate-100 text-slate-700 border border-slate-200',
+    },
+    NotSigned: {
+      label: 'Не подписан',
+      className: 'bg-slate-100 text-slate-700 border border-slate-200',
+    },
+    OnSigning: {
+      label: 'На подписании',
+      className: 'bg-violet-100 text-violet-700 border border-violet-200',
+    },
+    Signed: {
+      label: 'Подписан',
+      className: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    },
+    Cancelled: {
+      label: 'Отменен',
+      className: 'bg-rose-100 text-rose-700 border border-rose-200',
+    },
+  };
+
   const typeMeta = useMemo(() => {
     if (act?.type === 'Income') {
       return {
@@ -291,6 +314,15 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
 
   const lineItems = useMemo(() => (act?.lineItems ?? []).filter((item) => Boolean(item?.name || item?.sourceKey)), [act?.lineItems]);
   const currentStatusMeta = act ? (statusMeta[act.status] ?? statusMeta.Created) : statusMeta.Created;
+  void currentStatusMeta;
+  const currentWorkflowStatus = useMemo<ActWorkflowStatus>(() => {
+    if (act?.workflowStatus) return act.workflowStatus;
+    if (act?.status === 'Transferred') return 'OnSigning';
+    if (act?.status === 'Signed') return 'Signed';
+    if (act?.status === 'Terminated') return 'Cancelled';
+    return 'Draft';
+  }, [act?.status, act?.workflowStatus]);
+  const currentWorkflowStatusMeta = workflowStatusMeta[currentWorkflowStatus] ?? workflowStatusMeta.Draft;
   const printableAmount = formatMoney(act?.amount);
   const actLink = useMemo(() => {
     if (typeof window === 'undefined' || !act?.id) {
@@ -363,7 +395,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
 
   const handleStatusAction = useCallback(async (
     targetStatus: ActStatus,
-    actionKey: Extract<PageAction, 'transferred' | 'signed'>,
+    actionKey: Extract<PageAction, 'notSigned' | 'transferred' | 'signed'>,
     title: string,
     description: string,
     confirmLabel: string,
@@ -385,7 +417,9 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       void targetStatus;
       const updated = normalizeAct(actionKey === 'transferred'
         ? await apiService.sendActToSigning(act.id)
-        : await apiService.markActSigned(act.id));
+        : actionKey === 'signed'
+          ? await apiService.markActSigned(act.id)
+          : await apiService.markActNotSigned(act.id));
       if (!updated) {
         throw new Error('Не удалось обновить статус акта.');
       }
@@ -484,8 +518,9 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     }
   }, [act, confirm, selectedClient?.email, toast]);
 
-  const transferredDisabled = !canEdit || act?.status === 'Transferred' || act?.status === 'Signed' || act?.status === 'Terminated';
-  const signedDisabled = !canEdit || act?.status === 'Signed' || act?.status === 'Terminated';
+  const notSignedDisabled = !canEdit || currentWorkflowStatus === 'NotSigned' || act?.status === 'Terminated';
+  const transferredDisabled = !canEdit || currentWorkflowStatus === 'OnSigning' || act?.status === 'Signed' || act?.status === 'Terminated';
+  const signedDisabled = !canEdit || currentWorkflowStatus === 'Signed' || act?.status === 'Terminated';
   const cancelDisabled = !canEdit || act?.status === 'Terminated';
 
   if (act && editorOpen) {
@@ -564,8 +599,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           </div>
 
           <div className="flex items-center gap-2">
-            <span className={`rounded-full px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>
-              {currentStatusMeta.label}
+            <span className={`rounded-full px-3 py-1 text-sm font-semibold ${currentWorkflowStatusMeta.className}`}>
+              {currentWorkflowStatusMeta.label}
             </span>
             {canEdit ? (
               <button
@@ -630,8 +665,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-xl font-semibold">{printableAmount}</span>
                   <div className="flex items-center gap-2">
-                    <span className={`rounded px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>
-                      {currentStatusMeta.label}
+                    <span className={`rounded px-3 py-1 text-sm font-semibold ${currentWorkflowStatusMeta.className}`}>
+                      {currentWorkflowStatusMeta.label}
                     </span>
                   </div>
                 </div>
@@ -739,7 +774,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             </aside>
           </div>
 
-          <div className={`grid gap-2 rounded-lg border border-slate-300 bg-white p-2 ${canDelete ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-6' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-5'}`}>
+          <div className={`grid gap-2 rounded-lg border border-slate-300 bg-white p-2 ${canDelete ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-7' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-6'}`}>
             <button
               type="button"
               onClick={() => void handleSend()}
@@ -807,6 +842,27 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 </div>
               ) : null}
             </div>
+
+            <button
+              type="button"
+              onClick={() => void handleStatusAction(
+                'Created',
+                'notSigned',
+                'Отметить акт неподписанным',
+                'Подтвердите перевод акта в статус «Не подписан».',
+                'Не подписан',
+                'Статус акта обновлен: Не подписан.',
+              )}
+              disabled={notSignedDisabled || pageActionLoading === 'notSigned'}
+              className={`inline-flex items-center justify-center gap-2 rounded border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                currentWorkflowStatus === 'NotSigned'
+                  ? 'border-slate-200 bg-slate-50 text-slate-700'
+                  : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {pageActionLoading === 'notSigned' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+              Не подписан
+            </button>
 
             <button
               type="button"

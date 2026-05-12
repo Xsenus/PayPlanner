@@ -3,6 +3,7 @@ namespace PayPlanner.Api.Models;
 public static class ContractStatus
 {
     public const string Draft = "Draft";
+    public const string NotSigned = "NotSigned";
     public const string OnSigning = "OnSigning";
     public const string Concluded = "Concluded";
     public const string Terminated = "Terminated";
@@ -11,6 +12,7 @@ public static class ContractStatus
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         Draft,
+        NotSigned,
         OnSigning,
         Concluded,
         Terminated,

@@ -9,7 +9,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useActs, type ActsSortKey } from '../../hooks/useActs';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { apiService } from '../../services/api';
-import type { Act, ActInput, ActResponsible, ActStatus, Client, PaymentKind } from '../../types';
+import type { Act, ActInput, ActResponsible, ActStatus, ActWorkflowStatus, Client, PaymentKind } from '../../types';
 import { toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
@@ -37,7 +37,7 @@ function formatDate(value?: string | null): string {
   return `${d}.${m}.${y}`;
 }
 
-type ActColumnKey = ActsSortKey | 'actions';
+type ActColumnKey = ActsSortKey | 'workflowStatus' | 'actions';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const ACT_COLUMN_CONFIGS = [
@@ -47,6 +47,7 @@ const ACT_COLUMN_CONFIGS = [
   { key: 'invoiceNumber', defaultVisible: true, defaultWidth: 150 },
   { key: 'client', defaultVisible: true, defaultWidth: 250 },
   { key: 'status', defaultVisible: true, defaultWidth: 150 },
+  { key: 'workflowStatus', defaultVisible: true, defaultWidth: 170 },
   { key: 'responsible', defaultVisible: true, defaultWidth: 180 },
   { key: 'actions', defaultVisible: true, defaultWidth: 130 },
 ] as const satisfies ReadonlyArray<{
@@ -114,6 +115,7 @@ export function Acts({
   const periodRange = useMemo(() => resolvePeriod(period), [period]);
   const [typeFilter, setTypeFilter] = useState<'All' | PaymentKind>(defaultType ?? 'All');
   const [statusFilter, setStatusFilter] = useState<'all' | ActStatus>('all');
+  const [workflowStatusFilter, setWorkflowStatusFilter] = useState<'all' | ActWorkflowStatus>('all');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
@@ -167,6 +169,7 @@ export function Acts({
     from: periodRange.from || undefined,
     to: periodRange.to || undefined,
     status: statusFilter === 'all' ? undefined : statusFilter,
+    workflowStatus: workflowStatusFilter === 'all' ? undefined : workflowStatusFilter,
     type: effectiveTypeFilter === 'All' ? undefined : effectiveTypeFilter,
     search: debouncedSearch || undefined,
     sortBy: sortState.key,
@@ -215,6 +218,30 @@ export function Acts({
     Transferred: 'bg-amber-100 text-amber-800 border border-amber-200',
     Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Terminated: 'bg-rose-100 text-rose-700 border border-rose-200',
+  };
+
+  const workflowStatusLabels: Record<ActWorkflowStatus, string> = {
+    Draft: 'Черновик',
+    NotSigned: 'Не подписан',
+    OnSigning: 'На подписании',
+    Signed: 'Подписан',
+    Cancelled: 'Отменен',
+  };
+
+  const workflowStatusClasses: Record<ActWorkflowStatus, string> = {
+    Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
+    NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+    OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
+    Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
+  };
+
+  const resolveWorkflowStatus = (act: Act): ActWorkflowStatus => {
+    if (act.workflowStatus) return act.workflowStatus;
+    if (act.status === 'Transferred') return 'OnSigning';
+    if (act.status === 'Signed') return 'Signed';
+    if (act.status === 'Terminated') return 'Cancelled';
+    return 'Draft';
   };
 
   const typeOptions: Array<'All' | PaymentKind> = ['All', 'Income', 'Expense'];
@@ -288,6 +315,7 @@ export function Acts({
       { key: 'invoiceNumber' as ActColumnKey, label: t('actInvoice') ?? 'Счёт', sortable: true },
       { key: 'client' as ActColumnKey, label: t('actClient') ?? 'Контрагент', sortable: true },
       { key: 'status' as ActColumnKey, label: t('actStatus') ?? 'Статус', sortable: true },
+      { key: 'workflowStatus' as ActColumnKey, label: 'Статус документа', sortable: false },
       { key: 'responsible' as ActColumnKey, label: t('actResponsible') ?? 'Ответственный', sortable: true },
       { key: 'actions' as ActColumnKey, label: t('actions') ?? 'Действия', sortable: false },
     ],
@@ -315,7 +343,7 @@ export function Acts({
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, effectiveTypeFilter, statusFilter, periodRange.from, periodRange.to, pageSize]);
+  }, [debouncedSearch, effectiveTypeFilter, statusFilter, workflowStatusFilter, periodRange.from, periodRange.to, pageSize]);
 
   useEffect(() => {
     setPage((prev) => Math.min(prev, totalPages));
@@ -451,6 +479,7 @@ export function Acts({
       setTypeFilter('All');
     }
     setStatusFilter('all');
+    setWorkflowStatusFilter('all');
     setSearch('');
     setSortState({ key: 'date', direction: 'desc' });
     setPage(1);
@@ -511,6 +540,16 @@ export function Acts({
             </span>
           </td>
         );
+      case 'workflowStatus': {
+        const workflowStatus = resolveWorkflowStatus(act);
+        return (
+          <td key={key} className="px-4 py-3">
+            <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${workflowStatusClasses[workflowStatus]}`}>
+              {workflowStatusLabels[workflowStatus]}
+            </span>
+          </td>
+        );
+      }
       case 'responsible':
         return <td key={key} className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">{act.responsibleName || t('actResponsibleNotSelected') || '—'}</td>;
       case 'actions':
@@ -650,6 +689,20 @@ export function Acts({
               {STATUS_ORDER.concat('Created' as ActStatus).map((status) => (
                 <option key={status} value={status}>
                   {statusLabels[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex min-w-[220px] flex-col gap-1 text-sm">
+            <span className="font-medium text-slate-700">Статус документа</span>
+            <select
+              value={workflowStatusFilter}
+              onChange={(event) => setWorkflowStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ActWorkflowStatus))}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+              <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
+              {(['NotSigned', 'OnSigning', 'Signed', 'Draft', 'Cancelled'] as ActWorkflowStatus[]).map((status) => (
+                <option key={status} value={status}>
+                  {workflowStatusLabels[status]}
                 </option>
               ))}
             </select>

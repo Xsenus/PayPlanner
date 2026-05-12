@@ -118,8 +118,9 @@ const formatAmountInput = (value?: number | null) => (typeof value === 'number' 
 
 const contractStatusLabels: Record<NonNullable<Contract['status']>, string> = {
   Draft: 'Черновик',
+  NotSigned: 'Не подписан',
   OnSigning: 'На подписании',
-  Concluded: 'Заключён',
+  Concluded: 'Подписан',
   Terminated: 'Расторгнут',
   Cancelled: 'Аннулирован',
 };
@@ -657,7 +658,7 @@ export function ContractDetailPage({
     });
   };
 
-  const runWorkflowAction = async (action: 'sendToSigning' | 'markConcluded' | 'terminate' | 'cancel') => {
+  const runWorkflowAction = async (action: 'markNotSigned' | 'sendToSigning' | 'markConcluded' | 'terminate' | 'cancel') => {
     if (!contract || workflowSaving) return;
 
     let terminatePayload:
@@ -701,9 +702,12 @@ export function ContractDetailPage({
       if (action === 'sendToSigning') {
         updatedContract = await apiService.sendContractToSigning(contract.id);
         successMessage = 'Договор отправлен на подписание.';
+      } else if (action === 'markNotSigned') {
+        updatedContract = await apiService.markContractNotSigned(contract.id);
+        successMessage = 'Договор отмечен неподписанным.';
       } else if (action === 'markConcluded') {
         updatedContract = await apiService.markContractConcluded(contract.id);
-        successMessage = 'Договор отмечен заключённым.';
+        successMessage = 'Договор отмечен подписанным.';
       } else if (action === 'terminate' && terminatePayload) {
         updatedContract = await apiService.terminateContract(
           contract.id,
@@ -748,9 +752,10 @@ export function ContractDetailPage({
   } as Contract);
   const isTerminated = contract?.status === 'Terminated';
   const isCancelled = contract?.status === 'Cancelled';
+  const notSignedDisabled = workflowSaving || editMode || contract?.status === 'NotSigned' || isTerminated || isCancelled;
   const workflowDisabled = workflowSaving || editMode || isTerminated || isCancelled;
   const terminateDisabled = workflowSaving || editMode || isTerminated || isCancelled;
-  const cancelDisabled = workflowSaving || editMode || (contract?.status !== 'Draft' && contract?.status !== 'OnSigning');
+  const cancelDisabled = workflowSaving || editMode || (contract?.status !== 'Draft' && contract?.status !== 'NotSigned' && contract?.status !== 'OnSigning');
 
   if (loading || !contract) {
     return (
@@ -771,6 +776,15 @@ export function ContractDetailPage({
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={() => void runWorkflowAction('markNotSigned')}
+            disabled={notSignedDisabled}
+            className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
+          >
+            {workflowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+            Не подписан
+          </button>
+          <button
+            type="button"
             onClick={() => void runWorkflowAction('sendToSigning')}
             disabled={workflowDisabled}
             className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
@@ -785,7 +799,7 @@ export function ContractDetailPage({
             className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
           >
             {workflowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            Заключён
+            Подписан
           </button>
           <button
             type="button"

@@ -61,6 +61,7 @@ function makeSummaryKey(filters: ActsFilters): string {
     from: filters.from ?? null,
     to: filters.to ?? null,
     status: filters.status ?? null,
+    workflowStatus: filters.workflowStatus ?? null,
     type: filters.type ?? null,
     clientId: filters.clientId ?? null,
     legalEntityId: filters.legalEntityId ?? null,
@@ -116,6 +117,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
           from: filters.from,
           to: filters.to,
           status: filters.status,
+          workflowStatus: filters.workflowStatus,
           type: filters.type,
           clientId: filters.clientId,
           legalEntityId: filters.legalEntityId,
@@ -152,7 +154,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.legalEntityId, filters.contractId, filters.invoiceId, filters.paymentId, filters.caseId, filters.responsibleId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
+    [enabled, filters.from, filters.to, filters.status, filters.workflowStatus, filters.type, filters.clientId, filters.legalEntityId, filters.contractId, filters.invoiceId, filters.paymentId, filters.caseId, filters.responsibleId, filters.search, filters.sortBy, filters.sortDir, filters.page, filters.pageSize],
   );
 
   const fetchSummary = useCallback(
@@ -172,6 +174,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
           from: filters.from,
           to: filters.to,
           status: filters.status,
+          workflowStatus: filters.workflowStatus,
           type: filters.type,
           clientId: filters.clientId,
           legalEntityId: filters.legalEntityId,
@@ -194,7 +197,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         }
       }
     },
-    [enabled, filters.from, filters.to, filters.status, filters.type, filters.clientId, filters.legalEntityId, filters.contractId, filters.invoiceId, filters.paymentId, filters.caseId, filters.responsibleId, filters.search],
+    [enabled, filters.from, filters.to, filters.status, filters.workflowStatus, filters.type, filters.clientId, filters.legalEntityId, filters.contractId, filters.invoiceId, filters.paymentId, filters.caseId, filters.responsibleId, filters.search],
   );
 
   useEffect(() => {

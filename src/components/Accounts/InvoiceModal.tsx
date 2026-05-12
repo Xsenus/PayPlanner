@@ -2927,7 +2927,7 @@ export function InvoiceModal({
     }
   };
 
-  const handlePageAction = async (action: 'send' | 'sendToSigning' | 'markSigned' | 'copy' | 'paid' | 'cancel' | 'delete') => {
+  const handlePageAction = async (action: 'send' | 'markNotSigned' | 'sendToSigning' | 'markSigned' | 'copy' | 'paid' | 'cancel' | 'delete') => {
     if (action === 'cancel') {
       openCancelInvoiceDialog();
       return;
@@ -2938,6 +2938,7 @@ export function InvoiceModal({
       copy: { title: 'Копия счёта', message: 'Создать копию текущего счёта?', confirmLabel: 'Копировать' },
       paid: { title: 'Отметить оплаченным', message: 'Отметить счёт как оплаченный?', confirmLabel: 'Оплачен' },
       delete: { title: 'Удалить счёт', message: 'Удалить счёт без возможности восстановления?', confirmLabel: 'Удалить' },
+      markNotSigned: { title: 'Отметить неподписанным', message: 'Перевести счёт в статус “не подписан”?', confirmLabel: 'Не подписан' },
       sendToSigning: { title: 'Отправить на подписание', message: 'Перевести счёт в статус “на подписании”?', confirmLabel: 'На подписание' },
       markSigned: { title: 'Отметить подписанным', message: 'Отметить счёт как подписанный клиентом?', confirmLabel: 'Подписан' },
     }[action];
@@ -2966,14 +2967,16 @@ export function InvoiceModal({
         return;
       }
 
-      if (action === 'sendToSigning' || action === 'markSigned') {
+      if (action === 'markNotSigned' || action === 'sendToSigning' || action === 'markSigned') {
         if (!invoice?.id) {
           throw new Error('Сначала сохраните счёт, затем можно менять статус подписания.');
         }
 
         const updated = action === 'sendToSigning'
           ? await apiService.sendInvoiceToSigning(invoice.id)
-          : await apiService.markInvoiceSigned(invoice.id);
+          : action === 'markSigned'
+            ? await apiService.markInvoiceSigned(invoice.id)
+            : await apiService.markInvoiceNotSigned(invoice.id);
 
         setForm((prev) => ({
           ...prev,
@@ -2983,7 +2986,9 @@ export function InvoiceModal({
         toast.success(
           action === 'sendToSigning'
             ? 'Счёт отправлен на подписание.'
-            : 'Счёт отмечен подписанным.',
+            : action === 'markSigned'
+              ? 'Счёт отмечен подписанным.'
+              : 'Счёт отмечен неподписанным.',
           'Статус счёта обновлён',
         );
         return;
@@ -3823,9 +3828,10 @@ export function InvoiceModal({
             </aside>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-9">
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-10">
             <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
             <button type="button" onClick={() => void handlePrintDocument()} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
+            <button type="button" onClick={() => void handlePageAction('markNotSigned')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Ban className="h-4 w-4" />Не подписан</button>
             <button type="button" onClick={() => void handlePageAction('sendToSigning')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />На подписание</button>
             <button type="button" onClick={() => void handlePageAction('markSigned')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Check className="h-4 w-4" />Подписан</button>
             <div className="relative" ref={downloadMenuRef}>
@@ -4003,6 +4009,7 @@ export function InvoiceModal({
                                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                 >
                                   <option value="Draft">Черновик</option>
+                                  <option value="NotSigned">Не подписан</option>
                                   <option value="OnSigning">На подписании</option>
                                   <option value="SignedByClient">Подписан клиентом</option>
                                   <option value="Paid">Оплачен</option>

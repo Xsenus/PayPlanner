@@ -234,6 +234,21 @@ export function ContractCreateForm({ onSubmit, submitting, errorMessage }: Contr
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-slate-700">Статус документа</span>
+            <select
+              value={form.status}
+              onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value as ContractStatus }))}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+            >
+              <option value="Draft">Черновик</option>
+              <option value="NotSigned">Не подписан</option>
+              <option value="OnSigning">На подписании</option>
+              <option value="Concluded">Подписан</option>
+              <option value="Terminated">Расторгнут</option>
+              <option value="Cancelled">Аннулирован</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-slate-700">{t('contractAmount') ?? 'Сумма договора'}</span>
             <input
               type="text"

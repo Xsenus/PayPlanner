@@ -3,6 +3,7 @@ namespace PayPlanner.Api.Models;
 public static class InvoiceWorkflowStatus
 {
     public const string Draft = "Draft";
+    public const string NotSigned = "NotSigned";
     public const string OnSigning = "OnSigning";
     public const string SignedByClient = "SignedByClient";
     public const string Paid = "Paid";
@@ -13,6 +14,7 @@ public static class InvoiceWorkflowStatus
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         Draft,
+        NotSigned,
         OnSigning,
         SignedByClient,
         Paid,

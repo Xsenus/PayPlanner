@@ -6,6 +6,7 @@ public sealed class ContractStatusReportDto
     public DateTime To { get; init; }
     public int ContractCount { get; init; }
     public int DraftCount { get; init; }
+    public int NotSignedCount { get; init; }
     public int OnSigningCount { get; init; }
     public int ConcludedCount { get; init; }
     public int TerminatedCount { get; init; }

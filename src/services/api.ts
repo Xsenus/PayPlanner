@@ -980,6 +980,10 @@ export class ApiService {
     return this.request<Act>(`/acts/${id}/mark-signed`, { method: 'POST' });
   }
 
+  async markActNotSigned(id: number) {
+    return this.request<Act>(`/acts/${id}/mark-not-signed`, { method: 'POST' });
+  }
+
   async cancelAct(id: number, reason: string) {
     return this.request<Act>(`/acts/${id}/cancel`, {
       method: 'POST',
@@ -1066,6 +1070,10 @@ export class ApiService {
 
   async markContractConcluded(id: number) {
     return this.request<Contract>(`/contracts/${id}/mark-concluded`, { method: 'POST' });
+  }
+
+  async markContractNotSigned(id: number) {
+    return this.request<Contract>(`/contracts/${id}/mark-not-signed`, { method: 'POST' });
   }
 
   async terminateContract(
@@ -1560,6 +1568,10 @@ export class ApiService {
     return this.request<Invoice>(`/invoices/${id}/mark-signed`, { method: 'POST' });
   }
 
+  async markInvoiceNotSigned(id: number) {
+    return this.request<Invoice>(`/invoices/${id}/mark-not-signed`, { method: 'POST' });
+  }
+
   async cancelInvoice(
     id: number,
     reason: string,
@@ -1606,6 +1618,7 @@ export class ApiService {
     search?: string;
     type?: 'Income' | 'Expense';
     clientId?: number;
+    legalEntityId?: number;
     clientIds?: string;
     clientRole?: ClientRole;
     payablesOnly?: boolean;
@@ -1627,6 +1640,7 @@ export class ApiService {
     to?: string;
     search?: string;
     clientId?: number;
+    legalEntityId?: number;
     clientIds?: string;
     clientRole?: ClientRole;
   }) {
