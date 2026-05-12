@@ -150,6 +150,7 @@ public class ContractsController : ControllerBase
         {
             case ContractStatus.Draft:
             case ContractStatus.NotSigned:
+            case ContractStatus.RequiresClientSignature:
             case ContractStatus.OnApproval:
             case ContractStatus.Approved:
             case ContractStatus.ApprovalRejected:
@@ -253,6 +254,7 @@ public class ContractsController : ControllerBase
         if (contract is null) return NotFound();
         if (!string.Equals(contract.Status, ContractStatus.Draft, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.NotSigned, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(contract.Status, ContractStatus.RequiresClientSignature, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.OnApproval, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.Approved, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.ApprovalRejected, StringComparison.OrdinalIgnoreCase)

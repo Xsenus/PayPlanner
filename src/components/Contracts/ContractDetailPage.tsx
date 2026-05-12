@@ -119,6 +119,7 @@ const formatAmountInput = (value?: number | null) => (typeof value === 'number' 
 const contractStatusLabels: Record<NonNullable<Contract['status']>, string> = {
   Draft: 'Черновик',
   NotSigned: 'Не подписан',
+  RequiresClientSignature: 'Требуется подпись клиента',
   OnApproval: 'На согласовании',
   Approved: 'Согласован',
   ApprovalRejected: 'Отказ в согласовании',
@@ -132,6 +133,7 @@ const contractStatusLabels: Record<NonNullable<Contract['status']>, string> = {
 const cancellableContractStatuses: Array<NonNullable<Contract['status']>> = [
   'Draft',
   'NotSigned',
+  'RequiresClientSignature',
   'OnApproval',
   'Approved',
   'ApprovalRejected',

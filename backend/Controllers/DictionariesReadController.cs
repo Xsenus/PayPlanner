@@ -188,4 +188,17 @@ public class DictionariesReadController : ControllerBase
             ct);
         return Ok(result);
     }
+
+    [HttpGet("document-statuses")]
+    public async Task<IActionResult> DocumentStatuses(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.DocumentStatuses.AsNoTracking()
+                .OrderBy(x => x.SortOrder)
+                .ThenBy(x => x.Name)
+                .ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
 }

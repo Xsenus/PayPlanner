@@ -1294,63 +1294,7 @@ export function ActModal({
       amount = computedAmount;
     } else {
       creationMode = 'Manual';
-      const manualPayload = preparedManualLineItems.reduce<{
-        error: string | null;
-        items: NonNullable<ActInput['lineItems']>;
-      }>((accumulator, item, index) => {
-        if (accumulator.error || !item.hasContent) {
-          return accumulator;
-        }
-
-        if (!item.normalizedName) {
-          return {
-            error: `Заполните название позиции акта в строке ${index + 1}`,
-            items: accumulator.items,
-          };
-        }
-
-        if (item.parsedQuantity === null || item.parsedQuantity <= 0) {
-          return {
-            error: `Укажите корректное количество для позиции "${item.normalizedName}"`,
-            items: accumulator.items,
-          };
-        }
-
-        if (item.parsedPrice === null || item.parsedPrice < 0) {
-          return {
-            error: `Укажите корректную цену для позиции "${item.normalizedName}"`,
-            items: accumulator.items,
-          };
-        }
-
-        return {
-          error: null,
-          items: [
-            ...accumulator.items,
-            {
-              sourceKey: item.sourceKey,
-              name: item.normalizedName,
-              quantity: item.parsedQuantity,
-              unit: item.normalizedUnit,
-              price: item.parsedPrice,
-            },
-          ],
-        };
-      }, { error: null, items: [] });
-
-      if (manualPayload.error) {
-        setLocalError(manualPayload.error);
-        return;
-      }
-
-      lineItems = manualPayload.items;
-
-      if (lineItems.length > 0) {
-        amount = lineItems.reduce(
-          (sum, item) => sum + Number(item.quantity ?? 0) * Number(item.price ?? 0),
-          0,
-        );
-      } else {
+      if (!canEditManualLineItems) {
         const parsedAmount = parseDecimalInput(form.amount);
         if (parsedAmount === null) {
           setLocalError('Введите корректную сумму');
@@ -1358,6 +1302,73 @@ export function ActModal({
         }
 
         amount = parsedAmount;
+        lineItems = [];
+      } else {
+        const manualPayload = preparedManualLineItems.reduce<{
+          error: string | null;
+          items: NonNullable<ActInput['lineItems']>;
+        }>((accumulator, item, index) => {
+          if (accumulator.error || !item.hasContent) {
+            return accumulator;
+          }
+
+          if (!item.normalizedName) {
+            return {
+              error: `Заполните название позиции акта в строке ${index + 1}`,
+              items: accumulator.items,
+            };
+          }
+
+          if (item.parsedQuantity === null || item.parsedQuantity <= 0) {
+            return {
+              error: `Укажите корректное количество для позиции "${item.normalizedName}"`,
+              items: accumulator.items,
+            };
+          }
+
+          if (item.parsedPrice === null || item.parsedPrice < 0) {
+            return {
+              error: `Укажите корректную цену для позиции "${item.normalizedName}"`,
+              items: accumulator.items,
+            };
+          }
+
+          return {
+            error: null,
+            items: [
+              ...accumulator.items,
+              {
+                sourceKey: item.sourceKey,
+                name: item.normalizedName,
+                quantity: item.parsedQuantity,
+                unit: item.normalizedUnit,
+                price: item.parsedPrice,
+              },
+            ],
+          };
+        }, { error: null, items: [] });
+
+        if (manualPayload.error) {
+          setLocalError(manualPayload.error);
+          return;
+        }
+
+        lineItems = manualPayload.items;
+
+        if (lineItems.length > 0) {
+          amount = lineItems.reduce(
+            (sum, item) => sum + Number(item.quantity ?? 0) * Number(item.price ?? 0),
+            0,
+          );
+        } else {
+          const parsedAmount = parseDecimalInput(form.amount);
+          if (parsedAmount === null) {
+            setLocalError('Введите корректную сумму');
+            return;
+          }
+
+          amount = parsedAmount;
+        }
       }
     }
 
@@ -1495,6 +1506,7 @@ export function ActModal({
                   >
                     <option value="Draft">Черновик</option>
                     <option value="NotSigned">Не подписан</option>
+                    <option value="RequiresClientSignature">Требуется подпись клиента</option>
                     <option value="OnApproval">На согласовании</option>
                     <option value="Approved">Согласован</option>
                     <option value="ApprovalRejected">Отказ в согласовании</option>

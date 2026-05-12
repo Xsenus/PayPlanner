@@ -409,6 +409,7 @@ export function ContractModal({
               >
                 <option value="Draft">Черновик</option>
                 <option value="NotSigned">Не подписан</option>
+                <option value="RequiresClientSignature">Требуется подпись клиента</option>
                 <option value="OnApproval">На согласовании</option>
                 <option value="Approved">Согласован</option>
                 <option value="ApprovalRejected">Отказ в согласовании</option>

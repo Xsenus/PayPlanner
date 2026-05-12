@@ -901,7 +901,7 @@ public class ReportsControllerTests
             item =>
             {
                 Assert.Equal(ActWorkflowStatus.Cancelled, item.WorkflowStatus);
-                Assert.Equal("Отменен", item.WorkflowStatusLabel);
+                Assert.Equal("Аннулирован", item.WorkflowStatusLabel);
                 Assert.Equal(4_000m, item.PendingAmount);
                 Assert.Equal(26.7m, item.Share);
             });

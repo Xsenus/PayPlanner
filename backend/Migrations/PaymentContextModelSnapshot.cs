@@ -1595,6 +1595,68 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("DealTypes");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.DocumentStatusEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("UseForActs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("UseForContracts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("UseForInvoices")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("IX_DocumentStatuses_Code");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_DocumentStatuses_IsActive");
+
+                    b.HasIndex("SortOrder")
+                        .HasDatabaseName("IX_DocumentStatuses_SortOrder");
+
+                    b.HasIndex("IsActive", "SortOrder")
+                        .HasDatabaseName("IX_DocumentStatuses_IsActive_SortOrder");
+
+                    b.ToTable("DocumentStatuses");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ExternalAuthRequest", b =>
                 {
                     b.Property<int>("Id")

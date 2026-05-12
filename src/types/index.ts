@@ -1538,10 +1538,30 @@ export interface PaymentStatusEntity {
   createdAt: string;
 }
 
+export interface DocumentStatusEntity {
+  id: number;
+  code: DocumentStatusCode;
+  name: string;
+  description: string;
+  colorHex: string;
+  isActive: boolean;
+  useForInvoices: boolean;
+  useForActs: boolean;
+  useForContracts: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export type DocumentStatusCode =
+  | InvoiceWorkflowStatus
+  | ActWorkflowStatus
+  | ContractStatus;
+
 export type ActStatus = 'Created' | 'Transferred' | 'Signed' | 'Terminated';
 export type ActWorkflowStatus =
   | 'Draft'
   | 'NotSigned'
+  | 'RequiresClientSignature'
   | 'OnApproval'
   | 'Approved'
   | 'ApprovalRejected'
@@ -1665,6 +1685,7 @@ export type ContractBillingMode = 'Fixed' | 'Actual';
 export type ContractStatus =
   | 'Draft'
   | 'NotSigned'
+  | 'RequiresClientSignature'
   | 'OnApproval'
   | 'Approved'
   | 'ApprovalRejected'

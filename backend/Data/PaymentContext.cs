@@ -1308,6 +1308,21 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_PaymentStatuses_IsActive_Name");
         });
 
+        // ------------------ DocumentStatusEntity ------------------
+        modelBuilder.Entity<DocumentStatusEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Code).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.ColorHex).HasMaxLength(7);
+
+            entity.HasIndex(e => e.Code).IsUnique().HasDatabaseName("IX_DocumentStatuses_Code");
+            entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_DocumentStatuses_IsActive");
+            entity.HasIndex(e => e.SortOrder).HasDatabaseName("IX_DocumentStatuses_SortOrder");
+            entity.HasIndex(e => new { e.IsActive, e.SortOrder }).HasDatabaseName("IX_DocumentStatuses_IsActive_SortOrder");
+        });
+
         // ================== Roles ==================
         modelBuilder.Entity<Role>(entity =>
         {
@@ -2439,6 +2454,7 @@ public class PaymentContext : DbContext
     /// Статусы платежей.
     /// </summary>
     public DbSet<PaymentStatusEntity> PaymentStatuses { get; set; }
+    public DbSet<DocumentStatusEntity> DocumentStatuses { get; set; }
     public DbSet<PaymentResponsible> PaymentResponsibles { get; set; }
 
     /// <summary>

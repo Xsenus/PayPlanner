@@ -27,6 +27,7 @@ import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings
 import { useAccountsRegistry } from '../../hooks/useAccountsRegistry';
 import { usePayablesDashboard } from '../../hooks/usePayablesDashboard';
 import { useTableSelection } from '../../hooks/useTableSelection';
+import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import type {
   AccountRegistryRow,
   Act,
@@ -46,6 +47,7 @@ import type {
 import { apiService } from '../../services/api';
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { formatPeriodLabel, normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
 import {
@@ -86,6 +88,7 @@ interface AccountsProps {
 
 type FilterType = PaymentKind | 'All';
 type AccountStatus = 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
+const INVOICE_WORKFLOW_STATUS_ORDER: InvoiceWorkflowStatus[] = ['Draft', 'NotSigned', 'RequiresClientSignature', 'OnApproval', 'Approved', 'ApprovalRejected', 'NeedsCorrection', 'OnSigning', 'SignedByClient', 'Cancelled'];
 type InvoiceSigningStatus =
   | 'notSigned'
   | 'requiresClientSignature'
@@ -477,6 +480,7 @@ export function Accounts({
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const { t } = useTranslation();
+  const documentStatusSettings = useDocumentStatusSettings();
 
   const canCreate = permissions.accounts.canCreate;
   const canEdit = permissions.accounts.canEdit;
@@ -737,7 +741,7 @@ export function Accounts({
     signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
-  const invoiceWorkflowStatusLabels: Record<InvoiceWorkflowStatus, string> = {
+  const defaultInvoiceWorkflowStatusLabels: Record<InvoiceWorkflowStatus, string> = {
     Draft: 'Черновик',
     NotSigned: 'Не подписан',
     RequiresClientSignature: 'Требуется подпись клиента',
@@ -752,6 +756,11 @@ export function Accounts({
     Overdue: 'Просрочен',
     Cancelled: 'Аннулирован',
   };
+
+  const invoiceWorkflowStatusLabels = useMemo(
+    () => getDocumentStatusLabels(documentStatusSettings, 'invoice', defaultInvoiceWorkflowStatusLabels),
+    [documentStatusSettings],
+  );
   const invoiceWorkflowStatusClasses: Record<InvoiceWorkflowStatus, string> = {
     Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
     NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
@@ -767,68 +776,36 @@ export function Accounts({
     Overdue: 'bg-rose-100 text-rose-700 border border-rose-200',
     Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
-  const invoiceWorkflowStatusOptions: StatusChangeOption<InvoiceWorkflowStatus>[] = [
-    {
-      value: 'Draft',
-      label: invoiceWorkflowStatusLabels.Draft,
-      description: 'Документ вернется в черновик, даты отправки и подписи будут очищены.',
-      className: invoiceWorkflowStatusClasses.Draft,
-    },
-    {
-      value: 'NotSigned',
-      label: invoiceWorkflowStatusLabels.NotSigned,
-      description: 'Документ будет отмечен как неподписанный.',
-      className: invoiceWorkflowStatusClasses.NotSigned,
-    },
-    {
-      value: 'RequiresClientSignature',
-      label: invoiceWorkflowStatusLabels.RequiresClientSignature,
-      description: 'Документ требует подпись клиента; статус оплаты счета не меняется.',
-      className: invoiceWorkflowStatusClasses.RequiresClientSignature,
-    },
-    {
-      value: 'OnApproval',
-      label: invoiceWorkflowStatusLabels.OnApproval,
-      description: 'Документ будет отправлен на внутреннее согласование.',
-      className: invoiceWorkflowStatusClasses.OnApproval,
-    },
-    {
-      value: 'Approved',
-      label: invoiceWorkflowStatusLabels.Approved,
-      description: 'Документ будет отмечен как согласованный.',
-      className: invoiceWorkflowStatusClasses.Approved,
-    },
-    {
-      value: 'ApprovalRejected',
-      label: invoiceWorkflowStatusLabels.ApprovalRejected,
-      description: 'В журнал попадет отказ в согласовании документа.',
-      className: invoiceWorkflowStatusClasses.ApprovalRejected,
-    },
-    {
-      value: 'NeedsCorrection',
-      label: invoiceWorkflowStatusLabels.NeedsCorrection,
-      description: 'Документ будет возвращен на исправление.',
-      className: invoiceWorkflowStatusClasses.NeedsCorrection,
-    },
-    {
-      value: 'OnSigning',
-      label: invoiceWorkflowStatusLabels.OnSigning,
-      description: 'Документ будет отмечен как отправленный на подписание.',
-      className: invoiceWorkflowStatusClasses.OnSigning,
-    },
-    {
-      value: 'SignedByClient',
-      label: invoiceWorkflowStatusLabels.SignedByClient,
-      description: 'Документ будет отмечен как подписанный клиентом.',
-      className: invoiceWorkflowStatusClasses.SignedByClient,
-    },
-    {
-      value: 'Cancelled',
-      label: invoiceWorkflowStatusLabels.Cancelled,
-      description: 'Изменится только статус документа; статус оплаты счета не меняется.',
-      className: invoiceWorkflowStatusClasses.Cancelled,
-    },
-  ];
+  const invoiceWorkflowStatusDescriptions: Record<InvoiceWorkflowStatus, string> = {
+    Draft: 'Документ вернется в черновик, даты отправки и подписи будут очищены.',
+    NotSigned: 'Документ будет отмечен как неподписанный.',
+    RequiresClientSignature: 'Документ требует подпись клиента; статус оплаты счета не меняется.',
+    OnApproval: 'Документ будет отправлен на внутреннее согласование.',
+    Approved: 'Документ будет отмечен как согласованный.',
+    ApprovalRejected: 'В журнал попадет отказ в согласовании документа.',
+    NeedsCorrection: 'Документ будет возвращен на исправление.',
+    OnSigning: 'Документ будет отмечен как отправленный на подписание.',
+    SignedByClient: 'Документ будет отмечен как подписанный клиентом.',
+    Paid: 'Статус оплаты ведется отдельно.',
+    PartiallyPaid: 'Статус оплаты ведется отдельно.',
+    Overdue: 'Статус оплаты ведется отдельно.',
+    Cancelled: 'Изменится только статус документа; статус оплаты счета не меняется.',
+  };
+
+  const invoiceWorkflowStatusCodes = useMemo(
+    () => getDocumentStatusCodes(documentStatusSettings, 'invoice', INVOICE_WORKFLOW_STATUS_ORDER),
+    [documentStatusSettings],
+  );
+
+  const invoiceWorkflowStatusOptions: StatusChangeOption<InvoiceWorkflowStatus>[] = useMemo(
+    () => invoiceWorkflowStatusCodes.map((status) => ({
+      value: status,
+      label: invoiceWorkflowStatusLabels[status],
+      description: invoiceWorkflowStatusDescriptions[status],
+      className: invoiceWorkflowStatusClasses[status],
+    })),
+    [invoiceWorkflowStatusCodes, invoiceWorkflowStatusLabels],
+  );
   const statusBadgeClass =
     'inline-flex max-w-full items-center justify-center rounded-full px-3 py-1 text-center text-xs font-medium leading-tight whitespace-normal';
   void statusLabels;

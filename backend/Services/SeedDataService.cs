@@ -82,6 +82,7 @@ namespace PayPlanner.Api.Services
             await EnsureServiceDictionarySchemaAsync(context);
             await EnsureLegalEntityProfileDictionarySchemaAsync(context);
             await EnsureInvoiceLineDictionarySchemaAsync(context);
+            await EnsureDocumentStatusesAsync(context);
 
             try
             {
@@ -1113,6 +1114,37 @@ namespace PayPlanner.Api.Services
                 ctx.PaymentStatuses.Add(new PaymentStatusEntity { Name = name, ColorHex = color, Description = desc ?? string.Empty, IsActive = true });
                 await ctx.SaveChangesAsync();
             }
+        }
+
+        private static async Task EnsureDocumentStatusesAsync(PaymentContext ctx)
+        {
+            foreach (var status in DocumentWorkflowStatus.Defaults)
+            {
+                var existing = await ctx.DocumentStatuses.FirstOrDefaultAsync(x => x.Code == status.Code);
+                if (existing is null)
+                {
+                    ctx.DocumentStatuses.Add(new DocumentStatusEntity
+                    {
+                        Code = status.Code,
+                        Name = status.Name,
+                        Description = status.Description,
+                        ColorHex = status.ColorHex,
+                        IsActive = true,
+                        UseForInvoices = status.UseForInvoices,
+                        UseForActs = status.UseForActs,
+                        UseForContracts = status.UseForContracts,
+                        SortOrder = status.SortOrder,
+                    });
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(existing.Name)) existing.Name = status.Name;
+                    if (string.IsNullOrWhiteSpace(existing.ColorHex)) existing.ColorHex = status.ColorHex;
+                    if (existing.SortOrder == 0) existing.SortOrder = status.SortOrder;
+                }
+            }
+
+            await ctx.SaveChangesAsync();
         }
 
         private static async Task EnsureStarterInvoiceUnitsAsync(PaymentContext ctx)

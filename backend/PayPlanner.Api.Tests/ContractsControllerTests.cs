@@ -249,6 +249,38 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task UpdateStatus_AcceptsRequiresClientSignature()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-SIGN-CLIENT-1",
+                Date = new DateTime(2026, 4, 20),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 25_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var updateAction = await controller.UpdateStatus(
+            createdDto.Id,
+            new UpdateNamedStatusRequest { Status = ContractStatus.RequiresClientSignature },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(ContractStatus.RequiresClientSignature, dto.Status);
+        Assert.Null(dto.SentForSigningAt);
+        Assert.Null(dto.ConcludedAt);
+    }
+
+    [Fact]
     public async Task Terminate_StoresTermsAndUpdatesStatus()
     {
         await using var db = await CreateContextAsync();

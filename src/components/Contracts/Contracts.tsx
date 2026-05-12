@@ -19,10 +19,12 @@ import { useToast } from '../../hooks/useToast';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useContracts, type ContractsSortKey } from '../../hooks/useContracts';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { apiService } from '../../services/api';
 import type { Client, Contract, ContractStatus } from '../../types';
 import { getContractBillingModeLabel, getContractEffectiveAmount, getContractExecutionMetrics } from '../../utils/contracts';
 import { toRuDate, toDateInputValue } from '../../utils/dateUtils';
+import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { buildClientLookupOptions } from '../Clients/clientLookupOptions';
@@ -32,6 +34,7 @@ import { TablePagination } from '../ui/TablePagination';
 import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 
 type SortState = { key: ContractsSortKey; direction: 'asc' | 'desc' };
+const CONTRACT_STATUS_ORDER: ContractStatus[] = ['Draft', 'NotSigned', 'RequiresClientSignature', 'OnApproval', 'Approved', 'ApprovalRejected', 'NeedsCorrection', 'OnSigning', 'Concluded', 'Terminated', 'Cancelled'];
 
 interface ContractsProps {
   onOpenContract?: (id: number) => void;
@@ -82,6 +85,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const toast = useToast();
   const { confirm } = useDialog();
   const { t } = useTranslation();
+  const documentStatusSettings = useDocumentStatusSettings();
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -180,9 +184,10 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     [columnsByKey, orderedVisibleColumns],
   );
 
-  const contractStatusLabels: Record<ContractStatus, string> = {
+  const defaultContractStatusLabels: Record<ContractStatus, string> = {
     Draft: 'Черновик',
     NotSigned: 'Не подписан',
+    RequiresClientSignature: 'Требуется подпись клиента',
     OnApproval: 'На согласовании',
     Approved: 'Согласован',
     ApprovalRejected: 'Отказ в согласовании',
@@ -193,9 +198,15 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     Cancelled: 'Аннулирован',
   };
 
+  const contractStatusLabels = useMemo(
+    () => getDocumentStatusLabels(documentStatusSettings, 'contract', defaultContractStatusLabels),
+    [documentStatusSettings],
+  );
+
   const contractStatusClasses: Record<ContractStatus, string> = {
     Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
     NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+    RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
     OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
     Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
@@ -205,68 +216,34 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     Terminated: 'bg-orange-100 text-orange-700 border border-orange-200',
     Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
-  const contractStatusOptions: StatusChangeOption<ContractStatus>[] = [
-    {
-      value: 'Draft',
-      label: contractStatusLabels.Draft,
-      description: 'Договор вернется в черновик, даты подписания и закрытия будут очищены.',
-      className: contractStatusClasses.Draft,
-    },
-    {
-      value: 'NotSigned',
-      label: contractStatusLabels.NotSigned,
-      description: 'Договор будет отмечен как неподписанный.',
-      className: contractStatusClasses.NotSigned,
-    },
-    {
-      value: 'OnApproval',
-      label: contractStatusLabels.OnApproval,
-      description: 'Договор будет отправлен на внутреннее согласование.',
-      className: contractStatusClasses.OnApproval,
-    },
-    {
-      value: 'Approved',
-      label: contractStatusLabels.Approved,
-      description: 'Договор будет отмечен как согласованный.',
-      className: contractStatusClasses.Approved,
-    },
-    {
-      value: 'ApprovalRejected',
-      label: contractStatusLabels.ApprovalRejected,
-      description: 'В журнал попадет отказ в согласовании договора.',
-      className: contractStatusClasses.ApprovalRejected,
-    },
-    {
-      value: 'NeedsCorrection',
-      label: contractStatusLabels.NeedsCorrection,
-      description: 'Договор будет возвращен на исправление.',
-      className: contractStatusClasses.NeedsCorrection,
-    },
-    {
-      value: 'OnSigning',
-      label: contractStatusLabels.OnSigning,
-      description: 'Договор будет отмечен как отправленный на подписание.',
-      className: contractStatusClasses.OnSigning,
-    },
-    {
-      value: 'Concluded',
-      label: contractStatusLabels.Concluded,
-      description: 'Договор будет отмечен как подписанный.',
-      className: contractStatusClasses.Concluded,
-    },
-    {
-      value: 'Terminated',
-      label: contractStatusLabels.Terminated,
-      description: 'Договор будет расторгнут сегодняшней датой.',
-      className: contractStatusClasses.Terminated,
-    },
-    {
-      value: 'Cancelled',
-      label: contractStatusLabels.Cancelled,
-      description: 'Договор будет аннулирован сегодняшней датой.',
-      className: contractStatusClasses.Cancelled,
-    },
-  ];
+  const contractStatusDescriptions: Record<ContractStatus, string> = {
+    Draft: 'Договор вернется в черновик, даты подписания и закрытия будут очищены.',
+    NotSigned: 'Договор будет отмечен как неподписанный.',
+    RequiresClientSignature: 'Договор будет ожидать подпись клиента.',
+    OnApproval: 'Договор будет отправлен на внутреннее согласование.',
+    Approved: 'Договор будет отмечен как согласованный.',
+    ApprovalRejected: 'В журнал попадет отказ в согласовании договора.',
+    NeedsCorrection: 'Договор будет возвращен на исправление.',
+    OnSigning: 'Договор будет отмечен как отправленный на подписание.',
+    Concluded: 'Договор будет отмечен как подписанный.',
+    Terminated: 'Договор будет расторгнут сегодняшней датой.',
+    Cancelled: 'Договор будет аннулирован сегодняшней датой.',
+  };
+
+  const contractStatusCodes = useMemo(
+    () => getDocumentStatusCodes(documentStatusSettings, 'contract', CONTRACT_STATUS_ORDER),
+    [documentStatusSettings],
+  );
+
+  const contractStatusOptions: StatusChangeOption<ContractStatus>[] = useMemo(
+    () => contractStatusCodes.map((status) => ({
+      value: status,
+      label: contractStatusLabels[status],
+      description: contractStatusDescriptions[status],
+      className: contractStatusClasses[status],
+    })),
+    [contractStatusCodes, contractStatusLabels],
+  );
 
   const handleSort = (key: ContractsSortKey) => {
     setSortState((prev) => {
@@ -575,7 +552,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
               >
                 <option value="all">Все статусы</option>
-                {(['Draft', 'NotSigned', 'OnApproval', 'Approved', 'ApprovalRejected', 'NeedsCorrection', 'OnSigning', 'Concluded', 'Terminated', 'Cancelled'] as ContractStatus[]).map((status) => (
+                {contractStatusCodes.map((status) => (
                   <option key={status} value={status}>
                     {contractStatusLabels[status]}
                   </option>

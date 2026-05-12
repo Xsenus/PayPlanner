@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActModal } from './ActModal';
-import type { ActResponsible, Client, Invoice } from '../../types';
+import type { Act, ActResponsible, Client, Invoice } from '../../types';
 
 const { getActMock, getInvoiceMock, getInvoicesMock, getClientsV2Mock, getLegalEntitiesPagedMock } = vi.hoisted(() => ({
   getActMock: vi.fn(),
@@ -545,5 +545,87 @@ describe('ActModal integration', () => {
         price: 1500,
       }),
     ]);
+  });
+
+  it('does not submit stale invoice positions when linked act is switched to manual mode', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const invoice = {
+      id: 951,
+      number: '200',
+      date: '2026-04-22',
+      amount: 5000,
+      type: 'Income',
+      clientId: 7,
+      clientName: 'Мурсалимов Радик Рауфович',
+      lineItems: [
+        { id: 2540, sourceKey: 'db:2540', name: 'Старая позиция счета', quantity: 1, unit: 'шт', price: 5000, sortOrder: 0 },
+      ],
+      acts: [],
+    } as unknown as Invoice;
+    const act = {
+      id: 951,
+      number: 'ACT-951',
+      title: '',
+      date: '2026-04-23',
+      amount: 5000,
+      creationMode: 'Full',
+      invoiceId: 951,
+      invoiceNumber: '200',
+      clientId: 7,
+      status: 'Created',
+      workflowStatus: 'Draft',
+      lineItems: [
+        {
+          id: 1,
+          sourceKey: 'db:2540',
+          invoiceLineItemId: 2540,
+          sourceSortOrder: 0,
+          name: 'Старая позиция счета',
+          quantity: 1,
+          unit: 'шт',
+          price: 5000,
+          sortOrder: 0,
+        },
+      ],
+    } as unknown as Act;
+
+    getInvoiceMock.mockResolvedValue(invoice);
+
+    render(
+      <ActModal
+        open
+        mode="edit"
+        act={act}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createClient(7, 'Мурсалимов Радик Рауфович')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getInvoiceMock).toHaveBeenCalledWith(951);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ручной акт' }));
+    fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '7000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = onSubmit.mock.calls[0]?.[0];
+    expect(payload).toMatchObject({
+      number: 'ACT-951',
+      amount: 7000,
+      creationMode: 'Manual',
+      invoiceId: 951,
+      clientId: 7,
+    });
+    expect(payload.lineItems).toEqual([]);
   });
 });

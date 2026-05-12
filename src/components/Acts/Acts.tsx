@@ -8,9 +8,11 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useActs, type ActsSortKey } from '../../hooks/useActs';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { apiService } from '../../services/api';
 import type { Act, ActInput, ActResponsible, ActStatus, ActWorkflowStatus, Client, PaymentKind } from '../../types';
 import { toDateInputValue } from '../../utils/dateUtils';
+import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
@@ -20,6 +22,7 @@ import { ActModal } from './ActModal';
 import { DatePeriodPicker } from '../DateRange/DatePeriodPicker';
 
 const STATUS_ORDER: ActStatus[] = ['Terminated', 'Transferred', 'Signed'];
+const ACT_WORKFLOW_STATUS_ORDER: ActWorkflowStatus[] = ['Draft', 'NotSigned', 'RequiresClientSignature', 'OnApproval', 'Approved', 'ApprovalRejected', 'NeedsCorrection', 'OnSigning', 'Signed', 'Cancelled'];
 
 function formatMoney(value: number): string {
   return new Intl.NumberFormat('ru-RU', {
@@ -108,6 +111,7 @@ export function Acts({
   const canDelete = actsPermissions.canDelete;
 
   const { t } = useTranslation();
+  const documentStatusSettings = useDocumentStatusSettings();
 
   const defaultPeriod = useMemo<PeriodFilter>(() => ({ mode: 'custom', from: '', to: '' }), []);
   const storagePrefix = useMemo(() => `pp.acts.${user?.id ?? 'guest'}`, [user?.id]);
@@ -226,9 +230,10 @@ export function Acts({
     Terminated: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
 
-  const workflowStatusLabels: Record<ActWorkflowStatus, string> = {
+  const defaultWorkflowStatusLabels: Record<ActWorkflowStatus, string> = {
     Draft: 'Черновик',
     NotSigned: 'Не подписан',
+    RequiresClientSignature: 'Требуется подпись клиента',
     OnApproval: 'На согласовании',
     Approved: 'Согласован',
     ApprovalRejected: 'Отказ в согласовании',
@@ -238,9 +243,15 @@ export function Acts({
     Cancelled: 'Аннулирован',
   };
 
+  const workflowStatusLabels = useMemo(
+    () => getDocumentStatusLabels(documentStatusSettings, 'act', defaultWorkflowStatusLabels),
+    [documentStatusSettings],
+  );
+
   const workflowStatusClasses: Record<ActWorkflowStatus, string> = {
     Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
     NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+    RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
     OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
     Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
@@ -249,62 +260,33 @@ export function Acts({
     Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
-  const workflowStatusOptions: StatusChangeOption<ActWorkflowStatus>[] = [
-    {
-      value: 'Draft',
-      label: workflowStatusLabels.Draft,
-      description: 'Акт вернется в черновик, даты подписания будут очищены.',
-      className: workflowStatusClasses.Draft,
-    },
-    {
-      value: 'NotSigned',
-      label: workflowStatusLabels.NotSigned,
-      description: 'Акт будет отмечен как неподписанный.',
-      className: workflowStatusClasses.NotSigned,
-    },
-    {
-      value: 'OnApproval',
-      label: workflowStatusLabels.OnApproval,
-      description: 'Акт будет отправлен на внутреннее согласование.',
-      className: workflowStatusClasses.OnApproval,
-    },
-    {
-      value: 'Approved',
-      label: workflowStatusLabels.Approved,
-      description: 'Акт будет отмечен как согласованный.',
-      className: workflowStatusClasses.Approved,
-    },
-    {
-      value: 'ApprovalRejected',
-      label: workflowStatusLabels.ApprovalRejected,
-      description: 'В журнал попадет отказ в согласовании акта.',
-      className: workflowStatusClasses.ApprovalRejected,
-    },
-    {
-      value: 'NeedsCorrection',
-      label: workflowStatusLabels.NeedsCorrection,
-      description: 'Акт будет возвращен на исправление.',
-      className: workflowStatusClasses.NeedsCorrection,
-    },
-    {
-      value: 'OnSigning',
-      label: workflowStatusLabels.OnSigning,
-      description: 'Акт будет отмечен как переданный на подписание.',
-      className: workflowStatusClasses.OnSigning,
-    },
-    {
-      value: 'Signed',
-      label: workflowStatusLabels.Signed,
-      description: 'Акт будет отмечен как подписанный.',
-      className: workflowStatusClasses.Signed,
-    },
-    {
-      value: 'Cancelled',
-      label: workflowStatusLabels.Cancelled,
-      description: 'Акт будет аннулирован, основной статус станет расторгнутым.',
-      className: workflowStatusClasses.Cancelled,
-    },
-  ];
+  const workflowStatusDescriptions: Record<ActWorkflowStatus, string> = {
+    Draft: 'Акт вернется в черновик, даты подписания будут очищены.',
+    NotSigned: 'Акт будет отмечен как неподписанный.',
+    RequiresClientSignature: 'Акт будет ожидать подпись клиента.',
+    OnApproval: 'Акт будет отправлен на внутреннее согласование.',
+    Approved: 'Акт будет отмечен как согласованный.',
+    ApprovalRejected: 'В журнал попадет отказ в согласовании акта.',
+    NeedsCorrection: 'Акт будет возвращен на исправление.',
+    OnSigning: 'Акт будет отмечен как переданный на подписание.',
+    Signed: 'Акт будет отмечен как подписанный.',
+    Cancelled: 'Акт будет аннулирован, основной статус станет расторгнутым.',
+  };
+
+  const workflowStatusCodes = useMemo(
+    () => getDocumentStatusCodes(documentStatusSettings, 'act', ACT_WORKFLOW_STATUS_ORDER),
+    [documentStatusSettings],
+  );
+
+  const workflowStatusOptions: StatusChangeOption<ActWorkflowStatus>[] = useMemo(
+    () => workflowStatusCodes.map((status) => ({
+      value: status,
+      label: workflowStatusLabels[status],
+      description: workflowStatusDescriptions[status],
+      className: workflowStatusClasses[status],
+    })),
+    [workflowStatusCodes, workflowStatusLabels],
+  );
 
   const resolveWorkflowStatus = (act: Act): ActWorkflowStatus => {
     if (act.workflowStatus) return act.workflowStatus;
@@ -833,7 +815,7 @@ export function Acts({
               onChange={(event) => setWorkflowStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ActWorkflowStatus))}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
               <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
-              {(['Draft', 'NotSigned', 'OnApproval', 'Approved', 'ApprovalRejected', 'NeedsCorrection', 'OnSigning', 'Signed', 'Cancelled'] as ActWorkflowStatus[]).map((status) => (
+              {workflowStatusCodes.map((status) => (
                 <option key={status} value={status}>
                   {workflowStatusLabels[status]}
                 </option>

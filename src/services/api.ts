@@ -17,6 +17,7 @@ export type DictKind =
   | 'service-categories'
   | 'client-statuses'
   | 'payment-statuses'
+  | 'document-statuses'
   | 'countries'
   | 'base-currencies'
   | 'service-languages'
@@ -39,6 +40,8 @@ export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? ServiceCategoryDictionaryItem
   : K extends 'client-statuses'
   ? ClientStatus
+  : K extends 'document-statuses'
+  ? DocumentStatusEntity
   : K extends 'countries'
   ? BaseDictItem
   : K extends 'base-currencies'
@@ -2518,6 +2521,9 @@ export class ApiService {
   async getPaymentStatuses() {
     return this.getDict('payment-statuses');
   }
+  async getDocumentStatuses() {
+    return this.getDict('document-statuses');
+  }
 
   // ===== Statistics =====
   async getMonthlyStats(year: number, month: number) {
@@ -3490,6 +3496,7 @@ import type {
   ServiceDictionaryItem,
   ServiceCategoryDictionaryItem,
   PaymentStatusEntity,
+  DocumentStatusEntity,
   ClientStatus,
   MonthlyStats,
   ClientCase,

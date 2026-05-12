@@ -312,6 +312,7 @@ public class ActsController : ControllerBase
         {
             case ActWorkflowStatus.Draft:
             case ActWorkflowStatus.NotSigned:
+            case ActWorkflowStatus.RequiresClientSignature:
             case ActWorkflowStatus.OnApproval:
             case ActWorkflowStatus.Approved:
             case ActWorkflowStatus.ApprovalRejected:
@@ -994,32 +995,19 @@ public class ActsController : ControllerBase
         }
 
         var creationMode = ActCreationMode.Normalize(request.CreationMode);
-        if (currentAct is not null
-            && creationMode == ActCreationMode.Manual
-            && request.LineItems.Count == 0
-            && currentAct.LineItems.Count > 0)
-        {
-            return (
-                null,
-                currentAct.CreationMode,
-                currentAct.Amount,
-                currentAct.LineItems
-                    .OrderBy(item => item.SortOrder)
-                    .ThenBy(item => item.Id)
-                    .Select(item => new ActLineItemDraft(
-                        item.InvoiceLineItemId,
-                        item.SourceKey,
-                        item.SourceSortOrder,
-                        item.Name,
-                        item.Quantity,
-                        item.Unit,
-                        item.Price))
-                    .ToList());
-        }
-
         if (creationMode == ActCreationMode.Manual)
         {
-            creationMode = request.LineItems.Count > 0 ? ActCreationMode.Partial : ActCreationMode.Full;
+            var manualLineItems = ResolveManualActLineItems(request.LineItems);
+            if (manualLineItems.Error is not null)
+            {
+                return (manualLineItems.Error, ActCreationMode.Manual, 0m, new List<ActLineItemDraft>());
+            }
+
+            var manualAmount = manualLineItems.LineItems.Count > 0
+                ? manualLineItems.LineItems.Sum(item => item.Quantity * item.Price)
+                : request.Amount;
+
+            return (null, ActCreationMode.Manual, manualAmount, manualLineItems.LineItems);
         }
 
         var usedQuantities = await _db.Set<ActLineItem>()

@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X, ShieldAlert } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
-import type { ClientStatus, DealType, IncomeType, PaymentSource, ServiceCategoryDictionaryItem, ServiceDictionaryItem } from '../../types';
+import type { ClientStatus, DealType, DocumentStatusEntity, IncomeType, PaymentSource, ServiceCategoryDictionaryItem, ServiceDictionaryItem } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
     if (a.item.isActive !== b.item.isActive) return a.item.isActive ? -1 : 1;
+    if ((a.item.sortOrder ?? 0) !== (b.item.sortOrder ?? 0)) {
+      return (a.item.sortOrder ?? 0) - (b.item.sortOrder ?? 0);
+    }
     return a.item.name.localeCompare(b.item.name, 'ru', { sensitivity: 'base' });
   });
 }
@@ -21,6 +24,7 @@ type VisibleKind =
   | 'income-expense'
   | 'payment-sources'
   | 'payment-statuses'
+  | 'document-statuses'
   | 'services'
   | 'service-categories'
   | 'client-statuses'
@@ -33,8 +37,20 @@ type VisibleKind =
   | 'tax-system-modes'
   | 'invoice-units'
   | 'invoice-item-names';
-type LooseDictItem = { id: number; name: string; description?: string; colorHex?: string; isActive?: boolean; createdAt?: string };
-type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem | ServiceCategoryDictionaryItem | LooseDictItem;
+type LooseDictItem = {
+  id: number;
+  name: string;
+  description?: string;
+  colorHex?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  code?: string;
+  useForInvoices?: boolean;
+  useForActs?: boolean;
+  useForContracts?: boolean;
+  sortOrder?: number;
+};
+type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | DocumentStatusEntity | ServiceDictionaryItem | ServiceCategoryDictionaryItem | LooseDictItem;
 
 type FullDictItem = {
   id: number;
@@ -42,6 +58,11 @@ type FullDictItem = {
   unit?: string;
   defaultPrice?: number;
   categoryId?: number | null;
+  code?: string;
+  useForInvoices?: boolean;
+  useForActs?: boolean;
+  useForContracts?: boolean;
+  sortOrder?: number;
   description: string;
   colorHex: string;
   isActive: boolean;
@@ -63,6 +84,7 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'income-expense', label: 'Тип расхода' },
   { value: 'payment-sources', label: 'Источник платежа' },
   { value: 'payment-statuses', label: 'Статус оплаты' },
+  { value: 'document-statuses', label: 'Статусы документов' },
   { value: 'services', label: 'Услуги' },
   { value: 'service-categories', label: 'Категории услуг' },
   { value: 'client-statuses', label: 'Статус клиента' },
@@ -89,6 +111,8 @@ function defaultColor(kind: VisibleKind): string {
       return '#8B5CF6';
     case 'payment-statuses':
       return '#0F766E';
+    case 'document-statuses':
+      return '#64748B';
     case 'services':
       return '#0EA5E9';
     case 'service-categories':
@@ -151,6 +175,11 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
     unit: 'unit' in x && typeof x.unit === 'string' ? x.unit : undefined,
     defaultPrice: 'defaultPrice' in x && typeof x.defaultPrice === 'number' ? x.defaultPrice : undefined,
     categoryId: 'categoryId' in x ? (x.categoryId as number | null | undefined) ?? null : undefined,
+    code: 'code' in x && typeof x.code === 'string' ? x.code : undefined,
+    useForInvoices: 'useForInvoices' in x && typeof x.useForInvoices === 'boolean' ? x.useForInvoices : undefined,
+    useForActs: 'useForActs' in x && typeof x.useForActs === 'boolean' ? x.useForActs : undefined,
+    useForContracts: 'useForContracts' in x && typeof x.useForContracts === 'boolean' ? x.useForContracts : undefined,
+    sortOrder: 'sortOrder' in x && typeof x.sortOrder === 'number' ? x.sortOrder : undefined,
     description,
     colorHex,
     isActive,
@@ -166,6 +195,10 @@ function supportsServiceCategory(kind: VisibleKind): boolean {
   return kind === 'services';
 }
 
+function isDocumentStatusKind(kind: VisibleKind): boolean {
+  return kind === 'document-statuses';
+}
+
 export const Dictionaries = () => {
   const { isAdmin } = useAuth();
   const canEdit = isAdmin(); // админ может создавать/редактировать/удалять
@@ -176,6 +209,7 @@ export const Dictionaries = () => {
     'income-expense': [],
     'payment-sources': [],
     'payment-statuses': [],
+    'document-statuses': [],
     'services': [],
     'service-categories': [],
     'client-statuses': [],
@@ -319,6 +353,11 @@ export const Dictionaries = () => {
             unit: supportsInvoiceItemTemplateFields(kind) ? (item.unit?.trim() || 'шт') : undefined,
             defaultPrice: supportsInvoiceItemTemplateFields(kind) ? (item.defaultPrice ?? 0) : undefined,
             categoryId: supportsServiceCategory(kind) ? (item.categoryId ?? null) : undefined,
+            code: isDocumentStatusKind(kind) ? item.code : undefined,
+            useForInvoices: isDocumentStatusKind(kind) ? !!item.useForInvoices : undefined,
+            useForActs: isDocumentStatusKind(kind) ? !!item.useForActs : undefined,
+            useForContracts: isDocumentStatusKind(kind) ? !!item.useForContracts : undefined,
+            sortOrder: isDocumentStatusKind(kind) ? (item.sortOrder ?? 0) : undefined,
           });
       const normalized = normalize(kind, created as ApiVisibleItem);
       setData((prev) => {
@@ -359,6 +398,11 @@ export const Dictionaries = () => {
             unit: supportsInvoiceItemTemplateFields(kind) ? (item.unit?.trim() || 'шт') : undefined,
             defaultPrice: supportsInvoiceItemTemplateFields(kind) ? (item.defaultPrice ?? 0) : undefined,
             categoryId: supportsServiceCategory(kind) ? (item.categoryId ?? null) : undefined,
+            code: isDocumentStatusKind(kind) ? item.code : undefined,
+            useForInvoices: isDocumentStatusKind(kind) ? !!item.useForInvoices : undefined,
+            useForActs: isDocumentStatusKind(kind) ? !!item.useForActs : undefined,
+            useForContracts: isDocumentStatusKind(kind) ? !!item.useForContracts : undefined,
+            sortOrder: isDocumentStatusKind(kind) ? (item.sortOrder ?? 0) : undefined,
           });
       const normalized = normalize(kind, updated as ApiVisibleItem);
       setData((prev) => {
@@ -442,6 +486,18 @@ export const Dictionaries = () => {
             </div>
           )}
 
+          {isDocumentStatusKind(kind) && (
+            <div className="lg:col-span-3">
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Код</label>
+              <input
+                type="text"
+                value={local.code ?? ''}
+                onChange={(e) => set({ code: e.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
+              />
+            </div>
+          )}
+
           <div className="lg:col-span-3">
             <label className="block text-xs font-medium text-slate-700 mb-1.5">Цвет</label>
             <div className="flex items-center gap-2">
@@ -490,6 +546,37 @@ export const Dictionaries = () => {
           </div>
 
           <div className="lg:col-span-12">
+            {isDocumentStatusKind(kind) && (
+              <div className="mb-3 flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={!!local.useForInvoices}
+                    onChange={(e) => set({ useForInvoices: e.target.checked })}
+                    className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  />
+                  Счета
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={!!local.useForActs}
+                    onChange={(e) => set({ useForActs: e.target.checked })}
+                    className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  />
+                  Акты
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={!!local.useForContracts}
+                    onChange={(e) => set({ useForContracts: e.target.checked })}
+                    className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  />
+                  Договоры
+                </label>
+              </div>
+            )}
             {supportsInvoiceItemTemplateFields(kind) && (
               <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
@@ -567,6 +654,18 @@ export const Dictionaries = () => {
             </div>
           )}
 
+          {isDocumentStatusKind(kind) && (
+            <div className="lg:col-span-3">
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">Код</label>
+              <input
+                type="text"
+                value={local.code ?? ''}
+                readOnly
+                className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600"
+              />
+            </div>
+          )}
+
           <div className="lg:col-span-3">
             <label className="block text-xs font-medium text-slate-700 mb-1.5">Цвет</label>
             <div className="flex items-center gap-2">
@@ -613,6 +712,37 @@ export const Dictionaries = () => {
           </div>
 
           <div className="lg:col-span-12">
+            {isDocumentStatusKind(kind) && (
+              <div className="mb-3 flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={!!local.useForInvoices}
+                    onChange={(e) => set({ useForInvoices: e.target.checked })}
+                    className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  />
+                  Счета
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={!!local.useForActs}
+                    onChange={(e) => set({ useForActs: e.target.checked })}
+                    className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  />
+                  Акты
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={!!local.useForContracts}
+                    onChange={(e) => set({ useForContracts: e.target.checked })}
+                    className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                  />
+                  Договоры
+                </label>
+              </div>
+            )}
             {supportsInvoiceItemTemplateFields(kind) && (
               <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
@@ -706,6 +836,14 @@ export const Dictionaries = () => {
               Ед.: {item.unit || 'шт'} · Цена: {(item.defaultPrice ?? 0).toFixed(2)}
             </div>
           )}
+          {isDocumentStatusKind(kind) && (
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-600">Код: {item.code}</span>
+              {item.useForInvoices && <span className="rounded bg-blue-50 px-2 py-0.5 text-blue-700">Счета</span>}
+              {item.useForActs && <span className="rounded bg-emerald-50 px-2 py-0.5 text-emerald-700">Акты</span>}
+              {item.useForContracts && <span className="rounded bg-violet-50 px-2 py-0.5 text-violet-700">Договоры</span>}
+            </div>
+          )}
           {item.createdAt && (
             <div className="mt-1 text-xs text-slate-400">
               Создано: {new Date(item.createdAt).toLocaleDateString()}
@@ -720,11 +858,13 @@ export const Dictionaries = () => {
                 className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition">
                 <Pencil className="h-4 w-4" />
               </button>
-              <button
-                onClick={onDelete}
-                className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition">
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {!isDocumentStatusKind(kind) && (
+                <button
+                  onClick={onDelete}
+                  className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
             </>
           )}
         </div>
@@ -798,7 +938,7 @@ export const Dictionaries = () => {
                 <div className="text-sm text-slate-600">Всего: {data[activeTab]?.length ?? 0}</div>
               </div>
 
-              {canEdit && (
+              {canEdit && !isDocumentStatusKind(activeTab) && (
                 <button
                   onClick={() => addNew(activeTab)}
                   className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm bg-slate-900 text-white hover:bg-slate-800 transition">

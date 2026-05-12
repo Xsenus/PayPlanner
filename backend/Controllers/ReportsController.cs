@@ -1825,12 +1825,17 @@ public class ReportsController : ControllerBase
     private static int ActWorkflowStatusSortOrder(string status)
         => status switch
         {
-            ActWorkflowStatus.OnSigning => 0,
-            ActWorkflowStatus.NotSigned => 1,
-            ActWorkflowStatus.Draft => 2,
-            ActWorkflowStatus.Signed => 3,
-            ActWorkflowStatus.Cancelled => 4,
-            _ => 5,
+            ActWorkflowStatus.RequiresClientSignature => 0,
+            ActWorkflowStatus.OnApproval => 1,
+            ActWorkflowStatus.ApprovalRejected => 2,
+            ActWorkflowStatus.NeedsCorrection => 3,
+            ActWorkflowStatus.OnSigning => 4,
+            ActWorkflowStatus.NotSigned => 5,
+            ActWorkflowStatus.Draft => 6,
+            ActWorkflowStatus.Approved => 7,
+            ActWorkflowStatus.Signed => 8,
+            ActWorkflowStatus.Cancelled => 9,
+            _ => 10,
         };
 
     private static string FormatActWorkflowStatusLabel(string status)
@@ -1838,9 +1843,14 @@ public class ReportsController : ControllerBase
         {
             ActWorkflowStatus.Draft => "Черновик",
             ActWorkflowStatus.NotSigned => "Не подписан",
+            ActWorkflowStatus.RequiresClientSignature => "Требуется подпись клиента",
+            ActWorkflowStatus.OnApproval => "На согласовании",
+            ActWorkflowStatus.Approved => "Согласован",
+            ActWorkflowStatus.ApprovalRejected => "Отказ в согласовании",
+            ActWorkflowStatus.NeedsCorrection => "Требует исправления",
             ActWorkflowStatus.OnSigning => "На подписании",
             ActWorkflowStatus.Signed => "Подписан",
-            ActWorkflowStatus.Cancelled => "Отменен",
+            ActWorkflowStatus.Cancelled => "Аннулирован",
             _ => status,
         };
 
@@ -1899,7 +1909,17 @@ public class ReportsController : ControllerBase
             .ThenByDescending(item => item.TotalAmount)
             .ToList();
 
-        var activeStatuses = new[] { ContractStatus.Draft, ContractStatus.NotSigned, ContractStatus.OnSigning, ContractStatus.Concluded };
+        var activeStatuses = new[]
+        {
+            ContractStatus.Draft,
+            ContractStatus.NotSigned,
+            ContractStatus.RequiresClientSignature,
+            ContractStatus.OnApproval,
+            ContractStatus.Approved,
+            ContractStatus.NeedsCorrection,
+            ContractStatus.OnSigning,
+            ContractStatus.Concluded
+        };
 
         return new ContractStatusReportDto
         {
@@ -1930,13 +1950,18 @@ public class ReportsController : ControllerBase
     private static int ContractStatusSortOrder(string status)
         => status switch
         {
-            ContractStatus.OnSigning => 0,
-            ContractStatus.NotSigned => 1,
-            ContractStatus.Draft => 2,
-            ContractStatus.Concluded => 3,
-            ContractStatus.Terminated => 4,
-            ContractStatus.Cancelled => 5,
-            _ => 6,
+            ContractStatus.RequiresClientSignature => 0,
+            ContractStatus.OnApproval => 1,
+            ContractStatus.ApprovalRejected => 2,
+            ContractStatus.NeedsCorrection => 3,
+            ContractStatus.OnSigning => 4,
+            ContractStatus.NotSigned => 5,
+            ContractStatus.Draft => 6,
+            ContractStatus.Approved => 7,
+            ContractStatus.Concluded => 8,
+            ContractStatus.Terminated => 9,
+            ContractStatus.Cancelled => 10,
+            _ => 11,
         };
 
     private static string FormatContractStatusLabel(string status)
@@ -1944,6 +1969,11 @@ public class ReportsController : ControllerBase
         {
             ContractStatus.Draft => "Черновик",
             ContractStatus.NotSigned => "Не подписан",
+            ContractStatus.RequiresClientSignature => "Требуется подпись клиента",
+            ContractStatus.OnApproval => "На согласовании",
+            ContractStatus.Approved => "Согласован",
+            ContractStatus.ApprovalRejected => "Отказ в согласовании",
+            ContractStatus.NeedsCorrection => "Требует исправления",
             ContractStatus.OnSigning => "На подписании",
             ContractStatus.Concluded => "Подписан",
             ContractStatus.Terminated => "Расторгнут",

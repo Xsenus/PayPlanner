@@ -2,30 +2,19 @@ namespace PayPlanner.Api.Models;
 
 public static class ContractStatus
 {
-    public const string Draft = "Draft";
-    public const string NotSigned = "NotSigned";
-    public const string OnApproval = "OnApproval";
-    public const string Approved = "Approved";
-    public const string ApprovalRejected = "ApprovalRejected";
-    public const string NeedsCorrection = "NeedsCorrection";
-    public const string OnSigning = "OnSigning";
-    public const string Concluded = "Concluded";
-    public const string Terminated = "Terminated";
-    public const string Cancelled = "Cancelled";
+    public const string Draft = DocumentWorkflowStatus.Draft;
+    public const string NotSigned = DocumentWorkflowStatus.NotSigned;
+    public const string RequiresClientSignature = DocumentWorkflowStatus.RequiresClientSignature;
+    public const string OnApproval = DocumentWorkflowStatus.OnApproval;
+    public const string Approved = DocumentWorkflowStatus.Approved;
+    public const string ApprovalRejected = DocumentWorkflowStatus.ApprovalRejected;
+    public const string NeedsCorrection = DocumentWorkflowStatus.NeedsCorrection;
+    public const string OnSigning = DocumentWorkflowStatus.OnSigning;
+    public const string Concluded = DocumentWorkflowStatus.Concluded;
+    public const string Terminated = DocumentWorkflowStatus.Terminated;
+    public const string Cancelled = DocumentWorkflowStatus.Cancelled;
 
-    public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        Draft,
-        NotSigned,
-        OnApproval,
-        Approved,
-        ApprovalRejected,
-        NeedsCorrection,
-        OnSigning,
-        Concluded,
-        Terminated,
-        Cancelled,
-    };
+    public static readonly IReadOnlySet<string> All = DocumentWorkflowStatus.ContractCodes;
 
     public static bool IsValid(string? value) => Normalize(value) is not null;
 

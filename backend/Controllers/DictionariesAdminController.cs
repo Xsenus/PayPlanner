@@ -23,6 +23,22 @@ public class DictionariesAdminController : ControllerBase
         return new string(value.Trim().ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
     }
 
+    private static DocumentStatusSeed? ResolveDocumentStatusSeed(string? code)
+    {
+        var normalized = DocumentWorkflowStatus.Normalize(code);
+        if (normalized is null) return null;
+
+        foreach (var item in DocumentWorkflowStatus.Defaults)
+        {
+            if (string.Equals(item.Code, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                return item;
+            }
+        }
+
+        return null;
+    }
+
     private sealed record SimpleDictionaryMeta(
         Func<CancellationToken, Task<List<object>>> LoadAsNoTrackingAsync,
         Func<CancellationToken, Task<List<object>>> LoadTrackingAsync,
@@ -832,6 +848,80 @@ public class DictionariesAdminController : ControllerBase
     public async Task<IActionResult> TogglePaymentStatus(int id)
     {
         var e = await _db.PaymentStatuses.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
+    // DocumentStatusEntity
+    [HttpPost("document-statuses")]
+    public async Task<IActionResult> CreateDocumentStatus([FromBody] DocumentStatusEntity m)
+    {
+        var seed = ResolveDocumentStatusSeed(m.Code);
+        if (seed is null) return BadRequest("Неизвестный код статуса документа.");
+        if (await _db.DocumentStatuses.AsNoTracking().AnyAsync(x => x.Code == seed.Value.Code))
+        {
+            return BadRequest("Статус документа с таким кодом уже существует.");
+        }
+
+        m.Code = seed.Value.Code;
+        m.Name = string.IsNullOrWhiteSpace(m.Name) ? seed.Value.Name : m.Name.Trim();
+        m.Description = m.Description?.Trim() ?? string.Empty;
+        m.ColorHex = string.IsNullOrWhiteSpace(m.ColorHex) ? seed.Value.ColorHex : m.ColorHex.Trim();
+        m.SortOrder = m.SortOrder == 0 ? seed.Value.SortOrder : m.SortOrder;
+        _db.DocumentStatuses.Add(m);
+        await _db.SaveChangesAsync();
+        return Created($"/api/dictionaries/document-statuses/{m.Id}", m);
+    }
+
+    [HttpPut("document-statuses/{id:int}")]
+    public async Task<IActionResult> UpdateDocumentStatus(int id, [FromBody] DocumentStatusEntity m)
+    {
+        var e = await _db.DocumentStatuses.FindAsync(id);
+        if (e is null) return NotFound();
+
+        var seed = ResolveDocumentStatusSeed(string.IsNullOrWhiteSpace(m.Code) ? e.Code : m.Code);
+        if (seed is null) return BadRequest("Неизвестный код статуса документа.");
+
+        if (!string.Equals(e.Code, seed.Value.Code, StringComparison.OrdinalIgnoreCase)
+            && await _db.DocumentStatuses.AsNoTracking().AnyAsync(x => x.Code == seed.Value.Code))
+        {
+            return BadRequest("Статус документа с таким кодом уже существует.");
+        }
+
+        e.Code = seed.Value.Code;
+        e.Name = string.IsNullOrWhiteSpace(m.Name) ? seed.Value.Name : m.Name.Trim();
+        e.Description = m.Description?.Trim() ?? string.Empty;
+        e.ColorHex = string.IsNullOrWhiteSpace(m.ColorHex) ? seed.Value.ColorHex : m.ColorHex.Trim();
+        e.IsActive = m.IsActive;
+        e.UseForInvoices = m.UseForInvoices;
+        e.UseForActs = m.UseForActs;
+        e.UseForContracts = m.UseForContracts;
+        e.SortOrder = m.SortOrder == 0 ? seed.Value.SortOrder : m.SortOrder;
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+
+    [HttpDelete("document-statuses/{id:int}")]
+    public async Task<IActionResult> DeleteDocumentStatus(int id)
+    {
+        var e = await _db.DocumentStatuses.FindAsync(id);
+        if (e is null) return NotFound();
+        if (ResolveDocumentStatusSeed(e.Code) is not null)
+        {
+            return BadRequest("Системный статус документа нельзя удалить. Отключите его или снимите использование для нужных документов.");
+        }
+
+        _db.DocumentStatuses.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpPost("document-statuses/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleDocumentStatus(int id)
+    {
+        var e = await _db.DocumentStatuses.FindAsync(id);
         if (e is null) return NotFound();
         e.IsActive = !e.IsActive;
         await _db.SaveChangesAsync();

@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Check, X, Search } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
 import type {
   ClientStatus,
+  DocumentStatusEntity,
   DealType,
   IncomeType,
   PaymentSource,
@@ -13,6 +14,9 @@ import type {
 function sortRows<T extends RowState>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
     if (a.item.isActive !== b.item.isActive) return a.item.isActive ? -1 : 1;
+    if ((a.item.sortOrder ?? 0) !== (b.item.sortOrder ?? 0)) {
+      return (a.item.sortOrder ?? 0) - (b.item.sortOrder ?? 0);
+    }
     return a.item.name.localeCompare(b.item.name, 'ru', { sensitivity: 'base' });
   });
 }
@@ -195,6 +199,7 @@ type VisibleKind =
   | 'income-expense'
   | 'payment-sources'
   | 'payment-statuses'
+  | 'document-statuses'
   | 'services'
   | 'service-categories'
   | 'client-statuses'
@@ -207,8 +212,20 @@ type VisibleKind =
   | 'tax-system-modes'
   | 'invoice-units'
   | 'invoice-item-names';
-type LooseDictItem = { id: number; name: string; description?: string; colorHex?: string; isActive?: boolean; createdAt?: string };
-type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | ServiceDictionaryItem | ServiceCategoryDictionaryItem | LooseDictItem;
+type LooseDictItem = {
+  id: number;
+  name: string;
+  description?: string;
+  colorHex?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  code?: string;
+  useForInvoices?: boolean;
+  useForActs?: boolean;
+  useForContracts?: boolean;
+  sortOrder?: number;
+};
+type ApiVisibleItem = DealType | IncomeType | PaymentSource | ClientStatus | DocumentStatusEntity | ServiceDictionaryItem | ServiceCategoryDictionaryItem | LooseDictItem;
 
 type FullDictItem = {
   id: number;
@@ -216,6 +233,11 @@ type FullDictItem = {
   unit?: string;
   defaultPrice?: number;
   categoryId?: number | null;
+  code?: string;
+  useForInvoices?: boolean;
+  useForActs?: boolean;
+  useForContracts?: boolean;
+  sortOrder?: number;
   description: string;
   colorHex: string;
   isActive: boolean;
@@ -237,6 +259,7 @@ const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'income-expense', label: 'Тип расхода' },
   { value: 'payment-sources', label: 'Источник платежа' },
   { value: 'payment-statuses', label: 'Статус оплаты' },
+  { value: 'document-statuses', label: 'Статусы документов' },
   { value: 'services', label: 'Услуги' },
   { value: 'service-categories', label: 'Категории услуг' },
   { value: 'client-statuses', label: 'Статус клиента' },
@@ -263,6 +286,8 @@ function defaultColor(kind: VisibleKind): string {
       return '#8B5CF6';
     case 'payment-statuses':
       return '#0F766E';
+    case 'document-statuses':
+      return '#64748B';
     case 'services':
       return '#0EA5E9';
     case 'service-categories':
@@ -319,6 +344,11 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
     unit: 'unit' in x && typeof x.unit === 'string' ? x.unit : undefined,
     defaultPrice: 'defaultPrice' in x && typeof x.defaultPrice === 'number' ? x.defaultPrice : undefined,
     categoryId: 'categoryId' in x ? (x.categoryId as number | null | undefined) ?? null : undefined,
+    code: 'code' in x && typeof x.code === 'string' ? x.code : undefined,
+    useForInvoices: 'useForInvoices' in x && typeof x.useForInvoices === 'boolean' ? x.useForInvoices : undefined,
+    useForActs: 'useForActs' in x && typeof x.useForActs === 'boolean' ? x.useForActs : undefined,
+    useForContracts: 'useForContracts' in x && typeof x.useForContracts === 'boolean' ? x.useForContracts : undefined,
+    sortOrder: 'sortOrder' in x && typeof x.sortOrder === 'number' ? x.sortOrder : undefined,
     description: x.description ?? '',
     colorHex: x.colorHex ?? defaultColor(kind),
     isActive: !!x.isActive,
@@ -348,6 +378,7 @@ export default function DictionariesModal({
     'income-expense': [],
     'payment-sources': [],
     'payment-statuses': [],
+    'document-statuses': [],
     'services': [],
     'service-categories': [],
     'client-statuses': [],
@@ -502,6 +533,10 @@ export default function DictionariesModal({
     return kind === 'services';
   }
 
+  function isDocumentStatusKind(kind: VisibleKind): boolean {
+    return kind === 'document-statuses';
+  }
+
   async function saveNew(
     kind: VisibleKind,
     idx: number,
@@ -535,6 +570,15 @@ export default function DictionariesModal({
               : {}),
             ...(supportsServiceCategory(kind)
               ? { categoryId: item.categoryId ?? null }
+              : {}),
+            ...(isDocumentStatusKind(kind)
+              ? {
+                  code: item.code,
+                  useForInvoices: !!item.useForInvoices,
+                  useForActs: !!item.useForActs,
+                  useForContracts: !!item.useForContracts,
+                  sortOrder: item.sortOrder ?? 0,
+                }
               : {}),
           });
       const normalized = normalize(kind, created as ApiVisibleItem);
@@ -580,6 +624,15 @@ export default function DictionariesModal({
               : {}),
             ...(supportsServiceCategory(kind)
               ? { categoryId: item.categoryId ?? null }
+              : {}),
+            ...(isDocumentStatusKind(kind)
+              ? {
+                  code: item.code,
+                  useForInvoices: !!item.useForInvoices,
+                  useForActs: !!item.useForActs,
+                  useForContracts: !!item.useForContracts,
+                  sortOrder: item.sortOrder ?? 0,
+                }
               : {}),
           });
       const normalized = normalize(kind, updated as ApiVisibleItem);
@@ -665,6 +718,16 @@ export default function DictionariesModal({
             </div>
           )}
 
+          {isDocumentStatusKind(kind) && (
+            <div className="sm:col-span-3">
+              <TextInput
+                label="Код"
+                value={local.code ?? ''}
+                onChange={(e) => set({ code: e.target.value })}
+              />
+            </div>
+          )}
+
           {supportsServiceFields(kind) && (
             <div className="sm:col-span-3 grid grid-cols-2 gap-2">
               <TextInput
@@ -726,6 +789,13 @@ export default function DictionariesModal({
           </div>
 
           <div className="sm:col-span-12">
+            {isDocumentStatusKind(kind) && (
+              <div className="mb-3 flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                <Checkbox checked={!!local.useForInvoices} onChange={(v) => set({ useForInvoices: v })} label="Счета" />
+                <Checkbox checked={!!local.useForActs} onChange={(v) => set({ useForActs: v })} label="Акты" />
+                <Checkbox checked={!!local.useForContracts} onChange={(v) => set({ useForContracts: v })} label="Договоры" />
+              </div>
+            )}
             <TextArea
               label="Описание"
               placeholder="Короткое пояснение..."
@@ -777,6 +847,17 @@ export default function DictionariesModal({
                   ))}
                 </select>
               </div>
+            </div>
+          )}
+
+          {isDocumentStatusKind(kind) && (
+            <div className="sm:col-span-3">
+              <TextInput
+                label="Код"
+                value={local.code ?? ''}
+                readOnly
+                className="bg-gray-100 text-gray-600"
+              />
             </div>
           )}
 
@@ -839,6 +920,13 @@ export default function DictionariesModal({
           </div>
 
           <div className="sm:col-span-12">
+            {isDocumentStatusKind(kind) && (
+              <div className="mb-3 flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                <Checkbox checked={!!local.useForInvoices} onChange={(v) => set({ useForInvoices: v })} label="Счета" />
+                <Checkbox checked={!!local.useForActs} onChange={(v) => set({ useForActs: v })} label="Акты" />
+                <Checkbox checked={!!local.useForContracts} onChange={(v) => set({ useForContracts: v })} label="Договоры" />
+              </div>
+            )}
             <TextArea
               label="Описание"
               rows={2}
@@ -903,6 +991,14 @@ export default function DictionariesModal({
               Ед.: {item.unit || 'шт'} · Цена: {item.defaultPrice ?? 0}
             </div>
           )}
+          {isDocumentStatusKind(kind) && (
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              <span className="rounded bg-gray-100 px-2 py-0.5 text-gray-600">Код: {item.code}</span>
+              {item.useForInvoices && <span className="rounded bg-blue-50 px-2 py-0.5 text-blue-700">Счета</span>}
+              {item.useForActs && <span className="rounded bg-emerald-50 px-2 py-0.5 text-emerald-700">Акты</span>}
+              {item.useForContracts && <span className="rounded bg-violet-50 px-2 py-0.5 text-violet-700">Договоры</span>}
+            </div>
+          )}
           {!item.isActive && <div className="text-xs text-gray-500">Не активно</div>}
           {item.createdAt && (
             <div className="mt-1 text-xs text-gray-400">
@@ -920,9 +1016,11 @@ export default function DictionariesModal({
           <Btn variant="ghost" onClick={onEdit}>
             <Pencil className="h-4 w-4" />
           </Btn>
-          <Btn variant="ghost" onClick={onDelete}>
-            <Trash2 className="h-4 w-4" />
-          </Btn>
+          {!isDocumentStatusKind(kind) && (
+            <Btn variant="ghost" onClick={onDelete}>
+              <Trash2 className="h-4 w-4" />
+            </Btn>
+          )}
         </div>
       </div>
     );
@@ -965,10 +1063,12 @@ export default function DictionariesModal({
         <div className={busy ? 'pointer-events-none opacity-70' : ''}>
           <div className="mb-3 flex items-center justify-between">
             <div className="text-sm text-gray-600">Всего: {data[activeTab]?.length ?? 0}</div>
-            <Btn onClick={() => addNew(onlyTab ?? activeTab)}>
-              <Plus className="h-4 w-4" />
-              Добавить
-            </Btn>
+            {!isDocumentStatusKind(activeTab) && (
+              <Btn onClick={() => addNew(onlyTab ?? activeTab)}>
+                <Plus className="h-4 w-4" />
+                Добавить
+              </Btn>
+            )}
           </div>
 
           <div className="space-y-2">

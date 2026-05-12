@@ -271,6 +271,10 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       label: 'Не подписан',
       className: 'bg-slate-100 text-slate-700 border border-slate-200',
     },
+    RequiresClientSignature: {
+      label: 'Требуется подпись клиента',
+      className: 'bg-amber-100 text-amber-800 border border-amber-200',
+    },
     OnApproval: {
       label: 'На согласовании',
       className: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
@@ -296,7 +300,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       className: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     },
     Cancelled: {
-      label: 'Отменен',
+      label: 'Аннулирован',
       className: 'bg-rose-100 text-rose-700 border border-rose-200',
     },
   };

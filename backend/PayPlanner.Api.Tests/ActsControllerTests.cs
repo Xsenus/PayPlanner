@@ -110,6 +110,40 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task UpdateWorkflowStatus_AcceptsRequiresClientSignature()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var createAction = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-SIGN-CLIENT-1",
+                Date = new DateTime(2026, 4, 20),
+                Amount = 9_500m,
+                CreationMode = ActCreationMode.Manual,
+                ClientId = client.Id,
+                Status = ActStatus.Created,
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<ActDto>(created.Value);
+
+        var updateAction = await controller.UpdateWorkflowStatus(
+            createdDto.Id,
+            new UpdateNamedStatusRequest { Status = ActWorkflowStatus.RequiresClientSignature },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var dto = Assert.IsType<ActDto>(ok.Value);
+        Assert.Equal(ActStatus.Created, dto.Status);
+        Assert.Equal(ActWorkflowStatus.RequiresClientSignature, dto.WorkflowStatus);
+        Assert.Null(dto.SentForSigningAt);
+        Assert.Null(dto.SignedAt);
+    }
+
+    [Fact]
     public async Task Cancel_StoresReasonAndUpdatesWorkflowStatus()
     {
         await using var db = await CreateContextAsync();
@@ -1034,7 +1068,7 @@ public class ActsControllerTests
     }
 
     [Fact]
-    public async Task Update_ManualModeWithoutSelection_PreservesExistingInvoiceLineItems()
+    public async Task Update_ManualModeWithoutSelection_ClearsExistingInvoiceLineItems()
     {
         await using var db = await CreateContextAsync();
         var client = await CreateClientAsync(db);
@@ -1074,8 +1108,9 @@ public class ActsControllerTests
             InvoiceId = invoicePayment.Id,
             ClientId = client.Id,
             Status = ActStatus.Signed,
+            WorkflowStatus = ActWorkflowStatus.RequiresClientSignature,
             CreationMode = ActCreationMode.Manual,
-            Comment = "Строки должны остаться из черновика",
+            Comment = "Ручной режим должен убрать позиции счета",
         };
 
         var updateAction = await controller.Update(dto.Id, updateRequest, CancellationToken.None);
@@ -1085,22 +1120,14 @@ public class ActsControllerTests
         Assert.Equal("ACT-201-UPDATED", updated.Number);
         Assert.Equal("Обновлённый акт", updated.Title);
         Assert.Equal(ActStatus.Signed, updated.Status);
-        Assert.Equal("Строки должны остаться из черновика", updated.Comment);
-        Assert.Equal(ActCreationMode.Full, updated.CreationMode);
-        Assert.Equal(15_000m, updated.Amount);
-        Assert.Equal(2, updated.LineItems.Count);
-        Assert.Collection(
-            updated.LineItems.OrderBy(item => item.SourceSortOrder),
-            first =>
-            {
-                Assert.Equal("Подготовка позиции", first.Name);
-                Assert.Equal(1m, first.Quantity);
-            },
-            second =>
-            {
-                Assert.Equal("Выезд на заседание", second.Name);
-                Assert.Equal(2m, second.Quantity);
-            });
+        Assert.Equal(ActWorkflowStatus.RequiresClientSignature, updated.WorkflowStatus);
+        Assert.Equal("Ручной режим должен убрать позиции счета", updated.Comment);
+        Assert.Equal(ActCreationMode.Manual, updated.CreationMode);
+        Assert.Equal(1m, updated.Amount);
+        Assert.Empty(updated.LineItems);
+
+        db.ChangeTracker.Clear();
+        Assert.Empty(await db.Set<ActLineItem>().AsNoTracking().Where(item => item.ActId == dto.Id).ToListAsync());
     }
 
     [Fact]
@@ -2201,7 +2228,7 @@ public class ActsControllerTests
     }
 
     [Fact]
-    public async Task Create_ManualModeWithInvoiceSelection_NormalizesToPartial()
+    public async Task Create_PartialModeWithInvoiceSelection_UsesSelectedLineItems()
     {
         await using var db = await CreateContextAsync();
         var client = await CreateClientAsync(db);
@@ -2231,7 +2258,7 @@ public class ActsControllerTests
                 InvoiceId = invoicePayment.Id,
                 ClientId = client.Id,
                 Status = ActStatus.Created,
-                CreationMode = ActCreationMode.Manual,
+                CreationMode = ActCreationMode.Partial,
                 LineItems =
                 [
                     new ActLineItemRequest
