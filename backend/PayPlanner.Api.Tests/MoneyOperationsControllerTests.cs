@@ -4179,11 +4179,25 @@ public class MoneyOperationsControllerTests
                 CreatedAt = DateTime.UtcNow,
             });
 
-        db.Payments.Add(new Payment
+        var representativeInvoicePayment = new Payment
         {
             InvoiceId = targetInvoice.Id,
             Account = "33",
             DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 100_000m,
+            PaidAmount = 100_000m,
+            Date = new DateTime(2026, 4, 29),
+            PaidDate = new DateTime(2026, 4, 29),
+            Description = "Служебная запись счёта №33",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var actualLinkedPayment = new Payment
+        {
+            InvoiceId = targetInvoice.Id,
+            Account = "33",
+            DocumentKind = DocumentKind.Payment,
             Type = PaymentType.Income,
             Status = PaymentStatus.Completed,
             Amount = 5_000m,
@@ -4192,7 +4206,8 @@ public class MoneyOperationsControllerTests
             PaidDate = new DateTime(2026, 4, 29),
             Description = "Наличный платёж по счёту №33",
             CreatedAt = DateTime.UtcNow,
-        });
+        };
+        db.Payments.AddRange(representativeInvoicePayment, actualLinkedPayment);
         await db.SaveChangesAsync();
 
         var controller = CreateController(db);
@@ -4214,7 +4229,9 @@ public class MoneyOperationsControllerTests
 
         Assert.Equal(2, page.Total);
         Assert.All(page.Items, item => Assert.Equal(targetInvoice.Id, item.LinkedInvoiceId));
-        Assert.Contains(page.Items, item => item.IsReadonly && item.RelatedPaymentId.HasValue);
+        Assert.Contains(page.Items, item => item.IsReadonly && item.RelatedPaymentId == actualLinkedPayment.Id);
+        Assert.DoesNotContain(page.Items, item => item.RelatedPaymentId == representativeInvoicePayment.Id);
+        Assert.DoesNotContain(page.Items, item => item.Amount == 100_000m);
         Assert.Contains(page.Items, item => !item.IsReadonly && item.Purpose == "Оплата по счёту №33");
         Assert.DoesNotContain(page.Items, item => item.LinkedInvoiceId == otherInvoice.Id);
     }
