@@ -1227,7 +1227,8 @@ public class MoneyOperationsController : ControllerBase
     {
         query = query.Where(payment =>
             payment.Status == PaymentStatus.Completed &&
-            payment.DocumentKind != DocumentKind.Invoice);
+            payment.DocumentKind != DocumentKind.Invoice &&
+            payment.InvoiceId == null);
 
         if (moneyAccountId.HasValue)
         {

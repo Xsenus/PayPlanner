@@ -233,7 +233,7 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
-    public async Task GetPaged_ReturnsResponsibleFromLinkedInvoicePayment()
+    public async Task GetPaged_ReturnsResponsibleFromLinkedInvoiceOnEditableOperation()
     {
         await using var db = await CreateContextAsync();
         var role = new Role
@@ -324,15 +324,11 @@ public class MoneyOperationsControllerTests
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
         var manualRow = Assert.Single(page.Items, item => item.Id == operation.Id);
-        var paymentRow = Assert.Single(page.Items, item => item.RelatedPaymentId == payment.Id);
+        Assert.DoesNotContain(page.Items, item => item.RelatedPaymentId == payment.Id);
         Assert.Equal(responsible.Id, manualRow.ResponsibleUserId);
         Assert.Equal("Анна Иванова", manualRow.ResponsibleName);
-        Assert.Equal(responsible.Id, paymentRow.ResponsibleUserId);
-        Assert.Equal("Анна Иванова", paymentRow.ResponsibleName);
         Assert.Equal(contract.Id, manualRow.LinkedContractId);
         Assert.Equal("ДОГ-55/26", manualRow.LinkedContractNumber);
-        Assert.Equal(contract.Id, paymentRow.LinkedContractId);
-        Assert.Equal("ДОГ-55/26", paymentRow.LinkedContractNumber);
     }
 
     [Fact]
@@ -990,12 +986,14 @@ public class MoneyOperationsControllerTests
         var controller = CreateController(db);
 
         var byResponsible = await SearchMoneyJournalAsync(controller, "анна");
-        Assert.Equal(2, byResponsible.Total);
+        Assert.Equal(1, byResponsible.Total);
         Assert.All(byResponsible.Items, item => Assert.Equal("Анна Поискова", item.ResponsibleName));
+        Assert.Contains(byResponsible.Items, item => item.Id == linkedOperation.Id);
 
         var byContract = await SearchMoneyJournalAsync(controller, "ДОГ-77");
-        Assert.Equal(2, byContract.Total);
+        Assert.Equal(1, byContract.Total);
         Assert.All(byContract.Items, item => Assert.Equal("ДОГ-77/26", item.LinkedContractNumber));
+        Assert.Contains(byContract.Items, item => item.Id == linkedOperation.Id);
 
         var byStatementFile = await SearchMoneyJournalAsync(controller, "statement-june.csv");
         var importedItem = Assert.Single(byStatementFile.Items);
@@ -4134,7 +4132,7 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
-    public async Task GetPaged_WithLinkedInvoiceId_ReturnsOnlyInvoiceMoneyOperations()
+    public async Task GetPaged_WithLinkedInvoiceId_ReturnsOnlyEditableInvoiceMoneyOperations()
     {
         await using var db = await CreateContextAsync();
         var targetInvoice = new Invoice
@@ -4227,11 +4225,12 @@ public class MoneyOperationsControllerTests
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var page = Assert.IsType<MoneyOperationsPageResponse>(ok.Value);
 
-        Assert.Equal(2, page.Total);
+        Assert.Equal(1, page.Total);
         Assert.All(page.Items, item => Assert.Equal(targetInvoice.Id, item.LinkedInvoiceId));
-        Assert.Contains(page.Items, item => item.IsReadonly && item.RelatedPaymentId == actualLinkedPayment.Id);
+        Assert.DoesNotContain(page.Items, item => item.RelatedPaymentId == actualLinkedPayment.Id);
         Assert.DoesNotContain(page.Items, item => item.RelatedPaymentId == representativeInvoicePayment.Id);
         Assert.DoesNotContain(page.Items, item => item.Amount == 100_000m);
+        Assert.DoesNotContain(page.Items, item => item.Amount == 5_000m);
         Assert.Contains(page.Items, item => !item.IsReadonly && item.Purpose == "Оплата по счёту №33");
         Assert.DoesNotContain(page.Items, item => item.LinkedInvoiceId == otherInvoice.Id);
     }
