@@ -291,6 +291,19 @@ public class ActsController : ControllerBase
             return NotFound();
         }
 
+        var reason = Normalize(request.Reason);
+        var statusChanged = !string.Equals(act.WorkflowStatus, workflowStatus, StringComparison.OrdinalIgnoreCase);
+        if (statusChanged)
+        {
+            var reasonError = await ValidateFinancialActionReasonAsync(reason, "изменения статуса акта", ct);
+            if (reasonError is not null)
+            {
+                return reasonError;
+            }
+
+            ApplyAuditReason(reason);
+        }
+
         var now = DateTime.UtcNow;
         act.WorkflowStatus = workflowStatus;
         act.UpdatedAt = now;
@@ -299,6 +312,10 @@ public class ActsController : ControllerBase
         {
             case ActWorkflowStatus.Draft:
             case ActWorkflowStatus.NotSigned:
+            case ActWorkflowStatus.OnApproval:
+            case ActWorkflowStatus.Approved:
+            case ActWorkflowStatus.ApprovalRejected:
+            case ActWorkflowStatus.NeedsCorrection:
                 act.Status = ActStatus.Created;
                 act.SentForSigningAt = null;
                 act.SignedAt = null;
@@ -326,7 +343,7 @@ public class ActsController : ControllerBase
                 act.Status = ActStatus.Terminated;
                 act.CancelledAt ??= now;
                 act.CancelledByUserId ??= User.GetUserId();
-                act.CancelledReason ??= "Быстрая смена статуса документа";
+                act.CancelledReason ??= reason ?? "Быстрая смена статуса документа";
                 break;
         }
 
@@ -347,6 +364,7 @@ public class ActsController : ControllerBase
         {
             return BadRequest("Cancellation reason is required.");
         }
+        ApplyAuditReason(reason);
 
         var act = await LoadActForWorkflowAsync(id, ct);
         if (act is null)
@@ -1319,6 +1337,26 @@ public class ActsController : ControllerBase
 
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<ActionResult?> ValidateFinancialActionReasonAsync(string? reason, string actionName, CancellationToken ct)
+    {
+        if (!await User.RequiresFinancialActionReasonAsync(_db, ct))
+        {
+            return null;
+        }
+
+        return string.IsNullOrWhiteSpace(reason)
+            ? BadRequest($"Укажите причину {actionName}. Она будет сохранена в журнале.")
+            : null;
+    }
+
+    private void ApplyAuditReason(string? reason)
+    {
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            _db.SetAuditReason(reason);
+        }
+    }
 
     private static string AppendCancellationComment(string? comment, string reason, DateTime now)
     {

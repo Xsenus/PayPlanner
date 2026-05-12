@@ -23,6 +23,7 @@ public class User
     public string? Viber { get; set; }
 
     public bool IsEmployee { get; set; } = false;
+    public bool RequiresFinancialActionReason { get; set; } = false;
     public DateTime? EmploymentStartDate { get; set; }
     public DateTime? EmploymentEndDate { get; set; }
 

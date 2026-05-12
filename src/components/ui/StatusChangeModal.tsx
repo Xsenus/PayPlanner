@@ -23,6 +23,11 @@ interface StatusChangeModalProps<T extends string = string> {
   consequences?: string[];
   error?: string | null;
   loading?: boolean;
+  reason?: string;
+  reasonRequired?: boolean;
+  reasonLabel?: string;
+  reasonPlaceholder?: string;
+  onReasonChange?: (value: string) => void;
 }
 
 export function StatusChangeModal<T extends string = string>({
@@ -40,11 +45,17 @@ export function StatusChangeModal<T extends string = string>({
   consequences = [],
   error,
   loading = false,
+  reason = '',
+  reasonRequired = false,
+  reasonLabel = 'Причина действия',
+  reasonPlaceholder = 'Опишите, почему меняется статус',
+  onReasonChange,
 }: StatusChangeModalProps<T>) {
   if (!open || typeof document === 'undefined') return null;
 
   const selectedOption = options.find((option) => option.value === value);
   const isSameStatus = !selectedOption || (currentValue ? value === currentValue : selectedOption.label === currentLabel);
+  const missingRequiredReason = reasonRequired && !isSameStatus && reason.trim().length === 0;
 
   return createPortal(
     <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-slate-900/45 p-4">
@@ -104,6 +115,26 @@ export function StatusChangeModal<T extends string = string>({
             </div>
           </div>
 
+          {onReasonChange || reasonRequired ? (
+            <label className="block space-y-2">
+              <span className="text-sm font-semibold text-slate-800">
+                {reasonLabel}
+                {reasonRequired ? <span className="text-rose-600"> *</span> : null}
+              </span>
+              <textarea
+                value={reason}
+                onChange={(event) => onReasonChange?.(event.target.value)}
+                disabled={loading || !onReasonChange}
+                placeholder={reasonPlaceholder}
+                rows={3}
+                className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-slate-100 disabled:text-slate-500"
+              />
+              {missingRequiredReason ? (
+                <span className="text-xs font-medium text-rose-600">Причина обязательна для записи в журнал.</span>
+              ) : null}
+            </label>
+          ) : null}
+
           {consequences.length > 0 ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <div className="font-semibold">Что произойдет после подтверждения</div>
@@ -134,7 +165,7 @@ export function StatusChangeModal<T extends string = string>({
           <button
             type="button"
             onClick={() => void onConfirm()}
-            disabled={loading || isSameStatus}
+            disabled={loading || isSameStatus || missingRequiredReason}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -96,7 +97,7 @@ public class InvoicesControllerCrudTests
         Assert.Equal(18_000m, dto.Amount);
         Assert.Equal(PaymentType.Income, dto.Type);
         Assert.Equal(PaymentStatus.Completed, dto.Status);
-        Assert.Equal(InvoiceWorkflowStatus.Paid, dto.WorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, dto.WorkflowStatus);
         Assert.True(dto.IsPaid);
         Assert.Equal(new DateTime(2026, 4, 16), dto.PaidDate);
         Assert.Equal(clientId, dto.ClientId);
@@ -121,7 +122,7 @@ public class InvoicesControllerCrudTests
         Assert.Equal(new DateTime(2026, 6, 15), storedParent.Date);
         Assert.Equal(18_000m, storedParent.Amount);
         Assert.Equal(PaymentStatus.Completed, storedParent.Status);
-        Assert.Equal(InvoiceWorkflowStatus.Paid, storedParent.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, storedParent.InvoiceWorkflowStatus);
         Assert.Equal(18_000m, storedParent.PaidAmount);
         Assert.Equal(new DateTime(2026, 4, 16), storedParent.PaidDate);
         Assert.Equal("CASE-REF-501", storedParent.ClientCaseReference);
@@ -222,10 +223,11 @@ public class InvoicesControllerCrudTests
         var clientId = await CreateClientAsync(db, "Client Workflow");
         var controller = CreateController(db, isAdmin: true, userId: actorUserId);
 
-        var paidRequest = CreateRequest("INV-WF-PAID", clientId, new DateTime(2026, 4, 15), 10_000m);
-        paidRequest.Status = PaymentStatus.Completed;
-        paidRequest.PaidDate = new DateTime(2026, 4, 16);
-        await controller.Create(paidRequest, CancellationToken.None);
+        var approvedRequest = CreateRequest("INV-WF-APPROVED", clientId, new DateTime(2026, 4, 15), 10_000m);
+        approvedRequest.Status = PaymentStatus.Completed;
+        approvedRequest.PaidDate = new DateTime(2026, 4, 16);
+        approvedRequest.WorkflowStatus = InvoiceWorkflowStatus.Approved;
+        await controller.Create(approvedRequest, CancellationToken.None);
 
         var signingRequest = CreateRequest("INV-WF-SIGN", clientId, new DateTime(2026, 4, 16), 8_000m);
         signingRequest.WorkflowStatus = InvoiceWorkflowStatus.OnSigning;
@@ -248,13 +250,13 @@ public class InvoicesControllerCrudTests
             page: 1,
             pageSize: 20,
             ct: CancellationToken.None,
-            workflowStatus: InvoiceWorkflowStatus.Paid);
+            workflowStatus: InvoiceWorkflowStatus.Approved);
 
         var ok = Assert.IsType<OkObjectResult>(action);
         var items = GetAnonymousProperty<List<InvoiceDto>>(ok.Value, "items");
         var item = Assert.Single(items);
-        Assert.Equal("INV-WF-PAID", item.Number);
-        Assert.Equal(InvoiceWorkflowStatus.Paid, item.WorkflowStatus);
+        Assert.Equal("INV-WF-APPROVED", item.Number);
+        Assert.Equal(InvoiceWorkflowStatus.Approved, item.WorkflowStatus);
     }
 
     [Fact]
@@ -334,6 +336,87 @@ public class InvoicesControllerCrudTests
         Assert.Equal(InvoiceWorkflowStatus.RequiresClientSignature, stored.InvoiceWorkflowStatus);
         Assert.True(stored.IsPaid);
         Assert.Equal(new DateTime(2026, 4, 22), stored.PaidDate);
+    }
+
+    [Fact]
+    public async Task UpdateWorkflowStatus_RequiresReason_WhenUserSettingEnabled()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(
+            db,
+            "Strict Manager",
+            roleName: "admin",
+            requiresFinancialActionReason: true);
+        var clientId = await CreateClientAsync(db, "Client Reason Required");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createAction = await controller.Create(
+            CreateRequest("INV-REASON-REQUIRED", clientId, new DateTime(2026, 4, 23), 9_000m),
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var updateAction = await controller.UpdateWorkflowStatus(
+            createdDto.Id,
+            new UpdateNamedStatusRequest { Status = InvoiceWorkflowStatus.OnApproval },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(updateAction.Result);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, stored.InvoiceWorkflowStatus);
+    }
+
+    [Fact]
+    public async Task UpdateWorkflowStatus_WritesReasonToAuditJournal()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(
+            db,
+            "Strict Manager",
+            roleName: "admin",
+            requiresFinancialActionReason: true);
+        var clientId = await CreateClientAsync(db, "Client Reason Journal");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createAction = await controller.Create(
+            CreateRequest("INV-REASON-JOURNAL", clientId, new DateTime(2026, 4, 24), 9_000m),
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var updateAction = await controller.UpdateWorkflowStatus(
+            createdDto.Id,
+            new UpdateNamedStatusRequest
+            {
+                Status = InvoiceWorkflowStatus.OnApproval,
+                Reason = "Отправлено руководителю на согласование",
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(InvoiceWorkflowStatus.OnApproval, dto.WorkflowStatus);
+
+        var auditEvent = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .OrderByDescending(item => item.Id)
+            .FirstAsync(item =>
+                item.ObjectType == "payment"
+                && item.ObjectId == createdDto.Id
+                && item.Action == "Updated");
+
+        Assert.NotNull(auditEvent.MetadataJson);
+        using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        Assert.Contains("InvoiceWorkflowStatus", auditEvent.MetadataJson);
+        Assert.Equal(
+            "Отправлено руководителю на согласование",
+            metadata.RootElement.GetProperty("reason").GetString());
     }
 
     [Fact]
@@ -717,7 +800,7 @@ public class InvoicesControllerCrudTests
         var ok = Assert.IsType<OkObjectResult>(cancelAction.Result);
         var dto = Assert.IsType<InvoiceDto>(ok.Value);
         Assert.Equal(PaymentStatus.Processing, dto.Status);
-        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, dto.WorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, dto.WorkflowStatus);
         Assert.Equal(paidInstallment.Amount, dto.PaidAmount);
         Assert.Equal(0m, dto.OutstandingAmount);
         Assert.Null(dto.CancelledAt);
@@ -726,7 +809,7 @@ public class InvoicesControllerCrudTests
         db.ChangeTracker.Clear();
         var storedUpdatedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
         Assert.Equal(PaymentStatus.Processing, storedUpdatedParent.Status);
-        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, storedUpdatedParent.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, storedUpdatedParent.InvoiceWorkflowStatus);
         Assert.Equal(paidInstallment.Amount, storedUpdatedParent.PaidAmount);
         Assert.Null(storedUpdatedParent.InvoiceCancelledAt);
         Assert.Contains("Оплаченные платежи сохранены", storedUpdatedParent.SystemNotes, StringComparison.Ordinal);
@@ -2240,7 +2323,11 @@ public class InvoicesControllerCrudTests
         return entity.Id;
     }
 
-    private static async Task<int> CreateUserAsync(PaymentContext db, string fullName, string roleName = "user")
+    private static async Task<int> CreateUserAsync(
+        PaymentContext db,
+        string fullName,
+        string roleName = "user",
+        bool requiresFinancialActionReason = false)
     {
         var role = new Role
         {
@@ -2260,6 +2347,7 @@ public class InvoicesControllerCrudTests
             RoleId = role.Id,
             IsActive = true,
             IsApproved = true,
+            RequiresFinancialActionReason = requiresFinancialActionReason,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };

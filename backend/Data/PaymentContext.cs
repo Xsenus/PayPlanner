@@ -101,11 +101,18 @@ public class PaymentContext : DbContext
 
     private sealed record AuditUpdateMetadata(
         IReadOnlyCollection<string> ChangedFields,
-        IReadOnlyCollection<AuditFieldChange> Changes);
+        IReadOnlyCollection<AuditFieldChange> Changes,
+        string? Reason = null);
 
     private readonly IHttpContextAccessor? _httpContextAccessor;
+    private string? _auditReason;
 
     internal bool UseObjectAuditModel { get; }
+
+    public void SetAuditReason(string? reason)
+    {
+        _auditReason = NormalizeAuditString(reason);
+    }
 
     private static DateTime NormalizePostgreSqlTimestamp(DateTime value)
         => value.Kind == DateTimeKind.Unspecified
@@ -1379,6 +1386,7 @@ public class PaymentContext : DbContext
             // --- Флаги и значения по умолчанию ---
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.IsApproved).HasDefaultValue(false);
+            entity.Property(e => e.RequiresFinancialActionReason).HasDefaultValue(false);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             // --- Связи ---
@@ -2010,7 +2018,8 @@ public class PaymentContext : DbContext
 
                     var metadata = new AuditUpdateMetadata(
                         changedFields,
-                        GetChangedBusinessPropertyDiffs(entry));
+                        GetChangedBusinessPropertyDiffs(entry),
+                        _auditReason);
 
                     QueueAuditEvent(
                         pendingAuditEvents,
@@ -2040,6 +2049,8 @@ public class PaymentContext : DbContext
                 }
             }
         }
+
+        _auditReason = null;
 
         return pendingAuditEvents;
     }

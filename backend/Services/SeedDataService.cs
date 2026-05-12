@@ -160,11 +160,13 @@ namespace PayPlanner.Api.Services
                 {
                     new PaymentStatusEntity { Name = "Ожидается",  Description = "Оплата находится в ожидании",  ColorHex = "#F59E0B" },
                     new PaymentStatusEntity { Name = "Выполнено",  Description = "Оплата успешно завершена",    ColorHex = "#10B981" },
+                    new PaymentStatusEntity { Name = "Частично оплачено", Description = "Оплата внесена частично", ColorHex = "#3B82F6" },
                     new PaymentStatusEntity { Name = "Просрочено", Description = "Срок оплаты истёк",           ColorHex = "#EF4444" }
                 };
                 context.PaymentStatuses.AddRange(paymentStatuses);
                 await context.SaveChangesAsync();
             }
+            await EnsurePaymentStatusAsync(context, "Частично оплачено", "#3B82F6", "Оплата внесена частично");
 
             if (!await context.ClientStatuses.AnyAsync())
             {

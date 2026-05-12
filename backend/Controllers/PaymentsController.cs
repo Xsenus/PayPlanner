@@ -295,6 +295,18 @@ public class PaymentsController : ControllerBase
         var now = DateTime.UtcNow;
         var actor = User.GetDisplayName();
         var originalStatus = payment.Status;
+        var reason = Normalize(request.Reason);
+
+        if (originalStatus != nextStatus)
+        {
+            var reasonError = await ValidateFinancialActionReasonAsync(reason, "изменения статуса платежа", ct);
+            if (reasonError is not null)
+            {
+                return reasonError;
+            }
+
+            ApplyAuditReason(reason);
+        }
 
         payment.Status = nextStatus;
 
@@ -2308,6 +2320,29 @@ public class PaymentsController : ControllerBase
 
     private static string? NormalizeInvoiceNumber(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? Normalize(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<ActionResult?> ValidateFinancialActionReasonAsync(string? reason, string actionName, CancellationToken ct)
+    {
+        if (!await User.RequiresFinancialActionReasonAsync(_db, ct))
+        {
+            return null;
+        }
+
+        return string.IsNullOrWhiteSpace(reason)
+            ? BadRequest($"Укажите причину {actionName}. Она будет сохранена в журнале.")
+            : null;
+    }
+
+    private void ApplyAuditReason(string? reason)
+    {
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            _db.SetAuditReason(reason);
+        }
+    }
 
     private static bool AreAmountsEqual(decimal left, decimal right)
         => Math.Abs(left - right) <= 0.009m;

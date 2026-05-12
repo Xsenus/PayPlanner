@@ -228,6 +228,7 @@ public sealed partial class DatabaseImportService
         target.Messenger = source.Messenger;
         target.Viber = source.Viber;
         target.IsEmployee = source.IsEmployee;
+        target.RequiresFinancialActionReason = source.RequiresFinancialActionReason;
         target.EmploymentStartDate = source.EmploymentStartDate;
         target.EmploymentEndDate = source.EmploymentEndDate;
         target.RoleId = roleId;

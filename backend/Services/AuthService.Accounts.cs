@@ -306,6 +306,11 @@ public partial class AuthService
                 user.IsEmployee = request.IsEmployee.Value;
             }
 
+            if (request.RequiresFinancialActionReason.HasValue)
+            {
+                user.RequiresFinancialActionReason = request.RequiresFinancialActionReason.Value;
+            }
+
             if (request.RoleId.HasValue && request.RoleId.Value != user.RoleId)
             {
                 var roleExists = await _context.Roles

@@ -368,21 +368,6 @@ public static class InvoicePaymentStateService
             return normalizedCurrent;
         }
 
-        if (paidAmount > AmountEpsilon && paidAmount + AmountEpsilon < representative.Amount)
-        {
-            return InvoiceWorkflowStatus.PartiallyPaid;
-        }
-
-        if (status == PaymentStatus.Completed)
-        {
-            return InvoiceWorkflowStatus.Paid;
-        }
-
-        if (status == PaymentStatus.Overdue)
-        {
-            return InvoiceWorkflowStatus.Overdue;
-        }
-
         return InvoiceWorkflowStatus.FromPaymentStatus(status, paidAmount, representative.Amount);
     }
 

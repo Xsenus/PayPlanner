@@ -364,7 +364,7 @@ export const ru = {
   statusCompleted: 'Выполнено',
   completedStatus: 'Выполнено',
   overdue: 'Просрочено',
-  processingStatus: 'В обработке',
+  processingStatus: 'Частично оплачено',
   cancelledStatus: 'Отменено',
 
   // Legal Entities

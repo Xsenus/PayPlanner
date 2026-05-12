@@ -113,6 +113,7 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   UpdatedByUserName: 'Изменил',
   RoleId: 'Роль',
   IsEmployee: 'Сотрудник',
+  RequiresFinancialActionReason: 'Требовать причину финансовых действий',
   IsActive: 'Активность',
   IsApproved: 'Одобрение',
   EmploymentStartDate: 'Дата начала работы',
@@ -236,6 +237,10 @@ const VALUE_LABELS: Record<string, string> = {
   signedbyclient: 'Подписан клиентом',
   notsigned: 'Не подписан',
   requiresclientsignature: 'Требуется подпись клиента',
+  onapproval: 'На согласовании',
+  approved: 'Согласован',
+  approvalrejected: 'Отказ в согласовании',
+  needscorrection: 'Требует исправления',
   onsigning: 'На подписании',
   created: 'Создан',
   transferred: 'Передан',
@@ -256,6 +261,7 @@ export interface ParsedAuditFieldChange {
 interface ParsedAuditMetadataObject {
   changedFields?: unknown;
   changes?: unknown;
+  reason?: unknown;
 }
 
 function prettifyFieldName(fieldName: string): string {
@@ -506,6 +512,24 @@ export function parseAuditFieldChanges(metadataJson: string | null | undefined):
       .filter((item): item is ParsedAuditFieldChange => item !== null);
   } catch {
     return [];
+  }
+}
+
+export function parseAuditReason(metadataJson: string | null | undefined): string | null {
+  if (!metadataJson?.trim()) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(metadataJson);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const reason = (parsed as ParsedAuditMetadataObject).reason;
+    return typeof reason === 'string' && reason.trim().length > 0 ? reason.trim() : null;
+  } catch {
+    return null;
   }
 }
 

@@ -528,7 +528,7 @@ public class MoneyOperationsControllerTests
                 Amount = 10_000m,
                 Currency = "RUB",
                 Date = new DateTime(2026, 5, 1),
-                Purpose = "РћРїР»Р°С‚Р° РїРѕ СЃС‡РµС‚Сѓ",
+                Purpose = "Оплата по счету",
                 MatchStatus = MoneyOperationMatchStatus.None,
                 CreatedAt = DateTime.UtcNow,
             },
@@ -3024,7 +3024,7 @@ public class MoneyOperationsControllerTests
 
         var payment = await db.Payments.SingleAsync();
         Assert.Equal(PaymentStatus.Completed, payment.Status);
-        Assert.Equal(InvoiceWorkflowStatus.Paid, payment.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, payment.InvoiceWorkflowStatus);
         Assert.Equal(25_000m, payment.PaidAmount);
         Assert.True(payment.IsPaid);
         Assert.Contains("Деньги", payment.SystemNotes);
@@ -3128,7 +3128,7 @@ public class MoneyOperationsControllerTests
         Assert.Equal(PaymentStatus.Pending, refreshedSecond.Status);
         Assert.Equal(6_000m, refreshedParent.PaidAmount);
         Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
-        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, refreshedParent.InvoiceWorkflowStatus);
         Assert.False(refreshedParent.IsPaid);
     }
 

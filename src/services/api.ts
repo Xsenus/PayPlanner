@@ -984,10 +984,10 @@ export class ApiService {
     return this.request<Act>(`/acts/${id}/mark-not-signed`, { method: 'POST' });
   }
 
-  async updateActWorkflowStatus(id: number, status: ActWorkflowStatus) {
+  async updateActWorkflowStatus(id: number, status: ActWorkflowStatus, reason?: string | null) {
     return this.request<Act>(`/acts/${id}/workflow-status`, {
       method: 'POST',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, reason }),
     });
   }
 
@@ -1083,10 +1083,10 @@ export class ApiService {
     return this.request<Contract>(`/contracts/${id}/mark-not-signed`, { method: 'POST' });
   }
 
-  async updateContractStatus(id: number, status: ContractStatus) {
+  async updateContractStatus(id: number, status: ContractStatus, reason?: string | null) {
     return this.request<Contract>(`/contracts/${id}/status`, {
       method: 'POST',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, reason }),
     });
   }
 
@@ -1586,10 +1586,10 @@ export class ApiService {
     return this.request<Invoice>(`/invoices/${id}/mark-not-signed`, { method: 'POST' });
   }
 
-  async updateInvoiceWorkflowStatus(id: number, status: InvoiceWorkflowStatus) {
+  async updateInvoiceWorkflowStatus(id: number, status: InvoiceWorkflowStatus, reason?: string | null) {
     return this.request<Invoice>(`/invoices/${id}/workflow-status`, {
       method: 'POST',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, reason }),
     });
   }
 
@@ -1979,10 +1979,10 @@ export class ApiService {
     });
   }
 
-  async updatePaymentStatus(id: number, status: PaymentStatus, paidDate?: string | null) {
+  async updatePaymentStatus(id: number, status: PaymentStatus, paidDate?: string | null, reason?: string | null) {
     return this.request<Payment>(`/payments/${id}/status`, {
       method: 'POST',
-      body: JSON.stringify({ status, paidDate }),
+      body: JSON.stringify({ status, paidDate, reason }),
     });
   }
 

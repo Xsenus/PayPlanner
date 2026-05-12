@@ -12,6 +12,7 @@ import {
   getObjectAuditFieldLabel,
   parseAuditChangedFields,
   parseAuditFieldChanges,
+  parseAuditReason,
 } from '../../utils/objectAudit';
 
 interface ObjectAuditHistoryCardProps {
@@ -73,6 +74,7 @@ function HistoryTimeline({ items }: { items: ObjectAuditEventDto[] }) {
     <div className="space-y-4">
       {items.map((item) => {
         const detailedChanges = parseAuditFieldChanges(item.metadataJson);
+        const actionReason = parseAuditReason(item.metadataJson);
         const changedFields = parseAuditChangedFields(item.metadataJson).map((fieldName) =>
           getObjectAuditFieldLabel(item.objectType, fieldName),
         );
@@ -101,6 +103,11 @@ function HistoryTimeline({ items }: { items: ObjectAuditEventDto[] }) {
                 <p className="mt-1 break-words text-sm leading-6 text-slate-600">
                   {getEventDescription(item)}
                 </p>
+                {actionReason ? (
+                  <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900">
+                    Причина: {actionReason}
+                  </p>
+                ) : null}
 
                 {detailedChanges.length > 0 ? (
                   <div className="mt-4 space-y-3">

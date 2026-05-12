@@ -4821,6 +4821,11 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("RequiresFinancialActionReason")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.Property<int>("RoleId")
                         .HasColumnType("INTEGER");
 

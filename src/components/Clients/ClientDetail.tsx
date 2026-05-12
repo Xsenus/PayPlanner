@@ -69,6 +69,7 @@ import type {
   DadataAddressSuggestion,
   Invoice,
   InvoiceInput,
+  InvoiceWorkflowStatus,
   LegalEntityDetail,
   LegalEntityInput,
   LegalEntitySummary,
@@ -185,6 +186,7 @@ type InvoiceTableColumnKey =
   | "counterparty"
   | "amount"
   | "status"
+  | "signingStatus"
   | "dueDate"
   | "responsible"
   | "linkedContract"
@@ -280,7 +282,8 @@ const INVOICE_TABLE_COLUMNS: Array<{
   { key: "number", label: "Номер счета", defaultWidth: 240 },
   { key: "counterparty", label: "Контрагент", defaultWidth: 260 },
   { key: "amount", label: "Сумма", defaultWidth: 160 },
-  { key: "status", label: "Статус", defaultWidth: 170 },
+  { key: "status", label: "Статус оплаты", defaultWidth: 170 },
+  { key: "signingStatus", label: "Статус документа", defaultWidth: 190 },
   { key: "dueDate", label: "Срок оплаты", defaultWidth: 170 },
   { key: "responsible", label: "Ответственный", defaultWidth: 180 },
   { key: "linkedContract", label: "Договор", defaultWidth: 180 },
@@ -631,7 +634,7 @@ function toRuPaymentStatus(status?: string, fallback: string = "—"): string {
     return "Просрочено";
   if (normalized.includes("complete") || normalized.includes("оплач"))
     return "Оплачено";
-  if (normalized.includes("process")) return "В обработке";
+  if (normalized.includes("process")) return "Частично оплачено";
   if (normalized.includes("cancel")) return "Отменено";
   if (normalized.includes("pending") || normalized.includes("ожид"))
     return "Ожидается";
@@ -2477,10 +2480,29 @@ export function ClientDetail({
       Pending: t("invoicePendingBadge") ?? t("pending") ?? "Ожидается",
       Completed: t("invoicePaidBadge") ?? t("completedStatus") ?? "Оплачено",
       Overdue: t("invoiceOverdueBadge") ?? t("overdue") ?? "Просрочено",
-      Processing: t("processingStatus") ?? "В обработке",
+      Processing: t("processingStatus") ?? "Частично оплачено",
       Cancelled: t("cancelledStatus") ?? "Отменено",
     }),
     [t],
+  );
+
+  const invoiceWorkflowStatusLabels = useMemo<Record<InvoiceWorkflowStatus, string>>(
+    () => ({
+      Draft: "Черновик",
+      NotSigned: "Не подписан",
+      RequiresClientSignature: "Требуется подпись клиента",
+      OnApproval: "На согласовании",
+      Approved: "Согласован",
+      ApprovalRejected: "Отказ в согласовании",
+      NeedsCorrection: "Требует исправления",
+      OnSigning: "На подписании",
+      SignedByClient: "Подписан клиентом",
+      Paid: "Оплачен",
+      PartiallyPaid: "Частично оплачен",
+      Overdue: "Просрочен",
+      Cancelled: "Аннулирован",
+    }),
+    [],
   );
 
   const {
@@ -2537,6 +2559,22 @@ export function ClientDetail({
     Overdue: "bg-rose-100 text-rose-700 border border-rose-200",
     Processing: "bg-blue-100 text-blue-700 border border-blue-200",
     Cancelled: "bg-slate-100 text-slate-600 border border-slate-200",
+  };
+
+  const invoiceWorkflowStatusClasses: Record<InvoiceWorkflowStatus, string> = {
+    Draft: "bg-slate-100 text-slate-700 border border-slate-200",
+    NotSigned: "bg-slate-100 text-slate-700 border border-slate-200",
+    RequiresClientSignature: "bg-amber-100 text-amber-800 border border-amber-200",
+    OnApproval: "bg-cyan-100 text-cyan-700 border border-cyan-200",
+    Approved: "bg-emerald-100 text-emerald-700 border border-emerald-200",
+    ApprovalRejected: "bg-rose-100 text-rose-700 border border-rose-200",
+    NeedsCorrection: "bg-orange-100 text-orange-700 border border-orange-200",
+    OnSigning: "bg-violet-100 text-violet-700 border border-violet-200",
+    SignedByClient: "bg-emerald-100 text-emerald-700 border border-emerald-200",
+    Paid: "bg-emerald-100 text-emerald-700 border border-emerald-200",
+    PartiallyPaid: "bg-blue-100 text-blue-700 border border-blue-200",
+    Overdue: "bg-rose-100 text-rose-700 border border-rose-200",
+    Cancelled: "bg-rose-100 text-rose-700 border border-rose-200",
   };
 
   const openInvoiceCreate = () => {
@@ -8653,7 +8691,8 @@ export function ClientDetail({
                               const sortKey =
                                 column.key === "linkedContract" ||
                                 column.key === "linkedActs" ||
-                                column.key === "linkedPayments"
+                                column.key === "linkedPayments" ||
+                                column.key === "signingStatus"
                                   ? null
                                   : (column.key as InvoicesSortKey);
                               const isActive = sortKey
@@ -8878,6 +8917,25 @@ export function ClientDetail({
                                     >
                                       {invoiceStatusLabels[invoice.status]}
                                     </span>
+                                  ) : column.key === "signingStatus" ? (
+                                    (() => {
+                                      const workflowStatus =
+                                        (invoice.workflowStatus ?? "Draft") as InvoiceWorkflowStatus;
+                                      const label =
+                                        invoiceWorkflowStatusLabels[workflowStatus] ??
+                                        workflowStatus;
+                                      const className =
+                                        invoiceWorkflowStatusClasses[workflowStatus] ??
+                                        invoiceWorkflowStatusClasses.Draft;
+
+                                      return (
+                                        <span
+                                          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${className}`}
+                                        >
+                                          {label}
+                                        </span>
+                                      );
+                                    })()
                                   ) : column.key === "dueDate" ? (
                                     <span className="text-gray-900">
                                       {invoice.dueDate

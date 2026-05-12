@@ -4945,6 +4945,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<bool>("RequiresFinancialActionReason")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<int>("RoleId")
                         .HasColumnType("integer");
 

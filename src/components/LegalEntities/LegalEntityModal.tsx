@@ -290,7 +290,7 @@ const INVOICE_STATUS_LABELS = {
   Completed: "Оплачено",
   Overdue: "Просрочено",
   Cancelled: "Аннулировано",
-  Processing: "В обработке",
+  Processing: "Частично оплачено",
 } as const;
 
 const ACT_STATUS_LABELS = {

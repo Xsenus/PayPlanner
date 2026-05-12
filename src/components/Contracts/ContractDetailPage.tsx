@@ -119,11 +119,25 @@ const formatAmountInput = (value?: number | null) => (typeof value === 'number' 
 const contractStatusLabels: Record<NonNullable<Contract['status']>, string> = {
   Draft: 'Черновик',
   NotSigned: 'Не подписан',
+  OnApproval: 'На согласовании',
+  Approved: 'Согласован',
+  ApprovalRejected: 'Отказ в согласовании',
+  NeedsCorrection: 'Требует исправления',
   OnSigning: 'На подписании',
   Concluded: 'Подписан',
   Terminated: 'Расторгнут',
   Cancelled: 'Аннулирован',
 };
+
+const cancellableContractStatuses: Array<NonNullable<Contract['status']>> = [
+  'Draft',
+  'NotSigned',
+  'OnApproval',
+  'Approved',
+  'ApprovalRejected',
+  'NeedsCorrection',
+  'OnSigning',
+];
 
 function parseAmountInput(value: string): number | null | undefined {
   const normalized = value.replace(/\s+/g, '').replace(',', '.').trim();
@@ -149,6 +163,7 @@ export function ContractDetailPage({
 }: Props) {
   const { user } = useAuth();
   const toast = useToast();
+  const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
   const [contract, setContract] = useState<Contract | null>(null);
   const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
     autoGenerateWhenEmpty: true,
@@ -676,10 +691,20 @@ export function ContractDetailPage({
         return;
       }
 
+      const reason = window.prompt(
+        requiresFinancialActionReason
+          ? 'Причина расторжения договора'
+          : 'Причина расторжения договора (необязательно)',
+      )?.trim();
+      if (requiresFinancialActionReason && !reason) {
+        toast.error('Причина расторжения обязательна и будет сохранена в журнале.', 'Договоры');
+        return;
+      }
+
       terminatePayload = {
         terminationDate,
         terms,
-        reason: window.prompt('Причина расторжения договора (необязательно)')?.trim() || null,
+        reason: reason || null,
         financialTerms: window.prompt('Финансовые условия (необязательно)')?.trim() || null,
       };
     }
@@ -698,15 +723,32 @@ export function ContractDetailPage({
     try {
       let updatedContract: Contract;
       let successMessage: string;
+      const requestStatusReason = (label: string) => {
+        if (!requiresFinancialActionReason) return null;
+
+        const reason = window.prompt(`Укажите причину: ${label}`)?.trim();
+        if (!reason) {
+          toast.error('Причина обязательна и будет сохранена в журнале.', 'Договоры');
+          return undefined;
+        }
+
+        return reason;
+      };
 
       if (action === 'sendToSigning') {
-        updatedContract = await apiService.sendContractToSigning(contract.id);
+        const reason = requestStatusReason('смена статуса договора');
+        if (reason === undefined) return;
+        updatedContract = await apiService.updateContractStatus(contract.id, 'OnSigning', reason);
         successMessage = 'Договор отправлен на подписание.';
       } else if (action === 'markNotSigned') {
-        updatedContract = await apiService.markContractNotSigned(contract.id);
+        const reason = requestStatusReason('смена статуса договора');
+        if (reason === undefined) return;
+        updatedContract = await apiService.updateContractStatus(contract.id, 'NotSigned', reason);
         successMessage = 'Договор отмечен неподписанным.';
       } else if (action === 'markConcluded') {
-        updatedContract = await apiService.markContractConcluded(contract.id);
+        const reason = requestStatusReason('смена статуса договора');
+        if (reason === undefined) return;
+        updatedContract = await apiService.updateContractStatus(contract.id, 'Concluded', reason);
         successMessage = 'Договор отмечен подписанным.';
       } else if (action === 'terminate' && terminatePayload) {
         updatedContract = await apiService.terminateContract(
@@ -755,7 +797,11 @@ export function ContractDetailPage({
   const notSignedDisabled = workflowSaving || editMode || contract?.status === 'NotSigned' || isTerminated || isCancelled;
   const workflowDisabled = workflowSaving || editMode || isTerminated || isCancelled;
   const terminateDisabled = workflowSaving || editMode || isTerminated || isCancelled;
-  const cancelDisabled = workflowSaving || editMode || (contract?.status !== 'Draft' && contract?.status !== 'NotSigned' && contract?.status !== 'OnSigning');
+  const cancelDisabled =
+    workflowSaving ||
+    editMode ||
+    !contract?.status ||
+    !cancellableContractStatuses.includes(contract.status);
 
   if (loading || !contract) {
     return (

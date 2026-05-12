@@ -189,6 +189,7 @@ export function Acts({
   const [lookupsError, setLookupsError] = useState<string | null>(null);
   const [statusChangeAct, setStatusChangeAct] = useState<Act | null>(null);
   const [statusChangeValue, setStatusChangeValue] = useState<ActWorkflowStatus>('Draft');
+  const [statusChangeReason, setStatusChangeReason] = useState('');
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
   const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
 
@@ -228,14 +229,22 @@ export function Acts({
   const workflowStatusLabels: Record<ActWorkflowStatus, string> = {
     Draft: 'Черновик',
     NotSigned: 'Не подписан',
+    OnApproval: 'На согласовании',
+    Approved: 'Согласован',
+    ApprovalRejected: 'Отказ в согласовании',
+    NeedsCorrection: 'Требует исправления',
     OnSigning: 'На подписании',
     Signed: 'Подписан',
-    Cancelled: 'Отменен',
+    Cancelled: 'Аннулирован',
   };
 
   const workflowStatusClasses: Record<ActWorkflowStatus, string> = {
     Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
     NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+    OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
+    Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
+    NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
     OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
     Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
@@ -252,6 +261,30 @@ export function Acts({
       label: workflowStatusLabels.NotSigned,
       description: 'Акт будет отмечен как неподписанный.',
       className: workflowStatusClasses.NotSigned,
+    },
+    {
+      value: 'OnApproval',
+      label: workflowStatusLabels.OnApproval,
+      description: 'Акт будет отправлен на внутреннее согласование.',
+      className: workflowStatusClasses.OnApproval,
+    },
+    {
+      value: 'Approved',
+      label: workflowStatusLabels.Approved,
+      description: 'Акт будет отмечен как согласованный.',
+      className: workflowStatusClasses.Approved,
+    },
+    {
+      value: 'ApprovalRejected',
+      label: workflowStatusLabels.ApprovalRejected,
+      description: 'В журнал попадет отказ в согласовании акта.',
+      className: workflowStatusClasses.ApprovalRejected,
+    },
+    {
+      value: 'NeedsCorrection',
+      label: workflowStatusLabels.NeedsCorrection,
+      description: 'Акт будет возвращен на исправление.',
+      className: workflowStatusClasses.NeedsCorrection,
     },
     {
       value: 'OnSigning',
@@ -506,12 +539,14 @@ export function Acts({
     const workflowStatus = resolveWorkflowStatus(act);
     setStatusChangeAct(act);
     setStatusChangeValue(workflowStatus);
+    setStatusChangeReason('');
     setStatusChangeError(null);
   };
 
   const closeActStatusChange = () => {
     if (statusChangeSubmitting) return;
     setStatusChangeAct(null);
+    setStatusChangeReason('');
     setStatusChangeError(null);
   };
 
@@ -521,8 +556,9 @@ export function Acts({
     try {
       setStatusChangeSubmitting(true);
       setStatusChangeError(null);
-      await apiService.updateActWorkflowStatus(statusChangeAct.id, statusChangeValue);
+      await apiService.updateActWorkflowStatus(statusChangeAct.id, statusChangeValue, statusChangeReason.trim() || null);
       setStatusChangeAct(null);
+      setStatusChangeReason('');
       await refresh();
       toast.success('Статус документа обновлен.');
     } catch (err) {
@@ -797,7 +833,7 @@ export function Acts({
               onChange={(event) => setWorkflowStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ActWorkflowStatus))}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
               <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
-              {(['NotSigned', 'OnSigning', 'Signed', 'Draft', 'Cancelled'] as ActWorkflowStatus[]).map((status) => (
+              {(['Draft', 'NotSigned', 'OnApproval', 'Approved', 'ApprovalRejected', 'NeedsCorrection', 'OnSigning', 'Signed', 'Cancelled'] as ActWorkflowStatus[]).map((status) => (
                 <option key={status} value={status}>
                   {workflowStatusLabels[status]}
                 </option>
@@ -1018,6 +1054,14 @@ export function Acts({
         options={workflowStatusOptions}
         onChange={(value) => {
           setStatusChangeValue(value);
+          if (statusChangeError) {
+            setStatusChangeError(null);
+          }
+        }}
+        reason={statusChangeReason}
+        reasonRequired={Boolean(user?.requiresFinancialActionReason)}
+        onReasonChange={(value) => {
+          setStatusChangeReason(value);
           if (statusChangeError) {
             setStatusChangeError(null);
           }

@@ -1705,16 +1705,20 @@ public class ReportsController : ControllerBase
     private static int InvoiceWorkflowStatusSortOrder(string status)
         => status switch
         {
-            InvoiceWorkflowStatus.Overdue => 0,
-            InvoiceWorkflowStatus.RequiresClientSignature => 1,
-            InvoiceWorkflowStatus.OnSigning => 2,
-            InvoiceWorkflowStatus.NotSigned => 3,
-            InvoiceWorkflowStatus.SignedByClient => 4,
-            InvoiceWorkflowStatus.PartiallyPaid => 5,
-            InvoiceWorkflowStatus.Draft => 6,
-            InvoiceWorkflowStatus.Paid => 7,
-            InvoiceWorkflowStatus.Cancelled => 8,
-            _ => 9,
+            InvoiceWorkflowStatus.RequiresClientSignature => 0,
+            InvoiceWorkflowStatus.OnApproval => 1,
+            InvoiceWorkflowStatus.ApprovalRejected => 2,
+            InvoiceWorkflowStatus.NeedsCorrection => 3,
+            InvoiceWorkflowStatus.OnSigning => 4,
+            InvoiceWorkflowStatus.NotSigned => 5,
+            InvoiceWorkflowStatus.Approved => 6,
+            InvoiceWorkflowStatus.SignedByClient => 7,
+            InvoiceWorkflowStatus.Draft => 8,
+            InvoiceWorkflowStatus.Overdue => 9,
+            InvoiceWorkflowStatus.PartiallyPaid => 10,
+            InvoiceWorkflowStatus.Paid => 11,
+            InvoiceWorkflowStatus.Cancelled => 12,
+            _ => 99,
         };
 
     private static string FormatInvoiceWorkflowStatusLabel(string status)
@@ -1723,6 +1727,10 @@ public class ReportsController : ControllerBase
             InvoiceWorkflowStatus.Draft => "Черновик",
             InvoiceWorkflowStatus.NotSigned => "Не подписан",
             InvoiceWorkflowStatus.RequiresClientSignature => "Требуется подпись клиента",
+            InvoiceWorkflowStatus.OnApproval => "На согласовании",
+            InvoiceWorkflowStatus.Approved => "Согласован",
+            InvoiceWorkflowStatus.ApprovalRejected => "Отказ в согласовании",
+            InvoiceWorkflowStatus.NeedsCorrection => "Требует исправления",
             InvoiceWorkflowStatus.OnSigning => "На подписании",
             InvoiceWorkflowStatus.SignedByClient => "Подписан клиентом",
             InvoiceWorkflowStatus.Paid => "Оплачен",

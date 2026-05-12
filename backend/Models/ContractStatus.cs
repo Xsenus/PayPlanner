@@ -4,6 +4,10 @@ public static class ContractStatus
 {
     public const string Draft = "Draft";
     public const string NotSigned = "NotSigned";
+    public const string OnApproval = "OnApproval";
+    public const string Approved = "Approved";
+    public const string ApprovalRejected = "ApprovalRejected";
+    public const string NeedsCorrection = "NeedsCorrection";
     public const string OnSigning = "OnSigning";
     public const string Concluded = "Concluded";
     public const string Terminated = "Terminated";
@@ -13,6 +17,10 @@ public static class ContractStatus
     {
         Draft,
         NotSigned,
+        OnApproval,
+        Approved,
+        ApprovalRejected,
+        NeedsCorrection,
         OnSigning,
         Concluded,
         Terminated,

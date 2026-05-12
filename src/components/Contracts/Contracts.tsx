@@ -95,6 +95,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [statusChangeContract, setStatusChangeContract] = useState<Contract | null>(null);
   const [statusChangeValue, setStatusChangeValue] = useState<ContractStatus>('Draft');
+  const [statusChangeReason, setStatusChangeReason] = useState('');
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
   const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
 
@@ -182,6 +183,10 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const contractStatusLabels: Record<ContractStatus, string> = {
     Draft: 'Черновик',
     NotSigned: 'Не подписан',
+    OnApproval: 'На согласовании',
+    Approved: 'Согласован',
+    ApprovalRejected: 'Отказ в согласовании',
+    NeedsCorrection: 'Требует исправления',
     OnSigning: 'На подписании',
     Concluded: 'Подписан',
     Terminated: 'Расторгнут',
@@ -191,6 +196,10 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const contractStatusClasses: Record<ContractStatus, string> = {
     Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
     NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+    OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
+    Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
+    NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
     OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
     Concluded: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Terminated: 'bg-orange-100 text-orange-700 border border-orange-200',
@@ -208,6 +217,30 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
       label: contractStatusLabels.NotSigned,
       description: 'Договор будет отмечен как неподписанный.',
       className: contractStatusClasses.NotSigned,
+    },
+    {
+      value: 'OnApproval',
+      label: contractStatusLabels.OnApproval,
+      description: 'Договор будет отправлен на внутреннее согласование.',
+      className: contractStatusClasses.OnApproval,
+    },
+    {
+      value: 'Approved',
+      label: contractStatusLabels.Approved,
+      description: 'Договор будет отмечен как согласованный.',
+      className: contractStatusClasses.Approved,
+    },
+    {
+      value: 'ApprovalRejected',
+      label: contractStatusLabels.ApprovalRejected,
+      description: 'В журнал попадет отказ в согласовании договора.',
+      className: contractStatusClasses.ApprovalRejected,
+    },
+    {
+      value: 'NeedsCorrection',
+      label: contractStatusLabels.NeedsCorrection,
+      description: 'Договор будет возвращен на исправление.',
+      className: contractStatusClasses.NeedsCorrection,
     },
     {
       value: 'OnSigning',
@@ -287,12 +320,14 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     if (!permissions.canEdit) return;
     setStatusChangeContract(contract);
     setStatusChangeValue(contract.status ?? 'Draft');
+    setStatusChangeReason('');
     setStatusChangeError(null);
   }, [permissions.canEdit]);
 
   const closeContractStatusChange = useCallback(() => {
     if (statusChangeSubmitting) return;
     setStatusChangeContract(null);
+    setStatusChangeReason('');
     setStatusChangeError(null);
   }, [statusChangeSubmitting]);
 
@@ -302,8 +337,9 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     try {
       setStatusChangeSubmitting(true);
       setStatusChangeError(null);
-      await apiService.updateContractStatus(statusChangeContract.id, statusChangeValue);
+      await apiService.updateContractStatus(statusChangeContract.id, statusChangeValue, statusChangeReason.trim() || null);
       setStatusChangeContract(null);
+      setStatusChangeReason('');
       await refresh();
       toast.success('Статус договора обновлен.');
     } catch (err) {
@@ -311,7 +347,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     } finally {
       setStatusChangeSubmitting(false);
     }
-  }, [permissions.canEdit, refresh, statusChangeContract, statusChangeValue, toast]);
+  }, [permissions.canEdit, refresh, statusChangeContract, statusChangeReason, statusChangeValue, toast]);
 
   const renderSortIcon = (sortKey?: ContractsSortKey) => {
     if (!sortKey || sortState.key !== sortKey) {
@@ -539,7 +575,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
               >
                 <option value="all">Все статусы</option>
-                {(['Terminated', 'Concluded', 'NotSigned', 'Draft', 'OnSigning', 'Cancelled'] as ContractStatus[]).map((status) => (
+                {(['Draft', 'NotSigned', 'OnApproval', 'Approved', 'ApprovalRejected', 'NeedsCorrection', 'OnSigning', 'Concluded', 'Terminated', 'Cancelled'] as ContractStatus[]).map((status) => (
                   <option key={status} value={status}>
                     {contractStatusLabels[status]}
                   </option>
@@ -794,6 +830,14 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
           options={contractStatusOptions}
           onChange={(value) => {
             setStatusChangeValue(value);
+            if (statusChangeError) {
+              setStatusChangeError(null);
+            }
+          }}
+          reason={statusChangeReason}
+          reasonRequired={Boolean(user?.requiresFinancialActionReason)}
+          onReasonChange={(value) => {
+            setStatusChangeReason(value);
             if (statusChangeError) {
               setStatusChangeError(null);
             }

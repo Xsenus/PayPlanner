@@ -98,6 +98,7 @@ export interface User {
   messenger?: string | null;
   viber?: string | null;
   isEmployee: boolean;
+  requiresFinancialActionReason?: boolean;
   employmentStartDate?: string | null;
   employmentEndDate?: string | null;
   role: Role;
@@ -211,6 +212,7 @@ export interface CreateUserDto {
   roleId: number;
   isActive: boolean;
   isEmployee?: boolean;
+  requiresFinancialActionReason?: boolean;
   companyIds?: number[];
 }
 
@@ -229,6 +231,7 @@ export interface UpdateUserDto {
   messenger?: string;
   viber?: string;
   isEmployee?: boolean;
+  requiresFinancialActionReason?: boolean;
   employmentStartDate?: string;
   employmentEndDate?: string;
   roleId?: number;

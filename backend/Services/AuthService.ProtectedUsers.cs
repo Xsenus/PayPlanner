@@ -68,6 +68,7 @@ public partial class AuthService
         if ((request.RoleId.HasValue && request.RoleId.Value != user.RoleId)
             || (request.IsActive.HasValue && request.IsActive.Value != user.IsActive)
             || (request.IsEmployee.HasValue && request.IsEmployee.Value != user.IsEmployee)
+            || (request.RequiresFinancialActionReason.HasValue && request.RequiresFinancialActionReason.Value != user.RequiresFinancialActionReason)
             || (request.EmploymentStartDate.HasValue && request.EmploymentStartDate != user.EmploymentStartDate)
             || (request.EmploymentEndDate.HasValue && request.EmploymentEndDate != user.EmploymentEndDate)
             || (request.CompanyIds is not null

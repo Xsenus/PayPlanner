@@ -24,6 +24,7 @@ import type {
 } from '../../types';
 import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useAuth } from '../../contexts/AuthContext';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -639,20 +640,13 @@ function invoiceStatusLabel(status: PaymentStatus): string {
   }
 }
 
-function deriveInvoiceWorkflowStatus(status: PaymentStatus, amount: number): InvoiceWorkflowStatus {
+function deriveInvoiceWorkflowStatus(status: PaymentStatus, amount: number, fallback: InvoiceWorkflowStatus): InvoiceWorkflowStatus {
   void amount;
   switch (status) {
-    case 'Completed':
-      return 'Paid';
-    case 'Processing':
-      return 'PartiallyPaid';
-    case 'Overdue':
-      return 'Overdue';
     case 'Cancelled':
       return 'Cancelled';
-    case 'Pending':
     default:
-      return 'Draft';
+      return fallback;
   }
 }
 
@@ -826,6 +820,7 @@ export function InvoiceModal({
   onClientCaseCreated,
   onCreateActPage,
 }: InvoiceModalProps) {
+  const { user: currentUser } = useAuth();
   const { t } = useTranslation();
   const { confirm } = useDialog();
   const toast = useToast();
@@ -2327,6 +2322,26 @@ export function InvoiceModal({
     if (!installmentPlan) return false;
     return Math.abs(parseMoneyInput(form.amount) - installmentPlan.total) > 0.009;
   }, [form.amount, installmentPlan]);
+  const requiresFinancialActionReason = Boolean(currentUser?.requiresFinancialActionReason);
+
+  const requestFinancialActionReason = useCallback((actionName: string): string | null | undefined => {
+    if (!requiresFinancialActionReason) {
+      return null;
+    }
+
+    const reason = window.prompt(`Укажите причину ${actionName}. Она будет сохранена в журнале.`);
+    if (reason === null) {
+      return undefined;
+    }
+
+    const normalizedReason = reason.trim();
+    if (!normalizedReason) {
+      setLocalError('Причина обязательна для записи в журнал.');
+      return undefined;
+    }
+
+    return normalizedReason;
+  }, [requiresFinancialActionReason]);
 
   type BuildInvoicePayloadOptions = {
     statusOverride?: PaymentStatus;
@@ -2357,7 +2372,7 @@ export function InvoiceModal({
       amount: safeAmount,
       type: form.type,
       status: statusOverride ?? form.status,
-      workflowStatus: statusOverride ? deriveInvoiceWorkflowStatus(statusOverride, safeAmount) : form.workflowStatus,
+      workflowStatus: statusOverride ? deriveInvoiceWorkflowStatus(statusOverride, safeAmount, form.workflowStatus) : form.workflowStatus,
       clientId: form.clientId ? Number(form.clientId) : null,
       legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : null,
       expenseClientId: form.type === 'Expense' && form.expenseClientId ? Number(form.expenseClientId) : null,
@@ -2592,6 +2607,21 @@ export function InvoiceModal({
 
     const payload = buildInvoicePayload({ dueDateOverride: dueDateResolution.dueDateOverride });
     payload.number = number;
+
+    if (
+      mode === 'edit'
+      && invoice
+      && (
+        payload.status !== invoice.status
+        || payload.workflowStatus !== (invoice.workflowStatus ?? form.workflowStatus)
+      )
+    ) {
+      const reason = requestFinancialActionReason('изменения статуса счета');
+      if (reason === undefined) {
+        return;
+      }
+      payload.actionReason = reason;
+    }
 
     try {
       await onSubmit(payload);
@@ -2972,11 +3002,20 @@ export function InvoiceModal({
           throw new Error('Сначала сохраните счёт, затем можно менять статус подписания.');
         }
 
-        const updated = action === 'sendToSigning'
-          ? await apiService.sendInvoiceToSigning(invoice.id)
-          : action === 'markSigned'
-            ? await apiService.markInvoiceSigned(invoice.id)
-            : await apiService.markInvoiceNotSigned(invoice.id);
+        const workflowStatus: InvoiceWorkflowStatus =
+          action === 'sendToSigning'
+            ? 'OnSigning'
+            : action === 'markSigned'
+              ? 'SignedByClient'
+              : 'NotSigned';
+        const reason = requestFinancialActionReason('смены статуса документа');
+        if (reason === undefined) return;
+
+        const updated = await apiService.updateInvoiceWorkflowStatus(
+          invoice.id,
+          workflowStatus,
+          reason,
+        );
 
         setForm((prev) => ({
           ...prev,
@@ -3008,6 +3047,11 @@ export function InvoiceModal({
       if (action === 'paid' && invoice?.id) {
         const nextStatus: PaymentStatus = 'Completed';
         const payload = buildInvoicePayload({ statusOverride: nextStatus });
+        const reason = requestFinancialActionReason('изменения статуса оплаты');
+        if (reason === undefined) {
+          return;
+        }
+        payload.actionReason = reason;
         await apiService.updateInvoice(invoice.id, payload);
         setForm((prev) => ({ ...prev, status: nextStatus }));
         setDisplayPayments((prev) => prev.map((payment) => (
@@ -3043,7 +3087,7 @@ export function InvoiceModal({
   const printableAmount = formatCurrencySmart(amountValue).full;
   const statusMeta: Record<PaymentStatus, { label: string; className: string }> = {
     Pending: { label: 'Создан', className: 'bg-slate-100 text-slate-700 border border-slate-200' },
-    Processing: { label: 'В работе', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
+    Processing: { label: 'Частично оплачен', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
     Completed: { label: 'Оплачен', className: 'bg-emerald-100 text-emerald-700 border border-emerald-200' },
     Cancelled: { label: 'Отменен', className: 'bg-rose-100 text-rose-700 border border-rose-200' },
     Overdue: { label: 'Просрочен', className: 'bg-amber-100 text-amber-700 border border-amber-200' },
@@ -3057,7 +3101,7 @@ export function InvoiceModal({
   };
   const relatedPaymentStatusLabel: Record<PaymentStatus, string> = {
     Pending: t('pending') ?? 'Ожидается',
-    Processing: t('processingStatus') ?? 'В обработке',
+    Processing: t('processingStatus') ?? 'Частично оплачено',
     Completed: t('completedStatus') ?? 'Оплачен',
     Cancelled: t('cancelledStatus') ?? 'Отменён',
     Overdue: t('overdue') ?? 'Просрочен',
@@ -3996,7 +4040,7 @@ export function InvoiceModal({
                                   <option value="Pending">{t('invoicePendingBadge') ?? t('pending') ?? 'Ожидается'}</option>
                                   <option value="Completed">{t('invoicePaidBadge') ?? t('completedStatus') ?? 'Оплачен'}</option>
                                   <option value="Overdue">{t('invoiceOverdueBadge') ?? t('overdue') ?? 'Просрочен'}</option>
-                                  <option value="Processing">{t('processingStatus') ?? 'В обработке'}</option>
+                                  <option value="Processing">Частично оплачен</option>
                                   <option value="Cancelled">{t('cancelledStatus') ?? 'Отменён'}</option>
                                 </select>
                               </label>
@@ -4011,12 +4055,13 @@ export function InvoiceModal({
                                   <option value="Draft">Черновик</option>
                                   <option value="NotSigned">Не подписан</option>
                                   <option value="RequiresClientSignature">Требуется подпись клиента</option>
+                                  <option value="OnApproval">На согласовании</option>
+                                  <option value="Approved">Согласован</option>
+                                  <option value="ApprovalRejected">Отказ в согласовании</option>
+                                  <option value="NeedsCorrection">Требует исправления</option>
                                   <option value="OnSigning">На подписании</option>
                                   <option value="SignedByClient">Подписан клиентом</option>
-                                  <option value="Paid">Оплачен</option>
-                                  <option value="PartiallyPaid">Частично оплачен</option>
-                                  <option value="Overdue">Просрочен</option>
-                                  <option value="Cancelled">Отменен</option>
+                                  <option value="Cancelled">Аннулирован</option>
                                 </select>
                               </label>
 

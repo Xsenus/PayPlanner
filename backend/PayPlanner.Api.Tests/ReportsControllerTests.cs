@@ -775,14 +775,6 @@ public class ReportsControllerTests
             report.Statuses,
             item =>
             {
-                Assert.Equal(InvoiceWorkflowStatus.Overdue, item.Status);
-                Assert.Equal("Просрочен", item.StatusLabel);
-                Assert.Equal(5_000m, item.TotalAmount);
-                Assert.Equal(4_000m, item.OutstandingAmount);
-                Assert.Equal(17.9m, item.Share);
-            },
-            item =>
-            {
                 Assert.Equal(InvoiceWorkflowStatus.RequiresClientSignature, item.Status);
                 Assert.Equal("Требуется подпись клиента", item.StatusLabel);
                 Assert.Equal(0m, item.TotalAmount);
@@ -806,18 +798,26 @@ public class ReportsControllerTests
             },
             item =>
             {
+                Assert.Equal(InvoiceWorkflowStatus.Draft, item.Status);
+                Assert.Equal("Черновик", item.StatusLabel);
+                Assert.Equal(1_000m, item.TotalAmount);
+                Assert.Equal(3.6m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(InvoiceWorkflowStatus.Overdue, item.Status);
+                Assert.Equal("Просрочен", item.StatusLabel);
+                Assert.Equal(5_000m, item.TotalAmount);
+                Assert.Equal(4_000m, item.OutstandingAmount);
+                Assert.Equal(17.9m, item.Share);
+            },
+            item =>
+            {
                 Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, item.Status);
                 Assert.Equal("Частично оплачен", item.StatusLabel);
                 Assert.Equal(4_000m, item.TotalAmount);
                 Assert.Equal(2_500m, item.OutstandingAmount);
                 Assert.Equal(14.3m, item.Share);
-            },
-            item =>
-            {
-                Assert.Equal(InvoiceWorkflowStatus.Draft, item.Status);
-                Assert.Equal("Черновик", item.StatusLabel);
-                Assert.Equal(1_000m, item.TotalAmount);
-                Assert.Equal(3.6m, item.Share);
             },
             item =>
             {

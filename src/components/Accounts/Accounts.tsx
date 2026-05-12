@@ -86,7 +86,16 @@ interface AccountsProps {
 
 type FilterType = PaymentKind | 'All';
 type AccountStatus = 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
-type InvoiceSigningStatus = 'notSigned' | 'requiresClientSignature' | 'onSigning' | 'signed' | 'cancelled';
+type InvoiceSigningStatus =
+  | 'notSigned'
+  | 'requiresClientSignature'
+  | 'onApproval'
+  | 'approved'
+  | 'approvalRejected'
+  | 'needsCorrection'
+  | 'onSigning'
+  | 'signed'
+  | 'cancelled';
 type ClientRoleFilter = ClientRole | 'all';
 type ColumnKey =
   | 'date'
@@ -340,6 +349,10 @@ function deriveInvoiceSigningStatus(invoice?: Invoice | null): InvoiceSigningSta
   const workflowStatus = invoice.workflowStatus;
   if (invoice.cancelledAt || workflowStatus === 'Cancelled') return 'cancelled';
   if (workflowStatus === 'RequiresClientSignature') return 'requiresClientSignature';
+  if (workflowStatus === 'OnApproval') return 'onApproval';
+  if (workflowStatus === 'Approved') return 'approved';
+  if (workflowStatus === 'ApprovalRejected') return 'approvalRejected';
+  if (workflowStatus === 'NeedsCorrection') return 'needsCorrection';
   if (workflowStatus === 'NotSigned') return 'notSigned';
   if (workflowStatus === 'SignedByClient') return 'signed';
   if (workflowStatus === 'OnSigning') return 'onSigning';
@@ -354,6 +367,10 @@ function resolveEditableInvoiceWorkflowStatus(invoice?: Invoice | null): Invoice
     workflowStatus === 'Draft' ||
     workflowStatus === 'NotSigned' ||
     workflowStatus === 'RequiresClientSignature' ||
+    workflowStatus === 'OnApproval' ||
+    workflowStatus === 'Approved' ||
+    workflowStatus === 'ApprovalRejected' ||
+    workflowStatus === 'NeedsCorrection' ||
     workflowStatus === 'OnSigning' ||
     workflowStatus === 'SignedByClient' ||
     workflowStatus === 'Cancelled'
@@ -514,6 +531,7 @@ export function Accounts({
   const [nextResponsibleId, setNextResponsibleId] = useState('');
   const [statusChangeInvoice, setStatusChangeInvoice] = useState<Invoice | null>(null);
   const [statusChangeValue, setStatusChangeValue] = useState<InvoiceWorkflowStatus>('NotSigned');
+  const [statusChangeReason, setStatusChangeReason] = useState('');
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
   const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
   const baseTypeFilter = useMemo<FilterType>(() => (lockType ? (defaultType ?? 'All') : 'All'), [defaultType, lockType]);
@@ -661,7 +679,7 @@ export function Accounts({
   const statusLabels: Partial<Record<AccountStatus, string>> = {
     created: 'Создан',
     paid: 'Оплачен',
-    partial: 'Оплачен частично',
+    partial: 'Частично оплачен',
     cancelled: t('cancelledStatus') ?? 'Отменён',
   };
 
@@ -700,6 +718,10 @@ export function Accounts({
   const signingStatusLabels: Record<InvoiceSigningStatus, string> = {
     notSigned: 'Не подписан',
     requiresClientSignature: 'Требуется подпись клиента',
+    onApproval: 'На согласовании',
+    approved: 'Согласован',
+    approvalRejected: 'Отказ в согласовании',
+    needsCorrection: 'Требует исправления',
     onSigning: 'На подписании',
     signed: 'Подписан клиентом',
     cancelled: 'Аннулирован',
@@ -707,6 +729,10 @@ export function Accounts({
   const signingStatusClasses: Record<InvoiceSigningStatus, string> = {
     notSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
     requiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
+    onApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
+    approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    approvalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
+    needsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
     onSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
     signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
@@ -715,6 +741,10 @@ export function Accounts({
     Draft: 'Черновик',
     NotSigned: 'Не подписан',
     RequiresClientSignature: 'Требуется подпись клиента',
+    OnApproval: 'На согласовании',
+    Approved: 'Согласован',
+    ApprovalRejected: 'Отказ в согласовании',
+    NeedsCorrection: 'Требует исправления',
     OnSigning: 'На подписании',
     SignedByClient: 'Подписан клиентом',
     Paid: 'Оплачен',
@@ -726,6 +756,10 @@ export function Accounts({
     Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
     NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
     RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
+    OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
+    Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
+    NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
     OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
     SignedByClient: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Paid: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
@@ -751,6 +785,30 @@ export function Accounts({
       label: invoiceWorkflowStatusLabels.RequiresClientSignature,
       description: 'Документ требует подпись клиента; статус оплаты счета не меняется.',
       className: invoiceWorkflowStatusClasses.RequiresClientSignature,
+    },
+    {
+      value: 'OnApproval',
+      label: invoiceWorkflowStatusLabels.OnApproval,
+      description: 'Документ будет отправлен на внутреннее согласование.',
+      className: invoiceWorkflowStatusClasses.OnApproval,
+    },
+    {
+      value: 'Approved',
+      label: invoiceWorkflowStatusLabels.Approved,
+      description: 'Документ будет отмечен как согласованный.',
+      className: invoiceWorkflowStatusClasses.Approved,
+    },
+    {
+      value: 'ApprovalRejected',
+      label: invoiceWorkflowStatusLabels.ApprovalRejected,
+      description: 'В журнал попадет отказ в согласовании документа.',
+      className: invoiceWorkflowStatusClasses.ApprovalRejected,
+    },
+    {
+      value: 'NeedsCorrection',
+      label: invoiceWorkflowStatusLabels.NeedsCorrection,
+      description: 'Документ будет возвращен на исправление.',
+      className: invoiceWorkflowStatusClasses.NeedsCorrection,
     },
     {
       value: 'OnSigning',
@@ -1294,12 +1352,14 @@ export function Accounts({
     if (!canEdit) return;
     setStatusChangeInvoice(invoice);
     setStatusChangeValue(resolveEditableInvoiceWorkflowStatus(invoice));
+    setStatusChangeReason('');
     setStatusChangeError(null);
   }, [canEdit]);
 
   const closeInvoiceStatusChange = useCallback(() => {
     if (statusChangeSubmitting) return;
     setStatusChangeInvoice(null);
+    setStatusChangeReason('');
     setStatusChangeError(null);
   }, [statusChangeSubmitting]);
 
@@ -1309,8 +1369,9 @@ export function Accounts({
     try {
       setStatusChangeSubmitting(true);
       setStatusChangeError(null);
-      await apiService.updateInvoiceWorkflowStatus(statusChangeInvoice.id, statusChangeValue);
+      await apiService.updateInvoiceWorkflowStatus(statusChangeInvoice.id, statusChangeValue, statusChangeReason.trim() || null);
       setStatusChangeInvoice(null);
+      setStatusChangeReason('');
       await refreshAccounts();
       toast.success('Статус документа обновлен.');
     } catch (err) {
@@ -1318,7 +1379,7 @@ export function Accounts({
     } finally {
       setStatusChangeSubmitting(false);
     }
-  }, [canEdit, refreshAccounts, statusChangeInvoice, statusChangeValue, toast]);
+  }, [canEdit, refreshAccounts, statusChangeInvoice, statusChangeReason, statusChangeValue, toast]);
 
   const closeTableMenu = useCallback(() => {
     setTableMenuPosition(null);
@@ -3204,6 +3265,14 @@ export function Accounts({
           options={invoiceWorkflowStatusOptions}
           onChange={(value) => {
             setStatusChangeValue(value);
+            if (statusChangeError) {
+              setStatusChangeError(null);
+            }
+          }}
+          reason={statusChangeReason}
+          reasonRequired={Boolean(user?.requiresFinancialActionReason)}
+          onReasonChange={(value) => {
+            setStatusChangeReason(value);
             if (statusChangeError) {
               setStatusChangeError(null);
             }

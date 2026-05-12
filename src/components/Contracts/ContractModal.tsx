@@ -409,10 +409,14 @@ export function ContractModal({
               >
                 <option value="Draft">Черновик</option>
                 <option value="NotSigned">Не подписан</option>
+                <option value="OnApproval">На согласовании</option>
+                <option value="Approved">Согласован</option>
+                <option value="ApprovalRejected">Отказ в согласовании</option>
+                <option value="NeedsCorrection">Требует исправления</option>
                 <option value="OnSigning">На подписании</option>
                 <option value="Concluded">Подписан</option>
                 <option value="Terminated">Расторгнут</option>
-                <option value="Cancelled">Отменен</option>
+                <option value="Cancelled">Аннулирован</option>
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">

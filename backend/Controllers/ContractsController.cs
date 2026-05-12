@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -128,6 +129,19 @@ public class ContractsController : ControllerBase
         var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (contract is null) return NotFound();
 
+        var reason = Normalize(request.Reason);
+        var statusChanged = !string.Equals(contract.Status, status, StringComparison.OrdinalIgnoreCase);
+        if (statusChanged)
+        {
+            var reasonError = await ValidateFinancialActionReasonAsync(reason, "изменения статуса договора", ct);
+            if (reasonError is not null)
+            {
+                return reasonError;
+            }
+
+            ApplyAuditReason(reason);
+        }
+
         var now = DateTime.UtcNow;
         contract.Status = status;
         contract.UpdatedAt = now;
@@ -136,6 +150,10 @@ public class ContractsController : ControllerBase
         {
             case ContractStatus.Draft:
             case ContractStatus.NotSigned:
+            case ContractStatus.OnApproval:
+            case ContractStatus.Approved:
+            case ContractStatus.ApprovalRejected:
+            case ContractStatus.NeedsCorrection:
                 contract.SentForSigningAt = null;
                 contract.ConcludedAt = null;
                 contract.TerminationDate = null;
@@ -173,7 +191,7 @@ public class ContractsController : ControllerBase
                 break;
             case ContractStatus.Cancelled:
                 contract.CancelledAt ??= now.Date;
-                contract.CancelledReason ??= "Быстрая смена статуса";
+                contract.CancelledReason ??= reason ?? "Быстрая смена статуса";
                 contract.TerminationDate = null;
                 contract.TerminationReason = null;
                 contract.TerminationTerms = null;
@@ -195,6 +213,12 @@ public class ContractsController : ControllerBase
 
         var terms = Normalize(request.Terms);
         if (terms is null) return ValidationError(nameof(request.Terms), "Условия расторжения обязательны.");
+        var terminationReason = Normalize(request.Reason);
+        var reasonError = await ValidateFinancialActionReasonAsync(terminationReason, "расторжения договора", ct);
+        if (reasonError is not null)
+        {
+            return reasonError;
+        }
 
         var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (contract is null) return NotFound();
@@ -205,10 +229,11 @@ public class ContractsController : ControllerBase
 
         contract.Status = ContractStatus.Terminated;
         contract.TerminationDate = request.TerminationDate.Date;
-        contract.TerminationReason = Normalize(request.Reason);
+        contract.TerminationReason = terminationReason;
         contract.TerminationTerms = terms;
         contract.TerminationFinancialTerms = Normalize(request.FinancialTerms);
         contract.UpdatedAt = DateTime.UtcNow;
+        ApplyAuditReason(terminationReason);
 
         await _db.SaveChangesAsync(ct);
 
@@ -222,11 +247,16 @@ public class ContractsController : ControllerBase
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
         var reason = Normalize(request.Reason);
         if (reason is null) return ValidationError(nameof(request.Reason), "Причина аннулирования обязательна.");
+        ApplyAuditReason(reason);
 
         var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (contract is null) return NotFound();
         if (!string.Equals(contract.Status, ContractStatus.Draft, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.NotSigned, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(contract.Status, ContractStatus.OnApproval, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(contract.Status, ContractStatus.Approved, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(contract.Status, ContractStatus.ApprovalRejected, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(contract.Status, ContractStatus.NeedsCorrection, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.OnSigning, StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest("Аннулирование доступно только для черновиков и договоров на подписании.");
@@ -1062,4 +1092,24 @@ public class ContractsController : ControllerBase
 
     private static List<int> NormalizeIds(IEnumerable<int>? ids) => ids?.Where(x => x > 0).Distinct().ToList() ?? [];
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<ActionResult?> ValidateFinancialActionReasonAsync(string? reason, string actionName, CancellationToken ct)
+    {
+        if (!await User.RequiresFinancialActionReasonAsync(_db, ct))
+        {
+            return null;
+        }
+
+        return string.IsNullOrWhiteSpace(reason)
+            ? BadRequest($"Укажите причину {actionName}. Она будет сохранена в журнале.")
+            : null;
+    }
+
+    private void ApplyAuditReason(string? reason)
+    {
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            _db.SetAuditReason(reason);
+        }
+    }
 }

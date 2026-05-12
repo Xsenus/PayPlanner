@@ -357,7 +357,7 @@ public class InvoicePaymentConsistencyTests
         Assert.Equal(PaymentStatus.Completed, item.Current.Status);
         Assert.Equal(15_000m, item.Suggested.PaidAmount);
         Assert.Equal(PaymentStatus.Processing, item.Suggested.Status);
-        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, item.Suggested.WorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, item.Suggested.WorkflowStatus);
 
         var storedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == aggregate.InvoicePaymentId);
         Assert.Equal(30_000m, storedParent.PaidAmount);
@@ -392,7 +392,7 @@ public class InvoicePaymentConsistencyTests
 
         Assert.Equal(15_000m, storedParent.PaidAmount);
         Assert.Equal(PaymentStatus.Processing, storedParent.Status);
-        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, storedParent.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, storedParent.InvoiceWorkflowStatus);
         Assert.False(storedParent.IsPaid);
         Assert.Equal(new DateTime(2026, 5, 10), storedParent.Date);
         Assert.Equal(new DateTime(2026, 5, 10), storedParent.PlannedDate);
@@ -420,7 +420,7 @@ public class InvoicePaymentConsistencyTests
         var item = Assert.Single(response.Items);
 
         Assert.Equal(PaymentStatus.Completed, item.Suggested.Status);
-        Assert.Equal(InvoiceWorkflowStatus.Paid, item.Suggested.WorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, item.Suggested.WorkflowStatus);
         Assert.True(item.Suggested.IsPaid);
         Assert.Equal(10_000m, item.Suggested.PaidAmount);
         Assert.Equal(new DateTime(2026, 6, 10), item.Suggested.Date);
@@ -536,7 +536,7 @@ public class InvoicePaymentConsistencyTests
 
         Assert.Equal(15_000m, storedParent.PaidAmount);
         Assert.Equal(PaymentStatus.Processing, storedParent.Status);
-        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, storedParent.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, storedParent.InvoiceWorkflowStatus);
         Assert.False(storedParent.IsPaid);
         Assert.Equal(new DateTime(2026, 5, 10), storedParent.Date);
         Assert.Equal(new DateTime(2026, 5, 10), storedParent.PlannedDate);

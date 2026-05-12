@@ -4,6 +4,10 @@ export type InvoiceWorkflowStatus =
   | 'Draft'
   | 'NotSigned'
   | 'RequiresClientSignature'
+  | 'OnApproval'
+  | 'Approved'
+  | 'ApprovalRejected'
+  | 'NeedsCorrection'
   | 'OnSigning'
   | 'SignedByClient'
   | 'Paid'
@@ -1535,7 +1539,16 @@ export interface PaymentStatusEntity {
 }
 
 export type ActStatus = 'Created' | 'Transferred' | 'Signed' | 'Terminated';
-export type ActWorkflowStatus = 'Draft' | 'NotSigned' | 'OnSigning' | 'Signed' | 'Cancelled';
+export type ActWorkflowStatus =
+  | 'Draft'
+  | 'NotSigned'
+  | 'OnApproval'
+  | 'Approved'
+  | 'ApprovalRejected'
+  | 'NeedsCorrection'
+  | 'OnSigning'
+  | 'Signed'
+  | 'Cancelled';
 export type ActCreationMode = 'Manual' | 'Full' | 'Partial';
 export type DocumentKind = 'Invoice' | 'Accrual' | 'Payment';
 
@@ -1649,7 +1662,17 @@ export interface ContractLegalEntity {
 }
 
 export type ContractBillingMode = 'Fixed' | 'Actual';
-export type ContractStatus = 'Draft' | 'NotSigned' | 'OnSigning' | 'Concluded' | 'Terminated' | 'Cancelled';
+export type ContractStatus =
+  | 'Draft'
+  | 'NotSigned'
+  | 'OnApproval'
+  | 'Approved'
+  | 'ApprovalRejected'
+  | 'NeedsCorrection'
+  | 'OnSigning'
+  | 'Concluded'
+  | 'Terminated'
+  | 'Cancelled';
 
 export interface Contract {
   id: number;
@@ -1970,6 +1993,7 @@ export interface InvoiceInput {
   responsibleIds?: number[];
   replaceInstallmentPlan?: boolean;
   installmentPlan?: InstallmentPlanInput | null;
+  actionReason?: string | null;
 }
 
 export type ClientRole = 'counterparty' | 'expenseClient';

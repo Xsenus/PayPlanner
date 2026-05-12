@@ -308,6 +308,7 @@ export function Payments({
   const [remainderCandidateDates, setRemainderCandidateDates] = useState<Record<number, string>>({});
   const [statusChangePayment, setStatusChangePayment] = useState<Payment | null>(null);
   const [statusChangeValue, setStatusChangeValue] = useState<PaymentStatus>('Pending');
+  const [statusChangeReason, setStatusChangeReason] = useState('');
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
   const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
 
@@ -534,10 +535,10 @@ export function Payments({
 
   const statusLabels = useMemo(
     () => ({
-      Completed: t('statusCompleted') ?? 'Выполнено',
+      Completed: 'Оплачено',
       Pending: t('pending') ?? 'Ожидается',
       Overdue: t('overdue') ?? 'Просрочено',
-      Processing: t('processingStatus') ?? 'В обработке',
+      Processing: 'Частично оплачено',
       Cancelled: t('cancelledStatus') ?? 'Отменено',
     }),
     [t],
@@ -565,7 +566,7 @@ export function Payments({
             : status === 'Overdue'
               ? 'Платеж будет отмечен как просроченный.'
               : status === 'Processing'
-                ? 'Платеж будет отмечен как находящийся в обработке.'
+                ? 'Платеж будет отмечен как частично оплаченный.'
                 : 'Платеж будет отмечен как ожидающий оплаты.',
     })),
     [availableStatuses, statusLabels],
@@ -943,12 +944,14 @@ export function Payments({
     }
     setStatusChangePayment(payment);
     setStatusChangeValue(payment.status);
+    setStatusChangeReason('');
     setStatusChangeError(null);
   }, [paymentsPermissions.canEdit, showPermissionNotice, t]);
 
   const closePaymentStatusChange = useCallback(() => {
     if (statusChangeSubmitting) return;
     setStatusChangePayment(null);
+    setStatusChangeReason('');
     setStatusChangeError(null);
   }, [statusChangeSubmitting]);
 
@@ -962,8 +965,10 @@ export function Payments({
         statusChangePayment.id,
         statusChangeValue,
         statusChangeValue === 'Completed' ? formatLocalYMD(new Date()) : null,
+        statusChangeReason.trim() || null,
       );
       setStatusChangePayment(null);
+      setStatusChangeReason('');
       await refresh();
       toast.success('Статус платежа обновлен.', t('payments') ?? 'Платежи');
     } catch (error) {
@@ -971,7 +976,7 @@ export function Payments({
     } finally {
       setStatusChangeSubmitting(false);
     }
-  }, [paymentsPermissions.canEdit, refresh, statusChangePayment, statusChangeValue, t, toast]);
+  }, [paymentsPermissions.canEdit, refresh, statusChangePayment, statusChangeReason, statusChangeValue, t, toast]);
 
   const handleSubmit = useCallback(
     async (payload: SubmitDTO) => {
@@ -1946,6 +1951,14 @@ export function Payments({
         options={paymentStatusOptions}
         onChange={(value) => {
           setStatusChangeValue(value);
+          if (statusChangeError) {
+            setStatusChangeError(null);
+          }
+        }}
+        reason={statusChangeReason}
+        reasonRequired={Boolean(user?.requiresFinancialActionReason)}
+        onReasonChange={(value) => {
+          setStatusChangeReason(value);
           if (statusChangeError) {
             setStatusChangeError(null);
           }

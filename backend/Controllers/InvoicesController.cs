@@ -544,6 +544,19 @@ public class InvoicesController : ControllerBase
             return BadRequest("Only invoice documents can change workflow status through this endpoint.");
         }
 
+        var reason = Normalize(request.Reason);
+        var statusChanged = !string.Equals(payment.InvoiceWorkflowStatus, workflowStatus, StringComparison.OrdinalIgnoreCase);
+        if (statusChanged)
+        {
+            var reasonError = await ValidateFinancialActionReasonAsync(reason, "изменения статуса документа", ct);
+            if (reasonError is not null)
+            {
+                return reasonError;
+            }
+
+            ApplyAuditReason(reason);
+        }
+
         var now = DateTime.UtcNow;
         payment.InvoiceWorkflowStatus = workflowStatus;
 
@@ -552,6 +565,10 @@ public class InvoicesController : ControllerBase
             case InvoiceWorkflowStatus.Draft:
             case InvoiceWorkflowStatus.NotSigned:
             case InvoiceWorkflowStatus.RequiresClientSignature:
+            case InvoiceWorkflowStatus.OnApproval:
+            case InvoiceWorkflowStatus.Approved:
+            case InvoiceWorkflowStatus.ApprovalRejected:
+            case InvoiceWorkflowStatus.NeedsCorrection:
                 payment.InvoiceSentForSigningAt = null;
                 payment.InvoiceSignedAt = null;
                 payment.InvoiceCancelledAt = null;
@@ -575,7 +592,7 @@ public class InvoicesController : ControllerBase
             case InvoiceWorkflowStatus.Cancelled:
                 payment.InvoiceCancelledAt ??= now;
                 payment.InvoiceCancelledByUserId ??= User.GetUserId();
-                payment.InvoiceCancelledReason ??= "Быстрая смена статуса документа";
+                payment.InvoiceCancelledReason ??= reason ?? "Быстрая смена статуса документа";
                 break;
         }
 
@@ -596,6 +613,7 @@ public class InvoicesController : ControllerBase
         {
             return BadRequest("Cancellation reason is required.");
         }
+        ApplyAuditReason(reason);
 
         var payment = await _db.Payments
             .Include(p => p.Invoice)
@@ -1124,8 +1142,22 @@ public class InvoicesController : ControllerBase
 
         var previousInvoiceNumber = payment.Account;
         var originalStatus = payment.Status;
+        var originalWorkflowStatus = payment.InvoiceWorkflowStatus;
         var actor = User.GetDisplayName();
         var now = DateTime.UtcNow;
+        var actionReason = Normalize(request.ActionReason);
+
+        if (originalStatus != request.Status
+            || !string.Equals(originalWorkflowStatus, workflowStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            var reasonError = await ValidateFinancialActionReasonAsync(actionReason, "изменения статуса счета", ct);
+            if (reasonError is not null)
+            {
+                return reasonError;
+            }
+
+            ApplyAuditReason(actionReason);
+        }
 
         payment.Account = number;
         payment.DocumentKind = DocumentKind.Invoice;
@@ -2713,6 +2745,10 @@ public class InvoicesController : ControllerBase
         => value is InvoiceWorkflowStatus.Draft
             or InvoiceWorkflowStatus.NotSigned
             or InvoiceWorkflowStatus.RequiresClientSignature
+            or InvoiceWorkflowStatus.OnApproval
+            or InvoiceWorkflowStatus.Approved
+            or InvoiceWorkflowStatus.ApprovalRejected
+            or InvoiceWorkflowStatus.NeedsCorrection
             or InvoiceWorkflowStatus.OnSigning
             or InvoiceWorkflowStatus.SignedByClient
             or InvoiceWorkflowStatus.Cancelled;
@@ -2721,13 +2757,36 @@ public class InvoicesController : ControllerBase
     {
         if (!string.IsNullOrWhiteSpace(request.WorkflowStatus))
         {
-            return InvoiceWorkflowStatus.Normalize(request.WorkflowStatus);
+            var normalized = InvoiceWorkflowStatus.Normalize(request.WorkflowStatus);
+            return normalized is not null && IsEditableInvoiceWorkflowStatus(normalized)
+                ? normalized
+                : null;
         }
 
         return InvoiceWorkflowStatus.FromPaymentStatus(request.Status, 0m, request.Amount);
     }
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<ActionResult?> ValidateFinancialActionReasonAsync(string? reason, string actionName, CancellationToken ct)
+    {
+        if (!await User.RequiresFinancialActionReasonAsync(_db, ct))
+        {
+            return null;
+        }
+
+        return string.IsNullOrWhiteSpace(reason)
+            ? BadRequest($"Укажите причину {actionName}. Она будет сохранена в журнале.")
+            : null;
+    }
+
+    private void ApplyAuditReason(string? reason)
+    {
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            _db.SetAuditReason(reason);
+        }
+    }
 
     private static string? BuildLegacyGroupKey(
         string? accountNumber,

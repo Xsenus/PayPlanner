@@ -94,7 +94,7 @@ export function PaymentsTable({
       Completed: t('statusCompleted') ?? t('completedStatus') ?? 'Выполнено',
       Pending: t('pending') ?? 'Ожидается',
       Overdue: t('overdue') ?? 'Просрочено',
-      Processing: t('processingStatus') ?? 'В обработке',
+      Processing: t('processingStatus') ?? 'Частично оплачено',
       Cancelled: t('cancelledStatus') ?? 'Отменено',
     }),
     [t],

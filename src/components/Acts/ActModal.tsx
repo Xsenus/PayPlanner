@@ -1495,9 +1495,13 @@ export function ActModal({
                   >
                     <option value="Draft">Черновик</option>
                     <option value="NotSigned">Не подписан</option>
+                    <option value="OnApproval">На согласовании</option>
+                    <option value="Approved">Согласован</option>
+                    <option value="ApprovalRejected">Отказ в согласовании</option>
+                    <option value="NeedsCorrection">Требует исправления</option>
                     <option value="OnSigning">На подписании</option>
                     <option value="Signed">Подписан</option>
-                    <option value="Cancelled">Отменен</option>
+                    <option value="Cancelled">Аннулирован</option>
                   </select>
                 </label>
 

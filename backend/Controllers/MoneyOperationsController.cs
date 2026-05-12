@@ -4026,22 +4026,12 @@ public class MoneyOperationsController : ControllerBase
         {
             payment.PaidAmount = payment.Amount;
             payment.Status = PaymentStatus.Completed;
-            if (payment.DocumentKind == DocumentKind.Invoice
-                && !InvoiceWorkflowStatus.IsDocumentSigningStatus(payment.InvoiceWorkflowStatus))
-            {
-                payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.Paid;
-            }
             payment.IsPaid = true;
             payment.PaidDate ??= operation.Date;
         }
         else
         {
             payment.Status = PaymentStatus.Processing;
-            if (payment.DocumentKind == DocumentKind.Invoice
-                && !InvoiceWorkflowStatus.IsDocumentSigningStatus(payment.InvoiceWorkflowStatus))
-            {
-                payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.PartiallyPaid;
-            }
             payment.IsPaid = false;
             payment.PaidDate = null;
         }

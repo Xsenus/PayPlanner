@@ -83,6 +83,9 @@ public class UpsertInvoiceRequest
     public bool ReplaceInstallmentPlan { get; set; }
 
     public InvoiceInstallmentPlanRequest? InstallmentPlan { get; set; }
+
+    [MaxLength(500)]
+    public string? ActionReason { get; set; }
 }
 
 public class InvoiceLineItemRequest

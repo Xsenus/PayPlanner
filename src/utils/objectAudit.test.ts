@@ -9,6 +9,7 @@ import {
   parseAuditFieldChanges,
   getObjectAuditFieldLabel,
   parseAuditChangedFields,
+  parseAuditReason,
 } from './objectAudit';
 
 describe('objectAudit utilities', () => {
@@ -22,6 +23,7 @@ describe('objectAudit utilities', () => {
         '{"changedFields":["Status","ExpenseClientId"],"changes":[{"field":"Status","oldValue":"Pending","newValue":"Paid"}]}',
       ),
     ).toEqual(['Status', 'ExpenseClientId']);
+    expect(parseAuditReason('{"changedFields":["Status"],"reason":"Клиент прислал отказ"}')).toBe('Клиент прислал отказ');
   });
 
   it('returns empty list for invalid metadata', () => {
@@ -77,6 +79,9 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue('Overdue')).toBe('Просрочено');
     expect(formatAuditValue('SignedByClient')).toBe('Подписан клиентом');
     expect(formatAuditValue('RequiresClientSignature')).toBe('Требуется подпись клиента');
+    expect(formatAuditValue('OnApproval')).toBe('На согласовании');
+    expect(formatAuditValue('ApprovalRejected')).toBe('Отказ в согласовании');
+    expect(formatAuditValue('NeedsCorrection')).toBe('Требует исправления');
     expect(formatAuditValue('PartiallyPaid')).toBe('Частично оплачен');
     expect(formatAuditValue('2026-04-27 00:00:00', 'payment', 'Date')).toBe('27.04.2026');
     expect(formatAuditValue('1500.00', 'payment', 'Amount')).toMatch(/1\s*500\s*₽/u);

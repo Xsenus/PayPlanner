@@ -5,6 +5,10 @@ public static class InvoiceWorkflowStatus
     public const string Draft = "Draft";
     public const string NotSigned = "NotSigned";
     public const string RequiresClientSignature = "RequiresClientSignature";
+    public const string OnApproval = "OnApproval";
+    public const string Approved = "Approved";
+    public const string ApprovalRejected = "ApprovalRejected";
+    public const string NeedsCorrection = "NeedsCorrection";
     public const string OnSigning = "OnSigning";
     public const string SignedByClient = "SignedByClient";
     public const string Paid = "Paid";
@@ -17,6 +21,10 @@ public static class InvoiceWorkflowStatus
         Draft,
         NotSigned,
         RequiresClientSignature,
+        OnApproval,
+        Approved,
+        ApprovalRejected,
+        NeedsCorrection,
         OnSigning,
         SignedByClient,
         Paid,
@@ -39,21 +47,13 @@ public static class InvoiceWorkflowStatus
     }
 
     public static bool IsDocumentSigningStatus(string? value)
-        => Normalize(value) is NotSigned or RequiresClientSignature or OnSigning or SignedByClient;
+        => Normalize(value) is NotSigned or RequiresClientSignature or OnApproval or Approved or ApprovalRejected or NeedsCorrection or OnSigning or SignedByClient;
 
     public static string FromPaymentStatus(PaymentStatus status, decimal paidAmount = 0m, decimal amount = 0m)
     {
-        if (paidAmount > 0m && paidAmount < amount)
-        {
-            return PartiallyPaid;
-        }
-
         return status switch
         {
-            PaymentStatus.Completed => Paid,
-            PaymentStatus.Overdue => Overdue,
             PaymentStatus.Cancelled => Cancelled,
-            PaymentStatus.Processing => OnSigning,
             _ => Draft,
         };
     }

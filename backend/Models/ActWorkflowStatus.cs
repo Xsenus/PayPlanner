@@ -4,6 +4,10 @@ public static class ActWorkflowStatus
 {
     public const string Draft = "Draft";
     public const string NotSigned = "NotSigned";
+    public const string OnApproval = "OnApproval";
+    public const string Approved = "Approved";
+    public const string ApprovalRejected = "ApprovalRejected";
+    public const string NeedsCorrection = "NeedsCorrection";
     public const string OnSigning = "OnSigning";
     public const string Signed = "Signed";
     public const string Cancelled = "Cancelled";
@@ -12,6 +16,10 @@ public static class ActWorkflowStatus
     {
         Draft,
         NotSigned,
+        OnApproval,
+        Approved,
+        ApprovalRejected,
+        NeedsCorrection,
         OnSigning,
         Signed,
         Cancelled,

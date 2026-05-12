@@ -1166,7 +1166,7 @@ public class PaymentsControllerTests
         var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
         Assert.Equal(4_000m, refreshedParent.PaidAmount);
         Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
-        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, refreshedParent.InvoiceWorkflowStatus);
         Assert.False(refreshedParent.IsPaid);
     }
 
@@ -1213,7 +1213,7 @@ public class PaymentsControllerTests
         var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
         Assert.Equal(10_000m, refreshedParent.PaidAmount);
         Assert.Equal(PaymentStatus.Completed, refreshedParent.Status);
-        Assert.Equal(InvoiceWorkflowStatus.Paid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, refreshedParent.InvoiceWorkflowStatus);
         Assert.True(refreshedParent.IsPaid);
     }
 
@@ -2113,7 +2113,7 @@ public class PaymentsControllerTests
         var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
         Assert.Equal(6_000m, refreshedParent.PaidAmount);
         Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
-        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, refreshedParent.InvoiceWorkflowStatus);
         Assert.False(refreshedParent.IsPaid);
         Assert.Equal(firstInstallment.Date, refreshedParent.PaidDate!.Value);
         Assert.Equal(secondInstallment.Date, refreshedParent.Date);
@@ -2229,7 +2229,7 @@ public class PaymentsControllerTests
             .SumAsync(payment => payment.Amount));
         Assert.Equal(35_000m, refreshedParent.PaidAmount);
         Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
-        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, refreshedParent.InvoiceWorkflowStatus);
     }
 
     [Fact]
@@ -2910,7 +2910,7 @@ public class PaymentsControllerTests
         var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
         Assert.Equal(4_000m, refreshedParent.PaidAmount);
         Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
-        Assert.Equal(InvoiceWorkflowStatus.PartiallyPaid, refreshedParent.InvoiceWorkflowStatus);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, refreshedParent.InvoiceWorkflowStatus);
         Assert.False(refreshedParent.IsPaid);
     }
 

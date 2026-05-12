@@ -837,7 +837,7 @@ public sealed partial class SpreadsheetImportService
         {
             PaymentStatus.Completed => "Оплачен",
             PaymentStatus.Overdue => "Просрочен",
-            PaymentStatus.Processing => "В обработке",
+            PaymentStatus.Processing => "Частично оплачено",
             PaymentStatus.Cancelled => "Отменен",
             _ => "Ожидает",
         };

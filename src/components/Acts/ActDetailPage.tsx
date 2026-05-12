@@ -112,6 +112,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const permissions = useRolePermissions(user?.role?.id);
   const canEdit = permissions.acts.canEdit;
   const canDelete = permissions.acts.canDelete;
+  const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
 
   const [act, setAct] = useState<Act | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
@@ -270,6 +271,22 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       label: 'Не подписан',
       className: 'bg-slate-100 text-slate-700 border border-slate-200',
     },
+    OnApproval: {
+      label: 'На согласовании',
+      className: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
+    },
+    Approved: {
+      label: 'Согласован',
+      className: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    },
+    ApprovalRejected: {
+      label: 'Отказ в согласовании',
+      className: 'bg-rose-100 text-rose-700 border border-rose-200',
+    },
+    NeedsCorrection: {
+      label: 'Требует исправления',
+      className: 'bg-orange-100 text-orange-700 border border-orange-200',
+    },
     OnSigning: {
       label: 'На подписании',
       className: 'bg-violet-100 text-violet-700 border border-violet-200',
@@ -415,11 +432,23 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     setPageActionLoading(actionKey);
     try {
       void targetStatus;
-      const updated = normalizeAct(actionKey === 'transferred'
-        ? await apiService.sendActToSigning(act.id)
-        : actionKey === 'signed'
-          ? await apiService.markActSigned(act.id)
-          : await apiService.markActNotSigned(act.id));
+      const workflowStatus: ActWorkflowStatus =
+        actionKey === 'transferred'
+          ? 'OnSigning'
+          : actionKey === 'signed'
+            ? 'Signed'
+            : 'NotSigned';
+      const reason = requiresFinancialActionReason
+        ? window.prompt('Укажите причину смены статуса акта')?.trim()
+        : null;
+      if (requiresFinancialActionReason && !reason) {
+        toast.error('Причина обязательна и будет сохранена в журнале.');
+        return;
+      }
+
+      const updated = normalizeAct(
+        await apiService.updateActWorkflowStatus(act.id, workflowStatus, reason || null),
+      );
       if (!updated) {
         throw new Error('Не удалось обновить статус акта.');
       }
@@ -432,7 +461,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     } finally {
       setPageActionLoading(null);
     }
-  }, [act, confirm, toast]);
+  }, [act, confirm, requiresFinancialActionReason, toast]);
 
   const handleDelete = useCallback(async () => {
     if (!act) return;

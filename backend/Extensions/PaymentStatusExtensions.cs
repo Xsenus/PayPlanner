@@ -10,7 +10,7 @@ public static class PaymentStatusExtensions
             PaymentStatus.Pending => "Ожидается",
             PaymentStatus.Completed => "Выполнен",
             PaymentStatus.Overdue => "Просрочен",
-            PaymentStatus.Processing => "В обработке",
+            PaymentStatus.Processing => "Частично оплачено",
             PaymentStatus.Cancelled => "Отменён",
             _ => status.ToString()
         };
