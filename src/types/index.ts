@@ -91,6 +91,17 @@ export interface LegalEntityClientLink {
   isActive: boolean;
 }
 
+export interface RelatedDocumentLink {
+  id: number;
+  label: string;
+  secondaryLabel?: string | null;
+  clientId?: number | null;
+  legalEntityId?: number | null;
+  type?: PaymentKind | string | null;
+  date?: string | null;
+  amount?: number | null;
+}
+
 export interface LegalEntitySummary {
   id: number;
   shortName: string;
@@ -151,7 +162,15 @@ export interface LegalEntitySummary {
   notes?: string | null;
   clientsCount: number;
   casesCount?: number;
+  contractsCount?: number;
   invoicesCount?: number;
+  actsCount?: number;
+  paymentsCount?: number;
+  relatedCases?: RelatedDocumentLink[];
+  relatedContracts?: RelatedDocumentLink[];
+  relatedInvoices?: RelatedDocumentLink[];
+  relatedActs?: RelatedDocumentLink[];
+  relatedPayments?: RelatedDocumentLink[];
   createdAt: string;
   updatedAt?: string | null;
   auditCreatedByUserId?: number | null;
@@ -386,6 +405,13 @@ export interface Client {
   casesCount?: number;
   contractsCount?: number;
   invoicesCount?: number;
+  actsCount?: number;
+  paymentsCount?: number;
+  relatedCases?: RelatedDocumentLink[];
+  relatedContracts?: RelatedDocumentLink[];
+  relatedInvoices?: RelatedDocumentLink[];
+  relatedActs?: RelatedDocumentLink[];
+  relatedPayments?: RelatedDocumentLink[];
   addresses?: AddressRecord[];
 }
 

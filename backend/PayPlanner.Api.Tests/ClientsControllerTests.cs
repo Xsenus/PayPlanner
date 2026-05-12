@@ -64,6 +64,14 @@ public class ClientsControllerTests
         await db.SaveChangesAsync();
         db.ClientContracts.Add(new ClientContract { ClientId = target.Id, ContractId = contract.Id });
 
+        db.Acts.Add(new Act
+        {
+            ClientId = target.Id,
+            Number = "A-1",
+            Date = DateTime.UtcNow.Date,
+            Amount = 500m,
+        });
+
         db.Payments.AddRange(
             new Payment
             {
@@ -131,6 +139,13 @@ public class ClientsControllerTests
         Assert.Equal(2, item.Cases.Count);
         Assert.Equal(1, item.ContractsCount);
         Assert.Equal(2, item.InvoicesCount);
+        Assert.Equal(1, item.ActsCount);
+        Assert.Equal(1, item.PaymentsCount);
+        Assert.Equal(2, item.RelatedCases.Count);
+        Assert.Single(item.RelatedContracts);
+        Assert.Equal(2, item.RelatedInvoices.Count);
+        Assert.Single(item.RelatedActs);
+        Assert.Single(item.RelatedPayments);
     }
 
     [Fact]

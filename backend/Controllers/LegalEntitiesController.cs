@@ -1268,7 +1268,141 @@ public class LegalEntitiesController : ControllerBase
                 .Select(group => new { LegalEntityId = group.Key, Count = group.Count() })
                 .ToDictionaryAsync(item => item.LegalEntityId, item => item.Count, ct);
 
+        var caseLinksByLegalEntity = new Dictionary<int, List<RelatedDocumentLink>>();
+        if (itemIds.Count > 0)
+        {
+            var caseRows = await _db.ClientCases
+                .AsNoTracking()
+                .Where(clientCase => clientCase.LegalEntityId.HasValue
+                    && itemIds.Contains(clientCase.LegalEntityId.Value))
+                .OrderByDescending(clientCase => clientCase.CreatedAt)
+                .ThenByDescending(clientCase => clientCase.Id)
+                .Select(clientCase => new
+                {
+                    clientCase.Id,
+                    clientCase.Title,
+                    clientCase.Status,
+                    clientCase.ClientId,
+                    clientCase.LegalEntityId,
+                    clientCase.CreatedAt,
+                })
+                .ToListAsync(ct);
+
+            caseLinksByLegalEntity = caseRows
+                .Where(row => row.LegalEntityId.HasValue)
+                .GroupBy(row => row.LegalEntityId!.Value)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(row => new RelatedDocumentLink
+                    {
+                        Id = row.Id,
+                        Label = string.IsNullOrWhiteSpace(row.Title) ? $"Дело #{row.Id}" : row.Title,
+                        SecondaryLabel = row.Status.ToString(),
+                        ClientId = row.ClientId,
+                        LegalEntityId = row.LegalEntityId,
+                        Date = row.CreatedAt,
+                    }).ToList());
+        }
+
+        var contractsCountByLegalEntity = itemIds.Count == 0
+            ? new Dictionary<int, int>()
+            : await _db.LegalEntityContracts
+                .AsNoTracking()
+                .Where(link => itemIds.Contains(link.LegalEntityId))
+                .GroupBy(link => link.LegalEntityId)
+                .Select(group => new { LegalEntityId = group.Key, Count = group.Count() })
+                .ToDictionaryAsync(item => item.LegalEntityId, item => item.Count, ct);
+
+        var contractLinksByLegalEntity = new Dictionary<int, List<RelatedDocumentLink>>();
+        if (itemIds.Count > 0)
+        {
+            var contractRows = await _db.LegalEntityContracts
+                .AsNoTracking()
+                .Where(link => itemIds.Contains(link.LegalEntityId))
+                .Select(link => new
+                {
+                    link.LegalEntityId,
+                    link.ContractId,
+                    link.Contract.Number,
+                    link.Contract.Title,
+                    link.Contract.Date,
+                })
+                .ToListAsync(ct);
+
+            contractLinksByLegalEntity = contractRows
+                .GroupBy(row => row.LegalEntityId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderByDescending(row => row.Date)
+                        .Select(row => new RelatedDocumentLink
+                        {
+                            Id = row.ContractId,
+                            Label = !string.IsNullOrWhiteSpace(row.Number)
+                                ? $"№{row.Number}"
+                                : !string.IsNullOrWhiteSpace(row.Title)
+                                    ? row.Title!
+                                    : $"Договор #{row.ContractId}",
+                            SecondaryLabel = row.Title,
+                            LegalEntityId = row.LegalEntityId,
+                            Date = row.Date,
+                        }).ToList());
+        }
+
+        var actsCountByLegalEntity = itemIds.Count == 0
+            ? new Dictionary<int, int>()
+            : await _db.Acts
+                .AsNoTracking()
+                .Where(act => act.LegalEntityId.HasValue
+                    && itemIds.Contains(act.LegalEntityId.Value))
+                .GroupBy(act => act.LegalEntityId!.Value)
+                .Select(group => new { LegalEntityId = group.Key, Count = group.Count() })
+                .ToDictionaryAsync(item => item.LegalEntityId, item => item.Count, ct);
+
+        var actLinksByLegalEntity = new Dictionary<int, List<RelatedDocumentLink>>();
+        if (itemIds.Count > 0)
+        {
+            var actRows = await _db.Acts
+                .AsNoTracking()
+                .Where(act => act.LegalEntityId.HasValue
+                    && itemIds.Contains(act.LegalEntityId.Value))
+                .Select(act => new
+                {
+                    act.Id,
+                    act.Number,
+                    act.Title,
+                    act.Date,
+                    act.Amount,
+                    act.ClientId,
+                    act.LegalEntityId,
+                })
+                .ToListAsync(ct);
+
+            actLinksByLegalEntity = actRows
+                .Where(row => row.LegalEntityId.HasValue)
+                .GroupBy(row => row.LegalEntityId!.Value)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderByDescending(row => row.Date)
+                        .Select(row => new RelatedDocumentLink
+                        {
+                            Id = row.Id,
+                            Label = !string.IsNullOrWhiteSpace(row.Number)
+                                ? $"№{row.Number}"
+                                : !string.IsNullOrWhiteSpace(row.Title)
+                                    ? row.Title!
+                                    : $"Акт #{row.Id}",
+                            SecondaryLabel = row.Title,
+                            ClientId = row.ClientId,
+                            LegalEntityId = row.LegalEntityId,
+                            Date = row.Date,
+                            Amount = row.Amount,
+                        }).ToList());
+        }
+
         var invoicesCountByLegalEntity = new Dictionary<int, int>();
+        var paymentsCountByLegalEntity = new Dictionary<int, int>();
+        var invoiceLinksByLegalEntity = new Dictionary<int, List<RelatedDocumentLink>>();
+        var paymentLinksByLegalEntity = new Dictionary<int, List<RelatedDocumentLink>>();
         if (itemIds.Count > 0)
         {
             var invoiceRows = await _db.Payments
@@ -1281,16 +1415,45 @@ public class LegalEntitiesController : ControllerBase
                         && itemIds.Contains(payment.ExpenseLegalEntityId.Value)))
                 .Select(payment => new
                 {
+                    payment.Id,
                     payment.LegalEntityId,
                     payment.ExpenseLegalEntityId,
+                    payment.Account,
+                    payment.LegacyAccountNumber,
+                    payment.Date,
+                    payment.Amount,
+                    payment.Type,
                 })
                 .ToListAsync(ct);
 
+            void AddInvoiceLink(int legalEntityId, RelatedDocumentLink link)
+            {
+                if (!invoiceLinksByLegalEntity.TryGetValue(legalEntityId, out var links))
+                {
+                    links = new List<RelatedDocumentLink>();
+                    invoiceLinksByLegalEntity[legalEntityId] = links;
+                }
+
+                links.Add(link);
+            }
+
             foreach (var row in invoiceRows)
             {
+                var number = !string.IsNullOrWhiteSpace(row.Account) ? row.Account : row.LegacyAccountNumber;
+                var link = new RelatedDocumentLink
+                {
+                    Id = row.Id,
+                    Label = !string.IsNullOrWhiteSpace(number) ? $"№{number}" : $"Счет #{row.Id}",
+                    LegalEntityId = row.LegalEntityId ?? row.ExpenseLegalEntityId,
+                    Date = row.Date,
+                    Amount = row.Amount,
+                    Type = row.Type.ToString(),
+                };
+
                 if (row.LegalEntityId.HasValue && itemIds.Contains(row.LegalEntityId.Value))
                 {
                     invoicesCountByLegalEntity[row.LegalEntityId.Value] = invoicesCountByLegalEntity.GetValueOrDefault(row.LegalEntityId.Value) + 1;
+                    AddInvoiceLink(row.LegalEntityId.Value, link);
                 }
 
                 if (row.ExpenseLegalEntityId.HasValue
@@ -1298,6 +1461,70 @@ public class LegalEntitiesController : ControllerBase
                     && row.ExpenseLegalEntityId != row.LegalEntityId)
                 {
                     invoicesCountByLegalEntity[row.ExpenseLegalEntityId.Value] = invoicesCountByLegalEntity.GetValueOrDefault(row.ExpenseLegalEntityId.Value) + 1;
+                    AddInvoiceLink(row.ExpenseLegalEntityId.Value, link);
+                }
+            }
+
+            var paymentRows = await _db.Payments
+                .AsNoTracking()
+                .Where(payment => payment.DocumentKind != DocumentKind.Invoice)
+                .Where(payment =>
+                    (payment.LegalEntityId.HasValue
+                        && itemIds.Contains(payment.LegalEntityId.Value)) ||
+                    (payment.ExpenseLegalEntityId.HasValue
+                        && itemIds.Contains(payment.ExpenseLegalEntityId.Value)))
+                .Select(payment => new
+                {
+                    payment.Id,
+                    payment.LegalEntityId,
+                    payment.ExpenseLegalEntityId,
+                    payment.PaymentOrderNumber,
+                    payment.Description,
+                    payment.Date,
+                    payment.Amount,
+                    payment.Type,
+                })
+                .ToListAsync(ct);
+
+            void AddPaymentLink(int legalEntityId, RelatedDocumentLink link)
+            {
+                if (!paymentLinksByLegalEntity.TryGetValue(legalEntityId, out var links))
+                {
+                    links = new List<RelatedDocumentLink>();
+                    paymentLinksByLegalEntity[legalEntityId] = links;
+                }
+
+                links.Add(link);
+            }
+
+            foreach (var row in paymentRows)
+            {
+                var link = new RelatedDocumentLink
+                {
+                    Id = row.Id,
+                    Label = !string.IsNullOrWhiteSpace(row.PaymentOrderNumber)
+                        ? $"№{row.PaymentOrderNumber}"
+                        : !string.IsNullOrWhiteSpace(row.Description)
+                            ? row.Description
+                            : $"Платеж #{row.Id}",
+                    LegalEntityId = row.LegalEntityId ?? row.ExpenseLegalEntityId,
+                    Date = row.Date,
+                    Amount = row.Amount,
+                    Type = row.Type.ToString(),
+                };
+
+                if (row.LegalEntityId.HasValue && itemIds.Contains(row.LegalEntityId.Value))
+                {
+                    paymentsCountByLegalEntity[row.LegalEntityId.Value] = paymentsCountByLegalEntity.GetValueOrDefault(row.LegalEntityId.Value) + 1;
+                    AddPaymentLink(row.LegalEntityId.Value, link);
+                }
+
+                if (row.ExpenseLegalEntityId.HasValue
+                    && itemIds.Contains(row.ExpenseLegalEntityId.Value)
+                    && row.ExpenseLegalEntityId != row.LegalEntityId)
+                {
+                    paymentsCountByLegalEntity[row.ExpenseLegalEntityId.Value] = paymentsCountByLegalEntity.GetValueOrDefault(row.ExpenseLegalEntityId.Value) + 1;
+                    AddPaymentLink(row.ExpenseLegalEntityId.Value, link);
                 }
             }
         }
@@ -1308,7 +1535,15 @@ public class LegalEntitiesController : ControllerBase
             {
                 var dto = MapDetail(item);
                 dto.CasesCount = casesCountByLegalEntity.GetValueOrDefault(item.Id);
+                dto.ContractsCount = contractsCountByLegalEntity.GetValueOrDefault(item.Id);
                 dto.InvoicesCount = invoicesCountByLegalEntity.GetValueOrDefault(item.Id);
+                dto.ActsCount = actsCountByLegalEntity.GetValueOrDefault(item.Id);
+                dto.PaymentsCount = paymentsCountByLegalEntity.GetValueOrDefault(item.Id);
+                dto.RelatedCases = caseLinksByLegalEntity.GetValueOrDefault(item.Id) ?? new List<RelatedDocumentLink>();
+                dto.RelatedContracts = contractLinksByLegalEntity.GetValueOrDefault(item.Id) ?? new List<RelatedDocumentLink>();
+                dto.RelatedInvoices = invoiceLinksByLegalEntity.GetValueOrDefault(item.Id)?.OrderByDescending(link => link.Date).ToList() ?? new List<RelatedDocumentLink>();
+                dto.RelatedActs = actLinksByLegalEntity.GetValueOrDefault(item.Id) ?? new List<RelatedDocumentLink>();
+                dto.RelatedPayments = paymentLinksByLegalEntity.GetValueOrDefault(item.Id)?.OrderByDescending(link => link.Date).ToList() ?? new List<RelatedDocumentLink>();
                 return dto;
             }).ToList(),
             Total = total,

@@ -358,6 +358,23 @@ public class LegalEntitiesControllerCoverageTests
             new ClientCase { LegalEntityId = targetLegalId, Title = "Case 2" },
             new ClientCase { LegalEntityId = otherLegalId, Title = "Other Case" });
 
+        var contract = new Contract
+        {
+            Number = "C-1",
+            Date = DateTime.UtcNow.Date,
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        db.LegalEntityContracts.Add(new LegalEntityContract { LegalEntityId = targetLegalId, ContractId = contract.Id });
+
+        db.Acts.Add(new Act
+        {
+            LegalEntityId = targetLegalId,
+            Number = "A-1",
+            Date = DateTime.UtcNow.Date,
+            Amount = 500m,
+        });
+
         db.Payments.AddRange(
             new Payment
             {
@@ -409,7 +426,15 @@ public class LegalEntitiesControllerCoverageTests
         Assert.Equal(targetLegalId, item.Id);
         Assert.Equal(2, item.ClientsCount);
         Assert.Equal(2, item.CasesCount);
+        Assert.Equal(1, item.ContractsCount);
         Assert.Equal(2, item.InvoicesCount);
+        Assert.Equal(1, item.ActsCount);
+        Assert.Equal(1, item.PaymentsCount);
+        Assert.Equal(2, item.RelatedCases.Count);
+        Assert.Single(item.RelatedContracts);
+        Assert.Equal(2, item.RelatedInvoices.Count);
+        Assert.Single(item.RelatedActs);
+        Assert.Single(item.RelatedPayments);
     }
 
     [Fact]

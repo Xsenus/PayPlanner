@@ -98,6 +98,16 @@ function createLegalEntity(overrides: Partial<LegalEntitySummary> = {}): LegalEn
     treasuryAccountNumber: '03212643000000014200',
     notes: 'Комментарий юрлица',
     clientsCount: 1,
+    casesCount: 2,
+    contractsCount: 3,
+    invoicesCount: 4,
+    actsCount: 5,
+    paymentsCount: 6,
+    relatedCases: [{ id: 201, label: 'Дело юрлица', clientId: null, legalEntityId: 21 }],
+    relatedContracts: [{ id: 202, label: '№LC-1', legalEntityId: 21 }],
+    relatedInvoices: [{ id: 203, label: '№LI-1', legalEntityId: 21, type: 'Income' }],
+    relatedActs: [{ id: 204, label: '№LA-1', legalEntityId: 21 }],
+    relatedPayments: [{ id: 205, label: '№LP-1', legalEntityId: 21, type: 'Income' }],
     createdAt: '2026-04-03T00:00:00Z',
     updatedAt: '2026-04-04T00:00:00Z',
     auditCreatedByUserName: 'Создатель юрлица',
@@ -140,6 +150,15 @@ function createClient(overrides: Partial<Client> = {}): Client {
       },
     ],
     contracts: [],
+    casesCount: 1,
+    contractsCount: 2,
+    invoicesCount: 3,
+    actsCount: 4,
+    paymentsCount: 5,
+    relatedContracts: [{ id: 301, label: '№C-1', clientId: 11 }],
+    relatedInvoices: [{ id: 302, label: '№I-1', clientId: 11, type: 'Income' }],
+    relatedActs: [{ id: 303, label: '№A-1', clientId: 11 }],
+    relatedPayments: [{ id: 304, label: '№P-1', clientId: 11, type: 'Income' }],
     legalEntityId: 21,
     legalEntity: createLegalEntity({ id: 21, shortName: 'ООО Клиент', inn: '6311000000' }),
     ...overrides,
@@ -212,6 +231,11 @@ describe('UnifiedContacts', () => {
 
     expect(screen.getAllByText('Контакт').length).toBeGreaterThan(0);
     expect(screen.getAllByText('КПП').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Дела').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Договоры').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Счета').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Акты').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Платежи').length).toBeGreaterThan(0);
     expect(screen.queryByText('Юрлицо полное')).toBeNull();
     expect(screen.queryByText('ОКВЭД')).toBeNull();
     expect(screen.queryByText('Счет казначейства')).toBeNull();
@@ -225,7 +249,9 @@ describe('UnifiedContacts', () => {
 
     expect(screen.getAllByText('Физическое лицо').length).toBeGreaterThan(0);
     expect(screen.getByText('Юрлицо полное')).toBeTruthy();
-    expect(screen.getByText('Договоры')).toBeTruthy();
+    expect(screen.getAllByText('Договоры').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Акты').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Платежи').length).toBeGreaterThan(0);
     expect(screen.getByText('Кто обновил')).toBeTruthy();
     expect(screen.queryByText('ОКВЭД')).toBeNull();
     expect(screen.queryByText('Счет казначейства')).toBeNull();
@@ -241,8 +267,33 @@ describe('UnifiedContacts', () => {
     expect(screen.getByText('ОКВЭД')).toBeTruthy();
     expect(screen.getByText('ИФНС')).toBeTruthy();
     expect(screen.getByText('Счет казначейства')).toBeTruthy();
-    expect(screen.queryByText('Договоры')).toBeNull();
+    expect(screen.getAllByText('Договоры').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Акты').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Платежи').length).toBeGreaterThan(0);
     expect(screen.queryByText('Юрлицо полное')).toBeNull();
+  });
+
+  it('renders related document links in the combined contacts table', async () => {
+    mockUserSettings({ contacts_view_mode: 'table' });
+
+    render(
+      <UnifiedContacts
+        onOpenCase={vi.fn()}
+        onOpenContract={vi.fn()}
+        onOpenInvoice={vi.fn()}
+        onOpenAct={vi.fn()}
+        onOpenPayment={vi.fn()}
+      />,
+    );
+
+    const clientCell = await screen.findByText('Иван Иванов');
+    const clientRow = clientCell.closest('tr');
+    expect(clientRow).not.toBeNull();
+    expect(within(clientRow as HTMLElement).getByRole('button', { name: 'Дело клиента' })).toBeTruthy();
+    expect(within(clientRow as HTMLElement).getByRole('button', { name: '№C-1' })).toBeTruthy();
+    expect(within(clientRow as HTMLElement).getByRole('button', { name: '№I-1' })).toBeTruthy();
+    expect(within(clientRow as HTMLElement).getByRole('button', { name: '№A-1' })).toBeTruthy();
+    expect(within(clientRow as HTMLElement).getByRole('button', { name: '№P-1' })).toBeTruthy();
   });
 
   it('renders selected hidden legal columns after they are enabled through persisted table settings', async () => {

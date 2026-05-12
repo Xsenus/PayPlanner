@@ -17,7 +17,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
-import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
+import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary, PaymentKind, RelatedDocumentLink } from '../../types';
 import { getObjectAuditActorLabel } from '../../utils/objectAudit';
 import { LegalEntityModal } from '../LegalEntities/LegalEntityModal';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
@@ -71,6 +71,8 @@ type ContactColumnKey =
   | 'cases'
   | 'contracts'
   | 'invoices'
+  | 'acts'
+  | 'payments'
   | 'createdAt'
   | 'updatedAt'
   | 'auditCreatedBy'
@@ -114,6 +116,11 @@ interface UnifiedContactsProps {
   initialKind?: ContactKind;
   lockKind?: boolean;
   onOpenClient?: (id: number) => void;
+  onOpenCase?: (caseId: number, clientId?: number | null, legalEntityId?: number | null) => void;
+  onOpenContract?: (contractId: number) => void;
+  onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
+  onOpenAct?: (actId: number) => void;
+  onOpenPayment?: (paymentId: number, type?: PaymentKind) => void;
 }
 
 const PAGE_SIZE = 24;
@@ -134,7 +141,10 @@ const COMMON_CONTACT_COLUMNS: ContactColumnConfig[] = [
   { key: 'kpp', label: 'КПП', defaultWidth: 130, defaultVisible: false },
   { key: 'address', label: 'Адрес', defaultWidth: 320 },
   { key: 'cases', label: 'Дела', defaultWidth: 90 },
+  { key: 'contracts', label: 'Договоры', defaultWidth: 110 },
   { key: 'invoices', label: 'Счета', defaultWidth: 90 },
+  { key: 'acts', label: 'Акты', defaultWidth: 90 },
+  { key: 'payments', label: 'Платежи', defaultWidth: 100 },
   { key: 'createdAt', label: 'Создано', defaultWidth: 120 },
 ];
 
@@ -154,8 +164,10 @@ const CLIENT_CONTACT_COLUMNS: ContactColumnConfig[] = [
   { key: 'legalKpp', label: 'КПП юрлица', defaultWidth: 130, defaultVisible: false },
   { key: 'legalOgrn', label: 'ОГРН юрлица', defaultWidth: 170, defaultVisible: false },
   { key: 'cases', label: 'Дела', defaultWidth: 90 },
-  { key: 'contracts', label: 'Договоры', defaultWidth: 110, defaultVisible: false },
+  { key: 'contracts', label: 'Договоры', defaultWidth: 110 },
   { key: 'invoices', label: 'Счета', defaultWidth: 90 },
+  { key: 'acts', label: 'Акты', defaultWidth: 90 },
+  { key: 'payments', label: 'Платежи', defaultWidth: 100 },
   { key: 'createdAt', label: 'Создано', defaultWidth: 120 },
   { key: 'auditCreatedBy', label: 'Кто создал', defaultWidth: 180, defaultVisible: false },
   { key: 'updatedAt', label: 'Обновлено', defaultWidth: 130, defaultVisible: false },
@@ -175,7 +187,10 @@ const LEGAL_CONTACT_COLUMNS: ContactColumnConfig[] = [
   { key: 'responsible', label: 'Ответственный', defaultWidth: 190, defaultVisible: false },
   { key: 'clientsCount', label: 'Клиенты', defaultWidth: 100 },
   { key: 'cases', label: 'Дела', defaultWidth: 90 },
+  { key: 'contracts', label: 'Договоры', defaultWidth: 110 },
   { key: 'invoices', label: 'Счета', defaultWidth: 90 },
+  { key: 'acts', label: 'Акты', defaultWidth: 90 },
+  { key: 'payments', label: 'Платежи', defaultWidth: 100 },
   { key: 'country', label: 'Страна', defaultWidth: 150, defaultVisible: false },
   { key: 'organizationForm', label: 'Форма организации', defaultWidth: 190, defaultVisible: false },
   { key: 'taxSystem', label: 'Налогообложение', defaultWidth: 180, defaultVisible: false },
@@ -216,6 +231,10 @@ function columnsForScope(scope: ContactKind): ContactColumnConfig[] {
 function formatDate(value?: string | null) {
   if (!value) return '';
   return new Date(value).toLocaleDateString('ru-RU');
+}
+
+function normalizeRelatedPaymentKind(value?: string | null): PaymentKind | undefined {
+  return value === 'Income' || value === 'Expense' ? value : undefined;
 }
 
 function formatAuditUserName(value?: string | null) {
@@ -344,6 +363,11 @@ export function UnifiedContacts({
   initialKind = 'all',
   lockKind = false,
   onOpenClient,
+  onOpenCase,
+  onOpenContract,
+  onOpenInvoice,
+  onOpenAct,
+  onOpenPayment,
 }: UnifiedContactsProps) {
   const { user } = useAuth();
   const toast = useToast();
@@ -614,6 +638,101 @@ export function UnifiedContacts({
     return item.legalEntity.invoicesCount ?? 0;
   }, []);
 
+  const getCaseLinks = useCallback((item: UnifiedContact): RelatedDocumentLink[] => {
+    if (item.kind === 'client') {
+      if (item.client.relatedCases?.length) return item.client.relatedCases;
+      return (item.client.cases ?? []).map((clientCase) => ({
+        id: clientCase.id,
+        label: clientCase.title || `Дело #${clientCase.id}`,
+        secondaryLabel: clientCase.status,
+        clientId: clientCase.clientId ?? item.sourceId,
+        legalEntityId: clientCase.legalEntityId ?? item.client.legalEntityId ?? null,
+        date: clientCase.createdAt,
+      }));
+    }
+
+    return item.legalEntity.relatedCases ?? [];
+  }, []);
+
+  const getContractLinks = useCallback((item: UnifiedContact): RelatedDocumentLink[] => {
+    if (item.kind === 'client') {
+      if (item.client.relatedContracts?.length) return item.client.relatedContracts;
+      return (item.client.contracts ?? []).map((contract) => ({
+        id: contract.id,
+        label: contract.number ? `№${contract.number}` : contract.title || `Договор #${contract.id}`,
+        secondaryLabel: contract.title,
+        clientId: item.sourceId,
+        date: contract.date,
+        amount: contract.amount ?? null,
+      }));
+    }
+
+    return item.legalEntity.relatedContracts ?? [];
+  }, []);
+
+  const getContractCount = useCallback((item: UnifiedContact) => {
+    if (item.kind === 'client') {
+      return item.client.contractsCount ?? item.client.contracts?.length ?? 0;
+    }
+    return item.legalEntity.contractsCount ?? 0;
+  }, []);
+
+  const getActCount = useCallback((item: UnifiedContact) => {
+    if (item.kind === 'client') {
+      return item.client.actsCount ?? 0;
+    }
+    return item.legalEntity.actsCount ?? 0;
+  }, []);
+
+  const getPaymentCount = useCallback((item: UnifiedContact) => {
+    if (item.kind === 'client') {
+      return item.client.paymentsCount ?? 0;
+    }
+    return item.legalEntity.paymentsCount ?? 0;
+  }, []);
+
+  const renderRelatedLinks = (
+    links: RelatedDocumentLink[],
+    totalCount: number,
+    onOpen?: (link: RelatedDocumentLink) => void,
+    canOpen?: (link: RelatedDocumentLink) => boolean,
+  ) => {
+    if (links.length === 0) {
+      return totalCount;
+    }
+
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        {links.map((link) => {
+          const label = link.label || `#${link.id}`;
+          const title = [label, link.secondaryLabel].filter(Boolean).join(' · ');
+          const clickable = onOpen && (canOpen?.(link) ?? true);
+          return clickable ? (
+            <button
+              key={link.id}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpen(link);
+              }}
+              className="block max-w-full truncate text-left text-sm text-blue-600 hover:underline"
+              title={title}
+            >
+              {label}
+            </button>
+          ) : (
+            <span key={link.id} className="block max-w-full truncate text-sm text-slate-700" title={title}>
+              {label}
+            </span>
+          );
+        })}
+        {totalCount > links.length ? (
+          <span className="text-xs text-slate-400">+{totalCount - links.length}</span>
+        ) : null}
+      </div>
+    );
+  };
+
   const openItem = async (item: UnifiedContact) => {
     if (item.kind === 'client' && onOpenClient) {
       onOpenClient(item.sourceId);
@@ -791,11 +910,38 @@ export function UnifiedContacts({
       case 'clientsCount':
         return item.kind === 'legal' ? item.legalEntity.clientsCount ?? 0 : '—';
       case 'cases':
-        return getCaseCount(item);
+        return renderRelatedLinks(
+          getCaseLinks(item),
+          getCaseCount(item),
+          onOpenCase
+            ? (link) => onOpenCase(link.id, link.clientId ?? (item.kind === 'client' ? item.sourceId : null), link.legalEntityId)
+            : undefined,
+          (link) => Boolean(link.clientId ?? (item.kind === 'client' ? item.sourceId : null)),
+        );
       case 'contracts':
-        return item.kind === 'client' ? item.client.contractsCount ?? item.client.contracts?.length ?? 0 : '—';
+        return renderRelatedLinks(
+          getContractLinks(item),
+          getContractCount(item),
+          onOpenContract ? (link) => onOpenContract(link.id) : undefined,
+        );
       case 'invoices':
-        return getInvoiceCount(item);
+        return renderRelatedLinks(
+          item.kind === 'client' ? item.client.relatedInvoices ?? [] : item.legalEntity.relatedInvoices ?? [],
+          getInvoiceCount(item),
+          onOpenInvoice ? (link) => onOpenInvoice(link.id, normalizeRelatedPaymentKind(link.type)) : undefined,
+        );
+      case 'acts':
+        return renderRelatedLinks(
+          item.kind === 'client' ? item.client.relatedActs ?? [] : item.legalEntity.relatedActs ?? [],
+          getActCount(item),
+          onOpenAct ? (link) => onOpenAct(link.id) : undefined,
+        );
+      case 'payments':
+        return renderRelatedLinks(
+          item.kind === 'client' ? item.client.relatedPayments ?? [] : item.legalEntity.relatedPayments ?? [],
+          getPaymentCount(item),
+          onOpenPayment ? (link) => onOpenPayment(link.id, normalizeRelatedPaymentKind(link.type)) : undefined,
+        );
       case 'createdAt':
         return formatDate(item.createdAt) || '—';
       case 'updatedAt':

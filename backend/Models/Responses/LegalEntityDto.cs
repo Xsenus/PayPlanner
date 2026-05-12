@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Models.Responses;
 
@@ -73,7 +74,10 @@ public class LegalEntityListItemDto
     public string? Notes { get; set; }
     public int ClientsCount { get; set; }
     public int CasesCount { get; set; }
+    public int ContractsCount { get; set; }
     public int InvoicesCount { get; set; }
+    public int ActsCount { get; set; }
+    public int PaymentsCount { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public int? AuditCreatedByUserId { get; set; }
@@ -87,6 +91,11 @@ public class LegalEntityListItemDto
     public string? AuditDeletedByUserName { get; set; }
     public List<LegalEntityClientDto> Clients { get; set; } = new();
     public List<AddressRecordDto> Addresses { get; set; } = new();
+    public List<RelatedDocumentLink> RelatedCases { get; set; } = new();
+    public List<RelatedDocumentLink> RelatedContracts { get; set; } = new();
+    public List<RelatedDocumentLink> RelatedInvoices { get; set; } = new();
+    public List<RelatedDocumentLink> RelatedActs { get; set; } = new();
+    public List<RelatedDocumentLink> RelatedPayments { get; set; } = new();
 }
 
 public class LegalEntityDetailDto : LegalEntityListItemDto

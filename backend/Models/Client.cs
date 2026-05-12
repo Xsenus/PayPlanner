@@ -56,6 +56,27 @@ namespace PayPlanner.Api.Models
         [NotMapped]
         public int InvoicesCount { get; set; }
 
+        [NotMapped]
+        public int ActsCount { get; set; }
+
+        [NotMapped]
+        public int PaymentsCount { get; set; }
+
+        [NotMapped]
+        public List<RelatedDocumentLink> RelatedCases { get; set; } = new();
+
+        [NotMapped]
+        public List<RelatedDocumentLink> RelatedContracts { get; set; } = new();
+
+        [NotMapped]
+        public List<RelatedDocumentLink> RelatedInvoices { get; set; } = new();
+
+        [NotMapped]
+        public List<RelatedDocumentLink> RelatedActs { get; set; } = new();
+
+        [NotMapped]
+        public List<RelatedDocumentLink> RelatedPayments { get; set; } = new();
+
         /// <summary>
         /// Дата и время создания записи (UTC).
         /// </summary>

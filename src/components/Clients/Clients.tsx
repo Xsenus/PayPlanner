@@ -24,7 +24,7 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useTranslation } from '../../hooks/useTranslation';
 import { ClientModal } from './ClientModal';
 import { ClientDetail } from './ClientDetail';
-import type { ActResponsible, Client, ClientCase, ClientInput } from '../../types';
+import type { ActResponsible, Client, ClientCase, ClientInput, PaymentKind, RelatedDocumentLink } from '../../types';
 import { CaseModal } from './CaseModal';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -105,6 +105,46 @@ function getClientCaseCount(client: Client) {
 
 function getClientContractsCount(client: Client) {
   return Math.max(client.contractsCount ?? 0, client.contracts?.length ?? 0);
+}
+
+function getClientInvoicesCount(client: Client) {
+  return client.invoicesCount ?? 0;
+}
+
+function getClientActsCount(client: Client) {
+  return client.actsCount ?? 0;
+}
+
+function getClientPaymentsCount(client: Client) {
+  return client.paymentsCount ?? 0;
+}
+
+function normalizeRelatedPaymentKind(value?: string | null): PaymentKind | undefined {
+  return value === 'Income' || value === 'Expense' ? value : undefined;
+}
+
+function getClientCaseLinks(client: Client): RelatedDocumentLink[] {
+  if (client.relatedCases?.length) return client.relatedCases;
+  return (client.cases ?? []).map((item) => ({
+    id: item.id,
+    label: item.title || `Дело #${item.id}`,
+    secondaryLabel: item.status,
+    clientId: item.clientId ?? client.id,
+    legalEntityId: item.legalEntityId ?? client.legalEntityId ?? null,
+    date: item.createdAt,
+  }));
+}
+
+function getClientContractLinks(client: Client): RelatedDocumentLink[] {
+  if (client.relatedContracts?.length) return client.relatedContracts;
+  return (client.contracts ?? []).map((item) => ({
+    id: item.id,
+    label: item.number ? `№${item.number}` : item.title || `Договор #${item.id}`,
+    secondaryLabel: item.title,
+    clientId: client.id,
+    date: item.date,
+    amount: item.amount ?? null,
+  }));
 }
 
 function escapeRegExp(s: string) {
@@ -206,7 +246,10 @@ type ColumnId =
   | 'legalEntityOgrn'
   | 'legalEntityKpp'
   | 'casesCount'
-  | 'contractsCount';
+  | 'contractsCount'
+  | 'invoicesCount'
+  | 'actsCount'
+  | 'paymentsCount';
 
 type ColumnDefinition = {
   id: ColumnId;
@@ -235,7 +278,10 @@ const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { id: 'legalEntityOgrn', label: 'ОГРН юр. лица', defaultWidth: 160, defaultVisible: false, filterable: true },
   { id: 'legalEntityKpp', label: 'КПП юр. лица', defaultWidth: 160, defaultVisible: false, filterable: true },
   { id: 'casesCount', label: 'Дела', defaultWidth: 120, defaultVisible: true },
-  { id: 'contractsCount', label: 'Договоры', defaultWidth: 130, defaultVisible: false },
+  { id: 'contractsCount', label: 'Договоры', defaultWidth: 130, defaultVisible: true },
+  { id: 'invoicesCount', label: 'Счета', defaultWidth: 110, defaultVisible: true },
+  { id: 'actsCount', label: 'Акты', defaultWidth: 100, defaultVisible: true },
+  { id: 'paymentsCount', label: 'Платежи', defaultWidth: 120, defaultVisible: true },
 ];
 
 const COLUMN_META = COLUMN_DEFINITIONS.reduce(
@@ -251,6 +297,13 @@ const TABLE_SETTINGS_DB_KEY = 'clients_table_settings';
 const FILTER_SETTINGS_STORAGE_PREFIX = 'pp.clients_table_filters';
 const FILTER_SETTINGS_DB_KEY = 'clients_table_filters';
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
+
+interface ClientsProps {
+  onOpenContract?: (contractId: number) => void;
+  onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
+  onOpenAct?: (actId: number) => void;
+  onOpenPayment?: (paymentId: number, type?: PaymentKind) => void;
+}
 
 const TABLE_LAYOUT_COLUMNS = COLUMN_DEFINITIONS.map((column) => ({
   key: column.id,
@@ -318,7 +371,7 @@ function saveFilterSettings(storageKey: string, settings: ClientTableFilterSetti
   }
 }
 
-export function Clients() {
+export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPayment }: ClientsProps = {}) {
   const { statuses: clientStatuses } = useClientStatuses();
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -422,6 +475,9 @@ export function Clients() {
         legalEntityKpp: 'legalEntityKpp',
         casesCount: 'casesCount',
         contractsCount: 'contractsCount',
+        invoicesCount: 'invoicesCount',
+        actsCount: 'actsCount',
+        paymentsCount: 'paymentsCount',
       }) satisfies Record<ColumnId, string>,
     [],
   );
@@ -995,6 +1051,46 @@ export function Clients() {
     );
   }
 
+  const renderRelatedLinks = (
+    links: RelatedDocumentLink[],
+    totalCount: number,
+    onOpen?: (link: RelatedDocumentLink) => void,
+  ) => {
+    if (links.length === 0) {
+      return <span className="text-sm text-gray-700 block truncate">{totalCount}</span>;
+    }
+
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        {links.map((link) => {
+          const label = link.label || `#${link.id}`;
+          const title = [label, link.secondaryLabel].filter(Boolean).join(' · ');
+          return onOpen ? (
+            <button
+              key={link.id}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpen(link);
+              }}
+              className="block max-w-full truncate text-left text-sm text-blue-600 hover:underline"
+              title={title}
+            >
+              {label}
+            </button>
+          ) : (
+            <span key={link.id} className="block max-w-full truncate text-sm text-gray-700" title={title}>
+              {label}
+            </span>
+          );
+        })}
+        {totalCount > links.length ? (
+          <span className="text-xs text-gray-400">+{totalCount - links.length}</span>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderCell = (client: Client, columnId: ColumnId) => {
     switch (columnId) {
       case 'id':
@@ -1115,18 +1211,32 @@ export function Clients() {
           <span className="text-xs text-gray-400">—</span>
         );
       case 'casesCount':
-        return (
-          <button
-            type="button"
-            onClick={() => handleOpenClient(client.id)}
-            className="text-sm text-blue-600 hover:underline"
-          >
-            {getClientCaseCount(client)}
-          </button>
-        );
+        return renderRelatedLinks(getClientCaseLinks(client), getClientCaseCount(client), (link) => {
+          handleOpenClient(client.id, link.id);
+        });
       case 'contractsCount':
-        return (
-          <span className="text-sm text-gray-700 block truncate">{getClientContractsCount(client)}</span>
+        return renderRelatedLinks(
+          getClientContractLinks(client),
+          getClientContractsCount(client),
+          onOpenContract ? (link) => onOpenContract(link.id) : undefined,
+        );
+      case 'invoicesCount':
+        return renderRelatedLinks(
+          client.relatedInvoices ?? [],
+          getClientInvoicesCount(client),
+          onOpenInvoice ? (link) => onOpenInvoice(link.id, normalizeRelatedPaymentKind(link.type)) : undefined,
+        );
+      case 'actsCount':
+        return renderRelatedLinks(
+          client.relatedActs ?? [],
+          getClientActsCount(client),
+          onOpenAct ? (link) => onOpenAct(link.id) : undefined,
+        );
+      case 'paymentsCount':
+        return renderRelatedLinks(
+          client.relatedPayments ?? [],
+          getClientPaymentsCount(client),
+          onOpenPayment ? (link) => onOpenPayment(link.id, normalizeRelatedPaymentKind(link.type)) : undefined,
         );
       default:
         return null;

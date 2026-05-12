@@ -360,6 +360,29 @@ function AppContent() {
     [permissions.payments.canView],
   );
 
+  const openPaymentPage = useCallback(
+    (paymentId: number, type?: 'Income' | 'Expense') => {
+      if (!permissions.payments.canView || !(paymentId > 0)) {
+        return;
+      }
+
+      setSelectedPaymentId(paymentId);
+      setActiveTab(type === 'Expense' ? 'paymentsExpense' : type === 'Income' ? 'paymentsIncome' : 'payments');
+    },
+    [permissions.payments.canView],
+  );
+
+  const openRelatedCase = useCallback(
+    (caseId: number, clientId?: number | null) => {
+      if (!clientId) {
+        return;
+      }
+
+      handleOpenClient(clientId, caseId);
+    },
+    [handleOpenClient],
+  );
+
   const openTaskDetail = useCallback(
     (taskId: number) => {
       if (!permissions.tasks.canView || !(taskId > 0)) {
@@ -747,12 +770,27 @@ function AppContent() {
 
       case 'legalEntities':
         return permissions.legalEntities.canView
-          ? <LegalEntities />
+          ? (
+              <LegalEntities
+                onOpenCase={openRelatedCase}
+                onOpenContract={(id) => openContractDetail(id, { returnTo: 'legalEntities' })}
+                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
+                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onOpenPayment={openPaymentPage}
+              />
+            )
           : renderNoAccess('Раздел юридических лиц недоступен для вашей роли.');
 
       case 'clients':
         return permissions.clients.canView
-          ? <Clients />
+          ? (
+              <Clients
+                onOpenContract={(id) => openContractDetail(id, { returnTo: 'clients' })}
+                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
+                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onOpenPayment={openPaymentPage}
+              />
+            )
           : renderNoAccess('Раздел клиентов недоступен для вашей роли.');
 
       case 'contacts':
@@ -763,6 +801,11 @@ function AppContent() {
                 canViewLegalEntities={permissions.legalEntities.canView}
                 initialKind="all"
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contacts' } })}
+                onOpenCase={openRelatedCase}
+                onOpenContract={(id) => openContractDetail(id, { returnTo: 'contacts' })}
+                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
+                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onOpenPayment={openPaymentPage}
               />
             )
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
@@ -776,6 +819,11 @@ function AppContent() {
                 initialKind="client"
                 lockKind
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contactsClients' } })}
+                onOpenCase={openRelatedCase}
+                onOpenContract={(id) => openContractDetail(id, { returnTo: 'contactsClients' })}
+                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
+                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onOpenPayment={openPaymentPage}
               />
             )
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
@@ -789,6 +837,11 @@ function AppContent() {
                 initialKind="legal"
                 lockKind
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contactsLegal' } })}
+                onOpenCase={openRelatedCase}
+                onOpenContract={(id) => openContractDetail(id, { returnTo: 'contactsLegal' })}
+                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
+                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onOpenPayment={openPaymentPage}
               />
             )
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
@@ -811,7 +864,14 @@ function AppContent() {
         }
 
         if (!selectedClientId) {
-          return <Clients />;
+          return (
+            <Clients
+              onOpenContract={(id) => openContractDetail(id, { returnTo: 'clients' })}
+              onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
+              onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+              onOpenPayment={openPaymentPage}
+            />
+          );
         }
 
         return (

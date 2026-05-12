@@ -29,7 +29,7 @@ import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { apiService } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import type { LegalEntityDetail, LegalEntityInput, LegalEntitySummary } from '../../types';
+import type { LegalEntityDetail, LegalEntityInput, LegalEntitySummary, PaymentKind, RelatedDocumentLink } from '../../types';
 import { LegalEntityModal } from './LegalEntityModal';
 
 const PAGE_SIZE_OPTIONS = [12, 24, 48];
@@ -41,10 +41,23 @@ const LEGAL_ENTITY_COLUMNS = [
   { key: 'contacts', label: 'Контакты', defaultVisible: true, defaultWidth: 220 },
   { key: 'address', label: 'Адрес', defaultVisible: false, defaultWidth: 280 },
   { key: 'clients', label: 'Клиенты', defaultVisible: true, defaultWidth: 180 },
+  { key: 'cases', label: 'Дела', defaultVisible: true, defaultWidth: 100 },
+  { key: 'contracts', label: 'Договоры', defaultVisible: true, defaultWidth: 120 },
+  { key: 'invoices', label: 'Счета', defaultVisible: true, defaultWidth: 100 },
+  { key: 'acts', label: 'Акты', defaultVisible: true, defaultWidth: 100 },
+  { key: 'payments', label: 'Платежи', defaultVisible: true, defaultWidth: 120 },
   { key: 'createdAt', label: 'Создано', defaultVisible: false, defaultWidth: 140 },
 ] as const;
 
 type LegalEntityColumnKey = (typeof LEGAL_ENTITY_COLUMNS)[number]['key'];
+
+interface LegalEntitiesProps {
+  onOpenCase?: (caseId: number, clientId?: number | null, legalEntityId?: number | null) => void;
+  onOpenContract?: (contractId: number) => void;
+  onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
+  onOpenAct?: (actId: number) => void;
+  onOpenPayment?: (paymentId: number, type?: PaymentKind) => void;
+}
 
 const LEGAL_ENTITY_COLUMN_LABELS: Record<LegalEntityColumnKey, string> = LEGAL_ENTITY_COLUMNS.reduce(
   (acc, column) => ({ ...acc, [column.key]: column.label }),
@@ -79,7 +92,17 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleDateString('ru-RU');
 }
 
-export function LegalEntities() {
+function normalizeRelatedPaymentKind(value?: string | null): PaymentKind | undefined {
+  return value === 'Income' || value === 'Expense' ? value : undefined;
+}
+
+export function LegalEntities({
+  onOpenCase,
+  onOpenContract,
+  onOpenInvoice,
+  onOpenAct,
+  onOpenPayment,
+}: LegalEntitiesProps = {}) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const toast = useToast();
@@ -275,6 +298,49 @@ export function LegalEntities() {
     }
   };
 
+  const renderRelatedLinks = (
+    links: RelatedDocumentLink[] | undefined,
+    totalCount: number,
+    onOpen?: (link: RelatedDocumentLink) => void,
+    canOpen?: (link: RelatedDocumentLink) => boolean,
+  ) => {
+    const items = links ?? [];
+    if (items.length === 0) {
+      return <span className="text-sm text-slate-700">{totalCount}</span>;
+    }
+
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        {items.map((link) => {
+          const label = link.label || `#${link.id}`;
+          const title = [label, link.secondaryLabel].filter(Boolean).join(' · ');
+          const clickable = onOpen && (canOpen?.(link) ?? true);
+          return clickable ? (
+            <button
+              key={link.id}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpen(link);
+              }}
+              className="block max-w-full truncate text-left text-sm text-blue-600 hover:underline"
+              title={title}
+            >
+              {label}
+            </button>
+          ) : (
+            <span key={link.id} className="block max-w-full truncate text-sm text-slate-700" title={title}>
+              {label}
+            </span>
+          );
+        })}
+        {totalCount > items.length ? (
+          <span className="text-xs text-slate-400">+{totalCount - items.length}</span>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderTableCell = (entity: LegalEntitySummary, columnKey: LegalEntityColumnKey) => {
     switch (columnKey) {
       case 'shortName':
@@ -341,6 +407,39 @@ export function LegalEntities() {
               </div>
             ) : null}
           </div>
+        );
+      case 'cases':
+        return renderRelatedLinks(
+          entity.relatedCases,
+          entity.casesCount ?? 0,
+          onOpenCase
+            ? (link) => onOpenCase(link.id, link.clientId, entity.id)
+            : undefined,
+          (link) => Boolean(link.clientId),
+        );
+      case 'contracts':
+        return renderRelatedLinks(
+          entity.relatedContracts,
+          entity.contractsCount ?? 0,
+          onOpenContract ? (link) => onOpenContract(link.id) : undefined,
+        );
+      case 'invoices':
+        return renderRelatedLinks(
+          entity.relatedInvoices,
+          entity.invoicesCount ?? 0,
+          onOpenInvoice ? (link) => onOpenInvoice(link.id, normalizeRelatedPaymentKind(link.type)) : undefined,
+        );
+      case 'acts':
+        return renderRelatedLinks(
+          entity.relatedActs,
+          entity.actsCount ?? 0,
+          onOpenAct ? (link) => onOpenAct(link.id) : undefined,
+        );
+      case 'payments':
+        return renderRelatedLinks(
+          entity.relatedPayments,
+          entity.paymentsCount ?? 0,
+          onOpenPayment ? (link) => onOpenPayment(link.id, normalizeRelatedPaymentKind(link.type)) : undefined,
         );
       case 'createdAt':
         return <span className="text-sm text-slate-600">{formatDate(entity.createdAt)}</span>;

@@ -216,6 +216,21 @@ public class ClientsV2Controller : ControllerBase
                 .ThenByDescending(c => c.Id)
                 .ToListAsync(ct);
 
+            var caseLinksByClient = casesByClient
+                .Where(c => c.ClientId.HasValue)
+                .GroupBy(c => c.ClientId!.Value)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(c => new RelatedDocumentLink
+                    {
+                        Id = c.Id,
+                        Label = string.IsNullOrWhiteSpace(c.Title) ? $"Дело #{c.Id}" : c.Title,
+                        SecondaryLabel = c.Status.ToString(),
+                        ClientId = c.ClientId,
+                        LegalEntityId = c.LegalEntityId,
+                        Date = c.CreatedAt,
+                    }).ToList());
+
             var contractsCountByClient = await _db.ClientContracts
                 .AsNoTracking()
                 .Where(c => itemIds.Contains(c.ClientId))
@@ -223,26 +238,196 @@ public class ClientsV2Controller : ControllerBase
                 .Select(g => new { ClientId = g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.ClientId, x => x.Count, ct);
 
+            var contractRows = await _db.ClientContracts
+                .AsNoTracking()
+                .Where(c => itemIds.Contains(c.ClientId))
+                .Select(c => new
+                {
+                    c.ClientId,
+                    c.ContractId,
+                    c.Contract.Number,
+                    c.Contract.Title,
+                    c.Contract.Date,
+                })
+                .ToListAsync(ct);
+
+            var contractLinksByClient = contractRows
+                .GroupBy(row => row.ClientId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(row => row.Date)
+                        .Select(row => new RelatedDocumentLink
+                        {
+                            Id = row.ContractId,
+                            Label = !string.IsNullOrWhiteSpace(row.Number)
+                                ? $"№{row.Number}"
+                                : !string.IsNullOrWhiteSpace(row.Title)
+                                    ? row.Title!
+                                    : $"Договор #{row.ContractId}",
+                            SecondaryLabel = row.Title,
+                            ClientId = row.ClientId,
+                            Date = row.Date,
+                        }).ToList());
+
+            var actsCountByClient = await _db.Acts
+                .AsNoTracking()
+                .Where(a => a.ClientId.HasValue && itemIds.Contains(a.ClientId.Value))
+                .GroupBy(a => a.ClientId!.Value)
+                .Select(g => new { ClientId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.ClientId, x => x.Count, ct);
+
+            var actRows = await _db.Acts
+                .AsNoTracking()
+                .Where(a => a.ClientId.HasValue && itemIds.Contains(a.ClientId.Value))
+                .Select(a => new
+                {
+                    a.Id,
+                    a.Number,
+                    a.Title,
+                    a.Date,
+                    a.Amount,
+                    a.ClientId,
+                    a.LegalEntityId,
+                })
+                .ToListAsync(ct);
+
+            var actLinksByClient = actRows
+                .Where(row => row.ClientId.HasValue)
+                .GroupBy(row => row.ClientId!.Value)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(row => row.Date)
+                        .Select(row => new RelatedDocumentLink
+                        {
+                            Id = row.Id,
+                            Label = !string.IsNullOrWhiteSpace(row.Number)
+                                ? $"№{row.Number}"
+                                : !string.IsNullOrWhiteSpace(row.Title)
+                                    ? row.Title!
+                                    : $"Акт #{row.Id}",
+                            SecondaryLabel = row.Title,
+                            ClientId = row.ClientId,
+                            LegalEntityId = row.LegalEntityId,
+                            Date = row.Date,
+                            Amount = row.Amount,
+                        }).ToList());
+
             var invoiceRows = await _db.Payments
                 .AsNoTracking()
                 .Where(p => p.DocumentKind == DocumentKind.Invoice)
                 .Where(p =>
                     (p.ClientId.HasValue && itemIds.Contains(p.ClientId.Value)) ||
                     (p.ExpenseClientId.HasValue && itemIds.Contains(p.ExpenseClientId.Value)))
-                .Select(p => new { p.ClientId, p.ExpenseClientId })
+                .Select(p => new
+                {
+                    p.Id,
+                    p.ClientId,
+                    p.ExpenseClientId,
+                    p.Account,
+                    p.LegacyAccountNumber,
+                    p.Date,
+                    p.Amount,
+                    p.Type,
+                })
                 .ToListAsync(ct);
 
             var invoicesCountByClient = new Dictionary<int, int>();
+            var invoiceLinksByClient = new Dictionary<int, List<RelatedDocumentLink>>();
+            void AddInvoiceLink(int clientId, RelatedDocumentLink link)
+            {
+                if (!invoiceLinksByClient.TryGetValue(clientId, out var links))
+                {
+                    links = new List<RelatedDocumentLink>();
+                    invoiceLinksByClient[clientId] = links;
+                }
+
+                links.Add(link);
+            }
+
             foreach (var row in invoiceRows)
             {
+                var number = !string.IsNullOrWhiteSpace(row.Account) ? row.Account : row.LegacyAccountNumber;
+                var link = new RelatedDocumentLink
+                {
+                    Id = row.Id,
+                    Label = !string.IsNullOrWhiteSpace(number) ? $"№{number}" : $"Счет #{row.Id}",
+                    ClientId = row.ClientId ?? row.ExpenseClientId,
+                    Date = row.Date,
+                    Amount = row.Amount,
+                    Type = row.Type.ToString(),
+                };
+
                 if (row.ClientId.HasValue && itemIds.Contains(row.ClientId.Value))
                 {
                     invoicesCountByClient[row.ClientId.Value] = invoicesCountByClient.GetValueOrDefault(row.ClientId.Value) + 1;
+                    AddInvoiceLink(row.ClientId.Value, link);
                 }
 
                 if (row.ExpenseClientId.HasValue && itemIds.Contains(row.ExpenseClientId.Value) && row.ExpenseClientId != row.ClientId)
                 {
                     invoicesCountByClient[row.ExpenseClientId.Value] = invoicesCountByClient.GetValueOrDefault(row.ExpenseClientId.Value) + 1;
+                    AddInvoiceLink(row.ExpenseClientId.Value, link);
+                }
+            }
+
+            var paymentRows = await _db.Payments
+                .AsNoTracking()
+                .Where(p => p.DocumentKind != DocumentKind.Invoice)
+                .Where(p =>
+                    (p.ClientId.HasValue && itemIds.Contains(p.ClientId.Value)) ||
+                    (p.ExpenseClientId.HasValue && itemIds.Contains(p.ExpenseClientId.Value)))
+                .Select(p => new
+                {
+                    p.Id,
+                    p.ClientId,
+                    p.ExpenseClientId,
+                    p.PaymentOrderNumber,
+                    p.Description,
+                    p.Date,
+                    p.Amount,
+                    p.Type,
+                })
+                .ToListAsync(ct);
+
+            var paymentsCountByClient = new Dictionary<int, int>();
+            var paymentLinksByClient = new Dictionary<int, List<RelatedDocumentLink>>();
+            void AddPaymentLink(int clientId, RelatedDocumentLink link)
+            {
+                if (!paymentLinksByClient.TryGetValue(clientId, out var links))
+                {
+                    links = new List<RelatedDocumentLink>();
+                    paymentLinksByClient[clientId] = links;
+                }
+
+                links.Add(link);
+            }
+
+            foreach (var row in paymentRows)
+            {
+                var link = new RelatedDocumentLink
+                {
+                    Id = row.Id,
+                    Label = !string.IsNullOrWhiteSpace(row.PaymentOrderNumber)
+                        ? $"№{row.PaymentOrderNumber}"
+                        : !string.IsNullOrWhiteSpace(row.Description)
+                            ? row.Description
+                            : $"Платеж #{row.Id}",
+                    ClientId = row.ClientId ?? row.ExpenseClientId,
+                    Date = row.Date,
+                    Amount = row.Amount,
+                    Type = row.Type.ToString(),
+                };
+
+                if (row.ClientId.HasValue && itemIds.Contains(row.ClientId.Value))
+                {
+                    paymentsCountByClient[row.ClientId.Value] = paymentsCountByClient.GetValueOrDefault(row.ClientId.Value) + 1;
+                    AddPaymentLink(row.ClientId.Value, link);
+                }
+
+                if (row.ExpenseClientId.HasValue && itemIds.Contains(row.ExpenseClientId.Value) && row.ExpenseClientId != row.ClientId)
+                {
+                    paymentsCountByClient[row.ExpenseClientId.Value] = paymentsCountByClient.GetValueOrDefault(row.ExpenseClientId.Value) + 1;
+                    AddPaymentLink(row.ExpenseClientId.Value, link);
                 }
             }
 
@@ -251,9 +436,16 @@ public class ClientsV2Controller : ControllerBase
                 item.CasesCount = casesCountByClient.GetValueOrDefault(item.Id);
                 item.ContractsCount = contractsCountByClient.GetValueOrDefault(item.Id);
                 item.InvoicesCount = invoicesCountByClient.GetValueOrDefault(item.Id);
+                item.ActsCount = actsCountByClient.GetValueOrDefault(item.Id);
+                item.PaymentsCount = paymentsCountByClient.GetValueOrDefault(item.Id);
                 item.Cases = casesByClient
                     .Where(clientCase => clientCase.ClientId == item.Id)
                     .ToList();
+                item.RelatedCases = caseLinksByClient.GetValueOrDefault(item.Id) ?? new List<RelatedDocumentLink>();
+                item.RelatedContracts = contractLinksByClient.GetValueOrDefault(item.Id) ?? new List<RelatedDocumentLink>();
+                item.RelatedInvoices = invoiceLinksByClient.GetValueOrDefault(item.Id)?.OrderByDescending(link => link.Date).ToList() ?? new List<RelatedDocumentLink>();
+                item.RelatedActs = actLinksByClient.GetValueOrDefault(item.Id) ?? new List<RelatedDocumentLink>();
+                item.RelatedPayments = paymentLinksByClient.GetValueOrDefault(item.Id)?.OrderByDescending(link => link.Date).ToList() ?? new List<RelatedDocumentLink>();
             }
         }
 
