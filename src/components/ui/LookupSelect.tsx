@@ -27,8 +27,61 @@ interface LookupSelectProps {
   noOptionsText?: string;
 }
 
-function normalizeText(value: string) {
-  return value.trim().toLocaleLowerCase('ru');
+const RUSSIAN_TO_LATIN: Record<string, string> = {
+  а: 'a',
+  б: 'b',
+  в: 'v',
+  г: 'g',
+  д: 'd',
+  е: 'e',
+  ж: 'zh',
+  з: 'z',
+  и: 'i',
+  й: 'i',
+  к: 'k',
+  л: 'l',
+  м: 'm',
+  н: 'n',
+  о: 'o',
+  п: 'p',
+  р: 'r',
+  с: 's',
+  т: 't',
+  у: 'u',
+  ф: 'f',
+  х: 'h',
+  ц: 'ts',
+  ч: 'ch',
+  ш: 'sh',
+  щ: 'sch',
+  ъ: '',
+  ы: 'y',
+  ь: '',
+  э: 'e',
+  ю: 'yu',
+  я: 'ya',
+};
+
+function normalizeBase(value: string) {
+  return value
+    .trim()
+    .toLocaleLowerCase('ru')
+    .replace(/ё/g, 'е')
+    .replace(/\s+/g, ' ');
+}
+
+function transliterateRussian(value: string) {
+  return value.replace(/[а-я]/g, (char) => RUSSIAN_TO_LATIN[char] ?? char);
+}
+
+function normalizeTextVariants(value: string) {
+  const normalized = normalizeBase(value);
+  if (!normalized) {
+    return [];
+  }
+
+  const transliterated = transliterateRussian(normalized);
+  return transliterated === normalized ? [normalized] : [normalized, transliterated];
 }
 
 export function LookupSelect({
@@ -57,19 +110,21 @@ export function LookupSelect({
   );
 
   const filteredOptions = useMemo(() => {
-    const normalizedQuery = normalizeText(query);
-    if (!normalizedQuery) {
+    const queryVariants = normalizeTextVariants(query);
+    if (queryVariants.length === 0) {
       return options;
     }
 
     return options.filter((option) => {
-      const haystack = normalizeText([
+      const haystackVariants = normalizeTextVariants([
         option.label,
         option.description ?? '',
         ...(option.keywords ?? []),
       ].join(' '));
 
-      return haystack.includes(normalizedQuery);
+      return queryVariants.some((queryVariant) =>
+        haystackVariants.some((haystackVariant) => haystackVariant.includes(queryVariant)),
+      );
     });
   }, [options, query]);
 

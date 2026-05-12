@@ -351,6 +351,17 @@ function getLegalEntityDisplayName(entity: Pick<LegalEntitySummary, 'id' | 'shor
   return entity.shortName?.trim() || entity.fullName?.trim() || `Юрлицо #${entity.id}`;
 }
 
+function getLegalEntityRoleLabels(entity: Pick<LegalEntitySummary, 'clientStatus' | 'isClientAndSupplier'> | null | undefined) {
+  const statusName = entity?.clientStatus?.name?.trim();
+  if (entity?.isClientAndSupplier) {
+    return statusName && !/клиент|поставщик/i.test(statusName)
+      ? ['Клиент', 'Поставщик', statusName]
+      : ['Клиент', 'Поставщик'];
+  }
+
+  return statusName ? [statusName] : [];
+}
+
 function getAutomationCandidateOwnerName(candidate: TaskJournalCaseAutomationCandidate) {
   return candidate.clientName?.trim() || candidate.legalEntityName?.trim() || 'Контрагент';
 }
@@ -662,11 +673,25 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           .filter((entity) => entity?.id && getLegalEntityDisplayName(entity))
           .map((entity) => {
             const name = getLegalEntityDisplayName(entity);
+            const roleLabels = getLegalEntityRoleLabels(entity);
             return {
               value: `legal:${entity.id}`,
               label: name,
-              description: ['Юрлицо', entity.inn ? `ИНН ${entity.inn}` : '', entity.kpp ? `КПП ${entity.kpp}` : '', entity.email].filter(Boolean).join(' · ') || undefined,
-              keywords: [String(entity.id), name, entity.fullName, entity.inn, entity.kpp, entity.ogrn, entity.phone, entity.email].filter(Boolean),
+              description: ['Юрлицо', ...roleLabels, entity.inn ? `ИНН ${entity.inn}` : '', entity.kpp ? `КПП ${entity.kpp}` : '', entity.email].filter(Boolean).join(' · ') || undefined,
+              keywords: [
+                String(entity.id),
+                name,
+                entity.fullName,
+                entity.inn,
+                entity.kpp,
+                entity.ogrn,
+                entity.phone,
+                entity.email,
+                'юридическое лицо',
+                'юрлицо',
+                'контрагент',
+                ...roleLabels,
+              ].filter(Boolean),
             };
           }))
         .sort((a, b) => a.label.localeCompare(b.label, 'ru')),

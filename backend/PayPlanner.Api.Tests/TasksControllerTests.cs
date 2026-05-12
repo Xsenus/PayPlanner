@@ -233,6 +233,48 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_SearchesByLegalEntityAndLegalEntityCase()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var legalEntity = await CreateLegalEntityAsync(db, "ООО Ромашка");
+        legalEntity.Inn = "5400000000";
+        var clientCase = await CreateLegalEntityCaseAsync(db, legalEntity.Id, "corporate dispute");
+        var task = await CreateTaskAsync(
+            db,
+            author.Id,
+            clientId: null,
+            clientCaseId: clientCase.Id,
+            legalEntityId: legalEntity.Id);
+        var otherClient = await CreateClientAsync(db, "Иванов Иван Иванович");
+        await CreateTaskAsync(db, author.Id, otherClient.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        foreach (var searchTerm in new[] { "5400000000", "corporate" })
+        {
+            var result = await controller.GetTasks(
+                search: searchTerm,
+                status: null,
+                type: null,
+                assigneeUserId: null,
+                from: null,
+                to: null,
+                page: 1,
+                pageSize: 50,
+                ct: CancellationToken.None);
+
+            var ok = Assert.IsType<OkObjectResult>(result.Result);
+            var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(ok.Value);
+            var dto = Assert.Single(page.Items);
+
+            Assert.Equal(task.Id, dto.Id);
+            Assert.Null(dto.ClientId);
+            Assert.Equal(legalEntity.Id, dto.LegalEntityId);
+            Assert.Equal(clientCase.Id, dto.ClientCaseId);
+        }
+    }
+
+    [Fact]
     public async Task GetAutomationCaseCandidates_ReturnsOpenCaseWithoutActiveTasks()
     {
         await using var db = await CreateContextAsync();
@@ -893,18 +935,20 @@ public class TasksControllerTests
     private static async Task<TaskJournalItem> CreateTaskAsync(
         PaymentContext db,
         int authorUserId,
-        int clientId,
+        int? clientId,
         int? assigneeUserId = null,
         int? clientCaseId = null,
         string? result = null,
         string status = "new",
-        DateTime? createdAt = null)
+        DateTime? createdAt = null,
+        int? legalEntityId = null)
     {
         var task = new TaskJournalItem
         {
             ClientId = clientId,
+            LegalEntityId = legalEntityId,
             ClientCaseId = clientCaseId,
-            ObjectName = "Тестовый клиент",
+            ObjectName = legalEntityId.HasValue ? "Тестовое юрлицо" : "Тестовый клиент",
             Title = "Тестовая задача",
             AuthorUserId = authorUserId,
             AuthorName = "Автор",

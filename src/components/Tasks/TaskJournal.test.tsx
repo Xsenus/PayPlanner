@@ -294,6 +294,31 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('finds legal entities in counterparty lookup by INN and latin legal form', async () => {
+    legalEntitiesState.legalEntities = [
+      { id: 20, shortName: 'ООО Ромашка', inn: '5400000000', email: 'office@example.com' } as LegalEntitySummary,
+      { id: 21, shortName: 'АО Василек', inn: '7700000000', email: 'vasilek@example.com' } as LegalEntitySummary,
+    ];
+
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
+    const searchInput = screen.getByPlaceholderText('Поиск по ФИО, названию, ИНН, телефону или email');
+
+    fireEvent.change(searchInput, { target: { value: '5400000000' } });
+
+    expect(await screen.findByRole('button', { name: /ООО Ромашка/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /АО Василек/ })).toBeNull();
+
+    fireEvent.change(searchInput, { target: { value: 'ooo' } });
+
+    expect(await screen.findByRole('button', { name: /ООО Ромашка/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /АО Василек/ })).toBeNull();
+  });
+
   it('creates a control task from case automation candidate', async () => {
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
       {
