@@ -19,6 +19,7 @@ import { useDictionaries } from '../../hooks/useDictionaries';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
+import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { apiService } from '../../services/api';
 import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from '../../utils/invoicePayments';
@@ -305,6 +306,10 @@ export function Payments({
   const [remainderCandidatesTotal, setRemainderCandidatesTotal] = useState(0);
   const [remainderCandidatesTotalAmount, setRemainderCandidatesTotalAmount] = useState(0);
   const [remainderCandidateDates, setRemainderCandidateDates] = useState<Record<number, string>>({});
+  const [statusChangePayment, setStatusChangePayment] = useState<Payment | null>(null);
+  const [statusChangeValue, setStatusChangeValue] = useState<PaymentStatus>('Pending');
+  const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
+  const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
 
   const initialFromRef = useRef(fromDate);
   const initialToRef = useRef(toDate);
@@ -546,6 +551,25 @@ export function Payments({
   const availableStatuses = useMemo(() => {
     return STATUS_ORDER;
   }, []);
+
+  const paymentStatusOptions = useMemo<StatusChangeOption<PaymentStatus>[]>(
+    () => availableStatuses.map((status) => ({
+      value: status,
+      label: statusLabels[status] ?? status,
+      className: PAYMENT_PREVIEW_STATUS_STYLES[status],
+      description:
+        status === 'Completed'
+          ? 'Платеж станет оплаченным, оплаченная сумма будет приравнена к полной сумме.'
+          : status === 'Cancelled'
+            ? 'Платеж будет отменен, оплаченная сумма и дата оплаты будут очищены.'
+            : status === 'Overdue'
+              ? 'Платеж будет отмечен как просроченный.'
+              : status === 'Processing'
+                ? 'Платеж будет отмечен как находящийся в обработке.'
+                : 'Платеж будет отмечен как ожидающий оплаты.',
+    })),
+    [availableStatuses, statusLabels],
+  );
 
   const effectiveDefaultType: TypeFilter = defaultType ?? 'all';
   const headingText =
@@ -912,6 +936,43 @@ export function Payments({
     [confirm, paymentsPermissions.canEdit, refresh, showPermissionNotice, t, toast],
   );
 
+  const openPaymentStatusChange = useCallback((payment: Payment) => {
+    if (!paymentsPermissions.canEdit) {
+      showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
+      return;
+    }
+    setStatusChangePayment(payment);
+    setStatusChangeValue(payment.status);
+    setStatusChangeError(null);
+  }, [paymentsPermissions.canEdit, showPermissionNotice, t]);
+
+  const closePaymentStatusChange = useCallback(() => {
+    if (statusChangeSubmitting) return;
+    setStatusChangePayment(null);
+    setStatusChangeError(null);
+  }, [statusChangeSubmitting]);
+
+  const submitPaymentStatusChange = useCallback(async () => {
+    if (!statusChangePayment || !paymentsPermissions.canEdit) return;
+
+    try {
+      setStatusChangeSubmitting(true);
+      setStatusChangeError(null);
+      await apiService.updatePaymentStatus(
+        statusChangePayment.id,
+        statusChangeValue,
+        statusChangeValue === 'Completed' ? formatLocalYMD(new Date()) : null,
+      );
+      setStatusChangePayment(null);
+      await refresh();
+      toast.success('Статус платежа обновлен.', t('payments') ?? 'Платежи');
+    } catch (error) {
+      setStatusChangeError(extractDisplayErrorMessage(error, 'Не удалось изменить статус платежа.'));
+    } finally {
+      setStatusChangeSubmitting(false);
+    }
+  }, [paymentsPermissions.canEdit, refresh, statusChangePayment, statusChangeValue, t, toast]);
+
   const handleSubmit = useCallback(
     async (payload: SubmitDTO) => {
       try {
@@ -1120,6 +1181,20 @@ export function Payments({
   const inputClass =
     'h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm transition-colors focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100';
   const centeredDateInputClass = `${inputClass} text-center`;
+  const statusChangeCurrentValue = statusChangePayment?.status ?? 'Pending';
+  const statusChangeTargetLabel = statusLabels[statusChangeValue] ?? statusChangeValue;
+  const statusChangeSubject = statusChangePayment
+    ? `Платеж #${statusChangePayment.id}: ${statusChangePayment.description?.trim() || 'без описания'}`
+    : 'Платеж не выбран';
+  const statusChangeConsequences = [
+    `Статус платежа изменится с «${statusLabels[statusChangeCurrentValue] ?? statusChangeCurrentValue}» на «${statusChangeTargetLabel}».`,
+    statusChangeValue === 'Completed'
+      ? 'Оплаченная сумма станет равна полной сумме платежа, дата оплаты будет сегодняшней.'
+      : statusChangeValue === 'Cancelled'
+        ? 'Оплаченная сумма и дата оплаты будут очищены.'
+        : 'Связанные поля оплаты будут приведены к выбранному статусу.',
+    'После сохранения список платежей обновится.',
+  ];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1600,6 +1675,7 @@ export function Payments({
                 onOpenClient={onOpenClient}
                 onAddPayment={handleAddPayment}
                 onDeletePayment={handleDeletePayment}
+                onStatusChange={openPaymentStatusChange}
                 canAdd={paymentsPermissions.canCreate}
                 canEdit={paymentsPermissions.canEdit}
                 canDelete={paymentsPermissions.canDelete}
@@ -1859,6 +1935,28 @@ export function Payments({
           </div>
         </div>
       ) : null}
+
+      <StatusChangeModal<PaymentStatus>
+        open={statusChangePayment !== null}
+        title="Смена статуса платежа"
+        subject={statusChangeSubject}
+        currentLabel={statusLabels[statusChangeCurrentValue] ?? statusChangeCurrentValue}
+        currentValue={statusChangeCurrentValue}
+        value={statusChangeValue}
+        options={paymentStatusOptions}
+        onChange={(value) => {
+          setStatusChangeValue(value);
+          if (statusChangeError) {
+            setStatusChangeError(null);
+          }
+        }}
+        consequences={statusChangeConsequences}
+        onCancel={closePaymentStatusChange}
+        onConfirm={submitPaymentStatusChange}
+        confirmLabel={`Изменить статус платежа #${statusChangePayment?.id ?? ''} на «${statusChangeTargetLabel}»`}
+        error={statusChangeError}
+        loading={statusChangeSubmitting}
+      />
 
       <PaymentModal
         isOpen={isModalOpen}

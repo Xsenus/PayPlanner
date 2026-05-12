@@ -37,6 +37,7 @@ import type {
   ClientRole,
   Invoice,
   InvoiceInput,
+  InvoiceWorkflowStatus,
   LegalEntitySummary,
   Payment,
   PaymentKind,
@@ -65,6 +66,7 @@ import { TableContextMenu, type TableContextMenuAction } from '../ui/TableContex
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { TableSelectCheckbox } from '../ui/TableSelectCheckbox';
+import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 
 interface AccountsProps {
   defaultType?: PaymentKind;
@@ -342,6 +344,31 @@ function deriveInvoiceSigningStatus(invoice?: Invoice | null): InvoiceSigningSta
   return 'notSigned';
 }
 
+function resolveEditableInvoiceWorkflowStatus(invoice?: Invoice | null): InvoiceWorkflowStatus {
+  const workflowStatus = invoice?.workflowStatus;
+  if (
+    workflowStatus === 'Draft' ||
+    workflowStatus === 'NotSigned' ||
+    workflowStatus === 'OnSigning' ||
+    workflowStatus === 'SignedByClient' ||
+    workflowStatus === 'Cancelled'
+  ) {
+    return workflowStatus;
+  }
+
+  switch (deriveInvoiceSigningStatus(invoice)) {
+    case 'cancelled':
+      return 'Cancelled';
+    case 'signed':
+      return 'SignedByClient';
+    case 'onSigning':
+      return 'OnSigning';
+    case 'notSigned':
+    default:
+      return 'NotSigned';
+  }
+}
+
 function accountKey(value?: string | null): string | null {
   if (!value) return null;
   const normalized = value.trim().toLowerCase();
@@ -478,6 +505,10 @@ export function Accounts({
   const [changeResponsibleSubmitting, setChangeResponsibleSubmitting] = useState(false);
   const [changeResponsibleError, setChangeResponsibleError] = useState<string | null>(null);
   const [nextResponsibleId, setNextResponsibleId] = useState('');
+  const [statusChangeInvoice, setStatusChangeInvoice] = useState<Invoice | null>(null);
+  const [statusChangeValue, setStatusChangeValue] = useState<InvoiceWorkflowStatus>('NotSigned');
+  const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
+  const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
   const baseTypeFilter = useMemo<FilterType>(() => (lockType ? (defaultType ?? 'All') : 'All'), [defaultType, lockType]);
   const selectedClientIdNumber = selectedCounterparty?.kind === 'client' ? selectedCounterparty.id : undefined;
   const selectedLegalEntityIdNumber = selectedCounterparty?.kind === 'legalEntity' ? selectedCounterparty.id : undefined;
@@ -671,6 +702,58 @@ export function Accounts({
     signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
+  const invoiceWorkflowStatusLabels: Record<InvoiceWorkflowStatus, string> = {
+    Draft: 'Черновик',
+    NotSigned: 'Не подписан',
+    OnSigning: 'На подписании',
+    SignedByClient: 'Подписан',
+    Paid: 'Оплачен',
+    PartiallyPaid: 'Частично оплачен',
+    Overdue: 'Просрочен',
+    Cancelled: 'Аннулирован',
+  };
+  const invoiceWorkflowStatusClasses: Record<InvoiceWorkflowStatus, string> = {
+    Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
+    NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+    OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
+    SignedByClient: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    Paid: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    PartiallyPaid: 'bg-blue-100 text-blue-700 border border-blue-200',
+    Overdue: 'bg-rose-100 text-rose-700 border border-rose-200',
+    Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
+  };
+  const invoiceWorkflowStatusOptions: StatusChangeOption<InvoiceWorkflowStatus>[] = [
+    {
+      value: 'Draft',
+      label: invoiceWorkflowStatusLabels.Draft,
+      description: 'Документ вернется в черновик, даты отправки и подписи будут очищены.',
+      className: invoiceWorkflowStatusClasses.Draft,
+    },
+    {
+      value: 'NotSigned',
+      label: invoiceWorkflowStatusLabels.NotSigned,
+      description: 'Документ будет отмечен как неподписанный.',
+      className: invoiceWorkflowStatusClasses.NotSigned,
+    },
+    {
+      value: 'OnSigning',
+      label: invoiceWorkflowStatusLabels.OnSigning,
+      description: 'Документ будет отмечен как отправленный на подписание.',
+      className: invoiceWorkflowStatusClasses.OnSigning,
+    },
+    {
+      value: 'SignedByClient',
+      label: invoiceWorkflowStatusLabels.SignedByClient,
+      description: 'Документ будет отмечен как подписанный клиентом.',
+      className: invoiceWorkflowStatusClasses.SignedByClient,
+    },
+    {
+      value: 'Cancelled',
+      label: invoiceWorkflowStatusLabels.Cancelled,
+      description: 'Изменится только статус документа; статус оплаты счета не меняется.',
+      className: invoiceWorkflowStatusClasses.Cancelled,
+    },
+  ];
   const statusBadgeClass =
     'inline-flex max-w-full items-center justify-center rounded-full px-3 py-1 text-center text-xs font-medium leading-tight whitespace-normal';
   void statusLabels;
@@ -1189,6 +1272,36 @@ export function Accounts({
       setChangeResponsibleSubmitting(false);
     }
   }, [actResponsibles, canEdit, confirm, nextResponsibleId, refreshAccounts, selectedInvoiceIds, singleSelectedInvoice, toast]);
+
+  const openInvoiceStatusChange = useCallback((invoice: Invoice) => {
+    if (!canEdit) return;
+    setStatusChangeInvoice(invoice);
+    setStatusChangeValue(resolveEditableInvoiceWorkflowStatus(invoice));
+    setStatusChangeError(null);
+  }, [canEdit]);
+
+  const closeInvoiceStatusChange = useCallback(() => {
+    if (statusChangeSubmitting) return;
+    setStatusChangeInvoice(null);
+    setStatusChangeError(null);
+  }, [statusChangeSubmitting]);
+
+  const submitInvoiceStatusChange = useCallback(async () => {
+    if (!canEdit || !statusChangeInvoice) return;
+
+    try {
+      setStatusChangeSubmitting(true);
+      setStatusChangeError(null);
+      await apiService.updateInvoiceWorkflowStatus(statusChangeInvoice.id, statusChangeValue);
+      setStatusChangeInvoice(null);
+      await refreshAccounts();
+      toast.success('Статус документа обновлен.');
+    } catch (err) {
+      setStatusChangeError(extractDisplayErrorMessage(err, 'Не удалось изменить статус документа.'));
+    } finally {
+      setStatusChangeSubmitting(false);
+    }
+  }, [canEdit, refreshAccounts, statusChangeInvoice, statusChangeValue, toast]);
 
   const closeTableMenu = useCallback(() => {
     setTableMenuPosition(null);
@@ -1970,6 +2083,17 @@ export function Accounts({
     },
   ];
 
+  const statusChangeCurrentValue = resolveEditableInvoiceWorkflowStatus(statusChangeInvoice);
+  const statusChangeTargetLabel = invoiceWorkflowStatusLabels[statusChangeValue] ?? statusChangeValue;
+  const statusChangeSubject = statusChangeInvoice
+    ? `Счет №${statusChangeInvoice.number} от ${formatDate(statusChangeInvoice.date)}`
+    : 'Счет не выбран';
+  const statusChangeConsequences = [
+    `Статус документа изменится с «${invoiceWorkflowStatusLabels[statusChangeCurrentValue] ?? statusChangeCurrentValue}» на «${statusChangeTargetLabel}».`,
+    'Статус оплаты, сумма, дата оплаты и связанные платежи не меняются.',
+    'Изменение сохранится сразу после подтверждения и список счетов обновится.',
+  ];
+
   const paymentModalElement = (
     <PaymentModal
       isOpen={paymentModalOpen}
@@ -2728,9 +2852,25 @@ export function Accounts({
                               case 'signingStatus':
                                 return (
                                   <td key={column.key} className="px-4 py-3 text-center align-middle">
-                                    <span className={`${statusBadgeClass} ${signingStatusClasses[signingStatus]}`}>
-                                      {signingStatusLabels[signingStatus]}
-                                    </span>
+                                    {invoice && canEdit ? (
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          openInvoiceStatusChange(invoice);
+                                        }}
+                                        className="inline-flex max-w-full rounded-full transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                        title="Изменить статус документа"
+                                      >
+                                        <span className={`${statusBadgeClass} ${signingStatusClasses[signingStatus]}`}>
+                                          {signingStatusLabels[signingStatus]}
+                                        </span>
+                                      </button>
+                                    ) : (
+                                      <span className={`${statusBadgeClass} ${signingStatusClasses[signingStatus]}`}>
+                                        {signingStatusLabels[signingStatus]}
+                                      </span>
+                                    )}
                                   </td>
                                 );
                               case 'dueDate':
@@ -3035,6 +3175,28 @@ export function Accounts({
           title={tableMenuTitle}
           actions={tableMenuActions}
           onClose={closeTableMenu}
+        />
+
+        <StatusChangeModal<InvoiceWorkflowStatus>
+          open={statusChangeInvoice !== null}
+          title="Смена статуса документа"
+          subject={statusChangeSubject}
+          currentLabel={invoiceWorkflowStatusLabels[statusChangeCurrentValue] ?? statusChangeCurrentValue}
+          currentValue={statusChangeCurrentValue}
+          value={statusChangeValue}
+          options={invoiceWorkflowStatusOptions}
+          onChange={(value) => {
+            setStatusChangeValue(value);
+            if (statusChangeError) {
+              setStatusChangeError(null);
+            }
+          }}
+          consequences={statusChangeConsequences}
+          onCancel={closeInvoiceStatusChange}
+          onConfirm={submitInvoiceStatusChange}
+          confirmLabel={`Изменить статус счета №${statusChangeInvoice?.number ?? ''} на «${statusChangeTargetLabel}»`}
+          error={statusChangeError}
+          loading={statusChangeSubmitting}
         />
 
         <FormPromptModal

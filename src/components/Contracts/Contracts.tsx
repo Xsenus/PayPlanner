@@ -29,6 +29,7 @@ import { buildClientLookupOptions } from '../Clients/clientLookupOptions';
 import { LookupSelect } from '../ui/LookupSelect';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
+import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 
 type SortState = { key: ContractsSortKey; direction: 'asc' | 'desc' };
 
@@ -92,6 +93,10 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [statusChangeContract, setStatusChangeContract] = useState<Contract | null>(null);
+  const [statusChangeValue, setStatusChangeValue] = useState<ContractStatus>('Draft');
+  const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
+  const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
 
   const debouncedSearch = useDebouncedValue(search.trim(), 350);
   const clientIdFilter = clientFilter === 'all' ? undefined : Number(clientFilter);
@@ -191,6 +196,44 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     Terminated: 'bg-orange-100 text-orange-700 border border-orange-200',
     Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
+  const contractStatusOptions: StatusChangeOption<ContractStatus>[] = [
+    {
+      value: 'Draft',
+      label: contractStatusLabels.Draft,
+      description: 'Договор вернется в черновик, даты подписания и закрытия будут очищены.',
+      className: contractStatusClasses.Draft,
+    },
+    {
+      value: 'NotSigned',
+      label: contractStatusLabels.NotSigned,
+      description: 'Договор будет отмечен как неподписанный.',
+      className: contractStatusClasses.NotSigned,
+    },
+    {
+      value: 'OnSigning',
+      label: contractStatusLabels.OnSigning,
+      description: 'Договор будет отмечен как отправленный на подписание.',
+      className: contractStatusClasses.OnSigning,
+    },
+    {
+      value: 'Concluded',
+      label: contractStatusLabels.Concluded,
+      description: 'Договор будет отмечен как подписанный.',
+      className: contractStatusClasses.Concluded,
+    },
+    {
+      value: 'Terminated',
+      label: contractStatusLabels.Terminated,
+      description: 'Договор будет расторгнут сегодняшней датой.',
+      className: contractStatusClasses.Terminated,
+    },
+    {
+      value: 'Cancelled',
+      label: contractStatusLabels.Cancelled,
+      description: 'Договор будет аннулирован сегодняшней датой.',
+      className: contractStatusClasses.Cancelled,
+    },
+  ];
 
   const handleSort = (key: ContractsSortKey) => {
     setSortState((prev) => {
@@ -239,6 +282,36 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     },
     [confirm, contracts.length, page, permissions.canDelete, refresh, toast],
   );
+
+  const openContractStatusChange = useCallback((contract: Contract) => {
+    if (!permissions.canEdit) return;
+    setStatusChangeContract(contract);
+    setStatusChangeValue(contract.status ?? 'Draft');
+    setStatusChangeError(null);
+  }, [permissions.canEdit]);
+
+  const closeContractStatusChange = useCallback(() => {
+    if (statusChangeSubmitting) return;
+    setStatusChangeContract(null);
+    setStatusChangeError(null);
+  }, [statusChangeSubmitting]);
+
+  const submitContractStatusChange = useCallback(async () => {
+    if (!permissions.canEdit || !statusChangeContract) return;
+
+    try {
+      setStatusChangeSubmitting(true);
+      setStatusChangeError(null);
+      await apiService.updateContractStatus(statusChangeContract.id, statusChangeValue);
+      setStatusChangeContract(null);
+      await refresh();
+      toast.success('Статус договора обновлен.');
+    } catch (err) {
+      setStatusChangeError(extractDisplayErrorMessage(err, 'Не удалось изменить статус договора.'));
+    } finally {
+      setStatusChangeSubmitting(false);
+    }
+  }, [permissions.canEdit, refresh, statusChangeContract, statusChangeValue, toast]);
 
   const renderSortIcon = (sortKey?: ContractsSortKey) => {
     if (!sortKey || sortState.key !== sortKey) {
@@ -296,9 +369,25 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
       case 'status': {
         const status = contract.status ?? 'Draft';
         return (
-          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${contractStatusClasses[status]}`}>
-            {contractStatusLabels[status]}
-          </span>
+          permissions.canEdit ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openContractStatusChange(contract);
+              }}
+              className="inline-flex rounded-full transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              title="Изменить статус договора"
+            >
+              <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${contractStatusClasses[status]}`}>
+                {contractStatusLabels[status]}
+              </span>
+            </button>
+          ) : (
+            <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${contractStatusClasses[status]}`}>
+              {contractStatusLabels[status]}
+            </span>
+          )
         );
       }
       case 'description':
@@ -345,6 +434,21 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
         return '—';
     }
   };
+
+  const statusChangeCurrentValue = statusChangeContract?.status ?? 'Draft';
+  const statusChangeTargetLabel = contractStatusLabels[statusChangeValue] ?? statusChangeValue;
+  const statusChangeSubject = statusChangeContract
+    ? `Договор №${statusChangeContract.number}${statusChangeContract.title ? ` · ${statusChangeContract.title}` : ''}`
+    : 'Договор не выбран';
+  const statusChangeConsequences = [
+    `Статус договора изменится с «${contractStatusLabels[statusChangeCurrentValue]}» на «${statusChangeTargetLabel}».`,
+    statusChangeValue === 'Terminated'
+      ? 'Дата расторжения будет установлена сегодняшним днем.'
+      : statusChangeValue === 'Cancelled'
+        ? 'Дата аннулирования будет установлена сегодняшним днем.'
+        : 'Связанные даты подписания и закрытия будут синхронизированы с выбранным статусом.',
+    'После подтверждения список договоров обновится.',
+  ];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -679,6 +783,28 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
             nextLabel={t('next') ?? 'Вперед'}
           />
         </div>
+
+        <StatusChangeModal<ContractStatus>
+          open={statusChangeContract !== null}
+          title="Смена статуса договора"
+          subject={statusChangeSubject}
+          currentLabel={contractStatusLabels[statusChangeCurrentValue]}
+          currentValue={statusChangeCurrentValue}
+          value={statusChangeValue}
+          options={contractStatusOptions}
+          onChange={(value) => {
+            setStatusChangeValue(value);
+            if (statusChangeError) {
+              setStatusChangeError(null);
+            }
+          }}
+          consequences={statusChangeConsequences}
+          onCancel={closeContractStatusChange}
+          onConfirm={submitContractStatusChange}
+          confirmLabel={`Изменить статус договора на «${statusChangeTargetLabel}»`}
+          error={statusChangeError}
+          loading={statusChangeSubmitting}
+        />
       </div>
     </div>
   );

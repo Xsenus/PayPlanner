@@ -37,6 +37,7 @@ interface PaymentsTableProps {
   onOpenClient?: (clientId: number, caseId?: number) => void;
   onAddPayment?: (type: Payment['type'], payment?: Payment) => void;
   onDeletePayment?: (payment: Payment) => void | Promise<void>;
+  onStatusChange?: (payment: Payment) => void;
   canAdd: boolean;
   canEdit: boolean;
   canDelete: boolean;
@@ -69,6 +70,7 @@ export function PaymentsTable({
   onOpenClient,
   onAddPayment,
   onDeletePayment,
+  onStatusChange,
   canAdd,
   canEdit,
   canDelete,
@@ -244,9 +246,25 @@ export function PaymentsTable({
         case 'status':
           return (
             <div className="flex flex-col items-start gap-1">
-              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle}`}>
-                {statusLabel}
-              </span>
+              {canEdit && onStatusChange ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onStatusChange(payment);
+                  }}
+                  className="inline-flex rounded-full transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                  title="Изменить статус платежа"
+                >
+                  <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle}`}>
+                    {statusLabel}
+                  </span>
+                </button>
+              ) : (
+                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle}`}>
+                  {statusLabel}
+                </span>
+              )}
               {needsRemainderTransfer ? (
                 <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200">
                   Нужен перенос остатка
@@ -277,7 +295,7 @@ export function PaymentsTable({
           return '—';
       }
     },
-    [formatDate, onOpenClient, statusLabels, t],
+    [canEdit, formatDate, onOpenClient, onStatusChange, statusLabels, t],
   );
 
   const isEditAllowed = useCallback(

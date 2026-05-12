@@ -15,6 +15,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
+import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 import { ActModal } from './ActModal';
 import { DatePeriodPicker } from '../DateRange/DatePeriodPicker';
 
@@ -186,6 +187,10 @@ export function Acts({
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
+  const [statusChangeAct, setStatusChangeAct] = useState<Act | null>(null);
+  const [statusChangeValue, setStatusChangeValue] = useState<ActWorkflowStatus>('Draft');
+  const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
+  const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (lockType && defaultType) {
@@ -235,6 +240,38 @@ export function Acts({
     Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
+  const workflowStatusOptions: StatusChangeOption<ActWorkflowStatus>[] = [
+    {
+      value: 'Draft',
+      label: workflowStatusLabels.Draft,
+      description: 'Акт вернется в черновик, даты подписания будут очищены.',
+      className: workflowStatusClasses.Draft,
+    },
+    {
+      value: 'NotSigned',
+      label: workflowStatusLabels.NotSigned,
+      description: 'Акт будет отмечен как неподписанный.',
+      className: workflowStatusClasses.NotSigned,
+    },
+    {
+      value: 'OnSigning',
+      label: workflowStatusLabels.OnSigning,
+      description: 'Акт будет отмечен как переданный на подписание.',
+      className: workflowStatusClasses.OnSigning,
+    },
+    {
+      value: 'Signed',
+      label: workflowStatusLabels.Signed,
+      description: 'Акт будет отмечен как подписанный.',
+      className: workflowStatusClasses.Signed,
+    },
+    {
+      value: 'Cancelled',
+      label: workflowStatusLabels.Cancelled,
+      description: 'Акт будет аннулирован, основной статус станет расторгнутым.',
+      className: workflowStatusClasses.Cancelled,
+    },
+  ];
 
   const resolveWorkflowStatus = (act: Act): ActWorkflowStatus => {
     if (act.workflowStatus) return act.workflowStatus;
@@ -464,6 +501,37 @@ export function Acts({
     }
   };
 
+  const openActStatusChange = (act: Act) => {
+    if (!canEdit) return;
+    const workflowStatus = resolveWorkflowStatus(act);
+    setStatusChangeAct(act);
+    setStatusChangeValue(workflowStatus);
+    setStatusChangeError(null);
+  };
+
+  const closeActStatusChange = () => {
+    if (statusChangeSubmitting) return;
+    setStatusChangeAct(null);
+    setStatusChangeError(null);
+  };
+
+  const submitActStatusChange = async () => {
+    if (!canEdit || !statusChangeAct) return;
+
+    try {
+      setStatusChangeSubmitting(true);
+      setStatusChangeError(null);
+      await apiService.updateActWorkflowStatus(statusChangeAct.id, statusChangeValue);
+      setStatusChangeAct(null);
+      await refresh();
+      toast.success('Статус документа обновлен.');
+    } catch (err) {
+      setStatusChangeError(extractDisplayErrorMessage(err, 'Не удалось изменить статус документа.'));
+    } finally {
+      setStatusChangeSubmitting(false);
+    }
+  };
+
   const changeSort = (key: ActsSortKey) => {
     setSortState((prev) => {
       if (prev.key === key) {
@@ -544,9 +612,25 @@ export function Acts({
         const workflowStatus = resolveWorkflowStatus(act);
         return (
           <td key={key} className="px-4 py-3">
-            <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${workflowStatusClasses[workflowStatus]}`}>
-              {workflowStatusLabels[workflowStatus]}
-            </span>
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openActStatusChange(act);
+                }}
+                className="inline-flex rounded-full transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                title="Изменить статус документа"
+              >
+                <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${workflowStatusClasses[workflowStatus]}`}>
+                  {workflowStatusLabels[workflowStatus]}
+                </span>
+              </button>
+            ) : (
+              <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${workflowStatusClasses[workflowStatus]}`}>
+                {workflowStatusLabels[workflowStatus]}
+              </span>
+            )}
           </td>
         );
       }
@@ -581,6 +665,19 @@ export function Acts({
         return null;
     }
   };
+
+  const statusChangeCurrentValue = statusChangeAct ? resolveWorkflowStatus(statusChangeAct) : 'Draft';
+  const statusChangeTargetLabel = workflowStatusLabels[statusChangeValue] ?? statusChangeValue;
+  const statusChangeSubject = statusChangeAct
+    ? `Акт №${statusChangeAct.number || statusChangeAct.id} от ${formatDate(statusChangeAct.date)}`
+    : 'Акт не выбран';
+  const statusChangeConsequences = [
+    `Статус документа изменится с «${workflowStatusLabels[statusChangeCurrentValue]}» на «${statusChangeTargetLabel}».`,
+    statusChangeValue === 'Cancelled'
+      ? 'Основной статус акта станет расторгнутым, будет заполнена дата аннулирования.'
+      : 'Основной статус акта будет синхронизирован с выбранным статусом документа.',
+    'После подтверждения список актов обновится.',
+  ];
 
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
@@ -910,6 +1007,28 @@ export function Acts({
           nextLabel={t('next') ?? 'Вперед'}
         />
       </div>
+
+      <StatusChangeModal<ActWorkflowStatus>
+        open={statusChangeAct !== null}
+        title="Смена статуса документа"
+        subject={statusChangeSubject}
+        currentLabel={workflowStatusLabels[statusChangeCurrentValue]}
+        currentValue={statusChangeCurrentValue}
+        value={statusChangeValue}
+        options={workflowStatusOptions}
+        onChange={(value) => {
+          setStatusChangeValue(value);
+          if (statusChangeError) {
+            setStatusChangeError(null);
+          }
+        }}
+        consequences={statusChangeConsequences}
+        onCancel={closeActStatusChange}
+        onConfirm={submitActStatusChange}
+        confirmLabel={`Изменить статус акта на «${statusChangeTargetLabel}»`}
+        error={statusChangeError}
+        loading={statusChangeSubmitting}
+      />
 
       <ActModal
         open={modalOpen}
