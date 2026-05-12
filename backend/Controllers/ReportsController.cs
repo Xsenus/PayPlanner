@@ -1706,14 +1706,15 @@ public class ReportsController : ControllerBase
         => status switch
         {
             InvoiceWorkflowStatus.Overdue => 0,
-            InvoiceWorkflowStatus.OnSigning => 1,
-            InvoiceWorkflowStatus.NotSigned => 2,
-            InvoiceWorkflowStatus.SignedByClient => 3,
-            InvoiceWorkflowStatus.PartiallyPaid => 4,
-            InvoiceWorkflowStatus.Draft => 5,
-            InvoiceWorkflowStatus.Paid => 6,
-            InvoiceWorkflowStatus.Cancelled => 7,
-            _ => 8,
+            InvoiceWorkflowStatus.RequiresClientSignature => 1,
+            InvoiceWorkflowStatus.OnSigning => 2,
+            InvoiceWorkflowStatus.NotSigned => 3,
+            InvoiceWorkflowStatus.SignedByClient => 4,
+            InvoiceWorkflowStatus.PartiallyPaid => 5,
+            InvoiceWorkflowStatus.Draft => 6,
+            InvoiceWorkflowStatus.Paid => 7,
+            InvoiceWorkflowStatus.Cancelled => 8,
+            _ => 9,
         };
 
     private static string FormatInvoiceWorkflowStatusLabel(string status)
@@ -1721,6 +1722,7 @@ public class ReportsController : ControllerBase
         {
             InvoiceWorkflowStatus.Draft => "Черновик",
             InvoiceWorkflowStatus.NotSigned => "Не подписан",
+            InvoiceWorkflowStatus.RequiresClientSignature => "Требуется подпись клиента",
             InvoiceWorkflowStatus.OnSigning => "На подписании",
             InvoiceWorkflowStatus.SignedByClient => "Подписан клиентом",
             InvoiceWorkflowStatus.Paid => "Оплачен",

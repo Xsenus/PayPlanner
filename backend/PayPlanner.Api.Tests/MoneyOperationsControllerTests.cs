@@ -3628,6 +3628,57 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task LinkInvoice_PreservesClientSignatureRequirement_WhenPaymentClosesInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "SIG-33",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 25_000m,
+            Date = new DateTime(2026, 4, 29),
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Account = "SIG-33",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.RequiresClientSignature,
+            Amount = 25_000m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.LinkInvoice(
+            operation.Id,
+            new MoneyOperationsController.LinkMoneyOperationInvoiceRequest { InvoiceId = invoice.Id },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(action);
+
+        var payment = await db.Payments.SingleAsync();
+        Assert.Equal(PaymentStatus.Completed, payment.Status);
+        Assert.Equal(25_000m, payment.PaidAmount);
+        Assert.True(payment.IsPaid);
+        Assert.Equal(InvoiceWorkflowStatus.RequiresClientSignature, payment.InvoiceWorkflowStatus);
+    }
+
+    [Fact]
     public async Task ApplyClientBalanceCreditAfterMoneyOperationOverpayment_DoesNotCreateNewMoneyOperation()
     {
         await using var db = await CreateContextAsync();

@@ -749,6 +749,7 @@ public class ReportsControllerTests
             InvoicePayment("INV-5", PaymentType.Income, PaymentStatus.Overdue, InvoiceWorkflowStatus.Overdue, 5_000m, 1_000m, new DateTime(2026, 5, 5)),
             InvoicePayment("INV-6", PaymentType.Expense, PaymentStatus.Cancelled, InvoiceWorkflowStatus.Cancelled, 6_000m, 100m, new DateTime(2026, 5, 6)),
             InvoicePayment("INV-7", PaymentType.Income, PaymentStatus.Pending, InvoiceWorkflowStatus.NotSigned, 7_000m, 0m, new DateTime(2026, 5, 7)),
+            InvoicePayment("INV-8", PaymentType.Income, PaymentStatus.Pending, InvoiceWorkflowStatus.RequiresClientSignature, 0m, 0m, new DateTime(2026, 5, 8)),
             InvoicePayment("INV-OLD", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 99_999m, 99_999m, new DateTime(2026, 4, 30)),
             InvoicePayment("PAY-1", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 88_888m, 88_888m, new DateTime(2026, 5, 7), DocumentKind.Payment));
         await db.SaveChangesAsync();
@@ -761,8 +762,8 @@ public class ReportsControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<InvoiceStatusReportDto>(ok.Value);
-        Assert.Equal(7, report.InvoiceCount);
-        Assert.Equal(5, report.IncomeCount);
+        Assert.Equal(8, report.InvoiceCount);
+        Assert.Equal(6, report.IncomeCount);
         Assert.Equal(2, report.ExpenseCount);
         Assert.Equal(1, report.PaidCount);
         Assert.Equal(1, report.OverdueCount);
@@ -779,6 +780,13 @@ public class ReportsControllerTests
                 Assert.Equal(5_000m, item.TotalAmount);
                 Assert.Equal(4_000m, item.OutstandingAmount);
                 Assert.Equal(17.9m, item.Share);
+            },
+            item =>
+            {
+                Assert.Equal(InvoiceWorkflowStatus.RequiresClientSignature, item.Status);
+                Assert.Equal("Требуется подпись клиента", item.StatusLabel);
+                Assert.Equal(0m, item.TotalAmount);
+                Assert.Equal(0m, item.Share);
             },
             item =>
             {

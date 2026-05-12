@@ -4,6 +4,7 @@ public static class InvoiceWorkflowStatus
 {
     public const string Draft = "Draft";
     public const string NotSigned = "NotSigned";
+    public const string RequiresClientSignature = "RequiresClientSignature";
     public const string OnSigning = "OnSigning";
     public const string SignedByClient = "SignedByClient";
     public const string Paid = "Paid";
@@ -15,6 +16,7 @@ public static class InvoiceWorkflowStatus
     {
         Draft,
         NotSigned,
+        RequiresClientSignature,
         OnSigning,
         SignedByClient,
         Paid,
@@ -35,6 +37,9 @@ public static class InvoiceWorkflowStatus
         var trimmed = value.Trim();
         return All.FirstOrDefault(status => string.Equals(status, trimmed, StringComparison.OrdinalIgnoreCase));
     }
+
+    public static bool IsDocumentSigningStatus(string? value)
+        => Normalize(value) is NotSigned or RequiresClientSignature or OnSigning or SignedByClient;
 
     public static string FromPaymentStatus(PaymentStatus status, decimal paidAmount = 0m, decimal amount = 0m)
     {

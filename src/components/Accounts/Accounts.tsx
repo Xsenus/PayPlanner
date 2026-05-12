@@ -86,7 +86,7 @@ interface AccountsProps {
 
 type FilterType = PaymentKind | 'All';
 type AccountStatus = 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
-type InvoiceSigningStatus = 'notSigned' | 'onSigning' | 'signed' | 'cancelled';
+type InvoiceSigningStatus = 'notSigned' | 'requiresClientSignature' | 'onSigning' | 'signed' | 'cancelled';
 type ClientRoleFilter = ClientRole | 'all';
 type ColumnKey =
   | 'date'
@@ -337,10 +337,14 @@ function deriveStatusFromPayments(payments: Payment[], fallback?: Invoice | null
 
 function deriveInvoiceSigningStatus(invoice?: Invoice | null): InvoiceSigningStatus {
   if (!invoice) return 'notSigned';
-  if (invoice.cancelledAt || invoice.workflowStatus === 'Cancelled') return 'cancelled';
-  if (invoice.workflowStatus === 'NotSigned') return 'notSigned';
-  if (invoice.signedAt || invoice.workflowStatus === 'SignedByClient') return 'signed';
-  if (invoice.sentForSigningAt || invoice.workflowStatus === 'OnSigning') return 'onSigning';
+  const workflowStatus = invoice.workflowStatus;
+  if (invoice.cancelledAt || workflowStatus === 'Cancelled') return 'cancelled';
+  if (workflowStatus === 'RequiresClientSignature') return 'requiresClientSignature';
+  if (workflowStatus === 'NotSigned') return 'notSigned';
+  if (workflowStatus === 'SignedByClient') return 'signed';
+  if (workflowStatus === 'OnSigning') return 'onSigning';
+  if (invoice.signedAt) return 'signed';
+  if (invoice.sentForSigningAt) return 'onSigning';
   return 'notSigned';
 }
 
@@ -349,6 +353,7 @@ function resolveEditableInvoiceWorkflowStatus(invoice?: Invoice | null): Invoice
   if (
     workflowStatus === 'Draft' ||
     workflowStatus === 'NotSigned' ||
+    workflowStatus === 'RequiresClientSignature' ||
     workflowStatus === 'OnSigning' ||
     workflowStatus === 'SignedByClient' ||
     workflowStatus === 'Cancelled'
@@ -363,6 +368,8 @@ function resolveEditableInvoiceWorkflowStatus(invoice?: Invoice | null): Invoice
       return 'SignedByClient';
     case 'onSigning':
       return 'OnSigning';
+    case 'requiresClientSignature':
+      return 'RequiresClientSignature';
     case 'notSigned':
     default:
       return 'NotSigned';
@@ -692,12 +699,14 @@ export function Accounts({
   };
   const signingStatusLabels: Record<InvoiceSigningStatus, string> = {
     notSigned: 'Не подписан',
+    requiresClientSignature: 'Требуется подпись клиента',
     onSigning: 'На подписании',
-    signed: 'Подписан',
+    signed: 'Подписан клиентом',
     cancelled: 'Аннулирован',
   };
   const signingStatusClasses: Record<InvoiceSigningStatus, string> = {
     notSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+    requiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
     onSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
     signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
@@ -705,8 +714,9 @@ export function Accounts({
   const invoiceWorkflowStatusLabels: Record<InvoiceWorkflowStatus, string> = {
     Draft: 'Черновик',
     NotSigned: 'Не подписан',
+    RequiresClientSignature: 'Требуется подпись клиента',
     OnSigning: 'На подписании',
-    SignedByClient: 'Подписан',
+    SignedByClient: 'Подписан клиентом',
     Paid: 'Оплачен',
     PartiallyPaid: 'Частично оплачен',
     Overdue: 'Просрочен',
@@ -715,6 +725,7 @@ export function Accounts({
   const invoiceWorkflowStatusClasses: Record<InvoiceWorkflowStatus, string> = {
     Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
     NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+    RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
     OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
     SignedByClient: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     Paid: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
@@ -734,6 +745,12 @@ export function Accounts({
       label: invoiceWorkflowStatusLabels.NotSigned,
       description: 'Документ будет отмечен как неподписанный.',
       className: invoiceWorkflowStatusClasses.NotSigned,
+    },
+    {
+      value: 'RequiresClientSignature',
+      label: invoiceWorkflowStatusLabels.RequiresClientSignature,
+      description: 'Документ требует подпись клиента; статус оплаты счета не меняется.',
+      className: invoiceWorkflowStatusClasses.RequiresClientSignature,
     },
     {
       value: 'OnSigning',

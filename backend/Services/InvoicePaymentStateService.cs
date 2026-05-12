@@ -362,6 +362,12 @@ public static class InvoicePaymentStateService
             return InvoiceWorkflowStatus.Cancelled;
         }
 
+        var normalizedCurrent = InvoiceWorkflowStatus.Normalize(representative.InvoiceWorkflowStatus);
+        if (normalizedCurrent is not null && InvoiceWorkflowStatus.IsDocumentSigningStatus(normalizedCurrent))
+        {
+            return normalizedCurrent;
+        }
+
         if (paidAmount > AmountEpsilon && paidAmount + AmountEpsilon < representative.Amount)
         {
             return InvoiceWorkflowStatus.PartiallyPaid;
@@ -375,14 +381,6 @@ public static class InvoicePaymentStateService
         if (status == PaymentStatus.Overdue)
         {
             return InvoiceWorkflowStatus.Overdue;
-        }
-
-        var normalizedCurrent = InvoiceWorkflowStatus.Normalize(representative.InvoiceWorkflowStatus);
-        if (normalizedCurrent == InvoiceWorkflowStatus.OnSigning
-            || normalizedCurrent == InvoiceWorkflowStatus.NotSigned
-            || normalizedCurrent == InvoiceWorkflowStatus.SignedByClient)
-        {
-            return normalizedCurrent;
         }
 
         return InvoiceWorkflowStatus.FromPaymentStatus(status, paidAmount, representative.Amount);

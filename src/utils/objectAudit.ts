@@ -235,6 +235,7 @@ const VALUE_LABELS: Record<string, string> = {
   signed: 'Подписан',
   signedbyclient: 'Подписан клиентом',
   notsigned: 'Не подписан',
+  requiresclientsignature: 'Требуется подпись клиента',
   onsigning: 'На подписании',
   created: 'Создан',
   transferred: 'Передан',

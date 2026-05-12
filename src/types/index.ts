@@ -2,6 +2,7 @@ export type PaymentStatus = 'Pending' | 'Completed' | 'Overdue' | 'Cancelled' | 
 export type InvoiceWorkflowStatus =
   | 'Draft'
   | 'NotSigned'
+  | 'RequiresClientSignature'
   | 'OnSigning'
   | 'SignedByClient'
   | 'Paid'

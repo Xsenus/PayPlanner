@@ -4010,6 +4010,7 @@ export function InvoiceModal({
                                 >
                                   <option value="Draft">Черновик</option>
                                   <option value="NotSigned">Не подписан</option>
+                                  <option value="RequiresClientSignature">Требуется подпись клиента</option>
                                   <option value="OnSigning">На подписании</option>
                                   <option value="SignedByClient">Подписан клиентом</option>
                                   <option value="Paid">Оплачен</option>

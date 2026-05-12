@@ -445,6 +445,24 @@ vi.mock('../ui/LookupSelect', () => ({
   ),
 }));
 
+vi.mock('../ui/CounterpartyPickerModal', () => ({
+  CounterpartyPickerModal: ({
+    open,
+    onSelect,
+  }: {
+    open: boolean;
+    onSelect?: (selection: { kind: 'client'; id: number; name: string } | null) => void;
+  }) => (
+    open ? (
+      <div role="dialog" aria-label="Выбор клиента / поставщика">
+        <button type="button" onClick={() => onSelect?.({ kind: 'client', id: 55, name: 'Test Client' })}>
+          Test Client
+        </button>
+      </div>
+    ) : null
+  ),
+}));
+
 vi.mock('../ui/TableContextMenu', () => ({
   TableContextMenu: () => null,
 }));
@@ -566,9 +584,8 @@ describe('Accounts integration', () => {
   it('passes client role filters into the accounts registry query', async () => {
     render(<Accounts />);
 
-    fireEvent.change(screen.getByLabelText('Клиент / поставщик'), {
-      target: { value: '55' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: /Все контрагенты/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Test Client' }));
     fireEvent.change(screen.getByLabelText('Роль клиента'), {
       target: { value: 'expenseClient' },
     });
@@ -630,7 +647,33 @@ describe('Accounts integration', () => {
     const row = screen.getByRole('button', { name: '24' }).closest('tr');
     expect(row).toBeTruthy();
     expect(within(row as HTMLTableRowElement).getByText('Оплачен')).toBeTruthy();
-    expect(within(row as HTMLTableRowElement).getByText('Подписан')).toBeTruthy();
+    expect(within(row as HTMLTableRowElement).getByText('Подписан клиентом')).toBeTruthy();
+  });
+
+  it('shows client signature requirement separately from payment status', () => {
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        createAccountRow({
+          invoice: createInvoice({
+            workflowStatus: 'RequiresClientSignature',
+          }),
+          status: 'paid',
+        }),
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts />);
+
+    const row = screen.getByRole('button', { name: '24' }).closest('tr');
+    expect(row).toBeTruthy();
+    expect(within(row as HTMLTableRowElement).getByText('Оплачен')).toBeTruthy();
+    expect(within(row as HTMLTableRowElement).getByText('Требуется подпись клиента')).toBeTruthy();
   });
 
   it('passes grouped invoice operations into the editor opened from the accounts registry', async () => {

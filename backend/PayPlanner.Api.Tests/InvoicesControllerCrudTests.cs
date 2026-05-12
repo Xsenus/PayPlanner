@@ -298,6 +298,45 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task UpdateWorkflowStatus_AcceptsRequiresClientSignature_WithoutChangingPaymentStatus()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Signature Required");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-SIGN-REQUIRED", clientId, new DateTime(2026, 4, 21), 9_000m);
+        request.Status = PaymentStatus.Completed;
+        request.PaidDate = new DateTime(2026, 4, 22);
+
+        var createAction = await controller.Create(request, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var updateAction = await controller.UpdateWorkflowStatus(
+            createdDto.Id,
+            new UpdateNamedStatusRequest { Status = InvoiceWorkflowStatus.RequiresClientSignature },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(PaymentStatus.Completed, dto.Status);
+        Assert.Equal(InvoiceWorkflowStatus.RequiresClientSignature, dto.WorkflowStatus);
+        Assert.True(dto.IsPaid);
+        Assert.Equal(new DateTime(2026, 4, 22), dto.PaidDate);
+        Assert.Null(dto.SentForSigningAt);
+        Assert.Null(dto.SignedAt);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(PaymentStatus.Completed, stored.Status);
+        Assert.Equal(InvoiceWorkflowStatus.RequiresClientSignature, stored.InvoiceWorkflowStatus);
+        Assert.True(stored.IsPaid);
+        Assert.Equal(new DateTime(2026, 4, 22), stored.PaidDate);
+    }
+
+    [Fact]
     public async Task Cancel_StoresReasonAndCancelsGeneratedInstallments()
     {
         await using var db = await CreateContextAsync();

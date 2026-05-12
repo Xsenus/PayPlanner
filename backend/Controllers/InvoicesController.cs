@@ -551,6 +551,7 @@ public class InvoicesController : ControllerBase
         {
             case InvoiceWorkflowStatus.Draft:
             case InvoiceWorkflowStatus.NotSigned:
+            case InvoiceWorkflowStatus.RequiresClientSignature:
                 payment.InvoiceSentForSigningAt = null;
                 payment.InvoiceSignedAt = null;
                 payment.InvoiceCancelledAt = null;
@@ -2711,6 +2712,7 @@ public class InvoicesController : ControllerBase
     private static bool IsEditableInvoiceWorkflowStatus(string value)
         => value is InvoiceWorkflowStatus.Draft
             or InvoiceWorkflowStatus.NotSigned
+            or InvoiceWorkflowStatus.RequiresClientSignature
             or InvoiceWorkflowStatus.OnSigning
             or InvoiceWorkflowStatus.SignedByClient
             or InvoiceWorkflowStatus.Cancelled;

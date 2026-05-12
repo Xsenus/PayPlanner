@@ -76,6 +76,7 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue('0', 'payment', 'Is Paid')).toBe('Нет');
     expect(formatAuditValue('Overdue')).toBe('Просрочено');
     expect(formatAuditValue('SignedByClient')).toBe('Подписан клиентом');
+    expect(formatAuditValue('RequiresClientSignature')).toBe('Требуется подпись клиента');
     expect(formatAuditValue('PartiallyPaid')).toBe('Частично оплачен');
     expect(formatAuditValue('2026-04-27 00:00:00', 'payment', 'Date')).toBe('27.04.2026');
     expect(formatAuditValue('1500.00', 'payment', 'Amount')).toMatch(/1\s*500\s*₽/u);

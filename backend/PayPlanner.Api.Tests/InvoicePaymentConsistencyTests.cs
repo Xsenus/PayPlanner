@@ -428,6 +428,48 @@ public class InvoicePaymentConsistencyTests
     }
 
     [Fact]
+    public void CalculateRepresentativeState_PreservesClientSignatureRequirement_WhenPaymentStateChanges()
+    {
+        var representative = new Payment
+        {
+            Id = 10,
+            InvoiceId = 100,
+            DocumentKind = DocumentKind.Invoice,
+            Amount = 10_000m,
+            Status = PaymentStatus.Pending,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.RequiresClientSignature,
+            Date = new DateTime(2026, 5, 10),
+            PlannedDate = new DateTime(2026, 5, 10),
+            Type = PaymentType.Income,
+        };
+        var linkedPayment = new Payment
+        {
+            Id = 11,
+            InvoiceId = 100,
+            DocumentKind = DocumentKind.Payment,
+            Amount = 10_000m,
+            PaidAmount = 10_000m,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Date = new DateTime(2026, 5, 11),
+            PlannedDate = new DateTime(2026, 5, 11),
+            PaidDate = new DateTime(2026, 5, 11),
+            LastPaymentDate = new DateTime(2026, 5, 11),
+            Type = PaymentType.Income,
+        };
+
+        var snapshot = InvoicePaymentStateService.CalculateRepresentativeState(
+            representative,
+            [linkedPayment],
+            new DateTime(2026, 5, 12));
+
+        Assert.Equal(10_000m, snapshot.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, snapshot.Status);
+        Assert.Equal(InvoiceWorkflowStatus.RequiresClientSignature, snapshot.WorkflowStatus);
+        Assert.True(snapshot.IsPaid);
+    }
+
+    [Fact]
     public async Task RepairPaymentState_RemovesStalePartialStatus_FromUnpaidInvoice()
     {
         await using var db = await CreateContextAsync();
