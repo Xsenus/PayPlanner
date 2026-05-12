@@ -1293,7 +1293,6 @@ export function ClientDetail({
   initialCaseId,
   initialSection,
   onOpenInvoicePage,
-  onOpenActPage,
   onCreateActPage,
 }: ClientDetailProps) {
   const { t } = useTranslation();
@@ -4349,12 +4348,6 @@ export function ClientDetail({
   const openEditAct = (act: Act) => {
     if (!actPermissions.canEdit) {
       showPermissionWarning("Недостаточно прав для редактирования актов.");
-      return;
-    }
-
-    if (onOpenActPage) {
-      setActiveSection("acts");
-      onOpenActPage(act.id, { section: "acts" });
       return;
     }
 

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ClientDetail } from './ClientDetail';
-import type { Client, PowerOfAttorney } from '../../types';
+import type { Act, Client, Contract, Invoice, Payment, PowerOfAttorney } from '../../types';
 import { apiService } from '../../services/api';
 
 const CLIENT_PROFILE_NOTES_PREFIX = '__PP_CLIENT_PROFILE_V2__:';
@@ -22,6 +22,7 @@ const {
   toastErrorMock,
   toastSuccessMock,
   toastWarningMock,
+  actModalPropsSpy,
   paymentModalPropsSpy,
   twoTypeStatsMock,
   useActsMock,
@@ -86,6 +87,7 @@ const {
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
   toastWarningMock: vi.fn(),
+  actModalPropsSpy: vi.fn(),
   paymentModalPropsSpy: vi.fn(),
   twoTypeStatsMock: vi.fn(),
   useActsMock: vi.fn(),
@@ -183,6 +185,57 @@ function createPowerOfAttorney(overrides: Partial<PowerOfAttorney> = {}): PowerO
     updatedAt: null,
     ...overrides,
   } as PowerOfAttorney;
+}
+
+function mockRelatedDocumentLookups() {
+  vi.mocked(apiService.getContracts).mockResolvedValue({
+    items: [{ id: 11, number: 'C-11', title: 'Client contract' } as Contract],
+    total: 1,
+    page: 1,
+    pageSize: 200,
+  });
+  vi.mocked(apiService.getInvoices).mockResolvedValue({
+    items: [{ id: 22, number: 'I-22', date: '2026-04-10' } as Invoice],
+    total: 1,
+    page: 1,
+    pageSize: 200,
+  });
+  vi.mocked(apiService.getActs).mockResolvedValue({
+    items: [{ id: 33, number: 'A-33', date: '2026-04-11' } as Act],
+    total: 1,
+    page: 1,
+    pageSize: 200,
+  });
+  vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
+    items: [
+      {
+        id: 44,
+        date: '2026-04-12',
+        amount: 12_500,
+        description: 'Linked payment',
+        documentKind: 'Payment',
+      } as Payment,
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 500,
+    summary: {
+      income: 12_500,
+      expense: 0,
+      balance: 12_500,
+      incomeCount: 1,
+      expenseCount: 0,
+      total: 1,
+    },
+  });
+}
+
+async function selectRelatedFilter(label: string, value: string, user: ReturnType<typeof userEvent.setup>) {
+  await waitFor(() => {
+    const select = screen.getByLabelText(label) as HTMLSelectElement;
+    expect([...select.options].some((option) => option.value === value)).toBe(true);
+  });
+  await user.selectOptions(screen.getByLabelText(label), value);
 }
 
 function getRowContainerByValue(value: string): HTMLElement {
@@ -288,6 +341,10 @@ vi.mock('../../services/api', () => ({
     getClientPowersOfAttorney: vi.fn(),
     getClientCaseFinanceSummaries: vi.fn(),
     getClientCaseExpenseDetails: vi.fn(),
+    getContracts: vi.fn(),
+    getInvoices: vi.fn(),
+    getActs: vi.fn(),
+    getPaymentsV2: vi.fn(),
     getClients: vi.fn(),
     getActResponsibles: vi.fn(),
     createClientPowerOfAttorney: vi.fn(),
@@ -328,7 +385,10 @@ vi.mock('../Calendar/PaymentModal', () => ({
 }));
 
 vi.mock('../Acts/ActModal', () => ({
-  ActModal: () => null,
+  ActModal: (props: unknown) => {
+    actModalPropsSpy(props);
+    return null;
+  },
 }));
 
 vi.mock('../Accounts/InvoiceModal', () => ({
@@ -490,6 +550,7 @@ describe('ClientDetail integration', () => {
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
     toastWarningMock.mockReset();
+    actModalPropsSpy.mockReset();
     paymentModalPropsSpy.mockReset();
     twoTypeStatsMock.mockReset();
     useClientCasesMock.mockReset();
@@ -512,6 +573,23 @@ describe('ClientDetail integration', () => {
     vi.mocked(apiService.getClientPowersOfAttorney).mockResolvedValue([]);
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
     vi.mocked(apiService.getClientCaseExpenseDetails).mockResolvedValue([]);
+    vi.mocked(apiService.getContracts).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
+    vi.mocked(apiService.getInvoices).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
+    vi.mocked(apiService.getActs).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 200 });
+    vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 500,
+      summary: {
+        income: 0,
+        expense: 0,
+        balance: 0,
+        incomeCount: 0,
+        expenseCount: 0,
+        total: 0,
+      },
+    });
     vi.mocked(apiService.createClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.updateClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.deleteClientPowerOfAttorney).mockResolvedValue(undefined);
@@ -1320,6 +1398,29 @@ describe('ClientDetail integration', () => {
     });
   });
 
+  it('passes related document filters from the payment tab to the payments hook', async () => {
+    const user = userEvent.setup();
+    mockRelatedDocumentLookups();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+
+    await selectRelatedFilter('Договор', '11', user);
+    await selectRelatedFilter('Счет', '22', user);
+    await selectRelatedFilter('Акт', '33', user);
+
+    await waitFor(() => {
+      const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          contractId: 11,
+          invoiceId: 22,
+          actId: 33,
+        }),
+      );
+    });
+  });
+
   it('passes account filters from the client tab to the invoices hook', async () => {
     const user = userEvent.setup();
 
@@ -1337,6 +1438,29 @@ describe('ClientDetail integration', () => {
           type: 'Income',
           search: '31',
           status: 'Overdue',
+        }),
+      );
+    });
+  });
+
+  it('passes related document filters from the account tab to the invoices hook', async () => {
+    const user = userEvent.setup();
+    mockRelatedDocumentLookups();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="accounts" />);
+
+    await selectRelatedFilter('Договор', '11', user);
+    await selectRelatedFilter('Акт', '33', user);
+    await selectRelatedFilter('Платеж', '44', user);
+
+    await waitFor(() => {
+      const lastCall = useInvoicesMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          contractId: 11,
+          actId: 33,
+          paymentId: 44,
         }),
       );
     });
@@ -1410,6 +1534,56 @@ describe('ClientDetail integration', () => {
     });
   });
 
+  it('edits acts in a client-card modal without opening the act page', async () => {
+    const user = userEvent.setup();
+    const onOpenActPage = vi.fn();
+    permissionsResult.acts.canEdit = true;
+    useActsMock.mockReturnValue({
+      ...emptyActsResult,
+      acts: [
+        {
+          id: 33,
+          number: 'A-33',
+          title: 'Client act',
+          date: '2026-04-11',
+          amount: 12_500,
+          status: 'Created',
+          createdAt: '2026-04-11T10:00:00Z',
+          updatedAt: '2026-04-11T10:00:00Z',
+        } as Act,
+      ],
+      pagination: { total: 1, page: 1, pageSize: 10 },
+    });
+
+    render(
+      <ClientDetail
+        clientId={1}
+        onBack={vi.fn()}
+        initialSection="acts"
+        onOpenActPage={onOpenActPage}
+      />,
+    );
+
+    await screen.findByText('№A-33');
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+
+    expect(onOpenActPage).not.toHaveBeenCalled();
+    await waitFor(() => {
+      const props = actModalPropsSpy.mock.calls.at(-1)?.[0] as {
+        open?: boolean;
+        mode?: string;
+        act?: Act;
+      };
+      expect(props).toEqual(
+        expect.objectContaining({
+          open: true,
+          mode: 'edit',
+          act: expect.objectContaining({ id: 33 }),
+        }),
+      );
+    });
+  });
+
   it('shows act filter badges and resets the act query state', async () => {
     const user = userEvent.setup();
     const today = new Date();
@@ -1461,6 +1635,29 @@ describe('ClientDetail integration', () => {
     });
   });
 
+  it('passes related document filters from the act tab to the acts hook', async () => {
+    const user = userEvent.setup();
+    mockRelatedDocumentLookups();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="acts" />);
+
+    await selectRelatedFilter('Договор', '11', user);
+    await selectRelatedFilter('Счет', '22', user);
+    await selectRelatedFilter('Платеж', '44', user);
+
+    await waitFor(() => {
+      const lastCall = useActsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          contractId: 11,
+          invoiceId: 22,
+          paymentId: 44,
+        }),
+      );
+    });
+  });
+
   it('passes contract filters from the client tab to the contracts hook', async () => {
     const user = userEvent.setup();
 
@@ -1475,6 +1672,29 @@ describe('ClientDetail integration', () => {
         expect.objectContaining({
           clientId: 1,
           search: '42/2026',
+        }),
+      );
+    });
+  });
+
+  it('passes related document filters from the contract tab to the contracts hook', async () => {
+    const user = userEvent.setup();
+    mockRelatedDocumentLookups();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="contracts" />);
+
+    await selectRelatedFilter('Счет', '22', user);
+    await selectRelatedFilter('Акт', '33', user);
+    await selectRelatedFilter('Платеж', '44', user);
+
+    await waitFor(() => {
+      const lastCall = useContractsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          invoiceId: 22,
+          actId: 33,
+          paymentId: 44,
         }),
       );
     });
