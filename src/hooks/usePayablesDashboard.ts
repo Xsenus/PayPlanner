@@ -8,6 +8,7 @@ type UsePayablesDashboardParams = {
   to?: string;
   search?: string;
   clientId?: number;
+  legalEntityId?: number;
   clientIds?: string;
   clientRole?: ClientRole;
   enabled?: boolean;
@@ -24,10 +25,11 @@ export function usePayablesDashboard(params: UsePayablesDashboardParams) {
       to: params.to,
       search: params.search,
       clientId: params.clientId,
+      legalEntityId: params.legalEntityId,
       clientIds: params.clientIds,
       clientRole: params.clientRole,
     }),
-    [params.clientId, params.clientIds, params.clientRole, params.from, params.search, params.to],
+    [params.clientId, params.legalEntityId, params.clientIds, params.clientRole, params.from, params.search, params.to],
   );
 
   const refresh = useCallback(async () => {

@@ -13,6 +13,7 @@ type UseAccountsRegistryParams = {
   search?: string;
   type?: AccountRegistryType | 'All';
   clientId?: number;
+  legalEntityId?: number;
   clientIds?: string;
   clientRole?: ClientRole;
   payablesOnly?: boolean;
@@ -48,6 +49,7 @@ export function useAccountsRegistry(params: UseAccountsRegistryParams) {
       search: params.search,
       type: params.type && params.type !== 'All' ? params.type : undefined,
       clientId: params.clientId,
+      legalEntityId: params.legalEntityId,
       clientIds: params.clientIds,
       clientRole: params.clientRole,
       payablesOnly: params.payablesOnly || undefined,
@@ -58,6 +60,7 @@ export function useAccountsRegistry(params: UseAccountsRegistryParams) {
     }),
     [
       params.clientId,
+      params.legalEntityId,
       params.clientIds,
       params.clientRole,
       params.from,

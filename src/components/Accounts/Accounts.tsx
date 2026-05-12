@@ -27,7 +27,6 @@ import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings
 import { useAccountsRegistry } from '../../hooks/useAccountsRegistry';
 import { usePayablesDashboard } from '../../hooks/usePayablesDashboard';
 import { useTableSelection } from '../../hooks/useTableSelection';
-import { useClients } from '../../hooks/useClients';
 import type {
   AccountRegistryRow,
   Act,
@@ -59,10 +58,9 @@ import { InvoiceModal } from './InvoiceModal';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { ActModal } from '../Acts/ActModal';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
-import { buildClientLookupOptions } from '../Clients/clientLookupOptions';
 import { DatePeriodPicker } from '../DateRange/DatePeriodPicker';
 import { FormPromptModal } from '../ui/FormPromptModal';
-import { LookupSelect } from '../ui/LookupSelect';
+import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { TableContextMenu, type TableContextMenuAction } from '../ui/TableContextMenu';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
@@ -338,6 +336,7 @@ function deriveStatusFromPayments(payments: Payment[], fallback?: Invoice | null
 function deriveInvoiceSigningStatus(invoice?: Invoice | null): InvoiceSigningStatus {
   if (!invoice) return 'notSigned';
   if (invoice.cancelledAt || invoice.workflowStatus === 'Cancelled') return 'cancelled';
+  if (invoice.workflowStatus === 'NotSigned') return 'notSigned';
   if (invoice.signedAt || invoice.workflowStatus === 'SignedByClient') return 'signed';
   if (invoice.sentForSigningAt || invoice.workflowStatus === 'OnSigning') return 'onSigning';
   return 'notSigned';
@@ -427,7 +426,6 @@ export function Accounts({
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const { t } = useTranslation();
-  const { clients: accountClients } = useClients();
 
   const canCreate = permissions.accounts.canCreate;
   const canEdit = permissions.accounts.canEdit;
@@ -440,7 +438,8 @@ export function Accounts({
   const periodRange = useMemo(() => resolvePeriod(period), [period]);
   const [statusFilter, setStatusFilter] = useState<'all' | AccountStatus>('all');
   const [typeFilter, setTypeFilter] = useState<FilterType>(defaultType ?? 'All');
-  const [selectedClientId, setSelectedClientId] = useState('');
+  const [selectedCounterparty, setSelectedCounterparty] = useState<CounterpartySelection | null>(null);
+  const [counterpartyPickerOpen, setCounterpartyPickerOpen] = useState(false);
   const [clientRoleFilter, setClientRoleFilter] = useState<ClientRoleFilter>('all');
   const [payablesOnly, setPayablesOnly] = useState(false);
   const [payablesDashboardOpen, setPayablesDashboardOpen] = useState(false);
@@ -480,14 +479,8 @@ export function Accounts({
   const [changeResponsibleError, setChangeResponsibleError] = useState<string | null>(null);
   const [nextResponsibleId, setNextResponsibleId] = useState('');
   const baseTypeFilter = useMemo<FilterType>(() => (lockType ? (defaultType ?? 'All') : 'All'), [defaultType, lockType]);
-  const selectedClientIdNumber = useMemo(() => {
-    const value = Number(selectedClientId);
-    return Number.isFinite(value) && value > 0 ? value : undefined;
-  }, [selectedClientId]);
-  const accountClientOptions = useMemo(
-    () => buildClientLookupOptions(accountClients),
-    [accountClients],
-  );
+  const selectedClientIdNumber = selectedCounterparty?.kind === 'client' ? selectedCounterparty.id : undefined;
+  const selectedLegalEntityIdNumber = selectedCounterparty?.kind === 'legalEntity' ? selectedCounterparty.id : undefined;
 
   const {
     columnOrder,
@@ -535,6 +528,7 @@ export function Accounts({
     search: debouncedSearch || undefined,
     type: typeFilter,
     clientId: selectedClientIdNumber,
+    legalEntityId: selectedLegalEntityIdNumber,
     clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
     payablesOnly,
     sortBy: sortState.key,
@@ -553,6 +547,7 @@ export function Accounts({
     to: periodRange.to || undefined,
     search: debouncedSearch || undefined,
     clientId: selectedClientIdNumber,
+    legalEntityId: selectedLegalEntityIdNumber,
     clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
     enabled: payablesOnly,
   });
@@ -582,6 +577,7 @@ export function Accounts({
     debouncedSearch,
     typeFilter,
     selectedClientIdNumber,
+    selectedLegalEntityIdNumber,
     clientRoleFilter,
     payablesOnly,
     pageSize,
@@ -731,7 +727,7 @@ export function Accounts({
   const hasCustomStatusFilter = statusFilter !== 'all';
   const hasCustomSearch = search.trim().length > 0;
   const hasCustomTypeFilter = typeFilter !== baseTypeFilter;
-  const hasCustomClientFilter = Boolean(selectedClientIdNumber);
+  const hasCustomClientFilter = Boolean(selectedCounterparty);
   const hasCustomClientRoleFilter = clientRoleFilter !== 'all';
   const activeFilterBadges = useMemo(() => {
     const badges: string[] = [];
@@ -746,8 +742,8 @@ export function Accounts({
       badges.push(`Тип: ${typeFilterLabels[typeFilter]}`);
     }
     if (hasCustomClientFilter) {
-      const selectedClient = accountClients.find((client) => client.id === selectedClientIdNumber);
-      badges.push(`Клиент: ${selectedClient?.name ?? `#${selectedClientIdNumber}`}`);
+      const prefix = selectedCounterparty?.kind === 'legalEntity' ? 'Юрлицо' : 'Клиент';
+      badges.push(`${prefix}: ${selectedCounterparty?.name ?? 'контрагент'}`);
     }
     if (hasCustomClientRoleFilter) {
       badges.push(
@@ -770,11 +766,10 @@ export function Accounts({
     hasCustomClientFilter,
     hasCustomClientRoleFilter,
     period,
-    accountClients,
     accountStatusLabels,
     clientRoleFilter,
     payablesOnly,
-    selectedClientIdNumber,
+    selectedCounterparty,
     statusFilter,
     search,
     typeFilter,
@@ -1222,7 +1217,7 @@ export function Accounts({
     setPeriod(defaultPeriod);
     setStatusFilter('all');
     setTypeFilter(baseTypeFilter);
-    setSelectedClientId('');
+    setSelectedCounterparty(null);
     setClientRoleFilter('all');
     setPayablesOnly(false);
     setPayablesDashboardOpen(false);
@@ -2183,20 +2178,21 @@ export function Accounts({
                   </select>
                 </label>
                 <div className="sm:col-span-2 lg:col-span-2">
-                  <LookupSelect
-                    label="Клиент / поставщик"
-                    value={selectedClientId}
-                    options={accountClientOptions}
-                    onChange={setSelectedClientId}
-                    placeholder="Все контрагенты"
-                    title="Выбор клиента / поставщика"
-                    dictionaryLabel="Открыть справочник"
-                    searchPlaceholder="Поиск по ФИО, компании, телефону или email"
-                    emptyOptionLabel="Все контрагенты"
-                    emptyOptionDescription="Показать счета всех клиентов и поставщиков"
-                    buttonClassName="border-gray-300 focus:border-blue-500"
-                    noOptionsText="Клиенты не найдены"
-                  />
+                  <div className="flex flex-col gap-1 text-sm">
+                    <span className="flex min-h-7 items-center font-medium text-gray-700">Клиент / поставщик</span>
+                    <button
+                      type="button"
+                      onClick={() => setCounterpartyPickerOpen(true)}
+                      className="flex min-h-[42px] w-full items-center justify-between gap-3 rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    >
+                      <span className={selectedCounterparty ? 'truncate text-slate-900' : 'truncate text-slate-500'}>
+                        {selectedCounterparty?.name ?? 'Все контрагенты'}
+                      </span>
+                      <span className="shrink-0 text-xs text-slate-500">
+                        {selectedCounterparty?.kind === 'legalEntity' ? 'Юрлицо' : selectedCounterparty ? 'Физлицо' : 'Выбрать'}
+                      </span>
+                    </button>
+                  </div>
                 </div>
                 <label className="flex flex-col gap-1 text-sm lg:col-start-3">
                   <span className="flex min-h-7 items-center font-medium text-gray-700">Роль клиента</span>
@@ -2617,7 +2613,7 @@ export function Accounts({
                     const extraActs = actsForInvoice.slice(1);
                     const actListKey = `${row.accountNumber}-${invoice?.id ?? 'no-invoice'}`;
                     const isActListOpen = expandedActListKey === actListKey;
-                    const primaryName = invoice?.clientName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
+                    const primaryName = invoice?.clientName || invoice?.legalEntityName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
                     const caseLines = getInvoiceCaseSummary(invoice);
                     const clientId = typeof invoice?.clientId === 'number' ? invoice.clientId : null;
                     const isExpanded = expandedAccounts[row.accountNumber] ?? false;
@@ -3080,6 +3076,21 @@ export function Accounts({
           cancelLabel="Отмена"
           error={changeResponsibleError ?? undefined}
           loading={changeResponsibleSubmitting}
+        />
+
+        <CounterpartyPickerModal
+          open={counterpartyPickerOpen}
+          title="Выбор клиента / поставщика"
+          selected={selectedCounterparty ? [selectedCounterparty] : []}
+          initialScope={selectedCounterparty?.kind ?? 'client'}
+          allowEmpty
+          emptyLabel="Все контрагенты"
+          overlayClassName="z-[1600]"
+          onClose={() => setCounterpartyPickerOpen(false)}
+          onSelect={(selection) => {
+            setSelectedCounterparty(selection);
+            setCounterpartyPickerOpen(false);
+          }}
         />
 
         <InvoiceModal

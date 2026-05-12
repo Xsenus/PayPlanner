@@ -30,6 +30,7 @@ public class AccountsController : ControllerBase
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int? clientId = null,
+        [FromQuery] int? legalEntityId = null,
         [FromQuery] string? clientIds = null,
         [FromQuery] string? clientRole = null,
         [FromQuery] bool payablesOnly = false,
@@ -52,6 +53,7 @@ public class AccountsController : ControllerBase
             search,
             type,
             clientId,
+            legalEntityId,
             clientIds,
             clientRole);
         var candidateItems = await candidateQuery
@@ -471,6 +473,7 @@ public class AccountsController : ControllerBase
         [FromQuery] DateTime? to,
         [FromQuery] string? search,
         [FromQuery] int? clientId = null,
+        [FromQuery] int? legalEntityId = null,
         [FromQuery] string? clientIds = null,
         [FromQuery] string? clientRole = null,
         CancellationToken ct = default)
@@ -500,6 +503,19 @@ public class AccountsController : ControllerBase
                 _ => query.Where(payment =>
                     (payment.ClientId.HasValue && parsedClientIds.Contains(payment.ClientId.Value)) ||
                     (payment.ExpenseClientId.HasValue && parsedClientIds.Contains(payment.ExpenseClientId.Value))),
+            };
+        }
+
+        if (legalEntityId.HasValue && legalEntityId.Value > 0)
+        {
+            var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+            query = normalizedClientRole switch
+            {
+                "counterparty" => query.Where(payment => payment.LegalEntityId == legalEntityId.Value),
+                "expenseClient" => query.Where(payment => payment.ExpenseLegalEntityId == legalEntityId.Value),
+                _ => query.Where(payment =>
+                    payment.LegalEntityId == legalEntityId.Value ||
+                    payment.ExpenseLegalEntityId == legalEntityId.Value),
             };
         }
 
@@ -676,6 +692,7 @@ public class AccountsController : ControllerBase
         string? search,
         PaymentType? type,
         int? clientId,
+        int? legalEntityId,
         string? clientIds,
         string? clientRole)
     {
@@ -703,6 +720,19 @@ public class AccountsController : ControllerBase
             };
         }
 
+        if (legalEntityId.HasValue && legalEntityId.Value > 0)
+        {
+            var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+            query = normalizedClientRole switch
+            {
+                "counterparty" => query.Where(payment => payment.LegalEntityId == legalEntityId.Value),
+                "expenseClient" => query.Where(payment => payment.ExpenseLegalEntityId == legalEntityId.Value),
+                _ => query.Where(payment =>
+                    payment.LegalEntityId == legalEntityId.Value ||
+                    payment.ExpenseLegalEntityId == legalEntityId.Value),
+            };
+        }
+
         if (from.HasValue)
         {
             var fromDate = from.Value.Date;
@@ -725,8 +755,14 @@ public class AccountsController : ControllerBase
                 || (payment.CounterpartyName != null && payment.CounterpartyName.ToLower().Contains(term))
                 || (payment.Client != null && payment.Client.Name != null && payment.Client.Name.ToLower().Contains(term))
                 || (payment.Client != null && payment.Client.Company != null && payment.Client.Company.ToLower().Contains(term))
+                || (payment.LegalEntity != null && payment.LegalEntity.ShortName.ToLower().Contains(term))
+                || (payment.LegalEntity != null && payment.LegalEntity.FullName != null && payment.LegalEntity.FullName.ToLower().Contains(term))
+                || (payment.LegalEntity != null && payment.LegalEntity.Inn != null && payment.LegalEntity.Inn.ToLower().Contains(term))
                 || (payment.ExpenseClient != null && payment.ExpenseClient.Name != null && payment.ExpenseClient.Name.ToLower().Contains(term))
                 || (payment.ExpenseClient != null && payment.ExpenseClient.Company != null && payment.ExpenseClient.Company.ToLower().Contains(term))
+                || (payment.ExpenseLegalEntity != null && payment.ExpenseLegalEntity.ShortName.ToLower().Contains(term))
+                || (payment.ExpenseLegalEntity != null && payment.ExpenseLegalEntity.FullName != null && payment.ExpenseLegalEntity.FullName.ToLower().Contains(term))
+                || (payment.ExpenseLegalEntity != null && payment.ExpenseLegalEntity.Inn != null && payment.ExpenseLegalEntity.Inn.ToLower().Contains(term))
                 || (payment.ClientCase != null && payment.ClientCase.Title != null && payment.ClientCase.Title.ToLower().Contains(term))
                 || payment.InvoiceClientCases.Any(link => link.ClientCase != null && link.ClientCase.Title != null && link.ClientCase.Title.ToLower().Contains(term))
                 || payment.Acts.Any(act =>
