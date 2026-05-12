@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskJournal } from './TaskJournal';
-import type { Client, ClientCase } from '../../types';
+import type { Client, ClientCase, LegalEntitySummary } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 
 const apiMock = vi.hoisted(() => ({
@@ -39,6 +39,10 @@ const casesState = vi.hoisted(() => ({
   cases: [] as ClientCase[],
 }));
 
+const legalEntitiesState = vi.hoisted(() => ({
+  legalEntities: [] as LegalEntitySummary[],
+}));
+
 vi.mock('../../services/api', () => ({
   apiService: apiMock,
 }));
@@ -63,6 +67,13 @@ vi.mock('../../hooks/useClients', () => ({
 vi.mock('../../hooks/useClientCases', () => ({
   useClientCases: () => ({
     cases: casesState.cases,
+    loading: false,
+  }),
+}));
+
+vi.mock('../../hooks/useLegalEntities', () => ({
+  useLegalEntities: () => ({
+    legalEntities: legalEntitiesState.legalEntities,
     loading: false,
   }),
 }));
@@ -160,6 +171,10 @@ describe('TaskJournal', () => {
     ];
     casesState.cases = [
       { id: 100, clientId: 10, title: 'БАНКРОТСТВО', status: 'Open', createdAt: todayAt(8) } as ClientCase,
+      { id: 200, legalEntityId: 20, title: 'КОРПОРАТИВНЫЙ СПОР', status: 'Open', createdAt: todayAt(8) } as ClientCase,
+    ];
+    legalEntitiesState.legalEntities = [
+      { id: 20, shortName: 'ООО Ромашка', inn: '5400000000', email: 'office@example.com' } as LegalEntitySummary,
     ];
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([]);
     apiMock.createTaskJournalCaseAutomationTask.mockResolvedValue(createTask({
@@ -211,19 +226,19 @@ describe('TaskJournal', () => {
   it('shows client, case and renamed task title field in the journal', async () => {
     await renderJournal();
 
-    expect(screen.getByText('Клиент / дело')).toBeTruthy();
+    expect(screen.getByText('Контрагент / дело')).toBeTruthy();
     expect(screen.getByText('Наименование задачи')).toBeTruthy();
     expect(screen.getByText('Иванов Иван Иванович')).toBeTruthy();
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
   });
 
-  it('does not save a new task without a required client', async () => {
+  it('does not save a new task without a required counterparty', async () => {
     await renderJournal();
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
     await screen.findByRole('heading', { name: 'Новая задача' });
 
-    expect(screen.getByText('Клиент')).toBeTruthy();
+    expect(screen.getByText('Контрагент')).toBeTruthy();
     expect(screen.getAllByText('Наименование задачи').length).toBeGreaterThan(0);
     expect(screen.getByText('Дело')).toBeTruthy();
 
@@ -231,7 +246,7 @@ describe('TaskJournal', () => {
     fireEvent.click(submitButtons[submitButtons.length - 1]);
 
     expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
-    expect(toastMock.error).toHaveBeenCalledWith('Укажите клиента задачи.', 'Журнал задач');
+    expect(toastMock.error).toHaveBeenCalledWith('Укажите контрагента задачи.', 'Журнал задач');
   });
 
   it('saves selected client and case from the task form', async () => {
@@ -240,7 +255,7 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
     await screen.findByRole('heading', { name: 'Новая задача' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите клиента' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
     fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
     fireEvent.change(screen.getByPlaceholderText('Что нужно сделать'), { target: { value: 'Подготовить документы' } });
 
@@ -253,6 +268,29 @@ describe('TaskJournal', () => {
       clientId: 10,
       clientCaseId: 100,
       title: 'Подготовить документы',
+    }));
+  });
+
+  it('saves selected legal entity and legal entity case from the task form', async () => {
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
+    fireEvent.click(await screen.findByRole('button', { name: /ООО Ромашка/ }));
+    fireEvent.change(screen.getByPlaceholderText('Что нужно сделать'), { target: { value: 'Проверить документы юрлица' } });
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Дело' }), { target: { value: '200' } });
+    const submitButtons = screen.getAllByRole('button', { name: 'Создать задачу' });
+    fireEvent.click(submitButtons[submitButtons.length - 1]);
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: null,
+      legalEntityId: 20,
+      clientCaseId: 200,
+      title: 'Проверить документы юрлица',
     }));
   });
 

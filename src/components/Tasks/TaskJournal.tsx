@@ -30,9 +30,10 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useClients } from '../../hooks/useClients';
 import { useClientCases } from '../../hooks/useClientCases';
+import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
-import type { Client } from '../../types';
+import type { Client, LegalEntitySummary } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import {
   isTaskJournalActive,
@@ -117,6 +118,7 @@ const emptyForm = (assigneeName: string, assigneeUserId?: number | null): TaskFo
 
   return {
     clientId: null,
+    legalEntityId: null,
     clientCaseId: null,
     objectName: '',
     title: '',
@@ -220,6 +222,7 @@ function moveDueAtToDate(currentDueAt: string, targetDate: Date) {
 function taskToPayload(task: TaskJournalItem, overrides: Partial<TaskJournalUpsertPayload> = {}): TaskJournalUpsertPayload {
   return {
     clientId: task.clientId ?? null,
+    legalEntityId: task.legalEntityId ?? null,
     clientCaseId: task.clientCaseId ?? null,
     objectName: task.objectName,
     title: task.title,
@@ -336,11 +339,20 @@ function getPriorityLabel(priority: TaskJournalPriority) {
 }
 
 function getTaskClientName(task: TaskJournalItem) {
-  return task.clientName?.trim() || task.objectName;
+  return task.clientName?.trim() || task.legalEntityName?.trim() || task.objectName;
 }
 
 function getTaskCaseTitle(task: TaskJournalItem) {
   return task.clientCaseTitle?.trim() || '';
+}
+
+function getLegalEntityDisplayName(entity: Pick<LegalEntitySummary, 'id' | 'shortName' | 'fullName'> | null | undefined) {
+  if (!entity) return '';
+  return entity.shortName?.trim() || entity.fullName?.trim() || `Юрлицо #${entity.id}`;
+}
+
+function getAutomationCandidateOwnerName(candidate: TaskJournalCaseAutomationCandidate) {
+  return candidate.clientName?.trim() || candidate.legalEntityName?.trim() || 'Контрагент';
 }
 
 function getTaskParticipants(task: TaskJournalItem, role: TaskJournalParticipantRole) {
@@ -456,6 +468,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const toast = useToast();
   const { confirm } = useDialog();
   const { clients } = useClients();
+  const { legalEntities } = useLegalEntities();
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [automationCandidates, setAutomationCandidates] = useState<TaskJournalCaseAutomationCandidate[]>([]);
@@ -635,18 +648,29 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     return Array.from(byId.values());
   }, [assignees]);
 
-  const clientOptions = useMemo<LookupSelectOption[]>(
+  const counterpartyOptions = useMemo<LookupSelectOption[]>(
     () =>
       clients
         .filter((client) => client?.id && client?.name)
         .map((client) => ({
-          value: String(client.id),
+          value: `client:${client.id}`,
           label: client.name,
           description: [client.phone, client.email].filter(Boolean).join(' · ') || undefined,
           keywords: [String(client.id), client.name, client.phone, client.email, client.company].filter(Boolean),
         }))
+        .concat(legalEntities
+          .filter((entity) => entity?.id && getLegalEntityDisplayName(entity))
+          .map((entity) => {
+            const name = getLegalEntityDisplayName(entity);
+            return {
+              value: `legal:${entity.id}`,
+              label: name,
+              description: ['Юрлицо', entity.inn ? `ИНН ${entity.inn}` : '', entity.kpp ? `КПП ${entity.kpp}` : '', entity.email].filter(Boolean).join(' · ') || undefined,
+              keywords: [String(entity.id), name, entity.fullName, entity.inn, entity.kpp, entity.ogrn, entity.phone, entity.email].filter(Boolean),
+            };
+          }))
         .sort((a, b) => a.label.localeCompare(b.label, 'ru')),
-    [clients],
+    [clients, legalEntities],
   );
 
   const filteredTasks = useMemo(() => {
@@ -680,6 +704,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
         const searchOk = !q || [
           task.objectName,
           task.clientName ?? '',
+          task.legalEntityName ?? '',
           task.clientCaseTitle ?? '',
           task.title,
           task.description,
@@ -757,8 +782,8 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   }, [filteredTasks, periodMode]);
 
   const handleSave = async (form: TaskForm, taskId?: number) => {
-    if (!form.clientId) {
-      toast.error('Укажите клиента задачи.', 'Журнал задач');
+    if (!form.clientId && !form.legalEntityId) {
+      toast.error('Укажите контрагента задачи.', 'Журнал задач');
       return;
     }
     if (!form.title.trim()) {
@@ -867,8 +892,8 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
       return;
     }
 
-    if (!task.clientId) {
-      toast.error('У задачи не указан клиент. Откройте задачу и заполните клиента перед переносом.', 'Календарь задач');
+    if (!task.clientId && !task.legalEntityId) {
+      toast.error('У задачи не указан контрагент. Откройте задачу и заполните контрагента перед переносом.', 'Календарь задач');
       openTaskEditor(task, { syncRoute: true });
       return;
     }
@@ -908,7 +933,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   };
 
   const handleExport = () => {
-    const header = ['Клиент', 'Дело', 'Наименование задачи', 'Исполнитель', 'Срок', 'Длительность', 'Тип', 'Приоритет', 'Статус', 'Результат'];
+    const header = ['Контрагент', 'Дело', 'Наименование задачи', 'Исполнитель', 'Срок', 'Длительность', 'Тип', 'Приоритет', 'Статус', 'Результат'];
     const rows = filteredTasks.map((task) => [
       getTaskClientName(task),
       getTaskCaseTitle(task),
@@ -951,7 +976,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Рабочий контроль</div>
               <h1 className="mt-2 text-3xl font-semibold text-slate-900">Журнал задач</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                Задачи по клиентам, делам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.
+                Задачи по контрагентам, делам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.
               </p>
             </div>
 
@@ -998,7 +1023,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Поиск по клиенту, делу, наименованию, исполнителю или результату"
+                placeholder="Поиск по контрагенту, делу, наименованию, исполнителю или результату"
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
             </label>
@@ -1145,7 +1170,8 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           state={modal}
           assignees={assignees}
           clients={clients}
-          clientOptions={clientOptions}
+          legalEntities={legalEntities}
+          counterpartyOptions={counterpartyOptions}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
           onClose={closeTaskModal}
@@ -1199,7 +1225,7 @@ function TaskAutomationPanel({
           <article key={candidate.clientCaseId} className="rounded-xl border border-amber-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-slate-900">{candidate.clientName}</div>
+                <div className="truncate text-sm font-semibold text-slate-900">{getAutomationCandidateOwnerName(candidate)}</div>
                 <div className="mt-1 truncate text-sm text-slate-600">{candidate.clientCaseTitle}</div>
               </div>
               <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
@@ -1274,7 +1300,7 @@ function TaskTable({
         <table className="min-w-[1180px] w-full">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              <th className="px-4 py-4">Клиент / дело</th>
+              <th className="px-4 py-4">Контрагент / дело</th>
               <th className="px-4 py-4">Наименование задачи</th>
               <th className="px-4 py-4">Исполнитель</th>
               <th className="px-4 py-4">Дата исполнения</th>
@@ -1911,7 +1937,8 @@ function TaskModal({
   state,
   assignees,
   clients,
-  clientOptions,
+  legalEntities,
+  counterpartyOptions,
   currentUserId,
   currentUserName,
   onClose,
@@ -1921,7 +1948,8 @@ function TaskModal({
   state: ModalState;
   assignees: TaskJournalAssignee[];
   clients: Client[];
-  clientOptions: LookupSelectOption[];
+  legalEntities: LegalEntitySummary[];
+  counterpartyOptions: LookupSelectOption[];
   currentUserId: number | null;
   currentUserName: string;
   onClose: () => void;
@@ -1942,6 +1970,7 @@ function TaskModal({
     if (state?.task) {
       const rest = {
         clientId: state.task.clientId ?? null,
+        legalEntityId: state.task.legalEntityId ?? null,
         clientCaseId: state.task.clientCaseId ?? null,
         objectName: state.task.objectName,
         title: state.task.title,
@@ -1976,6 +2005,11 @@ function TaskModal({
     () => clients.find((client) => client.id === form.clientId) ?? null,
     [clients, form.clientId],
   );
+  const selectedLegalEntity = useMemo(
+    () => legalEntities.find((entity) => entity.id === form.legalEntityId) ?? null,
+    [legalEntities, form.legalEntityId],
+  );
+  const selectedOwnerName = selectedClient?.name || getLegalEntityDisplayName(selectedLegalEntity);
   const approverParticipants = useMemo(
     () => (form.participants ?? []).filter((participant) => participant.role === 'approver'),
     [form.participants],
@@ -2002,19 +2036,41 @@ function TaskModal({
       .sort((a, b) => new Date(b.latest.uploadedAt).getTime() - new Date(a.latest.uploadedAt).getTime());
   }, [files]);
   const { cases: clientCases, loading: casesLoading } = useClientCases(form.clientId ?? undefined, {
-    enabled: Boolean(form.clientId),
+    enabled: Boolean(form.clientId || form.legalEntityId),
+    legalEntityId: form.legalEntityId ?? undefined,
   });
 
   const update = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleClientChange = (value: string) => {
-    const clientId = Number(value) || null;
+  const selectedCounterpartyValue = form.clientId
+    ? `client:${form.clientId}`
+    : form.legalEntityId
+      ? `legal:${form.legalEntityId}`
+      : '';
+
+  const handleCounterpartyChange = (value: string) => {
+    const [kind, rawId] = value.split(':');
+    const id = Number(rawId) || null;
+    if (kind === 'legal' && id) {
+      const entity = legalEntities.find((item) => item.id === id);
+      setForm((prev) => ({
+        ...prev,
+        clientId: null,
+        legalEntityId: id,
+        clientCaseId: null,
+        objectName: getLegalEntityDisplayName(entity),
+      }));
+      return;
+    }
+
+    const clientId = kind === 'client' ? id : null;
     const client = clients.find((item) => item.id === clientId);
     setForm((prev) => ({
       ...prev,
       clientId,
+      legalEntityId: null,
       clientCaseId: null,
       objectName: client?.name ?? '',
     }));
@@ -2026,7 +2082,9 @@ function TaskModal({
     setForm((prev) => ({
       ...prev,
       clientCaseId,
-      objectName: clientCase ? `${selectedClient?.name ?? prev.objectName} - ${clientCase.title}` : selectedClient?.name ?? prev.objectName,
+      objectName: clientCase
+        ? `${selectedOwnerName || prev.objectName} - ${clientCase.title}`
+        : selectedOwnerName || prev.objectName,
     }));
   };
 
@@ -2207,7 +2265,7 @@ function TaskModal({
         <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
           <div>
             <h2 className="text-2xl font-semibold text-slate-900">{state?.mode === 'edit' ? 'Редактировать задачу' : 'Новая задача'}</h2>
-            <p className="mt-1 text-sm text-slate-500">Заполните клиента, исполнителя, срок и правила напоминаний.</p>
+            <p className="mt-1 text-sm text-slate-500">Заполните контрагента, исполнителя, срок и правила напоминаний.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Закрыть">
             <X className="h-5 w-5" />
@@ -2216,19 +2274,19 @@ function TaskModal({
 
         <div className="min-h-0 overflow-y-auto px-6 py-5">
           <div className="grid gap-5 lg:grid-cols-2">
-            <Field label="Клиент">
+            <Field label="Контрагент">
               <LookupSelect
-                value={form.clientId ? String(form.clientId) : ''}
-                options={clientOptions}
-                onChange={handleClientChange}
-                placeholder="Выберите клиента"
-                title="Выбор клиента"
+                value={selectedCounterpartyValue}
+                options={counterpartyOptions}
+                onChange={handleCounterpartyChange}
+                placeholder="Выберите контрагента"
+                title="Выбор контрагента"
                 dictionaryLabel="Открыть справочник"
-                searchPlaceholder="Поиск по ФИО, компании, телефону или email"
-                emptyOptionLabel="Клиент не выбран"
-                emptyOptionDescription="Клиент обязателен для задачи"
+                searchPlaceholder="Поиск по ФИО, названию, ИНН, телефону или email"
+                emptyOptionLabel="Контрагент не выбран"
+                emptyOptionDescription="Контрагент обязателен для задачи"
                 buttonClassName="h-11 border-slate-200 focus:border-blue-400"
-                noOptionsText="Клиенты не найдены"
+                noOptionsText="Контрагенты не найдены"
               />
             </Field>
             <Field label="Исполнитель">
@@ -2259,7 +2317,7 @@ function TaskModal({
                 aria-label="Дело"
                 value={form.clientCaseId ?? ''}
                 onChange={(event) => handleCaseChange(event.target.value)}
-                disabled={!form.clientId || casesLoading}
+                disabled={(!form.clientId && !form.legalEntityId) || casesLoading}
                 className="form-input disabled:bg-slate-50 disabled:text-slate-400"
               >
                 <option value="">Без дела</option>

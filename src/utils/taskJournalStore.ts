@@ -32,6 +32,8 @@ export interface TaskJournalItem {
   id: number;
   clientId?: number | null;
   clientName?: string;
+  legalEntityId?: number | null;
+  legalEntityName?: string;
   clientCaseId?: number | null;
   clientCaseTitle?: string;
   objectName: string;
@@ -96,8 +98,10 @@ export interface TaskJournalAssignee {
 }
 
 export interface TaskJournalCaseAutomationCandidate {
-  clientId: number;
+  clientId?: number | null;
   clientName: string;
+  legalEntityId?: number | null;
+  legalEntityName?: string;
   clientCaseId: number;
   clientCaseTitle: string;
   reason: string;
