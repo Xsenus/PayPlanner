@@ -234,15 +234,16 @@ public static class InvoiceDocumentTemplateEngine
             };
 
         var total = normalizedLineItems.Sum(item => item.Quantity * item.Price);
-        var seller = BuildSeller(mainCompany);
-        var buyer = BuildBuyer(payment);
-        var director = ParsePerson(mainCompany?.DocumentDirectorJson);
-        var directorFullName = BuildPersonFullName(director, mainCompany?.Director);
+        var sellerLegalEntity = ResolveSellerLegalEntity(payment, mainCompany);
+        var seller = BuildSeller(payment, mainCompany);
+        var buyer = BuildBuyer(payment, mainCompany);
+        var director = ParsePerson(sellerLegalEntity?.DocumentDirectorJson);
+        var directorFullName = BuildPersonFullName(director, sellerLegalEntity?.Director);
         var directorShortName = BuildPersonShortName(director, directorFullName);
         var directorPosition = !string.IsNullOrWhiteSpace(director?.Position)
             ? director!.Position!
             : "Предприниматель";
-        var chiefAccountant = ParsePerson(mainCompany?.ChiefAccountantJson);
+        var chiefAccountant = ParsePerson(sellerLegalEntity?.ChiefAccountantJson);
         var chiefAccountantFullName = BuildPersonFullName(chiefAccountant, directorFullName);
         var chiefAccountantShortName = BuildPersonShortName(chiefAccountant, chiefAccountantFullName);
         var chiefAccountantPosition = !string.IsNullOrWhiteSpace(chiefAccountant?.Position)
@@ -298,12 +299,12 @@ public static class InvoiceDocumentTemplateEngine
                 ["seller.chiefAccountantPosition"] = Encode(chiefAccountantPosition),
                 ["seller.chiefAccountantFullName"] = Encode(chiefAccountantFullName),
                 ["seller.chiefAccountantShortName"] = Encode(chiefAccountantShortName),
-                ["seller.logoHtml"] = BuildImageHtml(mainCompany?.LogoDataUrl, "Логотип", "logo"),
+                ["seller.logoHtml"] = BuildImageHtml(sellerLegalEntity?.LogoDataUrl, "Логотип", "logo"),
                 ["seller.sealHtml"] = includeSignatureAndSeal
-                    ? BuildImageHtml(mainCompany?.SealDataUrl, "Печать", "seal")
+                    ? BuildImageHtml(sellerLegalEntity?.SealDataUrl, "Печать", "seal")
                     : string.Empty,
                 ["seller.signatureHtml"] = includeSignatureAndSeal
-                    ? BuildImageHtml(mainCompany?.DirectorSignatureDataUrl, "Подпись", "signature")
+                    ? BuildImageHtml(sellerLegalEntity?.DirectorSignatureDataUrl, "Подпись", "signature")
                     : string.Empty,
                 ["buyer.name"] = Encode(buyer.Name),
                 ["buyer.address"] = Encode(buyer.Address),
@@ -330,6 +331,80 @@ public static class InvoiceDocumentTemplateEngine
                     ["total"] = Encode(FormatMoney(item.Quantity * item.Price)),
                 })
                 .ToList(),
+        };
+    }
+
+    private static LegalEntity? ResolveSellerLegalEntity(Payment payment, LegalEntity? mainCompany)
+    {
+        if (payment.Type == PaymentType.Expense)
+        {
+            return payment.LegalEntity
+                ?? payment.Client?.LegalEntity
+                ?? null;
+        }
+
+        return mainCompany;
+    }
+
+    private static SellerInfo BuildSeller(Payment payment, LegalEntity? mainCompany)
+    {
+        if (payment.Type == PaymentType.Expense)
+        {
+            if (payment.LegalEntity is not null)
+            {
+                return BuildSeller(payment.LegalEntity);
+            }
+
+            if (payment.Client?.LegalEntity is not null)
+            {
+                return BuildSeller(payment.Client.LegalEntity);
+            }
+
+            if (payment.Client is not null)
+            {
+                return BuildSeller(payment.Client, payment.CounterpartyName);
+            }
+        }
+
+        return BuildSeller(mainCompany);
+    }
+
+    private static SellerInfo BuildSeller(Client client, string? fallbackName)
+    {
+        var profile = ParseBuyerProfile(client.Notes);
+        var name = FirstNotEmpty(client.Name, fallbackName, "Поставщик");
+        var company = client.Company ?? string.Empty;
+        var address = ResolveBuyerAddress(client);
+        var inn = profile?.Inn?.Trim() ?? string.Empty;
+
+        var requisitesParts = new List<string> { name };
+        if (!string.IsNullOrWhiteSpace(inn))
+        {
+            requisitesParts.Add($"ИНН {inn}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(company) && !string.Equals(company, name, StringComparison.OrdinalIgnoreCase))
+        {
+            requisitesParts.Add(company);
+        }
+
+        if (!string.IsNullOrWhiteSpace(address))
+        {
+            requisitesParts.Add(address);
+        }
+
+        return new SellerInfo
+        {
+            ShortName = name,
+            FullName = name,
+            Inn = inn,
+            Kpp = string.Empty,
+            Address = address,
+            BankName = string.Empty,
+            Bik = string.Empty,
+            AccountNumber = string.Empty,
+            CorrAccountNumber = string.Empty,
+            Requisites = string.Join(", ", requisitesParts.Where(static part => !string.IsNullOrWhiteSpace(part))),
         };
     }
 
@@ -399,11 +474,16 @@ public static class InvoiceDocumentTemplateEngine
         };
     }
 
-    private static BuyerInfo BuildBuyer(Payment payment)
+    private static BuyerInfo BuildBuyer(Payment payment, LegalEntity? mainCompany)
     {
         var isExpense = payment.Type == PaymentType.Expense;
         var directClient = isExpense ? payment.ExpenseClient : payment.Client;
         var directLegalEntity = isExpense ? payment.ExpenseLegalEntity : payment.LegalEntity;
+        if (isExpense && directClient is null && directLegalEntity is null)
+        {
+            directLegalEntity = mainCompany;
+        }
+
         if (directClient is null && directLegalEntity is not null)
         {
             var legalName = FirstNotEmpty(directLegalEntity.FullName, directLegalEntity.ShortName, payment.CounterpartyName, "Контрагент");
