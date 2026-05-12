@@ -4947,6 +4947,13 @@ export function InvoiceModal({
             : (form.legalEntityId ? 'legalEntity' : 'client')
         }
         selected={selectedCounterpartyPickerValue}
+        counterpartyRole={
+          clientPickerMode === 'expense'
+            ? 'client'
+            : form.type === 'Expense'
+              ? 'supplier'
+              : 'client'
+        }
         allowEmpty={clientPickerMode === 'expense'}
         emptyLabel="Без контрагента расхода"
         overlayClassName="z-[1600]"

@@ -2175,16 +2175,20 @@ export class ApiService {
   }
 
   // ===== Legal entities =====
-  async getLegalEntities(params?: { search?: string }) {
-    const q = buildQuery({ search: params?.search });
+  async getLegalEntities(params?: { search?: string; counterpartyRole?: 'client' | 'supplier' }) {
+    const q = buildQuery({
+      search: params?.search,
+      counterpartyRole: params?.counterpartyRole,
+    });
     return this.request<LegalEntitySummary[]>(`/legal-entities${q}`);
   }
 
-  async getLegalEntitiesPaged(params?: { search?: string; page?: number; pageSize?: number }) {
+  async getLegalEntitiesPaged(params?: { search?: string; page?: number; pageSize?: number; counterpartyRole?: 'client' | 'supplier' }) {
     const q = buildQuery({
       search: params?.search,
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 20,
+      counterpartyRole: params?.counterpartyRole,
     });
     return this.request<PagedResult<LegalEntitySummary>>(`/legal-entities/paged${q}`);
   }
@@ -2353,6 +2357,7 @@ export class ApiService {
     sortDir?: SortDir;
     page?: number;
     pageSize?: number;
+    counterpartyRole?: 'client' | 'supplier';
     [key: string]: string | number | boolean | undefined;
   }) {
     const q = buildQuery({

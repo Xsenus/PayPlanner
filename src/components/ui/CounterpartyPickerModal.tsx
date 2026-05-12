@@ -6,6 +6,7 @@ import type { Client, LegalEntitySummary } from '../../types';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
 export type CounterpartyKind = 'client' | 'legalEntity';
+export type CounterpartyRole = 'client' | 'supplier';
 
 export type CounterpartySelection = {
   kind: CounterpartyKind;
@@ -23,6 +24,7 @@ type CounterpartyPickerModalProps = {
   selected?: CounterpartySelection[];
   initialScope?: CounterpartyKind;
   allowedScopes?: CounterpartyKind[];
+  counterpartyRole?: CounterpartyRole;
   allowEmpty?: boolean;
   emptyLabel?: string;
   disabledKeys?: string[];
@@ -74,6 +76,7 @@ export function CounterpartyPickerModal({
   selected = EMPTY_SELECTIONS,
   initialScope = 'client',
   allowedScopes = DEFAULT_SCOPES,
+  counterpartyRole,
   allowEmpty = false,
   emptyLabel = 'Без контрагента',
   disabledKeys = [],
@@ -131,6 +134,7 @@ export function CounterpartyPickerModal({
             sortDir: 'asc',
             page,
             pageSize,
+            ...(counterpartyRole ? { counterpartyRole } : {}),
           });
           if (cancelled) return;
           setItems((response.items ?? []).map(mapClient));
@@ -142,6 +146,7 @@ export function CounterpartyPickerModal({
           search: debouncedQuery || undefined,
           page,
           pageSize,
+          ...(counterpartyRole ? { counterpartyRole } : {}),
         });
         if (cancelled) return;
         setItems((response.items ?? []).map(mapLegalEntity));
@@ -162,7 +167,7 @@ export function CounterpartyPickerModal({
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, open, page, pageSize, scope]);
+  }, [counterpartyRole, debouncedQuery, open, page, pageSize, scope]);
 
   const selectedKeys = useMemo(() => new Set(draftSelected.map(selectionKey)), [draftSelected]);
   const disabledKeySet = useMemo(() => new Set(disabledKeys), [disabledKeys]);
@@ -338,8 +343,25 @@ export function CounterpartyPickerModal({
                           <ClientStatusBadge status={client.clientStatus} />
                         </div>
                       ) : null}
+                      {client?.isClientAndSupplier ? (
+                        <div className="mt-2">
+                          <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                            Клиент и поставщик
+                          </span>
+                        </div>
+                      ) : null}
                       {entity?.fullName && entity.fullName !== entity.shortName ? (
                         <div className="mt-1 line-clamp-1 text-xs text-slate-500">{entity.fullName}</div>
+                      ) : null}
+                      {entity?.clientStatus || entity?.isClientAndSupplier ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {entity.clientStatus ? <ClientStatusBadge status={entity.clientStatus} /> : null}
+                          {entity.isClientAndSupplier ? (
+                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                              Клиент и поставщик
+                            </span>
+                          ) : null}
+                        </div>
                       ) : null}
                       {linkedClients.length > 0 ? (
                         <div className="mt-1 line-clamp-1 text-xs text-slate-400">

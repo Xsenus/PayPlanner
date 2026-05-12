@@ -1438,6 +1438,7 @@ export function ClientDetail({
     responsibleUserId: "",
     isActive: true,
     clientStatusId: "",
+    isClientAndSupplier: false,
   });
   const [legalEntityOptions, setLegalEntityOptions] = useState<LegalEntitySummary[]>([]);
   const [legalEntityLookupSearch, setLegalEntityLookupSearch] = useState("");
@@ -3148,6 +3149,7 @@ export function ClientDetail({
       clientStatusId: clientData.clientStatusId
         ? String(clientData.clientStatusId)
         : "",
+      isClientAndSupplier: Boolean(clientData.isClientAndSupplier),
     });
     // setProfileDocuments({
     //   passport: profile.passports[0] ?? '',
@@ -5587,6 +5589,7 @@ export function ClientDetail({
           clientStatusId: clientFormState.clientStatusId
             ? Number(clientFormState.clientStatusId)
             : null,
+          isClientAndSupplier: clientFormState.isClientAndSupplier,
         });
         toast.success(
           "Изменения карточки клиента сохранены.",
@@ -5813,6 +5816,24 @@ export function ClientDetail({
                     </p>
                   )}
                 </div>
+                <label className="md:col-span-2 flex items-start gap-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    name="isClientAndSupplier"
+                    checked={clientFormState.isClientAndSupplier}
+                    onChange={handleClientFormChange}
+                    disabled={!clientPermissions.canEdit}
+                    className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-60"
+                  />
+                  <span>
+                    <span className="block font-medium text-gray-800">
+                      Является одновременно клиентом и поставщиком
+                    </span>
+                    <span className="mt-0.5 block text-xs text-gray-500">
+                      При включении контрагент доступен в обоих списках выбора.
+                    </span>
+                  </span>
+                </label>
               </div>
             </div>
             {!clientPermissions.canEdit && (

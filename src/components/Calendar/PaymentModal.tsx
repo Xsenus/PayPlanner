@@ -2575,6 +2575,13 @@ export function PaymentModal({
             open={clientPickerOpen}
             title={clientPickerMode === 'expense' ? 'Выбор контрагента расхода' : 'Выбор контрагента'}
             initialScope={clientPickerMode === 'expense' && formData.expenseLegalEntityId ? 'legalEntity' : formData.legalEntityId ? 'legalEntity' : 'client'}
+            counterpartyRole={
+              clientPickerMode === 'expense'
+                ? 'client'
+                : formData.type === 'Expense'
+                  ? 'supplier'
+                  : 'client'
+            }
             overlayClassName="z-[1600]"
             onClose={() => setClientPickerOpen(false)}
             onSelect={(selection) => {

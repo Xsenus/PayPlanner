@@ -115,6 +115,9 @@ export interface LegalEntitySummary {
   director?: string | null;
   responsibleUserId?: number | null;
   responsibleUserName?: string | null;
+  clientStatusId?: number | null;
+  clientStatus?: ClientStatus | null;
+  isClientAndSupplier?: boolean;
   country?: string | null;
   baseCurrency?: string | null;
   serviceLanguage?: string | null;
@@ -323,6 +326,8 @@ export interface LegalEntityInput {
   email?: string | null;
   director?: string | null;
   responsibleUserId?: number | null;
+  clientStatusId?: number | null;
+  isClientAndSupplier?: boolean;
   country?: string | null;
   baseCurrency?: string | null;
   serviceLanguage?: string | null;
@@ -400,6 +405,7 @@ export interface Client {
   responsibleUserName?: string | null;
   clientStatusId?: number | null;
   clientStatus?: ClientStatus | null;
+  isClientAndSupplier?: boolean;
   cases?: ClientCase[];
   contracts?: Contract[];
   casesCount?: number;
@@ -426,6 +432,7 @@ export interface ClientInput {
   legalEntityId?: number | null;
   responsibleUserId?: number | null;
   clientStatusId?: number | null;
+  isClientAndSupplier?: boolean;
 }
 
 export interface DadataAddressSuggestion {

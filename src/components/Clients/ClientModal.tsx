@@ -120,6 +120,7 @@ export function ClientModal({
     okogu: formData.legalOkogu.trim() || null,
     okfs: formData.legalOkfs.trim() || null,
     notes: formData.comment.trim() || null,
+    isClientAndSupplier: formData.isClientAndSupplier,
     clientIds: [],
   });
 
@@ -148,10 +149,10 @@ export function ClientModal({
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
-    const { name, value } = e.target;
+    const { name, value, type } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value,
     }));
   };
 
@@ -397,6 +398,24 @@ export function ClientModal({
                 placeholder={t('additionalInfo')}
               />
             </div>
+
+            <label className="flex items-start gap-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                name="isClientAndSupplier"
+                checked={formData.isClientAndSupplier}
+                onChange={handleChange}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>
+                <span className="block font-medium text-gray-800">
+                  Является одновременно клиентом и поставщиком
+                </span>
+                <span className="mt-0.5 block text-xs text-gray-500">
+                  Контрагент будет доступен в клиентских и расходных документах.
+                </span>
+              </span>
+            </label>
 
             <div className="flex gap-3 pt-4">
               {client && onDelete && (

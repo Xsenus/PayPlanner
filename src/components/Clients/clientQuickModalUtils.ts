@@ -53,6 +53,7 @@ export interface QuickClientModalFormData {
   legalOktmo: string;
   legalOkogu: string;
   legalOkfs: string;
+  isClientAndSupplier: boolean;
 }
 
 type StructuredClientProfile = Record<string, unknown> & {
@@ -90,6 +91,7 @@ const emptyFormData = (): QuickClientModalFormData => ({
   legalOktmo: '',
   legalOkogu: '',
   legalOkfs: '',
+  isClientAndSupplier: false,
 });
 
 const normalizeList = (values: string[]): string[] =>
@@ -169,6 +171,7 @@ export const parseQuickClientModalFormData = (client?: Client): QuickClientModal
     legalOktmo: kind === 'legal' ? client.legalEntity?.oktmo ?? '' : '',
     legalOkogu: kind === 'legal' ? client.legalEntity?.okogu ?? '' : '',
     legalOkfs: kind === 'legal' ? client.legalEntity?.okfs ?? '' : '',
+    isClientAndSupplier: Boolean(client.isClientAndSupplier),
   };
 };
 
@@ -260,6 +263,7 @@ export const buildQuickClientPayload = (
       legalEntityId: legalEntityId ?? client?.legalEntityId ?? null,
       responsibleUserId: client?.responsibleUserId ?? null,
       clientStatusId: client?.clientStatusId ?? null,
+      isClientAndSupplier: formData.isClientAndSupplier,
     };
   }
 
@@ -274,6 +278,7 @@ export const buildQuickClientPayload = (
     legalEntityId: client?.legalEntityId ?? null,
     responsibleUserId: client?.responsibleUserId ?? null,
     clientStatusId: client?.clientStatusId ?? null,
+    isClientAndSupplier: formData.isClientAndSupplier,
   };
 };
 

@@ -49,6 +49,7 @@ import { apiService } from "../../services/api";
 import { useActs } from "../../hooks/useActs";
 import { useClients } from "../../hooks/useClients";
 import { useClientCases } from "../../hooks/useClientCases";
+import { useClientStatuses } from "../../hooks/useClientStatuses";
 import { useDialog } from "../../hooks/useDialog";
 import { useDictionaries } from "../../hooks/useDictionaries";
 import { useFormRequirements } from "../../hooks/useFormRequirements";
@@ -149,6 +150,8 @@ interface FormState {
   email: string;
   director: string;
   responsibleUserId: string;
+  clientStatusId: string;
+  isClientAndSupplier: boolean;
   country: string;
   baseCurrency: string;
   serviceLanguage: string;
@@ -670,6 +673,8 @@ const DEFAULT_STATE: FormState = {
   email: "",
   director: "",
   responsibleUserId: "",
+  clientStatusId: "",
+  isClientAndSupplier: false,
   country: "",
   baseCurrency: "",
   serviceLanguage: "",
@@ -809,6 +814,7 @@ export function LegalEntityModal({
     taxSystemModes,
   } = useDictionaries();
   const { isRequired } = useFormRequirements("legal-entities", isOpen);
+  const { statuses: clientStatuses } = useClientStatuses();
   const [formState, setFormState] = useState<FormState>(DEFAULT_STATE);
   const [selectedClients, setSelectedClients] = useState<
     ClientAssociationItem[]
@@ -910,6 +916,15 @@ export function LegalEntityModal({
   const [paymentModalMode, setPaymentModalMode] =
     useState<LegalEntityPaymentModalMode>("create");
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
+  const selectedLegalEntityClientStatus = useMemo(
+    () =>
+      formState.clientStatusId
+        ? clientStatuses.find(
+            (status) => status.id === Number(formState.clientStatusId),
+          ) ?? null
+        : null,
+    [clientStatuses, formState.clientStatusId],
+  );
 
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === "page";
@@ -1076,6 +1091,10 @@ export function LegalEntityModal({
         responsibleUserId: initial.responsibleUserId
           ? String(initial.responsibleUserId)
           : "",
+        clientStatusId: initial.clientStatusId
+          ? String(initial.clientStatusId)
+          : "",
+        isClientAndSupplier: Boolean(initial.isClientAndSupplier),
         country: initial.country ?? "",
         baseCurrency: initial.baseCurrency ?? "",
         serviceLanguage: initial.serviceLanguage ?? "",
@@ -1947,6 +1966,10 @@ export function LegalEntityModal({
         responsibleUserId: formState.responsibleUserId
           ? Number(formState.responsibleUserId)
           : null,
+        clientStatusId: formState.clientStatusId
+          ? Number(formState.clientStatusId)
+          : null,
+        isClientAndSupplier: formState.isClientAndSupplier,
         country: normalize(formState.country),
         baseCurrency: normalize(formState.baseCurrency),
         serviceLanguage: normalize(formState.serviceLanguage),
@@ -2058,6 +2081,10 @@ export function LegalEntityModal({
         responsibleUserId: saved.responsibleUserId
           ? String(saved.responsibleUserId)
           : prev.responsibleUserId,
+        clientStatusId: saved.clientStatusId
+          ? String(saved.clientStatusId)
+          : "",
+        isClientAndSupplier: Boolean(saved.isClientAndSupplier),
         country: saved.country ?? prev.country,
         baseCurrency: saved.baseCurrency ?? prev.baseCurrency,
         serviceLanguage: saved.serviceLanguage ?? prev.serviceLanguage,
@@ -3755,6 +3782,48 @@ export function LegalEntityModal({
                   ))}
                 </select>
               </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700">
+                  Статус принадлежности
+                </label>
+                <select
+                  name="clientStatusId"
+                  value={formState.clientStatusId}
+                  onChange={handleInputChange}
+                  disabled={readOnly}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Без статуса</option>
+                  {clientStatuses.map((status) => (
+                    <option key={status.id} value={status.id}>
+                      {status.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedLegalEntityClientStatus?.description ? (
+                  <p className="mt-2 text-xs text-gray-500">
+                    {selectedLegalEntityClientStatus.description}
+                  </p>
+                ) : null}
+              </div>
+              <label className="flex items-start gap-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="isClientAndSupplier"
+                  checked={formState.isClientAndSupplier}
+                  onChange={handleInputChange}
+                  disabled={readOnly}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-60"
+                />
+                <span>
+                  <span className="block font-medium text-gray-800">
+                    Является одновременно клиентом и поставщиком
+                  </span>
+                  <span className="mt-0.5 block text-xs text-gray-500">
+                    Организация будет доступна в обоих списках выбора.
+                  </span>
+                </span>
+              </label>
             </div>
           </div>
           {shouldShowDadataSection ? dadataSection : null}

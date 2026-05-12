@@ -19,6 +19,7 @@ function normalizeClient(client: Client): Client {
     responsibleUserName: client.responsibleUserName ?? null,
     clientStatusId: client.clientStatusId ?? null,
     clientStatus: (client.clientStatus as ClientStatus | null) ?? null,
+    isClientAndSupplier: Boolean(client.isClientAndSupplier),
     cases: Array.isArray(client.cases) ? (client.cases as ClientCase[]) : [],
     contracts: Array.isArray(client.contracts) ? client.contracts : [],
   };
