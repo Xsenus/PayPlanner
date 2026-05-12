@@ -269,6 +269,73 @@ public class PaymentsController : ControllerBase
         return Ok(e);
     }
 
+    [HttpPost("{id:int}/status")]
+    public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdatePaymentStatusRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return ValidationProblem(ModelState);
+        if (!Enum.TryParse<PaymentStatus>(request.Status, ignoreCase: true, out var nextStatus))
+        {
+            return BadRequest("Unknown payment status.");
+        }
+
+        var payment = await _db.Payments.FindAsync(new object[] { id }, ct);
+        if (payment is null) return NotFound();
+        if (InvoiceManagedPaymentRules.IsInvoiceManagedPayment(payment))
+        {
+            return Conflict(new { message = InvoiceManagedPaymentRules.UpdateBlockedMessage });
+        }
+
+        var now = DateTime.UtcNow;
+        var actor = User.GetDisplayName();
+        var originalStatus = payment.Status;
+
+        payment.Status = nextStatus;
+
+        if (nextStatus == PaymentStatus.Completed)
+        {
+            var paidDate = (request.PaidDate ?? payment.PaidDate ?? payment.LastPaymentDate ?? now).Date;
+            payment.PaidAmount = payment.Amount;
+            payment.IsPaid = true;
+            payment.PaidDate = paidDate;
+            payment.LastPaymentDate = paidDate;
+            payment.Date = paidDate;
+        }
+        else
+        {
+            payment.IsPaid = false;
+            payment.PaidDate = null;
+
+            if (payment.PaidAmount >= payment.Amount - AmountTolerance)
+            {
+                payment.PaidAmount = 0m;
+                payment.LastPaymentDate = null;
+            }
+
+            if (nextStatus == PaymentStatus.Cancelled)
+            {
+                payment.PaidAmount = 0m;
+                payment.LastPaymentDate = null;
+            }
+        }
+
+        PaymentDomainService.Normalize(payment);
+
+        if (originalStatus != payment.Status)
+        {
+            PaymentDomainService.AppendSystemNote(
+                payment,
+                $"Статус обновлён: {originalStatus.ToDisplayString()} → {payment.Status.ToDisplayString()}",
+                now,
+                actor);
+        }
+
+        await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.PaidAmount, now, HttpContext, ct);
+        await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, payment, now, ct);
+        await _db.SaveChangesAsync(ct);
+        PopulateAuditMetadata(_db, payment);
+        return Ok(payment);
+    }
+
     [HttpPut("{id:int}/invoice-managed")]
     public async Task<IActionResult> UpdateInvoiceManaged(int id, [FromBody] Payment model, CancellationToken ct)
     {

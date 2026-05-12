@@ -984,6 +984,13 @@ export class ApiService {
     return this.request<Act>(`/acts/${id}/mark-not-signed`, { method: 'POST' });
   }
 
+  async updateActWorkflowStatus(id: number, status: ActWorkflowStatus) {
+    return this.request<Act>(`/acts/${id}/workflow-status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+  }
+
   async cancelAct(id: number, reason: string) {
     return this.request<Act>(`/acts/${id}/cancel`, {
       method: 'POST',
@@ -1074,6 +1081,13 @@ export class ApiService {
 
   async markContractNotSigned(id: number) {
     return this.request<Contract>(`/contracts/${id}/mark-not-signed`, { method: 'POST' });
+  }
+
+  async updateContractStatus(id: number, status: ContractStatus) {
+    return this.request<Contract>(`/contracts/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
   }
 
   async terminateContract(
@@ -1572,6 +1586,13 @@ export class ApiService {
     return this.request<Invoice>(`/invoices/${id}/mark-not-signed`, { method: 'POST' });
   }
 
+  async updateInvoiceWorkflowStatus(id: number, status: InvoiceWorkflowStatus) {
+    return this.request<Invoice>(`/invoices/${id}/workflow-status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+  }
+
   async cancelInvoice(
     id: number,
     reason: string,
@@ -1955,6 +1976,13 @@ export class ApiService {
     return this.request<Payment>(`/payments/${id}/invoice-managed`, {
       method: 'PUT',
       body: JSON.stringify(payment),
+    });
+  }
+
+  async updatePaymentStatus(id: number, status: PaymentStatus, paidDate?: string | null) {
+    return this.request<Payment>(`/payments/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status, paidDate }),
     });
   }
 

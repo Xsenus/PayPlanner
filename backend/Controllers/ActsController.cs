@@ -271,6 +271,69 @@ public class ActsController : ControllerBase
         return Ok(Map(act));
     }
 
+    [HttpPost("{id:int}/workflow-status")]
+    public async Task<ActionResult<ActDto>> UpdateWorkflowStatus(int id, [FromBody] UpdateNamedStatusRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var workflowStatus = NormalizeActWorkflowStatusOrNull(request.Status);
+        if (workflowStatus is null)
+        {
+            return ValidationError(nameof(request.Status), "Unknown act workflow status.");
+        }
+
+        var act = await LoadActForWorkflowAsync(id, ct);
+        if (act is null)
+        {
+            return NotFound();
+        }
+
+        var now = DateTime.UtcNow;
+        act.WorkflowStatus = workflowStatus;
+        act.UpdatedAt = now;
+
+        switch (workflowStatus)
+        {
+            case ActWorkflowStatus.Draft:
+            case ActWorkflowStatus.NotSigned:
+                act.Status = ActStatus.Created;
+                act.SentForSigningAt = null;
+                act.SignedAt = null;
+                act.CancelledAt = null;
+                act.CancelledByUserId = null;
+                act.CancelledReason = null;
+                break;
+            case ActWorkflowStatus.OnSigning:
+                act.Status = ActStatus.Transferred;
+                act.SentForSigningAt ??= now;
+                act.SignedAt = null;
+                act.CancelledAt = null;
+                act.CancelledByUserId = null;
+                act.CancelledReason = null;
+                break;
+            case ActWorkflowStatus.Signed:
+                act.Status = ActStatus.Signed;
+                act.SentForSigningAt ??= now;
+                act.SignedAt ??= now;
+                act.CancelledAt = null;
+                act.CancelledByUserId = null;
+                act.CancelledReason = null;
+                break;
+            case ActWorkflowStatus.Cancelled:
+                act.Status = ActStatus.Terminated;
+                act.CancelledAt ??= now;
+                act.CancelledByUserId ??= User.GetUserId();
+                act.CancelledReason ??= "Быстрая смена статуса документа";
+                break;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return Ok(Map(act));
+    }
+
     [HttpPost("{id:int}/cancel")]
     public async Task<ActionResult<ActDto>> Cancel(int id, [FromBody] CancelActRequest request, CancellationToken ct)
     {

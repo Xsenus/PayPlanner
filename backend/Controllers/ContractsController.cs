@@ -114,6 +114,79 @@ public class ContractsController : ControllerBase
         return Ok(dto);
     }
 
+    [HttpPost("{id:int}/status")]
+    public async Task<ActionResult<ContractDto>> UpdateStatus(int id, [FromBody] UpdateNamedStatusRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return ValidationProblem(ModelState);
+
+        var status = NormalizeContractStatusOrNull(request.Status);
+        if (status is null)
+        {
+            return ValidationError(nameof(request.Status), "Unknown contract status.");
+        }
+
+        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (contract is null) return NotFound();
+
+        var now = DateTime.UtcNow;
+        contract.Status = status;
+        contract.UpdatedAt = now;
+
+        switch (status)
+        {
+            case ContractStatus.Draft:
+            case ContractStatus.NotSigned:
+                contract.SentForSigningAt = null;
+                contract.ConcludedAt = null;
+                contract.TerminationDate = null;
+                contract.TerminationReason = null;
+                contract.TerminationTerms = null;
+                contract.TerminationFinancialTerms = null;
+                contract.CancelledAt = null;
+                contract.CancelledReason = null;
+                break;
+            case ContractStatus.OnSigning:
+                contract.SentForSigningAt ??= now;
+                contract.ConcludedAt = null;
+                contract.TerminationDate = null;
+                contract.TerminationReason = null;
+                contract.TerminationTerms = null;
+                contract.TerminationFinancialTerms = null;
+                contract.CancelledAt = null;
+                contract.CancelledReason = null;
+                break;
+            case ContractStatus.Concluded:
+                contract.SentForSigningAt ??= now;
+                contract.ConcludedAt ??= now;
+                contract.TerminationDate = null;
+                contract.TerminationReason = null;
+                contract.TerminationTerms = null;
+                contract.TerminationFinancialTerms = null;
+                contract.CancelledAt = null;
+                contract.CancelledReason = null;
+                break;
+            case ContractStatus.Terminated:
+                contract.TerminationDate ??= now.Date;
+                contract.TerminationTerms ??= "Быстрая смена статуса";
+                contract.CancelledAt = null;
+                contract.CancelledReason = null;
+                break;
+            case ContractStatus.Cancelled:
+                contract.CancelledAt ??= now.Date;
+                contract.CancelledReason ??= "Быстрая смена статуса";
+                contract.TerminationDate = null;
+                contract.TerminationReason = null;
+                contract.TerminationTerms = null;
+                contract.TerminationFinancialTerms = null;
+                break;
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        return Ok(dto);
+    }
+
     [HttpPost("{id:int}/terminate")]
     public async Task<ActionResult<ContractDto>> Terminate(int id, [FromBody] TerminateContractRequest request, CancellationToken ct)
     {

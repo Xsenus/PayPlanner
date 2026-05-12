@@ -515,6 +515,73 @@ public class InvoicesController : ControllerBase
         return Ok(dto);
     }
 
+    [HttpPost("{id:int}/workflow-status")]
+    public async Task<ActionResult<InvoiceDto>> UpdateWorkflowStatus(int id, [FromBody] UpdateNamedStatusRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var workflowStatus = NormalizeInvoiceWorkflowStatusOrNull(request.Status);
+        if (workflowStatus is null)
+        {
+            return BadRequest("Unknown invoice workflow status.");
+        }
+        if (!IsEditableInvoiceWorkflowStatus(workflowStatus))
+        {
+            return BadRequest("Only document signing workflow statuses can be changed through this endpoint.");
+        }
+
+        var payment = await _db.Payments.FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        if (payment.DocumentKind != DocumentKind.Invoice)
+        {
+            return BadRequest("Only invoice documents can change workflow status through this endpoint.");
+        }
+
+        var now = DateTime.UtcNow;
+        payment.InvoiceWorkflowStatus = workflowStatus;
+
+        switch (workflowStatus)
+        {
+            case InvoiceWorkflowStatus.Draft:
+            case InvoiceWorkflowStatus.NotSigned:
+                payment.InvoiceSentForSigningAt = null;
+                payment.InvoiceSignedAt = null;
+                payment.InvoiceCancelledAt = null;
+                payment.InvoiceCancelledByUserId = null;
+                payment.InvoiceCancelledReason = null;
+                break;
+            case InvoiceWorkflowStatus.OnSigning:
+                payment.InvoiceSentForSigningAt ??= now;
+                payment.InvoiceSignedAt = null;
+                payment.InvoiceCancelledAt = null;
+                payment.InvoiceCancelledByUserId = null;
+                payment.InvoiceCancelledReason = null;
+                break;
+            case InvoiceWorkflowStatus.SignedByClient:
+                payment.InvoiceSentForSigningAt ??= now;
+                payment.InvoiceSignedAt ??= now;
+                payment.InvoiceCancelledAt = null;
+                payment.InvoiceCancelledByUserId = null;
+                payment.InvoiceCancelledReason = null;
+                break;
+            case InvoiceWorkflowStatus.Cancelled:
+                payment.InvoiceCancelledAt ??= now;
+                payment.InvoiceCancelledByUserId ??= User.GetUserId();
+                payment.InvoiceCancelledReason ??= "Быстрая смена статуса документа";
+                break;
+        }
+
+        var dto = await SaveAndReloadInvoiceAsync(payment, ct);
+        return Ok(dto);
+    }
+
     [HttpPost("{id:int}/cancel")]
     public async Task<ActionResult<InvoiceDto>> Cancel(int id, [FromBody] CancelInvoiceRequest request, CancellationToken ct)
     {
@@ -2640,6 +2707,13 @@ public class InvoicesController : ControllerBase
 
     private static string? NormalizeInvoiceWorkflowStatusOrNull(string? value)
         => InvoiceWorkflowStatus.Normalize(value);
+
+    private static bool IsEditableInvoiceWorkflowStatus(string value)
+        => value is InvoiceWorkflowStatus.Draft
+            or InvoiceWorkflowStatus.NotSigned
+            or InvoiceWorkflowStatus.OnSigning
+            or InvoiceWorkflowStatus.SignedByClient
+            or InvoiceWorkflowStatus.Cancelled;
 
     private static string? ResolveInvoiceWorkflowStatus(UpsertInvoiceRequest request)
     {
