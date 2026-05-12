@@ -67,6 +67,10 @@ vi.mock('../../services/api', () => ({
     getInvoicesSummary: vi.fn().mockResolvedValue(null),
     getLegalEntityCaseFinanceSummaries: vi.fn().mockResolvedValue([]),
     getLegalEntities: vi.fn().mockResolvedValue([]),
+    getMainCompanySettings: vi.fn().mockResolvedValue({
+      defaultCompanyId: 9,
+      companies: [{ id: 9, shortName: 'Наша компания', clientsCount: 0, createdAt: '2026-04-09T13:18:06Z' }],
+    }),
     getPaymentsV2: vi.fn().mockResolvedValue({
       items: [],
       total: 0,
@@ -126,8 +130,13 @@ describe('LegalEntityModal integration', () => {
     toastSuccessMock.mockReset();
     vi.mocked(apiService.suggestClientAddresses).mockReset();
     vi.mocked(apiService.cleanAddress).mockReset();
+    vi.mocked(apiService.getMainCompanySettings).mockReset();
     vi.mocked(apiService.suggestClientAddresses).mockResolvedValue([]);
     vi.mocked(apiService.cleanAddress).mockResolvedValue({ result: '' });
+    vi.mocked(apiService.getMainCompanySettings).mockResolvedValue({
+      defaultCompanyId: 9,
+      companies: [{ id: 9, shortName: 'Наша компания', clientsCount: 0, createdAt: '2026-04-09T13:18:06Z' }],
+    });
   });
 
   it('prefills DaData query from saved inn and keeps the full address after suggestion selection', async () => {
@@ -313,5 +322,52 @@ describe('LegalEntityModal integration', () => {
     expect(screen.queryByRole('button', { name: 'Найти адрес' })).toBeNull();
     expect(screen.getByDisplayValue('ИП Кожеваткин Андрей Владимирович')).toHaveProperty('disabled', true);
     expect(screen.getByDisplayValue('633009620345')).toHaveProperty('disabled', true);
+  });
+
+  it('shows logo, seal and signature fields for own legal entities only', async () => {
+    const initial = createInitialLegalEntity({ id: 9, shortName: 'Наша компания' });
+
+    render(
+      <LegalEntityModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(initial)}
+        initial={initial}
+        suggest={vi.fn().mockResolvedValue([])}
+        findById={vi.fn()}
+        allowEdit
+        allowDelete={false}
+      />,
+    );
+
+    expect(await screen.findByText('Логотип компании')).toBeTruthy();
+    expect(screen.getByText('Печать компании')).toBeTruthy();
+    expect(screen.getByText('Подпись руководителя')).toBeTruthy();
+  });
+
+  it('hides logo, seal and signature fields for non-own legal entities', async () => {
+    vi.mocked(apiService.getMainCompanySettings).mockResolvedValueOnce({
+      defaultCompanyId: 7,
+      companies: [{ id: 7, shortName: 'Наша компания', clientsCount: 0, createdAt: '2026-04-09T13:18:06Z' }],
+    });
+    const initial = createInitialLegalEntity({ id: 9, shortName: 'Контрагент' });
+
+    render(
+      <LegalEntityModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(initial)}
+        initial={initial}
+        suggest={vi.fn().mockResolvedValue([])}
+        findById={vi.fn()}
+        allowEdit
+        allowDelete={false}
+      />,
+    );
+
+    await waitFor(() => expect(apiService.getMainCompanySettings).toHaveBeenCalled());
+    expect(screen.queryByText('Логотип компании')).toBeNull();
+    expect(screen.queryByText('Печать компании')).toBeNull();
+    expect(screen.queryByText('Подпись руководителя')).toBeNull();
   });
 });

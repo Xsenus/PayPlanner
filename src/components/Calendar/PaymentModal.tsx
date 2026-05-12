@@ -17,6 +17,7 @@ import type {
   InvoiceInput,
   ActResponsible,
   ApplyClientBalanceResult,
+  PaymentOverpaymentHandling,
 } from '../../types';
 import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
 import { buildOptionsWithSelected } from '../../utils/formOptions';
@@ -151,6 +152,8 @@ export function PaymentModal({
   const [localClientBalance, setLocalClientBalance] = useState<number | null>(null);
   const [fetchedClientBalance, setFetchedClientBalance] = useState(0);
   const [clientBalanceLoading, setClientBalanceLoading] = useState(false);
+  const [overpaymentHandling, setOverpaymentHandling] = useState<PaymentOverpaymentHandling | ''>('');
+  const [overpaymentComment, setOverpaymentComment] = useState('');
   const [cases, setCases] = useState<ClientCase[]>([]);
   const [fallbackCase, setFallbackCase] = useState<ClientCase | null>(null);
 
@@ -442,12 +445,16 @@ export function PaymentModal({
       setBalanceApplyAmount('');
       setAppliedClientBalanceAmount(0);
       setLocalClientBalance(null);
+      setOverpaymentHandling('');
+      setOverpaymentComment('');
       return;
     }
 
     if (!prevOpenRef.current) {
       setLocalClientBalance(null);
       setBalanceApplyAmount('');
+      setOverpaymentHandling('');
+      setOverpaymentComment('');
       const p = paymentRef.current;
 
       if (p) {
@@ -904,6 +911,11 @@ export function PaymentModal({
     const safePaidAmount = Math.max(rawPaidAmount, 0);
     const paidForRemainder = Math.min(safePaidAmount, amountNum);
     const remainder = Math.max(Number((amountNum - paidForRemainder).toFixed(2)), 0);
+    const submitOverpaymentAmount = Math.max(Number((safePaidAmount - amountNum).toFixed(2)), 0);
+    if (formData.type === 'Income' && submitOverpaymentAmount > 0.005 && !overpaymentHandling) {
+      toast.error('Выберите сценарий обработки переплаты.');
+      return;
+    }
 
     setLoading(true);
 
@@ -1017,6 +1029,14 @@ export function PaymentModal({
         accountDate:
           shouldPersistLegacyAccountFields && formData.accountDate
             ? fromInputToApiDate(formData.accountDate)
+            : undefined,
+        overpaymentHandling:
+          formData.type === 'Income' && submitOverpaymentAmount > 0.005
+            ? overpaymentHandling || undefined
+            : undefined,
+        overpaymentComment:
+          formData.type === 'Income' && submitOverpaymentAmount > 0.005
+            ? overpaymentComment.trim() || undefined
             : undefined,
       };
 
@@ -1613,6 +1633,27 @@ export function PaymentModal({
   const effectiveClientBalance =
     localClientBalance ?? availableClientBalance ?? fetchedClientBalance;
   const canApplyClientBalance = Boolean(payment && effectiveClientBalance > 0 && remainingAmount > 0 && formData.type === 'Income');
+  const overpaymentOptions: Array<{
+    value: PaymentOverpaymentHandling;
+    title: string;
+    description: string;
+  }> = [
+    {
+      value: 'Advance',
+      title: 'Основной платёж + аванс',
+      description: 'Закрыть текущий платёж, переплату записать на баланс клиента.',
+    },
+    {
+      value: 'NextInstallment',
+      title: 'Основной платёж + следующий платёж',
+      description: 'Закрыть текущий платёж, переплату зачесть в следующий платёж рассрочки.',
+    },
+    {
+      value: 'Refund',
+      title: 'Только основной платёж',
+      description: 'Закрыть текущий платёж, переплату оформить к возврату клиенту.',
+    },
+  ];
 
   const selDealTypeId = formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined;
   const selIncomeTypeId = formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined;
@@ -1934,8 +1975,48 @@ export function PaymentModal({
                       </div>
                     )}
                     {overpaid && (
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                        Переплата {formatMoneyDisplayValue(overpaymentAmount)} будет записана на баланс клиента.
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="font-semibold">Обнаружена переплата</div>
+                            <div className="mt-1 text-emerald-800">
+                              Платеж {formatMoneyDisplayValue(amountNum)} · внесено {formatMoneyDisplayValue(paidAmountNum)} · переплата {formatMoneyDisplayValue(overpaymentAmount)}
+                            </div>
+                          </div>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                            Требуется выбор
+                          </span>
+                        </div>
+                        <div className="mt-3 grid gap-2">
+                          {overpaymentOptions.map((option) => (
+                            <label
+                              key={option.value}
+                              className={`flex cursor-pointer gap-3 rounded-lg border bg-white px-3 py-2 transition ${
+                                overpaymentHandling === option.value
+                                  ? 'border-emerald-400 ring-2 ring-emerald-100'
+                                  : 'border-emerald-100 hover:border-emerald-300'
+                              }`}>
+                              <input
+                                type="radio"
+                                name="overpaymentHandling"
+                                value={option.value}
+                                checked={overpaymentHandling === option.value}
+                                onChange={() => setOverpaymentHandling(option.value)}
+                                className="mt-1 h-4 w-4 border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              <span>
+                                <span className="block font-medium text-slate-900">{option.title}</span>
+                                <span className="mt-0.5 block text-xs text-slate-600">{option.description}</span>
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                        <textarea
+                          value={overpaymentComment}
+                          onChange={(event) => setOverpaymentComment(event.target.value)}
+                          className="mt-3 min-h-[72px] w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500"
+                          placeholder="Комментарий к обработке переплаты"
+                        />
                       </div>
                     )}
                     {canApplyClientBalance && (

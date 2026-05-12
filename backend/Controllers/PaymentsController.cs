@@ -103,10 +103,12 @@ public class PaymentsController : ControllerBase
         var rawPaidAmount = model.PaidAmount;
         PaymentDomainService.Normalize(model);
         PaymentDomainService.ApplyStatusRules(model, now);
+        var overpaymentValidationError = await ValidatePaymentOverpaymentHandlingAsync(model, rawPaidAmount, ct);
+        if (overpaymentValidationError is not null) return overpaymentValidationError;
 
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
-        await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, model, rawPaidAmount, now, HttpContext, ct);
+        await ApplyPaymentOverpaymentHandlingAsync(model, rawPaidAmount, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, model);
@@ -180,6 +182,8 @@ public class PaymentsController : ControllerBase
         e.PaidDate = model.PaidDate;
         e.PaymentOrderNumber = model.PaymentOrderNumber;
         e.PaymentDocumentDate = model.PaymentDocumentDate;
+        e.OverpaymentHandling = model.OverpaymentHandling;
+        e.OverpaymentComment = model.OverpaymentComment;
         var rawPaidAmount = model.PaidAmount;
         var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, e.Id, ct);
         if (rawPaidAmount + 0.009m < appliedCreditAmount)
@@ -255,7 +259,10 @@ public class PaymentsController : ControllerBase
 
         e.RescheduleCount = rescheduleCount;
 
-        await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, e, rawPaidAmount, now, HttpContext, ct);
+        var overpaymentValidationError = await ValidatePaymentOverpaymentHandlingAsync(e, rawPaidAmount, ct);
+        if (overpaymentValidationError is not null) return overpaymentValidationError;
+
+        await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         if (originalInvoiceId.HasValue
             && originalInvoiceId.Value > 0
@@ -405,6 +412,8 @@ public class PaymentsController : ControllerBase
         e.PaidDate = model.PaidDate;
         e.PaymentOrderNumber = model.PaymentOrderNumber;
         e.PaymentDocumentDate = model.PaymentDocumentDate;
+        e.OverpaymentHandling = model.OverpaymentHandling;
+        e.OverpaymentComment = model.OverpaymentComment;
         var rawPaidAmount = model.PaidAmount;
         var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, e.Id, ct);
         if (rawPaidAmount + 0.009m < appliedCreditAmount)
@@ -488,7 +497,10 @@ public class PaymentsController : ControllerBase
 
         e.RescheduleCount = rescheduleCount;
 
-        await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, e, rawPaidAmount, now, HttpContext, ct);
+        var overpaymentValidationError = await ValidatePaymentOverpaymentHandlingAsync(e, rawPaidAmount, ct);
+        if (overpaymentValidationError is not null) return overpaymentValidationError;
+
+        await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, e);
@@ -1209,6 +1221,437 @@ public class PaymentsController : ControllerBase
             NumberStyles.Number,
             CultureInfo.InvariantCulture,
             out amount);
+    }
+
+    private async Task<IActionResult?> ValidatePaymentOverpaymentHandlingAsync(
+        Payment payment,
+        decimal rawPaidAmount,
+        CancellationToken ct)
+    {
+        var overpaymentAmount = CalculateOverpaymentAmount(payment, rawPaidAmount);
+        if (overpaymentAmount <= AmountTolerance || payment.Type != PaymentType.Income)
+        {
+            return null;
+        }
+
+        if (!payment.OverpaymentHandling.HasValue)
+        {
+            return Conflict(new
+            {
+                code = "payment_overpayment_decision_required",
+                message = "Обнаружена переплата. Выберите сценарий обработки переплаты перед сохранением платежа.",
+                paymentAmount = payment.Amount,
+                enteredAmount = Math.Round(rawPaidAmount, 2, MidpointRounding.AwayFromZero),
+                overpaymentAmount,
+            });
+        }
+
+        if (payment.OverpaymentHandling == PaymentOverpaymentHandling.Advance
+            && !HasSingleCounterpartyOwner(payment))
+        {
+            return BadRequest(new
+            {
+                message = "Для записи переплаты на баланс у платежа должен быть указан один контрагент."
+            });
+        }
+
+        if (payment.OverpaymentHandling != PaymentOverpaymentHandling.NextInstallment)
+        {
+            return null;
+        }
+
+        var nextInstallment = await FindNextInstallmentPaymentAsync(payment, track: false, ct);
+        if (nextInstallment is null)
+        {
+            return BadRequest(new
+            {
+                message = "Следующий платеж рассрочки для зачета переплаты не найден."
+            });
+        }
+
+        var nextOutstanding = InvoicePaymentStateService.ResolveOutstandingAmount(nextInstallment);
+        if (overpaymentAmount > nextOutstanding + AmountTolerance)
+        {
+            return BadRequest(new
+            {
+                message = $"Переплата больше остатка следующего платежа рассрочки. Остаток: {nextOutstanding.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"))}."
+            });
+        }
+
+        return null;
+    }
+
+    private async Task ApplyPaymentOverpaymentHandlingAsync(
+        Payment payment,
+        decimal rawPaidAmount,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var overpaymentAmount = CalculateOverpaymentAmount(payment, rawPaidAmount);
+        if (overpaymentAmount <= AmountTolerance || payment.Type != PaymentType.Income)
+        {
+            await RemovePaymentOverpaymentRefundOperationAsync(payment.Id, ct);
+            await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, rawPaidAmount, now, HttpContext, ct);
+            return;
+        }
+
+        var handling = payment.OverpaymentHandling ?? PaymentOverpaymentHandling.Advance;
+        switch (handling)
+        {
+            case PaymentOverpaymentHandling.NextInstallment:
+                await RemovePaymentOverpaymentRefundOperationAsync(payment.Id, ct);
+                await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.Amount, now, HttpContext, ct);
+                await ApplyOverpaymentToNextInstallmentAsync(payment, overpaymentAmount, now, ct);
+                break;
+
+            case PaymentOverpaymentHandling.Refund:
+                await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.Amount, now, HttpContext, ct);
+                await UpsertPaymentOverpaymentRefundOperationAsync(payment, overpaymentAmount, now, ct);
+                break;
+
+            case PaymentOverpaymentHandling.Advance:
+            default:
+                await RemovePaymentOverpaymentRefundOperationAsync(payment.Id, ct);
+                await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, rawPaidAmount, now, HttpContext, ct);
+                AppendOverpaymentDecisionNote(
+                    payment,
+                    $"Переплата {FormatMoney(overpaymentAmount)} записана на баланс контрагента.",
+                    now);
+                break;
+        }
+    }
+
+    private async Task ApplyOverpaymentToNextInstallmentAsync(
+        Payment payment,
+        decimal overpaymentAmount,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var nextInstallment = await FindNextInstallmentPaymentAsync(payment, track: true, ct);
+        if (nextInstallment is null)
+        {
+            return;
+        }
+
+        nextInstallment.PaidAmount = Math.Round(
+            Math.Min(nextInstallment.Amount, Math.Max(nextInstallment.PaidAmount, 0m) + overpaymentAmount),
+            2,
+            MidpointRounding.AwayFromZero);
+        nextInstallment.LastPaymentDate = payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date;
+        nextInstallment.PaymentDocumentDate ??= payment.PaymentDocumentDate ?? payment.PaidDate ?? payment.LastPaymentDate ?? payment.Date;
+        nextInstallment.PaymentOrderNumber ??= payment.PaymentOrderNumber;
+        if (nextInstallment.PaidAmount > AmountTolerance
+            && nextInstallment.PaidAmount + AmountTolerance < nextInstallment.Amount
+            && nextInstallment.Status != PaymentStatus.Cancelled)
+        {
+            nextInstallment.Status = PaymentStatus.Processing;
+        }
+
+        PaymentDomainService.ApplyStatusRules(nextInstallment, now);
+
+        AppendOverpaymentDecisionNote(
+            payment,
+            $"Переплата {FormatMoney(overpaymentAmount)} зачтена в следующий платеж рассрочки #{nextInstallment.Id}.",
+            now);
+        AppendOverpaymentDecisionNote(
+            nextInstallment,
+            $"Зачтена переплата {FormatMoney(overpaymentAmount)} из платежа #{payment.Id}.",
+            now);
+    }
+
+    private async Task<Payment?> FindNextInstallmentPaymentAsync(
+        Payment payment,
+        bool track,
+        CancellationToken ct)
+    {
+        if (!payment.InvoiceId.HasValue)
+        {
+            return null;
+        }
+
+        var query = _db.Payments
+            .Where(item =>
+                item.InvoiceId == payment.InvoiceId.Value &&
+                item.Type == PaymentType.Income &&
+                item.Status != PaymentStatus.Cancelled &&
+                item.DocumentKind != DocumentKind.Invoice);
+        if (!track)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var candidates = await query.ToListAsync(ct);
+        var currentDate = InvoicePaymentStateService.EffectivePlannedDate(payment);
+
+        return candidates
+            .Where(item => item.Id != payment.Id)
+            .Where(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment)
+            .Where(item => InvoicePaymentStateService.ResolveOutstandingAmount(item) > AmountTolerance)
+            .OrderBy(InvoicePaymentStateService.EffectivePlannedDate)
+            .ThenBy(item => item.Id)
+            .FirstOrDefault(item =>
+                InvoicePaymentStateService.EffectivePlannedDate(item) > currentDate ||
+                (InvoicePaymentStateService.EffectivePlannedDate(item) == currentDate && item.Id > payment.Id));
+    }
+
+    private async Task UpsertPaymentOverpaymentRefundOperationAsync(
+        Payment payment,
+        decimal overpaymentAmount,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var key = BuildPaymentOverpaymentRefundKey(payment.Id);
+        var paymentSourceName = await ResolvePaymentSourceNameAsync(payment, ct);
+        var source = ResolveMoneyOperationSource(paymentSourceName);
+        var refundDate = (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
+        var invoiceNumber = string.IsNullOrWhiteSpace(payment.Account)
+            ? payment.Invoice?.Number
+            : payment.Account;
+        var counterpartyName = await ResolvePaymentCounterpartyNameAsync(payment, ct);
+        var comment = NormalizeOverpaymentComment(payment.OverpaymentComment);
+        var purpose = $"Возврат переплаты по платежу #{payment.Id}";
+        if (!string.IsNullOrWhiteSpace(invoiceNumber))
+        {
+            purpose += $" по счету №{invoiceNumber}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(comment))
+        {
+            purpose += $". Комментарий: {comment}";
+        }
+
+        var existing = await _db.MoneyOperations
+            .Include(operation => operation.CashOrders)
+            .FirstOrDefaultAsync(operation =>
+                operation.MatchComment != null &&
+                operation.MatchComment.Contains(key), ct);
+
+        if (existing is null)
+        {
+            existing = new MoneyOperation
+            {
+                CreatedAt = now,
+                MatchStatus = MoneyOperationMatchStatus.Matched,
+                MatchedAt = now,
+                MatchComment = $"Возврат переплаты по платежу #{payment.Id}. {key}",
+            };
+            _db.MoneyOperations.Add(existing);
+        }
+
+        existing.Source = source;
+        existing.Direction = MoneyOperationDirection.Expense;
+        existing.AccountingType = MoneyOperationAccountingType.Fact;
+        existing.AccountName = paymentSourceName;
+        existing.CounterpartyName = counterpartyName;
+        existing.CategoryName = "Возврат клиенту";
+        existing.Amount = overpaymentAmount;
+        existing.Currency = "RUB";
+        existing.Date = refundDate;
+        existing.RecognitionDate = refundDate;
+        existing.Purpose = purpose;
+        existing.PaidInvoiceNumber = invoiceNumber;
+        existing.PaidAmount = overpaymentAmount;
+        existing.PaidAccountName = invoiceNumber;
+        existing.LinkedInvoiceId = payment.InvoiceId;
+        existing.UpdatedAt = existing.Id > 0 ? now : null;
+
+        await _db.SaveChangesAsync(ct);
+        await SyncRefundCashOrderAsync(existing, payment, source, refundDate, overpaymentAmount, purpose, comment, now, ct);
+
+        AppendOverpaymentDecisionNote(
+            payment,
+            $"Переплата {FormatMoney(overpaymentAmount)} оформлена к возврату клиенту.",
+            now);
+    }
+
+    private async Task SyncRefundCashOrderAsync(
+        MoneyOperation operation,
+        Payment payment,
+        MoneyOperationSource source,
+        DateTime refundDate,
+        decimal overpaymentAmount,
+        string purpose,
+        string? comment,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var existingOrders = await _db.CashOrders
+            .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
+            .ToListAsync(ct);
+
+        if (source != MoneyOperationSource.Cash)
+        {
+            foreach (var order in existingOrders)
+            {
+                order.Status = CashOrderStatus.Cancelled;
+                order.CancelledAt = now;
+                order.CancelledReason = "Возврат переплаты перенесен из кассы в безналичный источник.";
+            }
+
+            return;
+        }
+
+        var orderToUpdate = existingOrders.FirstOrDefault();
+        if (orderToUpdate is null)
+        {
+            _db.CashOrders.Add(new CashOrder
+            {
+                Number = await GenerateCashOrderNumberAsync(CashOrderType.Outgoing, refundDate, ct),
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Posted,
+                Date = refundDate,
+                Amount = overpaymentAmount,
+                Currency = "RUB",
+                ClientId = payment.ClientId,
+                PaymentId = payment.Id,
+                MoneyOperationId = operation.Id,
+                InvoiceId = payment.InvoiceId,
+                Account = operation.AccountName,
+                ReceiverName = operation.CounterpartyName,
+                Basis = purpose,
+                Comment = comment,
+                CreatedAt = now,
+            });
+            return;
+        }
+
+        orderToUpdate.Type = CashOrderType.Outgoing;
+        orderToUpdate.Status = CashOrderStatus.Posted;
+        orderToUpdate.Date = refundDate;
+        orderToUpdate.Amount = overpaymentAmount;
+        orderToUpdate.Currency = "RUB";
+        orderToUpdate.ClientId = payment.ClientId;
+        orderToUpdate.PaymentId = payment.Id;
+        orderToUpdate.InvoiceId = payment.InvoiceId;
+        orderToUpdate.Account = operation.AccountName;
+        orderToUpdate.ReceiverName = operation.CounterpartyName;
+        orderToUpdate.Basis = purpose;
+        orderToUpdate.Comment = comment;
+        orderToUpdate.UpdatedAt = now;
+    }
+
+    private async Task RemovePaymentOverpaymentRefundOperationAsync(int paymentId, CancellationToken ct)
+    {
+        if (paymentId <= 0)
+        {
+            return;
+        }
+
+        var key = BuildPaymentOverpaymentRefundKey(paymentId);
+        var existing = await _db.MoneyOperations
+            .Include(operation => operation.CashOrders)
+            .FirstOrDefaultAsync(operation =>
+                operation.MatchComment != null &&
+                operation.MatchComment.Contains(key), ct);
+        if (existing is null)
+        {
+            return;
+        }
+
+        _db.CashOrders.RemoveRange(existing.CashOrders);
+        _db.MoneyOperations.Remove(existing);
+    }
+
+    private async Task<string?> ResolvePaymentSourceNameAsync(Payment payment, CancellationToken ct)
+    {
+        if (payment.PaymentSource is not null)
+        {
+            return payment.PaymentSource.Name;
+        }
+
+        if (!payment.PaymentSourceId.HasValue)
+        {
+            return null;
+        }
+
+        return await _db.PaymentSources
+            .AsNoTracking()
+            .Where(source => source.Id == payment.PaymentSourceId.Value)
+            .Select(source => source.Name)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    private async Task<string?> ResolvePaymentCounterpartyNameAsync(Payment payment, CancellationToken ct)
+    {
+        if (payment.ClientId.HasValue)
+        {
+            return await _db.Clients
+                .AsNoTracking()
+                .Where(client => client.Id == payment.ClientId.Value)
+                .Select(client => client.Name)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        if (payment.LegalEntityId.HasValue)
+        {
+            return await _db.LegalEntities
+                .AsNoTracking()
+                .Where(entity => entity.Id == payment.LegalEntityId.Value)
+                .Select(entity => entity.ShortName ?? entity.FullName)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        return payment.CounterpartyName;
+    }
+
+    private static MoneyOperationSource ResolveMoneyOperationSource(string? sourceName)
+    {
+        if (ContainsPaymentSourceToken(sourceName, "кас") ||
+            ContainsPaymentSourceToken(sourceName, "налич"))
+        {
+            return MoneyOperationSource.Cash;
+        }
+
+        if (ContainsPaymentSourceToken(sourceName, "карт") ||
+            ContainsPaymentSourceToken(sourceName, "card"))
+        {
+            return MoneyOperationSource.Card;
+        }
+
+        if (ContainsPaymentSourceToken(sourceName, "e-money") ||
+            ContainsPaymentSourceToken(sourceName, "электрон"))
+        {
+            return MoneyOperationSource.EMoney;
+        }
+
+        return MoneyOperationSource.Bank;
+    }
+
+    private static bool ContainsPaymentSourceToken(string? sourceName, string token)
+        => !string.IsNullOrWhiteSpace(sourceName) &&
+           sourceName.Contains(token, StringComparison.OrdinalIgnoreCase);
+
+    private async Task<string> GenerateCashOrderNumberAsync(CashOrderType type, DateTime date, CancellationToken ct)
+    {
+        var prefix = type == CashOrderType.Incoming ? "ПКО" : "РКО";
+        var yearPrefix = $"{prefix}-{date:yyyy}-";
+        var count = await _db.CashOrders.CountAsync(order => order.Number.StartsWith(yearPrefix), ct);
+        return $"{yearPrefix}{count + 1:0000}";
+    }
+
+    private static string BuildPaymentOverpaymentRefundKey(int paymentId) => $"payment-overpayment-refund:{paymentId}";
+
+    private static decimal CalculateOverpaymentAmount(Payment payment, decimal rawPaidAmount)
+        => Math.Round(Math.Max(rawPaidAmount - payment.Amount, 0m), 2, MidpointRounding.AwayFromZero);
+
+    private static bool HasSingleCounterpartyOwner(Payment payment)
+        => (payment.ClientId.HasValue && payment.ClientId.Value > 0 && !payment.LegalEntityId.HasValue)
+            || (payment.LegalEntityId.HasValue && payment.LegalEntityId.Value > 0 && !payment.ClientId.HasValue);
+
+    private static string? NormalizeOverpaymentComment(string? comment)
+        => string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
+
+    private static string FormatMoney(decimal amount)
+        => amount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"));
+
+    private void AppendOverpaymentDecisionNote(Payment payment, string message, DateTime now)
+    {
+        var comment = NormalizeOverpaymentComment(payment.OverpaymentComment);
+        PaymentDomainService.AppendSystemNote(
+            payment,
+            string.IsNullOrWhiteSpace(comment) ? message : $"{message} Комментарий: {comment}",
+            now,
+            User.GetDisplayName());
     }
 
     private static bool TryInferSuggestedRemainderDate(Payment payment, out DateTime suggestedDate)

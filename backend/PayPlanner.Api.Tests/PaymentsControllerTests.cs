@@ -1739,6 +1739,8 @@ public class PaymentsControllerTests
         update.Status = PaymentStatus.Completed;
         update.PaidDate = new DateTime(2026, 4, 25);
         update.LastPaymentDate = new DateTime(2026, 4, 25);
+        update.OverpaymentHandling = PaymentOverpaymentHandling.Advance;
+        update.OverpaymentComment = "Аванс по делу";
 
         var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
 
@@ -1752,6 +1754,176 @@ public class PaymentsControllerTests
         Assert.Equal(750m, transaction.Amount);
         Assert.Equal(ClientBalanceTransactionType.Overpayment, transaction.Type);
         Assert.Equal(ClientBalanceDirection.Credit, transaction.Direction);
+        Assert.Contains("Аванс по делу", payment.SystemNotes);
+    }
+
+    [Fact]
+    public async Task UpdateInvoiceManaged_WithOverpaymentWithoutDecision_ReturnsConflict()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Клиент без решения по переплате", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "OP-1", Date = new DateTime(2026, 4, 25) };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var installment = CreatePayment(invoice.Date, 10_000m, "Рассрочка OP-1");
+        installment.ClientId = client.Id;
+        installment.InvoiceId = invoice.Id;
+        installment.Account = invoice.Number;
+        installment.AccountDate = invoice.Date;
+        installment.SystemNotes = $"{InstallmentPaymentMarker}\nПлатеж 1/2";
+        db.Payments.Add(installment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(installment.Date, installment.Amount, installment.Description);
+        update.ClientId = client.Id;
+        update.InvoiceId = invoice.Id;
+        update.Account = invoice.Number;
+        update.AccountDate = invoice.Date;
+        update.PaidAmount = 10_500m;
+        update.Status = PaymentStatus.Completed;
+        update.PaidDate = installment.Date;
+        update.LastPaymentDate = installment.Date;
+
+        var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(actionResult);
+        Assert.Contains("payment_overpayment_decision_required", JsonSerializer.Serialize(conflict.Value));
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task UpdateInvoiceManaged_WithOverpaymentToNextInstallment_PaysNextPayment()
+    {
+        await using var db = await CreateContextAsync();
+
+        var invoiceDate = DateTime.UtcNow.Date.AddDays(5);
+        var client = new Client { Name = "Клиент с зачетом в следующий платеж", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "OP-NEXT", Date = invoiceDate };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var parentPayment = CreatePayment(invoice.Date, 20_000m, "Счет OP-NEXT");
+        parentPayment.ClientId = client.Id;
+        parentPayment.DocumentKind = DocumentKind.Invoice;
+        parentPayment.InvoiceId = invoice.Id;
+        parentPayment.Account = invoice.Number;
+        parentPayment.AccountDate = invoice.Date;
+
+        var firstInstallment = CreatePayment(invoice.Date.AddDays(1), 10_000m, "Рассрочка OP-NEXT 1/2");
+        firstInstallment.ClientId = client.Id;
+        firstInstallment.InvoiceId = invoice.Id;
+        firstInstallment.Account = invoice.Number;
+        firstInstallment.AccountDate = invoice.Date;
+        firstInstallment.SystemNotes = $"{InstallmentPaymentMarker}\nПлатеж 1/2";
+
+        var secondInstallment = CreatePayment(invoice.Date.AddDays(31), 10_000m, "Рассрочка OP-NEXT 2/2");
+        secondInstallment.ClientId = client.Id;
+        secondInstallment.InvoiceId = invoice.Id;
+        secondInstallment.Account = invoice.Number;
+        secondInstallment.AccountDate = invoice.Date;
+        secondInstallment.SystemNotes = $"{InstallmentPaymentMarker}\nПлатеж 2/2";
+
+        db.Payments.AddRange(parentPayment, firstInstallment, secondInstallment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(firstInstallment.Date, firstInstallment.Amount, firstInstallment.Description);
+        update.ClientId = client.Id;
+        update.InvoiceId = invoice.Id;
+        update.Account = invoice.Number;
+        update.AccountDate = invoice.Date;
+        update.PaidAmount = 12_500m;
+        update.Status = PaymentStatus.Completed;
+        update.PaidDate = firstInstallment.Date;
+        update.LastPaymentDate = firstInstallment.Date;
+        update.OverpaymentHandling = PaymentOverpaymentHandling.NextInstallment;
+
+        var actionResult = await controller.UpdateInvoiceManaged(firstInstallment.Id, update, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(actionResult);
+        db.ChangeTracker.Clear();
+
+        var storedFirst = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == firstInstallment.Id);
+        var storedSecond = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == secondInstallment.Id);
+        var refreshedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
+
+        Assert.Equal(10_000m, storedFirst.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, storedFirst.Status);
+        Assert.Equal(2_500m, storedSecond.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, storedSecond.Status);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+        Assert.Equal(12_500m, refreshedParent.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, refreshedParent.Status);
+    }
+
+    [Fact]
+    public async Task UpdateInvoiceManaged_WithRefundOverpayment_CreatesRefundOperationAndCashOrder()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Клиент с возвратом переплаты", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "OP-REFUND", Date = new DateTime(2026, 4, 25) };
+        var paymentSource = new PaymentSource { Name = "Касса" };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        db.PaymentSources.Add(paymentSource);
+        await db.SaveChangesAsync();
+
+        var invoiceDocument = CreatePayment(invoice.Date, 16_250m, "Счет OP-REFUND");
+        invoiceDocument.ClientId = client.Id;
+        invoiceDocument.InvoiceId = invoice.Id;
+        invoiceDocument.DocumentKind = DocumentKind.Invoice;
+        invoiceDocument.Account = invoice.Number;
+        invoiceDocument.AccountDate = invoice.Date;
+        invoiceDocument.PaymentSourceId = paymentSource.Id;
+
+        var installment = CreatePayment(invoice.Date.AddDays(1), 16_250m, "Рассрочка OP-REFUND");
+        installment.ClientId = client.Id;
+        installment.InvoiceId = invoice.Id;
+        installment.Account = invoice.Number;
+        installment.AccountDate = invoice.Date;
+        installment.PaymentSourceId = paymentSource.Id;
+        installment.SystemNotes = $"{InstallmentPaymentMarker}\nПлатеж 1/1";
+        db.Payments.AddRange(invoiceDocument, installment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(installment.Date, installment.Amount, installment.Description);
+        update.ClientId = client.Id;
+        update.InvoiceId = invoice.Id;
+        update.Account = invoice.Number;
+        update.AccountDate = invoice.Date;
+        update.PaymentSourceId = paymentSource.Id;
+        update.PaidAmount = 17_000m;
+        update.Status = PaymentStatus.Completed;
+        update.PaidDate = installment.Date;
+        update.LastPaymentDate = installment.Date;
+        update.OverpaymentHandling = PaymentOverpaymentHandling.Refund;
+        update.OverpaymentComment = "Вернуть клиенту";
+
+        var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(actionResult);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+
+        var refund = await db.MoneyOperations
+            .Include(operation => operation.CashOrders)
+            .SingleAsync();
+        Assert.Equal(MoneyOperationDirection.Expense, refund.Direction);
+        Assert.Equal(MoneyOperationSource.Cash, refund.Source);
+        Assert.Equal(750m, refund.Amount);
+        Assert.Contains("Возврат переплаты", refund.Purpose);
+
+        var cashOrder = Assert.Single(refund.CashOrders);
+        Assert.Equal(CashOrderType.Outgoing, cashOrder.Type);
+        Assert.Equal(750m, cashOrder.Amount);
+        Assert.Equal(installment.Id, cashOrder.PaymentId);
+        Assert.Equal("Вернуть клиенту", cashOrder.Comment);
     }
 
     [Fact]

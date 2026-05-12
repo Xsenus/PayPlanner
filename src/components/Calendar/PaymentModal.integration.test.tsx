@@ -621,7 +621,11 @@ describe('PaymentModal integration', () => {
     fireEvent.change(paidAmountInput!, { target: { value: '17000' } });
     fireEvent.blur(paidAmountInput!);
 
-    expect(await screen.findByText(/Переплата 750.00 будет записана на баланс клиента/i)).toBeTruthy();
+    expect(await screen.findByText('Обнаружена переплата')).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /Основной платёж \+ аванс/i }));
+    fireEvent.change(screen.getByPlaceholderText('Комментарий к обработке переплаты'), {
+      target: { value: 'Аванс по делу' },
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'save' }));
 
@@ -631,6 +635,8 @@ describe('PaymentModal integration', () => {
         id: 995,
         amount: 16_250,
         paidAmount: 17_000,
+        overpaymentHandling: 'Advance',
+        overpaymentComment: 'Аванс по делу',
       }),
     );
   });

@@ -916,6 +916,7 @@ export function LegalEntityModal({
   const [paymentModalMode, setPaymentModalMode] =
     useState<LegalEntityPaymentModalMode>("create");
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
+  const [mainCompanyIds, setMainCompanyIds] = useState<number[]>([]);
   const selectedLegalEntityClientStatus = useMemo(
     () =>
       formState.clientStatusId
@@ -929,6 +930,8 @@ export function LegalEntityModal({
   const readOnly = !allowEdit && !!initial;
   const isPageMode = mode === "page";
   const currentLegalEntityId = initial?.id ?? null;
+  const isOwnLegalEntity =
+    currentLegalEntityId !== null && mainCompanyIds.includes(currentLegalEntityId);
   const selectedCaseId =
     selectedLegalEntityCaseId === "all" ? undefined : selectedLegalEntityCaseId;
   const showLegacyImageFields = false;
@@ -1003,6 +1006,32 @@ export function LegalEntityModal({
     sortDir: "desc",
     enabled: isOpen && Boolean(currentLegalEntityId),
   });
+
+  useEffect(() => {
+    if (!isOpen) {
+      setMainCompanyIds([]);
+      return;
+    }
+
+    let cancelled = false;
+    apiService
+      .getMainCompanySettings()
+      .then((settings) => {
+        if (!cancelled) {
+          setMainCompanyIds(settings.companies.map((company) => company.id));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMainCompanyIds([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
   const legalEntityCaseIdsKey = useMemo(
     () => legalEntityCases.map((item) => item.id).join(","),
     [legalEntityCases],
@@ -4398,6 +4427,7 @@ export function LegalEntityModal({
           />
         </div>
 
+        {isOwnLegalEntity ? (
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
           <LegalEntityImageField
             title="Логотип компании"
@@ -4659,6 +4689,7 @@ export function LegalEntityModal({
             </>
           ) : null}
         </div>
+        ) : null}
 
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

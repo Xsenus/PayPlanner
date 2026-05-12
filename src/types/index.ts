@@ -1,4 +1,5 @@
 export type PaymentStatus = 'Pending' | 'Completed' | 'Overdue' | 'Cancelled' | 'Processing';
+export type PaymentOverpaymentHandling = 'Advance' | 'NextInstallment' | 'Refund';
 export type InvoiceWorkflowStatus =
   | 'Draft'
   | 'NotSigned'
@@ -747,6 +748,8 @@ export interface MoneyOperationInvoiceCandidate {
   invoiceDate?: string | null;
   amount: number;
   paidAmount: number;
+  overpaymentHandling?: PaymentOverpaymentHandling | null;
+  overpaymentComment?: string | null;
   outstandingAmount: number;
   status: PaymentStatus;
   clientId?: number | null;

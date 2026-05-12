@@ -213,6 +213,12 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public decimal PaidAmount { get; set; }
 
+        [NotMapped]
+        public PaymentOverpaymentHandling? OverpaymentHandling { get; set; }
+
+        [NotMapped]
+        public string? OverpaymentComment { get; set; }
+
         /// <summary>
         /// Дата последнего поступления денег по этому платежу.
         /// </summary>
