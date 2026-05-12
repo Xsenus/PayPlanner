@@ -33,10 +33,20 @@ import {
 
 type AuthView = 'login' | 'register' | 'awaiting';
 type ActListTab = 'acts' | 'actsIncome' | 'actsExpense';
+type GenericActReturnTab = Exclude<
+  Tab,
+  'accounts' | 'accountsIncome' | 'accountsExpense' | 'actCreate' | 'actDetail' | 'clientDetail' | 'contractDetail'
+>;
+type GenericInvoiceReturnTab = Exclude<Tab, 'actDetail' | 'clientDetail' | 'contractDetail'>;
 type ActReturnContext =
-  | { tab: ActListTab }
+  | { tab: GenericActReturnTab }
   | { tab: 'accounts' | 'accountsIncome' | 'accountsExpense'; invoiceId?: number | null }
   | { tab: 'clientDetail'; clientId: number; section?: 'acts' | 'accounts' }
+  | { tab: 'contractDetail'; contractId: number };
+type InvoiceReturnContext =
+  | { tab: GenericInvoiceReturnTab }
+  | { tab: 'clientDetail'; clientId: number; section?: 'accounts' | 'acts' }
+  | { tab: 'actDetail'; actId: number }
   | { tab: 'contractDetail'; contractId: number };
 
 const Calendar = lazy(() => import('./components/Calendar/Calendar').then((module) => ({ default: module.Calendar })));
@@ -143,7 +153,7 @@ function AppContent() {
   const [actReturnContext, setActReturnContext] = useState<ActReturnContext>(() => ({ tab: getInitialActReturnTab() ?? 'acts' }));
   const [actCreateInitialValues, setActCreateInitialValues] = useState<(Partial<ActInput> & { amount?: number | null }) | null>(null);
   const [actCreateInvoiceSeed, setActCreateInvoiceSeed] = useState<Invoice | null>(null);
-  const [invoicePageReturnClientId, setInvoicePageReturnClientId] = useState<number | null>(null);
+  const [invoiceReturnContext, setInvoiceReturnContext] = useState<InvoiceReturnContext | null>(null);
   const [contractReturnTab, setContractReturnTab] = useState<Tab | null>(getInitialContractReturnTab);
   const [clientReturnTab, setClientReturnTab] = useState<{
     tab: Tab;
@@ -276,7 +286,7 @@ function AppContent() {
       }
 
       setInitialClientSection(undefined);
-      setInvoicePageReturnClientId(null);
+      setInvoiceReturnContext(null);
       setClientReturnTab(options?.returnTo ?? { tab: 'clients' });
       setSelectedClientId(clientId);
       setInitialCaseId(typeof caseId === 'number' ? caseId : 'all');
@@ -308,27 +318,51 @@ function AppContent() {
   const handleRouteInvoiceChange = useCallback((invoiceId: number | null) => {
     setSelectedInvoiceId(invoiceId);
     if (invoiceId === null) {
-      setInvoicePageReturnClientId(null);
+      setInvoiceReturnContext(null);
     }
   }, []);
 
   const handleBackToClientFromInvoicePage = useCallback(() => {
-    if (!invoicePageReturnClientId) {
+    if (!invoiceReturnContext) {
       return;
     }
 
-    setInitialClientSection('accounts');
-    setSelectedClientId(invoicePageReturnClientId);
-    setActiveTab('clientDetail');
-  }, [invoicePageReturnClientId]);
+    if (invoiceReturnContext.tab === 'clientDetail') {
+      setInitialClientSection(invoiceReturnContext.section ?? 'accounts');
+      setSelectedClientId(invoiceReturnContext.clientId);
+      setActiveTab('clientDetail');
+      return;
+    }
+
+    if (invoiceReturnContext.tab === 'actDetail') {
+      setSelectedActId(invoiceReturnContext.actId);
+      setActiveTab('actDetail');
+      return;
+    }
+
+    if (invoiceReturnContext.tab === 'contractDetail') {
+      setSelectedContractId(invoiceReturnContext.contractId);
+      setActiveTab('contractDetail');
+      return;
+    }
+
+    setActiveTab(invoiceReturnContext.tab);
+  }, [invoiceReturnContext]);
 
   const openInvoicePage = useCallback(
-    (invoiceId: number, options?: { type?: 'Income' | 'Expense'; returnClientId?: number | null }) => {
+    (invoiceId: number, options?: {
+      type?: 'Income' | 'Expense';
+      returnClientId?: number | null;
+      returnTo?: InvoiceReturnContext | null;
+    }) => {
       if (!permissions.accounts.canView || !(invoiceId > 0)) {
         return;
       }
 
-      setInvoicePageReturnClientId(options?.returnClientId ?? null);
+      setInvoiceReturnContext(
+        options?.returnTo
+          ?? (options?.returnClientId ? { tab: 'clientDetail', clientId: options.returnClientId, section: 'accounts' } : null),
+      );
       setSelectedInvoiceId(invoiceId);
       setActiveTab(options?.type === 'Expense' ? 'accountsExpense' : options?.type === 'Income' ? 'accountsIncome' : 'accounts');
     },
@@ -774,8 +808,10 @@ function AppContent() {
               <LegalEntities
                 onOpenCase={openRelatedCase}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'legalEntities' })}
-                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
-                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'legalEntities' } })
+                }
+                onOpenAct={(id) => openActDetail(id, { tab: 'legalEntities' })}
                 onOpenPayment={openPaymentPage}
               />
             )
@@ -786,8 +822,10 @@ function AppContent() {
           ? (
               <Clients
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'clients' })}
-                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
-                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'clients' } })
+                }
+                onOpenAct={(id) => openActDetail(id, { tab: 'clients' })}
                 onOpenPayment={openPaymentPage}
               />
             )
@@ -803,8 +841,10 @@ function AppContent() {
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contacts' } })}
                 onOpenCase={openRelatedCase}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'contacts' })}
-                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
-                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'contacts' } })
+                }
+                onOpenAct={(id) => openActDetail(id, { tab: 'contacts' })}
                 onOpenPayment={openPaymentPage}
               />
             )
@@ -821,8 +861,10 @@ function AppContent() {
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contactsClients' } })}
                 onOpenCase={openRelatedCase}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'contactsClients' })}
-                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
-                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'contactsClients' } })
+                }
+                onOpenAct={(id) => openActDetail(id, { tab: 'contactsClients' })}
                 onOpenPayment={openPaymentPage}
               />
             )
@@ -839,8 +881,10 @@ function AppContent() {
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'contactsLegal' } })}
                 onOpenCase={openRelatedCase}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'contactsLegal' })}
-                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
-                onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'contactsLegal' } })
+                }
+                onOpenAct={(id) => openActDetail(id, { tab: 'contactsLegal' })}
                 onOpenPayment={openPaymentPage}
               />
             )
@@ -867,8 +911,10 @@ function AppContent() {
           return (
             <Clients
               onOpenContract={(id) => openContractDetail(id, { returnTo: 'clients' })}
-              onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
-              onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
+              onOpenInvoice={(id, type) =>
+                openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'clients' } })
+              }
+              onOpenAct={(id) => openActDetail(id, { tab: 'clients' })}
               onOpenPayment={openPaymentPage}
             />
           );
@@ -876,10 +922,15 @@ function AppContent() {
 
         return (
           <ClientDetail
+            key={selectedClientId}
             clientId={selectedClientId}
             initialCaseId={initialCaseId}
             initialSection={initialClientSection}
-            onOpenInvoicePage={(invoiceId) => openInvoicePage(invoiceId, { returnClientId: selectedClientId })}
+            onOpenInvoicePage={(invoiceId) =>
+              openInvoicePage(invoiceId, {
+                returnTo: { tab: 'clientDetail', clientId: selectedClientId, section: 'accounts' },
+              })
+            }
             onOpenActPage={(id, options) =>
               openActDetail(id, {
                 tab: 'clientDetail',
@@ -1010,7 +1061,7 @@ function AppContent() {
                 onOpenAct={(id) => openActDetail(id, { tab: 'acts' })}
                 onCreateActPage={(initialValues) => openActCreate({ initialValues, returnTo: { tab: 'acts' } })}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'acts' } })}
-                onOpenInvoiceEditor={(id) => openInvoicePage(id)}
+                onOpenInvoiceEditor={(id) => openInvoicePage(id, { returnTo: { tab: 'acts' } })}
               />
             )
           : renderNoAccess('Раздел актов недоступен для вашей роли.');
@@ -1024,7 +1075,7 @@ function AppContent() {
                 onOpenAct={(id) => openActDetail(id, { tab: 'actsIncome' })}
                 onCreateActPage={(initialValues) => openActCreate({ initialValues, returnTo: { tab: 'actsIncome' } })}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'actsIncome' } })}
-                onOpenInvoiceEditor={(id) => openInvoicePage(id, { type: 'Income' })}
+                onOpenInvoiceEditor={(id) => openInvoicePage(id, { type: 'Income', returnTo: { tab: 'actsIncome' } })}
               />
             )
           : renderNoAccess('Раздел актов недоступен для вашей роли.');
@@ -1038,7 +1089,7 @@ function AppContent() {
                 onOpenAct={(id) => openActDetail(id, { tab: 'actsExpense' })}
                 onCreateActPage={(initialValues) => openActCreate({ initialValues, returnTo: { tab: 'actsExpense' } })}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'actsExpense' } })}
-                onOpenInvoiceEditor={(id) => openInvoicePage(id, { type: 'Expense' })}
+                onOpenInvoiceEditor={(id) => openInvoicePage(id, { type: 'Expense', returnTo: { tab: 'actsExpense' } })}
               />
             )
           : renderNoAccess('Раздел актов недоступен для вашей роли.');
@@ -1052,7 +1103,9 @@ function AppContent() {
                 initialValues={actCreateInitialValues ?? undefined}
                 invoiceSeed={actCreateInvoiceSeed ?? undefined}
                 defaultResponsibleId={user?.id}
-                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'actCreate' } })
+                }
               />
             )
           : renderNoAccess('Создание актов недоступно для вашей роли.');
@@ -1063,7 +1116,12 @@ function AppContent() {
               <ActDetailPage
                 actId={selectedActId}
                 onBack={handleActBack}
-                onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)}
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, {
+                    ...(type ? { type } : {}),
+                    returnTo: { tab: 'actDetail', actId: selectedActId },
+                  })
+                }
                 onOpenClient={(id) =>
                   handleOpenClient(id, undefined, { returnTo: { tab: 'actDetail', actId: selectedActId } })
                 }
@@ -1120,27 +1178,62 @@ function AppContent() {
 
       case 'moneyBank':
         return permissions.payments.canView
-          ? <MoneyOperations source="Bank" onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)} />
+          ? (
+              <MoneyOperations
+                source="Bank"
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'moneyBank' } })
+                }
+              />
+            )
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'moneyCash':
         return permissions.payments.canView
-          ? <MoneyOperations source="Cash" onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)} />
+          ? (
+              <MoneyOperations
+                source="Cash"
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'moneyCash' } })
+                }
+              />
+            )
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'moneyCards':
         return permissions.payments.canView
-          ? <MoneyOperations source="Card" onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)} />
+          ? (
+              <MoneyOperations
+                source="Card"
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'moneyCards' } })
+                }
+              />
+            )
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'moneyEMoney':
         return permissions.payments.canView
-          ? <MoneyOperations source="EMoney" onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)} />
+          ? (
+              <MoneyOperations
+                source="EMoney"
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'moneyEMoney' } })
+                }
+              />
+            )
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'moneyTotal':
         return permissions.payments.canView
-          ? <MoneyOperations source="Total" onOpenInvoice={(id, type) => openInvoicePage(id, type ? { type } : undefined)} />
+          ? (
+              <MoneyOperations
+                source="Total"
+                onOpenInvoice={(id, type) =>
+                  openInvoicePage(id, { ...(type ? { type } : {}), returnTo: { tab: 'moneyTotal' } })
+                }
+              />
+            )
           : renderNoAccess('Раздел денег недоступен для вашей роли.');
 
       case 'contracts':
@@ -1172,7 +1265,9 @@ function AppContent() {
                 onOpenClient={(id) =>
                   handleOpenClient(id, undefined, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })
                 }
-                onOpenInvoiceEditor={(id) => openInvoicePage(id)}
+                onOpenInvoiceEditor={(id) =>
+                  openInvoicePage(id, { returnTo: { tab: 'contractDetail', contractId: selectedContractId } })
+                }
                 onOpenActEditor={(id) => openActDetail(id, { tab: 'contractDetail', contractId: selectedContractId })}
               />
             )

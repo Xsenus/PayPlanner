@@ -506,6 +506,7 @@ describe('Accounts integration', () => {
     clearInvoiceEditorDraftMock.mockReset();
     peekInvoiceEditorDraftMock.mockReset();
     window.localStorage.clear();
+    window.sessionStorage.clear();
 
     getAccountsRegistryResultMock.mockReturnValue({
       items: [createAccountRow()],
@@ -697,6 +698,44 @@ describe('Accounts integration', () => {
     expect(within(row as HTMLTableRowElement).queryByText(/^Подписан$/)).toBeNull();
   });
 
+  it('restores accounts journal filters after reopening the list', async () => {
+    const { unmount } = render(<Accounts />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Расходные счета' }));
+    fireEvent.change(screen.getByPlaceholderText('Номер счёта, клиент или акт'), {
+      target: { value: 'мурсалимов' },
+    });
+    fireEvent.change(screen.getByLabelText('Статус'), {
+      target: { value: 'paid' },
+    });
+
+    await waitFor(() => {
+      const lastCall = getAccountsRegistryResultMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          search: 'мурсалимов',
+          status: 'paid',
+          type: 'Expense',
+        }),
+      );
+    });
+
+    unmount();
+    render(<Accounts />);
+
+    expect((screen.getByPlaceholderText('Номер счёта, клиент или акт') as HTMLInputElement).value).toBe('мурсалимов');
+    await waitFor(() => {
+      const lastCall = getAccountsRegistryResultMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          search: 'мурсалимов',
+          status: 'paid',
+          type: 'Expense',
+        }),
+      );
+    });
+  });
+
   it('shows client signature requirement separately from payment status', () => {
     getAccountsRegistryResultMock.mockReturnValue({
       items: [
@@ -750,7 +789,7 @@ describe('Accounts integration', () => {
       clientId: 55,
       status: 'Created',
     }), expect.objectContaining({
-      invoiceId: 528,
+      invoiceId: null,
       invoiceSeed: expect.objectContaining({ id: 528, number: '24' }),
     }));
   });
@@ -783,7 +822,7 @@ describe('Accounts integration', () => {
     fireEvent.click(screen.getByRole('button', { name: /Акт №ACT-901/i }));
 
     expect(onOpenActPage).toHaveBeenCalledWith(901, {
-      invoiceId: 528,
+      invoiceId: null,
     });
   });
 
@@ -827,7 +866,7 @@ describe('Accounts integration', () => {
     fireEvent.click(screen.getByRole('button', { name: /Акт №ACT-902/i }));
 
     expect(onOpenActPage).toHaveBeenCalledWith(902, {
-      invoiceId: 528,
+      invoiceId: null,
     });
   });
 

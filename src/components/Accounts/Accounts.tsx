@@ -15,7 +15,7 @@ import {
   WalletCards,
   X,
 } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -50,6 +50,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { formatPeriodLabel, normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
+import { readSessionViewState, writeSessionViewState } from '../../utils/sessionViewState';
 import {
   clearInvoiceEditorDraft,
   peekInvoiceEditorDraft,
@@ -115,6 +116,18 @@ type ColumnKey =
   | 'description';
 
 type SortState = { key: 'date' | 'number' | 'amount' | 'counterparty' | 'dueDate' | 'responsible'; direction: 'asc' | 'desc' };
+
+type AccountsViewState = {
+  statusFilter: 'all' | AccountStatus;
+  typeFilter: FilterType;
+  selectedCounterparty: CounterpartySelection | null;
+  clientRoleFilter: ClientRoleFilter;
+  payablesOnly: boolean;
+  search: string;
+  sortState: SortState;
+  page: number;
+  expandedAccounts: Record<string, boolean>;
+};
 
 type SummaryCard = {
   key: 'total' | 'overdue' | 'paid';
@@ -488,22 +501,33 @@ export function Accounts({
 
   const defaultPeriod = useMemo<PeriodFilter>(() => ({ mode: 'preset', preset: 'year_to_date' }), []);
   const storagePrefix = useMemo(() => `pp.accounts.${user?.id ?? 'guest'}`, [user?.id]);
+  const viewStateKey = useMemo(
+    () => `${storagePrefix}.viewState.${lockType && defaultType ? defaultType : 'All'}.v1`,
+    [defaultType, lockType, storagePrefix],
+  );
+  const savedViewState = useMemo(
+    () => readSessionViewState<Partial<AccountsViewState> | null>(viewStateKey, null),
+    [viewStateKey],
+  );
   const savedPeriod = useMemo(() => safeRead<unknown>(`${storagePrefix}.period`, null), [storagePrefix]);
   const [period, setPeriod] = useState<PeriodFilter>(() => normalizeStoredPeriod(savedPeriod, defaultPeriod));
   const periodRange = useMemo(() => resolvePeriod(period), [period]);
-  const [statusFilter, setStatusFilter] = useState<'all' | AccountStatus>('all');
-  const [typeFilter, setTypeFilter] = useState<FilterType>(defaultType ?? 'All');
-  const [selectedCounterparty, setSelectedCounterparty] = useState<CounterpartySelection | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'all' | AccountStatus>(() => savedViewState?.statusFilter ?? 'all');
+  const [typeFilter, setTypeFilter] = useState<FilterType>(() => (
+    lockType && defaultType ? defaultType : savedViewState?.typeFilter ?? defaultType ?? 'All'
+  ));
+  const [selectedCounterparty, setSelectedCounterparty] = useState<CounterpartySelection | null>(() => savedViewState?.selectedCounterparty ?? null);
   const [counterpartyPickerOpen, setCounterpartyPickerOpen] = useState(false);
-  const [clientRoleFilter, setClientRoleFilter] = useState<ClientRoleFilter>('all');
-  const [payablesOnly, setPayablesOnly] = useState(false);
+  const [clientRoleFilter, setClientRoleFilter] = useState<ClientRoleFilter>(() => savedViewState?.clientRoleFilter ?? 'all');
+  const [payablesOnly, setPayablesOnly] = useState(() => savedViewState?.payablesOnly ?? false);
   const [payablesDashboardOpen, setPayablesDashboardOpen] = useState(false);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => savedViewState?.search ?? '');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
-  const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
-  const [page, setPage] = useState(1);
+  const [sortState, setSortState] = useState<SortState>(() => savedViewState?.sortState ?? { key: 'date', direction: 'desc' });
+  const [page, setPage] = useState(() => savedViewState?.page ?? 1);
   const [columnsOpen, setColumnsOpen] = useState(false);
-  const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({});
+  const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>(() => savedViewState?.expandedAccounts ?? {});
+  const filtersResetReadyRef = useRef(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [paymentModalType, setPaymentModalType] = useState<PaymentKind>('Income');
@@ -629,6 +653,11 @@ export function Accounts({
   );
 
   useEffect(() => {
+    if (!filtersResetReadyRef.current) {
+      filtersResetReadyRef.current = true;
+      return;
+    }
+
     setPage(1);
   }, [
     periodRange.from,
@@ -644,8 +673,10 @@ export function Accounts({
   ]);
 
   useEffect(() => {
-    setTypeFilter(baseTypeFilter);
-  }, [baseTypeFilter]);
+    if (lockType) {
+      setTypeFilter(baseTypeFilter);
+    }
+  }, [baseTypeFilter, lockType]);
 
   useEffect(() => {
     setPeriod(normalizeStoredPeriod(savedPeriod, defaultPeriod));
@@ -669,6 +700,40 @@ export function Accounts({
   useEffect(() => {
     safeWrite(`${storagePrefix}.period`, period);
   }, [period, storagePrefix]);
+
+  useEffect(() => {
+    const counterparty = selectedCounterparty
+      ? {
+        kind: selectedCounterparty.kind,
+        id: selectedCounterparty.id,
+        name: selectedCounterparty.name,
+        subtitle: selectedCounterparty.subtitle ?? null,
+      }
+      : null;
+
+    writeSessionViewState<AccountsViewState>(viewStateKey, {
+      statusFilter,
+      typeFilter,
+      selectedCounterparty: counterparty,
+      clientRoleFilter,
+      payablesOnly,
+      search,
+      sortState,
+      page,
+      expandedAccounts,
+    });
+  }, [
+    clientRoleFilter,
+    expandedAccounts,
+    page,
+    payablesOnly,
+    search,
+    selectedCounterparty,
+    sortState,
+    statusFilter,
+    typeFilter,
+    viewStateKey,
+  ]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -1978,7 +2043,7 @@ export function Accounts({
 
     if (onCreateActPage) {
       onCreateActPage(nextInitialValues, {
-        invoiceId: row.invoice?.id ?? null,
+        invoiceId: null,
         invoiceSeed: row.invoice ?? null,
       });
       return;
@@ -1996,7 +2061,7 @@ export function Accounts({
     setExpandedActListKey(null);
     if (onOpenActPage) {
       onOpenActPage(act.id, {
-        invoiceId: act.invoiceId ?? row.invoice?.id ?? null,
+        invoiceId: null,
       });
       return;
     }

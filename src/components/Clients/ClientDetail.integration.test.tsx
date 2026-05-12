@@ -558,6 +558,7 @@ describe('ClientDetail integration', () => {
     useInvoicesMock.mockReset();
     useContractsMock.mockReset();
     usePaymentsPagedMock.mockReset();
+    window.sessionStorage.clear();
     authState.isAdmin = false;
 
     useClientCasesMock.mockReturnValue(emptyClientCasesResult);
@@ -1438,6 +1439,40 @@ describe('ClientDetail integration', () => {
           type: 'Income',
           search: '31',
           status: 'Overdue',
+        }),
+      );
+    });
+  });
+
+  it('restores client account filters after reopening the card', async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="accounts" />);
+
+    await user.type(await screen.findByLabelText('Поиск счетов клиента'), 'счет 77');
+    await user.selectOptions(screen.getByLabelText('Статус счетов клиента'), 'Completed');
+
+    await waitFor(() => {
+      const lastCall = useInvoicesMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          search: 'счет 77',
+          status: 'Completed',
+        }),
+      );
+    });
+
+    unmount();
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="accounts" />);
+
+    expect((await screen.findByLabelText('Поиск счетов клиента') as HTMLInputElement).value).toBe('счет 77');
+    await waitFor(() => {
+      const lastCall = useInvoicesMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(
+        expect.objectContaining({
+          clientId: 1,
+          search: 'счет 77',
+          status: 'Completed',
         }),
       );
     });

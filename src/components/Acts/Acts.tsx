@@ -1,5 +1,5 @@
 import { Ban, CalendarRange, CheckCircle2, FileCheck2, GripVertical, Loader2, Pencil, Plus, RotateCcw, Search, Send, SlidersHorizontal, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -15,6 +15,7 @@ import { toDateInputValue } from '../../utils/dateUtils';
 import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { normalizeStoredPeriod, resolvePeriod, type PeriodFilter } from '../../utils/periodUtils';
+import { readSessionViewState, writeSessionViewState } from '../../utils/sessionViewState';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
@@ -84,6 +85,15 @@ type SortState = {
   direction: 'asc' | 'desc';
 };
 
+type ActsViewState = {
+  typeFilter: 'All' | PaymentKind;
+  statusFilter: 'all' | ActStatus;
+  workflowStatusFilter: 'all' | ActWorkflowStatus;
+  search: string;
+  sortState: SortState;
+  page: number;
+};
+
 interface ActsProps {
   defaultType?: PaymentKind;
   lockType?: boolean;
@@ -115,17 +125,28 @@ export function Acts({
 
   const defaultPeriod = useMemo<PeriodFilter>(() => ({ mode: 'custom', from: '', to: '' }), []);
   const storagePrefix = useMemo(() => `pp.acts.${user?.id ?? 'guest'}`, [user?.id]);
+  const viewStateKey = useMemo(
+    () => `${storagePrefix}.viewState.${lockType && defaultType ? defaultType : 'All'}.v1`,
+    [defaultType, lockType, storagePrefix],
+  );
+  const savedViewState = useMemo(
+    () => readSessionViewState<Partial<ActsViewState> | null>(viewStateKey, null),
+    [viewStateKey],
+  );
   const savedPeriod = useMemo(() => safeRead<unknown>(`${storagePrefix}.period`, null), [storagePrefix]);
   const [period, setPeriod] = useState<PeriodFilter>(() => normalizeStoredPeriod(savedPeriod, defaultPeriod));
   const periodRange = useMemo(() => resolvePeriod(period), [period]);
-  const [typeFilter, setTypeFilter] = useState<'All' | PaymentKind>(defaultType ?? 'All');
-  const [statusFilter, setStatusFilter] = useState<'all' | ActStatus>('all');
-  const [workflowStatusFilter, setWorkflowStatusFilter] = useState<'all' | ActWorkflowStatus>('all');
-  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'All' | PaymentKind>(() => (
+    lockType && defaultType ? defaultType : savedViewState?.typeFilter ?? defaultType ?? 'All'
+  ));
+  const [statusFilter, setStatusFilter] = useState<'all' | ActStatus>(() => savedViewState?.statusFilter ?? 'all');
+  const [workflowStatusFilter, setWorkflowStatusFilter] = useState<'all' | ActWorkflowStatus>(() => savedViewState?.workflowStatusFilter ?? 'all');
+  const [search, setSearch] = useState(() => savedViewState?.search ?? '');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
-  const [sortState, setSortState] = useState<SortState>({ key: 'date', direction: 'desc' });
-  const [page, setPage] = useState(1);
+  const [sortState, setSortState] = useState<SortState>(() => savedViewState?.sortState ?? { key: 'date', direction: 'desc' });
+  const [page, setPage] = useState(() => savedViewState?.page ?? 1);
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const filtersResetReadyRef = useRef(false);
   const effectiveTypeFilter = lockType && defaultType ? defaultType : typeFilter;
   const canOpenActPage = typeof onOpenAct === 'function';
 
@@ -394,6 +415,11 @@ export function Acts({
   }, [effectivePageSize, pagination.total]);
 
   useEffect(() => {
+    if (!filtersResetReadyRef.current) {
+      filtersResetReadyRef.current = true;
+      return;
+    }
+
     setPage(1);
   }, [debouncedSearch, effectiveTypeFilter, statusFilter, workflowStatusFilter, periodRange.from, periodRange.to, pageSize]);
 
@@ -413,6 +439,17 @@ export function Acts({
   useEffect(() => {
     safeWrite(`${storagePrefix}.period`, period);
   }, [period, storagePrefix]);
+
+  useEffect(() => {
+    writeSessionViewState<ActsViewState>(viewStateKey, {
+      typeFilter,
+      statusFilter,
+      workflowStatusFilter,
+      search,
+      sortState,
+      page,
+    });
+  }, [page, search, sortState, statusFilter, typeFilter, viewStateKey, workflowStatusFilter]);
 
   const ensureLookups = useCallback(async () => {
     if (!modalOpen) return;

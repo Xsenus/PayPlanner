@@ -114,6 +114,7 @@ import {
   resolvePeriod,
   type PeriodFilter,
 } from "../../utils/periodUtils";
+import { readSessionViewState, writeSessionViewState } from "../../utils/sessionViewState";
 import {
   createEmptyClientRelative as createEmptyRelative,
   normalizeClientRelative,
@@ -168,6 +169,22 @@ type ClientDetailSection =
   | "acts"
   | "contracts"
   | "settlement";
+
+type ClientDetailViewState = {
+  activeSection: ClientDetailSection;
+  invoicePeriod: PeriodFilter;
+  invoiceStatusFilter: "all" | PaymentStatus;
+  invoiceViewMode: InvoiceViewMode;
+  invoiceViewModeTouched: boolean;
+  invoiceSearch: string;
+  invoiceSort: { key: InvoicesSortKey; direction: "asc" | "desc" };
+  invoicePage: number;
+  actPeriod: PeriodFilter;
+  actStatusFilter: "all" | ActStatus;
+  actSearch: string;
+  actSort: { key: ActsSortKey; direction: "asc" | "desc" };
+  actPage: number;
+};
 
 type PaymentTableColumnKey =
   | "period"
@@ -1313,6 +1330,14 @@ export function ClientDetail({
       permissions[SECTION_PERMISSION_MAP[section]],
     [permissions],
   );
+  const clientViewStateKey = useMemo(
+    () => `pp.clientDetail.${user?.id ?? "guest"}.${clientId}.viewState.v1`,
+    [clientId, user?.id],
+  );
+  const savedViewState = useMemo(
+    () => readSessionViewState<Partial<ClientDetailViewState> | null>(clientViewStateKey, null),
+    [clientViewStateKey],
+  );
   const [activeSection, setActiveSection] = useState<ClientDetailSection>(
     () => {
       if (initialSection && initialSection !== "settlement") {
@@ -1333,6 +1358,16 @@ export function ClientDetail({
           return false;
         }
       });
+      const savedSection = savedViewState?.activeSection;
+      if (savedSection && savedSection !== "settlement") {
+        try {
+          if (sectionPermissions(savedSection).canView) {
+            return savedSection;
+          }
+        } catch {
+          // ignore invalid saved section and use the first available one
+        }
+      }
       return firstAllowed ?? "payments";
     },
   );
@@ -1984,20 +2019,21 @@ export function ClientDetail({
     });
   }, []);
 
-  const [actPeriod, setActPeriod] = useState<PeriodFilter>({
+  const [actPeriod, setActPeriod] = useState<PeriodFilter>(() => savedViewState?.actPeriod ?? {
     mode: "preset",
     preset: "year_to_date",
   });
   const [actStatusFilter, setActStatusFilter] = useState<"all" | ActStatus>(
-    "all",
+    () => savedViewState?.actStatusFilter ?? "all",
   );
-  const [actSearch, setActSearch] = useState("");
+  const [actSearch, setActSearch] = useState(() => savedViewState?.actSearch ?? "");
   const debouncedActSearch = useDebouncedValue(actSearch.trim(), 400);
   const [actSort, setActSort] = useState<{
     key: ActsSortKey;
     direction: "asc" | "desc";
-  }>({ key: "date", direction: "desc" });
-  const [actPage, setActPage] = useState(1);
+  }>(() => savedViewState?.actSort ?? { key: "date", direction: "desc" });
+  const [actPage, setActPage] = useState(() => savedViewState?.actPage ?? 1);
+  const actPageResetReadyRef = useRef(false);
   const [actTableSettingsOpen, setActTableSettingsOpen] = useState(false);
   const {
     columnOrder: actColumnOrder,
@@ -2045,25 +2081,26 @@ export function ClientDetail({
 
   const today = useMemo(() => new Date(), []);
 
-  const [invoicePeriod, setInvoicePeriod] = useState<PeriodFilter>({
+  const [invoicePeriod, setInvoicePeriod] = useState<PeriodFilter>(() => savedViewState?.invoicePeriod ?? {
     mode: "custom",
   });
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<
     "all" | PaymentStatus
-  >("all");
+  >(() => savedViewState?.invoiceStatusFilter ?? "all");
   const [invoiceViewMode, setInvoiceViewMode] =
-    useState<InvoiceViewMode>("income");
-  const [invoiceViewModeTouched, setInvoiceViewModeTouched] = useState(false);
-  const [invoiceSearch, setInvoiceSearch] = useState("");
+    useState<InvoiceViewMode>(() => savedViewState?.invoiceViewMode ?? "income");
+  const [invoiceViewModeTouched, setInvoiceViewModeTouched] = useState(() => savedViewState?.invoiceViewModeTouched ?? false);
+  const [invoiceSearch, setInvoiceSearch] = useState(() => savedViewState?.invoiceSearch ?? "");
   const debouncedInvoiceSearch = useDebouncedValue(invoiceSearch.trim(), 400);
   const [invoiceSort, setInvoiceSort] = useState<{
     key: InvoicesSortKey;
     direction: "asc" | "desc";
-  }>({
+  }>(() => savedViewState?.invoiceSort ?? {
     key: "date",
     direction: "desc",
   });
-  const [invoicePage, setInvoicePage] = useState(1);
+  const [invoicePage, setInvoicePage] = useState(() => savedViewState?.invoicePage ?? 1);
+  const invoicePageResetReadyRef = useRef(false);
   const [invoiceTableSettingsOpen, setInvoiceTableSettingsOpen] =
     useState(false);
   const {
@@ -2094,8 +2131,16 @@ export function ClientDetail({
     defaultPageSize: DETAIL_PAGE_SIZE_OPTIONS[0],
     minColumnWidth: 120,
   });
+  const clientDefaultStateReadyRef = useRef(false);
+  const paymentDefaultModeReadyRef = useRef(false);
+  const invoiceDefaultModeReadyRef = useRef(false);
 
   useEffect(() => {
+    if (!clientDefaultStateReadyRef.current) {
+      clientDefaultStateReadyRef.current = true;
+      return;
+    }
+
     setPaymentViewMode(defaultPaymentViewMode);
     setPaymentViewModeTouched(false);
     setInvoiceViewMode(defaultInvoiceViewMode);
@@ -2105,6 +2150,11 @@ export function ClientDetail({
   }, [clientId, defaultInvoiceViewMode, defaultPaymentViewMode]);
 
   useEffect(() => {
+    if (!paymentDefaultModeReadyRef.current) {
+      paymentDefaultModeReadyRef.current = true;
+      return;
+    }
+
     if (!paymentViewModeTouched) {
       setPaymentViewMode(defaultPaymentViewMode);
       setPaymentPage(1);
@@ -2112,6 +2162,11 @@ export function ClientDetail({
   }, [defaultPaymentViewMode, paymentViewModeTouched]);
 
   useEffect(() => {
+    if (!invoiceDefaultModeReadyRef.current) {
+      invoiceDefaultModeReadyRef.current = true;
+      return;
+    }
+
     if (!invoiceViewModeTouched) {
       setInvoiceViewMode(defaultInvoiceViewMode);
       setInvoicePage(1);
@@ -2392,6 +2447,11 @@ export function ClientDetail({
   });
 
   useEffect(() => {
+    if (!actPageResetReadyRef.current) {
+      actPageResetReadyRef.current = true;
+      return;
+    }
+
     setActPage(1);
   }, [
     resolvedActPeriod.from,
@@ -2446,6 +2506,11 @@ export function ClientDetail({
   });
 
   useEffect(() => {
+    if (!invoicePageResetReadyRef.current) {
+      invoicePageResetReadyRef.current = true;
+      return;
+    }
+
     setInvoicePage(1);
   }, [
     clientId,
@@ -2541,6 +2606,39 @@ export function ClientDetail({
     relatedActId,
     relatedPaymentId,
     contractPageSize,
+  ]);
+
+  useEffect(() => {
+    writeSessionViewState<ClientDetailViewState>(clientViewStateKey, {
+      activeSection,
+      invoicePeriod,
+      invoiceStatusFilter,
+      invoiceViewMode,
+      invoiceViewModeTouched,
+      invoiceSearch,
+      invoiceSort,
+      invoicePage,
+      actPeriod,
+      actStatusFilter,
+      actSearch,
+      actSort,
+      actPage,
+    });
+  }, [
+    activeSection,
+    actPage,
+    actPeriod,
+    actSearch,
+    actSort,
+    actStatusFilter,
+    clientViewStateKey,
+    invoicePage,
+    invoicePeriod,
+    invoiceSearch,
+    invoiceSort,
+    invoiceStatusFilter,
+    invoiceViewMode,
+    invoiceViewModeTouched,
   ]);
 
   const contractTotalPages = useMemo(() => {
