@@ -162,6 +162,7 @@ public class ClientsV1Controller : ControllerBase
         e.LegalEntityId = model.LegalEntityId;
         e.ResponsibleUserId = responsibleUserId;
         e.ClientStatusId = model.ClientStatusId;
+        e.IsClientAndSupplier = model.IsClientAndSupplier;
 
         await _db.SaveChangesAsync(ct);
         await _db.Entry(e).Reference(c => c.ResponsibleUser).LoadAsync(ct);

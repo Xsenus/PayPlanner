@@ -517,6 +517,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.ContactPhonesJson).HasMaxLength(8000);
             entity.Property(e => e.ContactEmailsJson).HasMaxLength(8000);
             entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.IsClientAndSupplier).HasDefaultValue(false);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasMany(e => e.Clients)
@@ -529,9 +530,16 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.ResponsibleUserId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.ClientStatus)
+                  .WithMany()
+                  .HasForeignKey(e => e.ClientStatusId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasIndex(e => e.ShortName).HasDatabaseName("IX_LegalEntities_ShortName");
             entity.HasIndex(e => e.Inn).HasDatabaseName("IX_LegalEntities_Inn");
             entity.HasIndex(e => e.Kpp).HasDatabaseName("IX_LegalEntities_Kpp");
+            entity.HasIndex(e => e.ClientStatusId).HasDatabaseName("IX_LegalEntities_ClientStatusId");
+            entity.HasIndex(e => e.IsClientAndSupplier).HasDatabaseName("IX_LegalEntities_IsClientAndSupplier");
             entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_LegalEntities_ResponsibleUserId");
         });
 
@@ -1134,6 +1142,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Company).HasMaxLength(200);
             entity.Property(e => e.Address).HasMaxLength(500);
             entity.Property(e => e.Notes).HasMaxLength(2000);
+            entity.Property(e => e.IsClientAndSupplier).HasDefaultValue(false);
 
             entity.HasOne(e => e.LegalEntity)
                   .WithMany(le => le.Clients)
@@ -1158,6 +1167,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_Clients_IsActive_Name");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_Clients_LegalEntityId");
             entity.HasIndex(e => e.ClientStatusId).HasDatabaseName("IX_Clients_ClientStatusId");
+            entity.HasIndex(e => e.IsClientAndSupplier).HasDatabaseName("IX_Clients_IsClientAndSupplier");
             entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_Clients_ResponsibleUserId");
         });
 

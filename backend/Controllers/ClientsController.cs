@@ -769,6 +769,7 @@ public class ClientsController : ControllerBase
             LegalEntityId = model.LegalEntityId,
             ResponsibleUserId = responsibleUserId,
             ClientStatusId = model.ClientStatusId,
+            IsClientAndSupplier = model.IsClientAndSupplier,
         };
 
         _db.Clients.Add(entity);
@@ -838,6 +839,7 @@ public class ClientsController : ControllerBase
         e.LegalEntityId = model.LegalEntityId;
         e.ResponsibleUserId = responsibleUserId;
         e.ClientStatusId = model.ClientStatusId;
+        e.IsClientAndSupplier = model.IsClientAndSupplier;
         await _db.SaveChangesAsync(ct);
         var response = await LoadClientResponseAsync(e.Id, ct);
         return Ok(response);

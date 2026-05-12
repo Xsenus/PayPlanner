@@ -27,6 +27,9 @@ public class LegalEntityListItemDto
     public string? Director { get; set; }
     public int? ResponsibleUserId { get; set; }
     public string? ResponsibleUserName { get; set; }
+    public int? ClientStatusId { get; set; }
+    public ClientStatusDto? ClientStatus { get; set; }
+    public bool IsClientAndSupplier { get; set; }
     public string? Country { get; set; }
     public string? BaseCurrency { get; set; }
     public string? ServiceLanguage { get; set; }

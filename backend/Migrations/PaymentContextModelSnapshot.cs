@@ -905,6 +905,11 @@ namespace PayPlanner.Api.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsClientAndSupplier")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -957,6 +962,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsActive")
                         .HasDatabaseName("IX_Clients_IsActive");
+
+                    b.HasIndex("IsClientAndSupplier")
+                        .HasDatabaseName("IX_Clients_IsClientAndSupplier");
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_Client_IsDeleted");
@@ -2168,6 +2176,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(8000)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("ClientStatusId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ContactEmailsJson")
                         .HasMaxLength(8000)
                         .HasColumnType("TEXT");
@@ -2241,6 +2252,11 @@ namespace PayPlanner.Api.Migrations
                     b.Property<string>("Inn")
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsClientAndSupplier")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -2398,11 +2414,17 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ClientStatusId")
+                        .HasDatabaseName("IX_LegalEntities_ClientStatusId");
+
                     b.HasIndex("DeletedAt")
                         .HasDatabaseName("IX_LegalEntity_DeletedAt_Audit");
 
                     b.HasIndex("Inn")
                         .HasDatabaseName("IX_LegalEntities_Inn");
+
+                    b.HasIndex("IsClientAndSupplier")
+                        .HasDatabaseName("IX_LegalEntities_IsClientAndSupplier");
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_LegalEntity_IsDeleted");
@@ -4348,17 +4370,17 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("PlannedDurationMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(60);
+
                     b.Property<string>("Priority")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(32)
                         .HasColumnType("TEXT")
                         .HasDefaultValue("normal");
-
-                    b.Property<int>("PlannedDurationMinutes")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(60);
 
                     b.Property<string>("RemindersJson")
                         .IsRequired()
@@ -5433,10 +5455,17 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
                 {
+                    b.HasOne("PayPlanner.Api.Models.ClientStatusEntity", "ClientStatus")
+                        .WithMany()
+                        .HasForeignKey("ClientStatusId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
                         .WithMany()
                         .HasForeignKey("ResponsibleUserId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientStatus");
 
                     b.Navigation("ResponsibleUser");
                 });

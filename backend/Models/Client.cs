@@ -39,6 +39,8 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public ClientStatusEntity? ClientStatus { get; set; }
 
+        public bool IsClientAndSupplier { get; set; }
+
         public int? ResponsibleUserId { get; set; }
 
         [JsonIgnore]

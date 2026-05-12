@@ -930,6 +930,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsClientAndSupplier")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -982,6 +987,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("IsActive")
                         .HasDatabaseName("IX_Clients_IsActive");
+
+                    b.HasIndex("IsClientAndSupplier")
+                        .HasDatabaseName("IX_Clients_IsClientAndSupplier");
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_Client_IsDeleted");
@@ -2225,6 +2233,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(8000)
                         .HasColumnType("character varying(8000)");
 
+                    b.Property<int?>("ClientStatusId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ContactEmailsJson")
                         .HasMaxLength(8000)
                         .HasColumnType("character varying(8000)");
@@ -2298,6 +2309,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<string>("Inn")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<bool>("IsClientAndSupplier")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -2455,11 +2471,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ClientStatusId")
+                        .HasDatabaseName("IX_LegalEntities_ClientStatusId");
+
                     b.HasIndex("DeletedAt")
                         .HasDatabaseName("IX_LegalEntity_DeletedAt_Audit");
 
                     b.HasIndex("Inn")
                         .HasDatabaseName("IX_LegalEntities_Inn");
+
+                    b.HasIndex("IsClientAndSupplier")
+                        .HasDatabaseName("IX_LegalEntities_IsClientAndSupplier");
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_LegalEntity_IsDeleted");
@@ -4461,17 +4483,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
 
+                    b.Property<int>("PlannedDurationMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(60);
+
                     b.Property<string>("Priority")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasDefaultValue("normal");
-
-                    b.Property<int>("PlannedDurationMinutes")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(60);
 
                     b.Property<string>("RemindersJson")
                         .IsRequired()
@@ -5563,10 +5585,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.LegalEntity", b =>
                 {
+                    b.HasOne("PayPlanner.Api.Models.ClientStatusEntity", "ClientStatus")
+                        .WithMany()
+                        .HasForeignKey("ClientStatusId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
                         .WithMany()
                         .HasForeignKey("ResponsibleUserId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientStatus");
 
                     b.Navigation("ResponsibleUser");
                 });

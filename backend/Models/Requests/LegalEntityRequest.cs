@@ -39,6 +39,10 @@ public class LegalEntityRequest
 
     public int? ResponsibleUserId { get; set; }
 
+    public int? ClientStatusId { get; set; }
+
+    public bool IsClientAndSupplier { get; set; }
+
     [MaxLength(100)]
     public string? Country { get; set; }
 

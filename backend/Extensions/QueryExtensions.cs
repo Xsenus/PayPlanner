@@ -235,6 +235,53 @@ namespace PayPlanner.Api.Extensions
             return q.Where(c => c.ResponsibleUserId == responsibleUserId.Value);
         }
 
+        public static IQueryable<Client> ApplyCounterpartyRoleFilter(this IQueryable<Client> q, string? counterpartyRole)
+        {
+            var normalized = NormalizeCounterpartyRole(counterpartyRole);
+            return normalized switch
+            {
+                "supplier" => q.Where(c =>
+                    c.IsClientAndSupplier ||
+                    (c.ClientStatus != null && ClientStatusSystemKeys.IsSupplierLike(c.ClientStatus.SystemKey))),
+                "client" => q.Where(c =>
+                    c.IsClientAndSupplier ||
+                    c.ClientStatus == null ||
+                    !ClientStatusSystemKeys.IsSupplierLike(c.ClientStatus.SystemKey)),
+                _ => q,
+            };
+        }
+
+        public static IQueryable<LegalEntity> ApplyCounterpartyRoleFilter(this IQueryable<LegalEntity> q, string? counterpartyRole)
+        {
+            var normalized = NormalizeCounterpartyRole(counterpartyRole);
+            return normalized switch
+            {
+                "supplier" => q.Where(e =>
+                    e.IsClientAndSupplier ||
+                    (e.ClientStatus != null && ClientStatusSystemKeys.IsSupplierLike(e.ClientStatus.SystemKey))),
+                "client" => q.Where(e =>
+                    e.IsClientAndSupplier ||
+                    e.ClientStatus == null ||
+                    !ClientStatusSystemKeys.IsSupplierLike(e.ClientStatus.SystemKey)),
+                _ => q,
+            };
+        }
+
+        public static string? NormalizeCounterpartyRole(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            return value.Trim().ToLowerInvariant() switch
+            {
+                "supplier" or "vendor" => "supplier",
+                "client" or "customer" => "client",
+                _ => null,
+            };
+        }
+
         public static IQueryable<Client> ApplyClientSort(this IQueryable<Client> q, string? sortBy, string? sortDir)
         {
             bool desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);

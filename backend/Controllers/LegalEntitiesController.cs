@@ -242,6 +242,12 @@ public class LegalEntitiesController : ControllerBase
         return await _db.Users.AsNoTracking().AnyAsync(u => u.Id == responsibleUserId.Value && u.IsActive, ct);
     }
 
+    private async Task<bool> ClientStatusExistsAsync(int? clientStatusId, CancellationToken ct)
+    {
+        if (!clientStatusId.HasValue) return true;
+        return await _db.ClientStatuses.AsNoTracking().AnyAsync(status => status.Id == clientStatusId.Value, ct);
+    }
+
     private async Task ApplyClientLinksAsync(int legalEntityId, IReadOnlyCollection<int> desiredClientIds, CancellationToken ct)
     {
         var desired = desiredClientIds.ToHashSet();
@@ -285,6 +291,18 @@ public class LegalEntitiesController : ControllerBase
             Director = entity.Director,
             ResponsibleUserId = entity.ResponsibleUserId,
             ResponsibleUserName = entity.ResponsibleUser?.FullName,
+            ClientStatusId = entity.ClientStatusId,
+            ClientStatus = entity.ClientStatus is null ? null : new ClientStatusDto
+            {
+                Id = entity.ClientStatus.Id,
+                Name = entity.ClientStatus.Name,
+                Description = entity.ClientStatus.Description,
+                ColorHex = entity.ClientStatus.ColorHex,
+                IsActive = entity.ClientStatus.IsActive,
+                CreatedAt = entity.ClientStatus.CreatedAt,
+                SystemKey = entity.ClientStatus.SystemKey,
+            },
+            IsClientAndSupplier = entity.IsClientAndSupplier,
             Country = entity.Country,
             BaseCurrency = entity.BaseCurrency,
             ServiceLanguage = entity.ServiceLanguage,
@@ -367,6 +385,7 @@ public class LegalEntitiesController : ControllerBase
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
+            .Include(le => le.ClientStatus)
             .FirstOrDefaultAsync(le => le.Id == id, ct);
     }
 
@@ -888,6 +907,11 @@ public class LegalEntitiesController : ControllerBase
             return BadRequest("Указанный ответственный не найден или неактивен");
         }
 
+        if (!await ClientStatusExistsAsync(request.ClientStatusId, ct))
+        {
+            return BadRequest($"Статус клиента #{request.ClientStatusId} не найден");
+        }
+
         var inlineAssetError = ValidateInlineAssetPayload(request);
         if (inlineAssetError is not null)
         {
@@ -919,6 +943,8 @@ public class LegalEntitiesController : ControllerBase
             Email = NormalizeOptional(request.Email),
             Director = NormalizeOptional(request.Director),
             ResponsibleUserId = request.ResponsibleUserId,
+            ClientStatusId = request.ClientStatusId,
+            IsClientAndSupplier = request.IsClientAndSupplier,
             Country = NormalizeOptional(request.Country),
             BaseCurrency = NormalizeOptional(request.BaseCurrency),
             ServiceLanguage = NormalizeOptional(request.ServiceLanguage),
@@ -991,6 +1017,7 @@ public class LegalEntitiesController : ControllerBase
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
+            .Include(le => le.ClientStatus)
             .FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {
@@ -1037,6 +1064,7 @@ public class LegalEntitiesController : ControllerBase
                 .Include(le => le.Clients)
                 .Include(le => le.Addresses)
                 .Include(le => le.ResponsibleUser)
+                .Include(le => le.ClientStatus)
                 .Where(le => state.CompanyIds.Contains(le.Id))
                 .OrderBy(le => le.ShortName)
                 .ToListAsync(ct);
@@ -1104,6 +1132,7 @@ public class LegalEntitiesController : ControllerBase
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
+            .Include(le => le.ClientStatus)
             .AsNoTracking()
             .FirstOrDefaultAsync(le => le.Id == mainCompanyId.Value, ct);
 
@@ -1123,6 +1152,7 @@ public class LegalEntitiesController : ControllerBase
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
+            .Include(le => le.ClientStatus)
             .AsNoTracking()
             .FirstOrDefaultAsync(le => le.Id == id, ct);
 
@@ -1194,12 +1224,16 @@ public class LegalEntitiesController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<LegalEntityListItemDto>>> GetAll([FromQuery] string? search, CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<LegalEntityListItemDto>>> GetAll(
+        [FromQuery] string? search,
+        CancellationToken ct,
+        [FromQuery] string? counterpartyRole = null)
     {
         var query = await ApplyCompanyVisibilityAsync(_db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
+            .Include(le => le.ClientStatus)
             .AsQueryable(), ct);
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -1213,6 +1247,8 @@ public class LegalEntitiesController : ControllerBase
                 (le.Ogrn ?? string.Empty).ToLower().Contains(term));
         }
 
+        query = query.ApplyCounterpartyRoleFilter(counterpartyRole);
+
         var items = await query
             .OrderBy(le => le.ShortName)
             .ToListAsync(ct);
@@ -1225,7 +1261,8 @@ public class LegalEntitiesController : ControllerBase
         [FromQuery] string? search,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] string? counterpartyRole = null)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
@@ -1246,12 +1283,15 @@ public class LegalEntitiesController : ControllerBase
                 (le.Address ?? string.Empty).ToLower().Contains(term));
         }
 
+        baseQuery = baseQuery.ApplyCounterpartyRoleFilter(counterpartyRole);
+
         var total = await baseQuery.CountAsync(ct);
 
         var items = await baseQuery
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
+            .Include(le => le.ClientStatus)
             .OrderBy(le => le.ShortName)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -1565,6 +1605,7 @@ public class LegalEntitiesController : ControllerBase
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
+            .Include(le => le.ClientStatus)
             .FirstOrDefaultAsync(le => le.Id == id, ct);
 
         if (entity is null)
@@ -1712,6 +1753,7 @@ public class LegalEntitiesController : ControllerBase
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
+            .Include(le => le.ClientStatus)
             .FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {
@@ -1721,6 +1763,11 @@ public class LegalEntitiesController : ControllerBase
         if (!await ResponsibleUserExistsAsync(request.ResponsibleUserId, ct))
         {
             return BadRequest("Указанный ответственный не найден или неактивен");
+        }
+
+        if (!await ClientStatusExistsAsync(request.ClientStatusId, ct))
+        {
+            return BadRequest($"Статус клиента #{request.ClientStatusId} не найден");
         }
 
         var inlineAssetError = ValidateInlineAssetPayload(request);
@@ -1751,6 +1798,8 @@ public class LegalEntitiesController : ControllerBase
         entity.Email = NormalizeOptional(request.Email);
         entity.Director = NormalizeOptional(request.Director);
         entity.ResponsibleUserId = request.ResponsibleUserId;
+        entity.ClientStatusId = request.ClientStatusId;
+        entity.IsClientAndSupplier = request.IsClientAndSupplier;
         entity.Country = NormalizeOptional(request.Country);
         entity.BaseCurrency = NormalizeOptional(request.BaseCurrency);
         entity.ServiceLanguage = NormalizeOptional(request.ServiceLanguage);

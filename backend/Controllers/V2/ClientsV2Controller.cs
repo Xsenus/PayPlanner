@@ -73,7 +73,8 @@ public class ClientsV2Controller : ControllerBase
         [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        [FromQuery] string? counterpartyRole = null)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 500);
@@ -183,6 +184,8 @@ public class ClientsV2Controller : ControllerBase
 
         if (isActive.HasValue)
             q = q.Where(c => c.IsActive == isActive.Value);
+
+        q = q.ApplyCounterpartyRoleFilter(counterpartyRole);
 
         bool desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
         q = (sortBy?.ToLowerInvariant()) switch
@@ -531,6 +534,7 @@ public class ClientsV2Controller : ControllerBase
         e.LegalEntityId = model.LegalEntityId;
         e.ResponsibleUserId = responsibleUserId;
         e.ClientStatusId = model.ClientStatusId;
+        e.IsClientAndSupplier = model.IsClientAndSupplier;
 
         await _db.SaveChangesAsync(ct);
         await _db.Entry(e).Reference(c => c.ResponsibleUser).LoadAsync(ct);
