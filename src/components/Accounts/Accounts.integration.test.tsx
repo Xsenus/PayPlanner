@@ -19,6 +19,7 @@ const {
   toastErrorMock,
   updateInvoiceManagedPaymentMock,
   updatePaymentMock,
+  getDocumentStatusesMock,
   getClientBalanceMock,
   applyClientBalanceMock,
 } = vi.hoisted(() => ({
@@ -35,6 +36,7 @@ const {
   toastErrorMock: vi.fn(),
   updateInvoiceManagedPaymentMock: vi.fn(),
   updatePaymentMock: vi.fn(),
+  getDocumentStatusesMock: vi.fn(),
   getClientBalanceMock: vi.fn(),
   applyClientBalanceMock: vi.fn(),
 }));
@@ -281,6 +283,7 @@ vi.mock('../../services/api', () => ({
     getActResponsibles: getActResponsiblesMock,
     updateInvoiceManagedPayment: updateInvoiceManagedPaymentMock,
     updatePayment: updatePaymentMock,
+    getDocumentStatuses: getDocumentStatusesMock,
     getClientBalance: getClientBalanceMock,
     applyClientBalance: applyClientBalanceMock,
   },
@@ -496,6 +499,7 @@ describe('Accounts integration', () => {
     toastErrorMock.mockReset();
     updateInvoiceManagedPaymentMock.mockReset();
     updatePaymentMock.mockReset();
+    getDocumentStatusesMock.mockReset();
     getClientBalanceMock.mockReset();
     applyClientBalanceMock.mockReset();
     createPaymentMock.mockReset();
@@ -544,6 +548,7 @@ describe('Accounts integration', () => {
     getActResponsiblesMock.mockResolvedValue([]);
     updateInvoiceManagedPaymentMock.mockResolvedValue(createSiblingPayment());
     updatePaymentMock.mockResolvedValue(createSiblingPayment());
+    getDocumentStatusesMock.mockResolvedValue([]);
     getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 0 });
     applyClientBalanceMock.mockResolvedValue({ appliedAmount: 0, balance: 0 });
     createPaymentMock.mockResolvedValue(createSiblingPayment({ id: 600 }));
@@ -648,6 +653,48 @@ describe('Accounts integration', () => {
     expect(row).toBeTruthy();
     expect(within(row as HTMLTableRowElement).getByText('Оплачен')).toBeTruthy();
     expect(within(row as HTMLTableRowElement).getByText('Подписан клиентом')).toBeTruthy();
+  });
+
+  it('uses the document status dictionary label in the accounts journal', async () => {
+    getDocumentStatusesMock.mockResolvedValue([
+      {
+        id: 31,
+        code: 'SignedByClient',
+        name: 'Подписан клиентом (справочник)',
+        description: '',
+        colorHex: '#10b981',
+        isActive: true,
+        useForInvoices: true,
+        useForActs: true,
+        useForContracts: true,
+        sortOrder: 9,
+        createdAt: '2026-04-02T10:00:00Z',
+      },
+    ]);
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        createAccountRow({
+          invoice: createInvoice({
+            workflowStatus: 'SignedByClient',
+            signedAt: '2026-04-03T12:00:00Z',
+          }),
+          status: 'paid',
+        }),
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts />);
+
+    const row = screen.getByRole('button', { name: '24' }).closest('tr');
+    expect(row).toBeTruthy();
+    expect(await within(row as HTMLTableRowElement).findByText('Подписан клиентом (справочник)')).toBeTruthy();
+    expect(within(row as HTMLTableRowElement).queryByText(/^Подписан$/)).toBeNull();
   });
 
   it('shows client signature requirement separately from payment status', () => {

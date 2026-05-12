@@ -2784,6 +2784,13 @@ export function Accounts({
                     const invoiceId = typeof invoice?.id === 'number' ? invoice.id : null;
                     const accountStatus = row.status;
                     const signingStatus = deriveInvoiceSigningStatus(invoice);
+                    const workflowStatus = invoice?.workflowStatus;
+                    const documentStatusLabel = workflowStatus
+                      ? (invoiceWorkflowStatusLabels[workflowStatus] ?? signingStatusLabels[signingStatus])
+                      : signingStatusLabels[signingStatus];
+                    const documentStatusClass = workflowStatus
+                      ? (invoiceWorkflowStatusClasses[workflowStatus] ?? signingStatusClasses[signingStatus])
+                      : signingStatusClasses[signingStatus];
                     const type = row.type;
                     const typeBadgeClass = typeBadgeClasses[type];
                     const typeLabel = typeLabels[type];
@@ -2917,13 +2924,13 @@ export function Accounts({
                                         className="inline-flex max-w-full rounded-full transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                         title="Изменить статус документа"
                                       >
-                                        <span className={`${statusBadgeClass} ${signingStatusClasses[signingStatus]}`}>
-                                          {signingStatusLabels[signingStatus]}
+                                        <span className={`${statusBadgeClass} ${documentStatusClass}`}>
+                                          {documentStatusLabel}
                                         </span>
                                       </button>
                                     ) : (
-                                      <span className={`${statusBadgeClass} ${signingStatusClasses[signingStatus]}`}>
-                                        {signingStatusLabels[signingStatus]}
+                                      <span className={`${statusBadgeClass} ${documentStatusClass}`}>
+                                        {documentStatusLabel}
                                       </span>
                                     )}
                                   </td>
