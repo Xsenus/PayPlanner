@@ -51,6 +51,10 @@ type LinkedInvoiceContext = {
   type?: PaymentKind;
 };
 
+function isCashPaymentSourceName(name?: string | null): boolean {
+  return Boolean(name && /кас|налич|cash/i.test(name));
+}
+
 function parseDecimal(value: string): number {
   if (!value) return 0;
   const normalized = value.replace(',', '.').replace(/[^0-9.-]/g, '');
@@ -251,11 +255,29 @@ export function PaymentModal({
     () => paymentSources.find((source) => String(source.id) === formData.paymentSourceId) ?? null,
     [formData.paymentSourceId, paymentSources],
   );
+  const isCashPaymentSource = isCashPaymentSourceName(selectedPaymentSource?.name);
+  const isIncomingCashPayment = formData.type === 'Income' && isCashPaymentSource;
+  const isOutgoingCashPayment = formData.type === 'Expense' && isCashPaymentSource;
   const showPaymentDocumentFields = Boolean(
     formData.paymentOrderNumber
     || formData.paymentDocumentDate
-    || (selectedPaymentSource && !/налич/i.test(selectedPaymentSource.name)),
+    || selectedPaymentSource,
   );
+  const paymentDocumentNumberLabel = isIncomingCashPayment
+    ? '№ приходника'
+    : isOutgoingCashPayment
+      ? '№ расходника'
+      : '№ документа';
+  const paymentDocumentDateLabel = isIncomingCashPayment
+    ? 'Дата приходника'
+    : isOutgoingCashPayment
+      ? 'Дата расходника'
+      : 'Дата документа';
+  const paymentDocumentNumberPlaceholder = isIncomingCashPayment
+    ? 'Например: ПКО-2026-0001'
+    : isOutgoingCashPayment
+      ? 'Например: РКО-2026-0001'
+      : 'Например: п/п 458 или ордер 17';
   const selectedInvoiceSummary = useMemo(() => {
     if (!formData.invoiceId) return null;
 
@@ -2453,7 +2475,7 @@ export function PaymentModal({
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          № документа
+                          {paymentDocumentNumberLabel}
                         </label>
                         <input
                           type="text"
@@ -2461,13 +2483,13 @@ export function PaymentModal({
                           value={formData.paymentOrderNumber}
                           onChange={handleChange}
                           maxLength={100}
-                          placeholder="Например: п/п 458 или ордер 17"
+                          placeholder={paymentDocumentNumberPlaceholder}
                           className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Дата документа
+                          {paymentDocumentDateLabel}
                         </label>
                         <input
                           type="date"

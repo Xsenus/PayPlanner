@@ -569,6 +569,77 @@ describe('PaymentModal integration', () => {
     );
   });
 
+  it('shows editable cash order fields for incoming cash payments', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 992,
+          date: '2026-04-20',
+          plannedDate: '2026-04-20',
+          amount: 25_000,
+          paidAmount: 25_000,
+          outstandingAmount: 0,
+          hasPartialPayment: false,
+          status: 'Completed',
+          description: 'Наличный платеж по счету',
+          isPaid: true,
+          paidDate: '2026-04-20',
+          lastPaymentDate: '2026-04-20',
+          notes: '',
+          clientId: 77,
+          clientCaseId: 501,
+          paymentSourceId: 6,
+          type: 'Income',
+          account: '33',
+          accountDate: '2026-04-03',
+          documentKind: 'Payment',
+          createdAt: '2026-04-20T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Income Case 501',
+            status: 'Open',
+            clientId: 77,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    const orderInput = document.body.querySelector(
+      'input[name="paymentOrderNumber"]',
+    ) as HTMLInputElement | null;
+    const dateInput = document.body.querySelector(
+      'input[name="paymentDocumentDate"]',
+    ) as HTMLInputElement | null;
+    expect(orderInput).not.toBeNull();
+    expect(dateInput).not.toBeNull();
+
+    fireEvent.change(orderInput!, { target: { value: 'ПКО-2026-0009' } });
+    fireEvent.change(dateInput!, { target: { value: '2026-04-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 992,
+        clientId: 77,
+        clientCaseId: 501,
+        paymentSourceId: 6,
+        paymentOrderNumber: 'ПКО-2026-0009',
+        paymentDocumentDate: '2026-04-20',
+        type: 'Income',
+      }),
+    );
+  });
+
   it('submits the full overpaid amount and shows balance warning', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 

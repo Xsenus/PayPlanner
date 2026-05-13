@@ -109,6 +109,7 @@ public class PaymentsController : ControllerBase
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
         await ApplyPaymentOverpaymentHandlingAsync(model, rawPaidAmount, now, ct);
+        await SyncPaymentCashOrderAsync(model, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, model);
@@ -263,6 +264,7 @@ public class PaymentsController : ControllerBase
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
         await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, ct);
+        await SyncPaymentCashOrderAsync(e, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         if (originalInvoiceId.HasValue
             && originalInvoiceId.Value > 0
@@ -349,6 +351,7 @@ public class PaymentsController : ControllerBase
         }
 
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.PaidAmount, now, HttpContext, ct);
+        await SyncPaymentCashOrderAsync(payment, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, payment, now, ct);
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, payment);
@@ -513,6 +516,7 @@ public class PaymentsController : ControllerBase
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
         await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, ct);
+        await SyncPaymentCashOrderAsync(e, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, e);
@@ -1542,6 +1546,120 @@ public class PaymentsController : ControllerBase
         orderToUpdate.UpdatedAt = now;
     }
 
+    private async Task SyncPaymentCashOrderAsync(Payment payment, DateTime now, CancellationToken ct)
+    {
+        if (payment.Id <= 0)
+        {
+            return;
+        }
+
+        var existingOrders = await _db.CashOrders
+            .Where(order =>
+                order.PaymentId == payment.Id &&
+                order.MoneyOperationId == null &&
+                order.Status != CashOrderStatus.Cancelled)
+            .OrderBy(order => order.Id)
+            .ToListAsync(ct);
+
+        var paymentSourceName = await ResolvePaymentSourceNameAsync(payment, ct);
+        var isCashPayment = ResolveMoneyOperationSource(paymentSourceName) == MoneyOperationSource.Cash;
+        var shouldHaveCashOrder = isCashPayment
+            && payment.Status == PaymentStatus.Completed
+            && payment.PaidAmount > AmountTolerance;
+
+        if (!shouldHaveCashOrder)
+        {
+            foreach (var order in existingOrders)
+            {
+                order.Status = CashOrderStatus.Cancelled;
+                order.CancelledAt = now;
+                order.CancelledReason = "Платеж больше не является выполненным наличным платежом.";
+                order.UpdatedAt = now;
+            }
+
+            return;
+        }
+
+        var orderType = payment.Type == PaymentType.Expense
+            ? CashOrderType.Outgoing
+            : CashOrderType.Incoming;
+        var orderDate = (payment.PaymentDocumentDate ?? payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
+        var orderToUpdate = existingOrders.FirstOrDefault();
+        var orderNumber = Normalize(payment.PaymentOrderNumber)
+            ?? orderToUpdate?.Number
+            ?? await GenerateCashOrderNumberAsync(orderType, orderDate, ct);
+
+        payment.PaymentOrderNumber = orderNumber;
+        payment.PaymentDocumentDate = orderDate;
+
+        foreach (var duplicate in existingOrders.Skip(1))
+        {
+            duplicate.Status = CashOrderStatus.Cancelled;
+            duplicate.CancelledAt = now;
+            duplicate.CancelledReason = "Дубль кассового ордера по платежу отменен при синхронизации.";
+            duplicate.UpdatedAt = now;
+        }
+
+        var counterpartyName = await ResolvePaymentCounterpartyNameAsync(payment, ct);
+        var basis = BuildPaymentCashOrderBasis(payment);
+        var clientId = payment.Type == PaymentType.Expense
+            ? payment.ExpenseClientId
+            : payment.ClientId;
+
+        if (orderToUpdate is null)
+        {
+            _db.CashOrders.Add(new CashOrder
+            {
+                Number = orderNumber,
+                Type = orderType,
+                Status = CashOrderStatus.Posted,
+                Date = orderDate,
+                Amount = payment.PaidAmount,
+                Currency = "RUB",
+                ClientId = clientId,
+                PaymentId = payment.Id,
+                InvoiceId = payment.InvoiceId,
+                Account = payment.Account,
+                PayerName = orderType == CashOrderType.Incoming ? counterpartyName : null,
+                ReceiverName = orderType == CashOrderType.Outgoing ? counterpartyName : null,
+                Basis = basis,
+                Comment = payment.Notes,
+                CreatedAt = now,
+            });
+            return;
+        }
+
+        orderToUpdate.Number = orderNumber;
+        orderToUpdate.Type = orderType;
+        orderToUpdate.Status = CashOrderStatus.Posted;
+        orderToUpdate.Date = orderDate;
+        orderToUpdate.Amount = payment.PaidAmount;
+        orderToUpdate.Currency = "RUB";
+        orderToUpdate.ClientId = clientId;
+        orderToUpdate.PaymentId = payment.Id;
+        orderToUpdate.InvoiceId = payment.InvoiceId;
+        orderToUpdate.Account = payment.Account;
+        orderToUpdate.PayerName = orderType == CashOrderType.Incoming ? counterpartyName : null;
+        orderToUpdate.ReceiverName = orderType == CashOrderType.Outgoing ? counterpartyName : null;
+        orderToUpdate.Basis = basis;
+        orderToUpdate.Comment = payment.Notes;
+        orderToUpdate.UpdatedAt = now;
+    }
+
+    private static string BuildPaymentCashOrderBasis(Payment payment)
+    {
+        var action = payment.Type == PaymentType.Expense
+            ? "Выдача наличных"
+            : "Прием наличных";
+        var invoicePart = string.IsNullOrWhiteSpace(payment.Account)
+            ? null
+            : $"счет №{payment.Account.Trim()}";
+        var descriptionPart = Normalize(payment.Description);
+
+        return string.Join(". ", new[] { action, invoicePart, descriptionPart }
+            .Where(part => !string.IsNullOrWhiteSpace(part)));
+    }
+
     private async Task RemovePaymentOverpaymentRefundOperationAsync(int paymentId, CancellationToken ct)
     {
         if (paymentId <= 0)
@@ -1585,6 +1703,27 @@ public class PaymentsController : ControllerBase
 
     private async Task<string?> ResolvePaymentCounterpartyNameAsync(Payment payment, CancellationToken ct)
     {
+        if (payment.Type == PaymentType.Expense)
+        {
+            if (payment.ExpenseClientId.HasValue)
+            {
+                return await _db.Clients
+                    .AsNoTracking()
+                    .Where(client => client.Id == payment.ExpenseClientId.Value)
+                    .Select(client => client.Name)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            if (payment.ExpenseLegalEntityId.HasValue)
+            {
+                return await _db.LegalEntities
+                    .AsNoTracking()
+                    .Where(entity => entity.Id == payment.ExpenseLegalEntityId.Value)
+                    .Select(entity => entity.ShortName ?? entity.FullName)
+                    .FirstOrDefaultAsync(ct);
+            }
+        }
+
         if (payment.ClientId.HasValue)
         {
             return await _db.Clients
@@ -1609,7 +1748,8 @@ public class PaymentsController : ControllerBase
     private static MoneyOperationSource ResolveMoneyOperationSource(string? sourceName)
     {
         if (ContainsPaymentSourceToken(sourceName, "кас") ||
-            ContainsPaymentSourceToken(sourceName, "налич"))
+            ContainsPaymentSourceToken(sourceName, "налич") ||
+            ContainsPaymentSourceToken(sourceName, "cash"))
         {
             return MoneyOperationSource.Cash;
         }

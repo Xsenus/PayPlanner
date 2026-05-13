@@ -835,7 +835,7 @@ public class PaymentsControllerTests
         var client = new Client { Name = "Invoice client" };
         var invoice = new Invoice { Number = "33", Date = new DateTime(2026, 4, 3) };
         var bankSource = new PaymentSource { Name = "Bank" };
-        var cashSource = new PaymentSource { Name = "Cash" };
+        var cashSource = new PaymentSource { Name = "Наличные" };
         var parentIncomeType = new IncomeType { Name = "Parent income", PaymentType = PaymentType.Income };
         var serviceIncomeType = new IncomeType { Name = "Service income", PaymentType = PaymentType.Income };
         var parentDealType = new DealType { Name = "Parent deal" };
@@ -904,6 +904,8 @@ public class PaymentsControllerTests
         Assert.Equal(completedPaymentStatus.Id, updated.PaymentStatusId);
         Assert.Equal(PaymentStatus.Completed, updated.Status);
         Assert.True(updated.IsPaid);
+        Assert.StartsWith("ПКО-2026-", updated.PaymentOrderNumber);
+        Assert.Equal(paidDate, updated.PaymentDocumentDate);
 
         db.ChangeTracker.Clear();
         var stored = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == installment.Id);
@@ -912,6 +914,45 @@ public class PaymentsControllerTests
         Assert.Equal(legalDealType.Id, stored.DealTypeId);
         Assert.Equal(completedPaymentStatus.Id, stored.PaymentStatusId);
         Assert.Equal(PaymentStatus.Completed, stored.Status);
+        Assert.StartsWith("ПКО-2026-", stored.PaymentOrderNumber);
+        Assert.Equal(paidDate, stored.PaymentDocumentDate);
+
+        var cashOrder = await db.CashOrders.AsNoTracking().SingleAsync(order => order.PaymentId == installment.Id);
+        Assert.Equal(stored.PaymentOrderNumber, cashOrder.Number);
+        Assert.Equal(CashOrderType.Incoming, cashOrder.Type);
+        Assert.Equal(CashOrderStatus.Posted, cashOrder.Status);
+        Assert.Equal(installment.Amount, cashOrder.Amount);
+        Assert.Equal(paidDate, cashOrder.Date);
+
+        db.ChangeTracker.Clear();
+        var edited = CreatePayment(installment.Date, installment.Amount, "Cash installment 1/8");
+        edited.InvoiceId = null;
+        edited.Account = "BROKEN";
+        edited.AccountDate = new DateTime(2030, 1, 1);
+        edited.SystemNotes = stored.SystemNotes;
+        edited.PaymentSourceId = cashSource.Id;
+        edited.IncomeTypeId = serviceIncomeType.Id;
+        edited.DealTypeId = legalDealType.Id;
+        edited.PaymentStatusId = completedPaymentStatus.Id;
+        edited.Status = PaymentStatus.Completed;
+        edited.PaidAmount = installment.Amount;
+        edited.PaidDate = paidDate;
+        edited.LastPaymentDate = paidDate;
+        edited.PaymentOrderNumber = "ПКО-2026-0099";
+        edited.PaymentDocumentDate = paidDate.AddDays(1);
+
+        var editedActionResult = await controller.UpdateInvoiceManaged(installment.Id, edited, CancellationToken.None);
+
+        var editedOk = Assert.IsType<OkObjectResult>(editedActionResult);
+        var editedPayment = Assert.IsType<Payment>(editedOk.Value);
+        Assert.Equal("ПКО-2026-0099", editedPayment.PaymentOrderNumber);
+        Assert.Equal(paidDate.AddDays(1), editedPayment.PaymentDocumentDate);
+
+        db.ChangeTracker.Clear();
+        var editedOrder = await db.CashOrders.AsNoTracking().SingleAsync(order => order.PaymentId == installment.Id);
+        Assert.Equal("ПКО-2026-0099", editedOrder.Number);
+        Assert.Equal(paidDate.AddDays(1), editedOrder.Date);
+        Assert.Equal(installment.Amount, editedOrder.Amount);
     }
 
     [Fact]
