@@ -15,6 +15,7 @@ const {
   getLegalEntitiesPagedMock,
   getClientBalanceMock,
   applyClientBalanceMock,
+  getNextCashOrderNumberMock,
   invoiceModalPropsSpy,
   toastErrorMock,
   toastSuccessMock,
@@ -30,6 +31,7 @@ const {
   getLegalEntitiesPagedMock: vi.fn(),
   getClientBalanceMock: vi.fn(),
   applyClientBalanceMock: vi.fn(),
+  getNextCashOrderNumberMock: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -119,6 +121,7 @@ vi.mock('../../services/api', () => ({
     getLegalEntitiesPaged: getLegalEntitiesPagedMock,
     getClientBalance: getClientBalanceMock,
     applyClientBalance: applyClientBalanceMock,
+    getNextCashOrderNumber: getNextCashOrderNumberMock,
   },
 }));
 
@@ -233,6 +236,7 @@ describe('PaymentModal integration', () => {
     getLegalEntitiesPagedMock.mockReset();
     getClientBalanceMock.mockReset();
     applyClientBalanceMock.mockReset();
+    getNextCashOrderNumberMock.mockReset();
     invoiceModalPropsSpy.mockReset();
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
@@ -292,6 +296,11 @@ describe('PaymentModal integration', () => {
     });
     getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 0 });
     applyClientBalanceMock.mockResolvedValue({ appliedAmount: 0, balance: 0 });
+    getNextCashOrderNumberMock.mockResolvedValue({
+      number: 'ПКО-2026-0007',
+      type: 'Incoming',
+      date: '2026-04-20',
+    });
   });
 
   it('shows the locked linked invoice context for a payment created from an invoice', async () => {
@@ -637,11 +646,17 @@ describe('PaymentModal integration', () => {
     expect(serviceSelect).not.toBeNull();
     expect(sourceSelect).not.toBeNull();
 
+    await waitFor(() => {
+      expect(getNextCashOrderNumberMock).toHaveBeenCalledWith('Incoming', '2026-04-20');
+      expect(orderInput!.value).toBe('ПКО-2026-0007');
+      expect(dateInput!.value).toBe('2026-04-20');
+    });
+
     fireEvent.change(dealTypeSelect!, { target: { value: '7' } });
     fireEvent.change(incomeTypeSelect!, { target: { value: '8' } });
     fireEvent.change(serviceSelect!, { target: { value: '9' } });
     fireEvent.change(sourceSelect!, { target: { value: '6' } });
-    fireEvent.change(orderInput!, { target: { value: 'ПКО-2026-0009' } });
+    fireEvent.change(orderInput!, { target: { value: 'ПКО-2026-0099' } });
     fireEvent.change(dateInput!, { target: { value: '2026-04-20' } });
     fireEvent.click(screen.getByRole('button', { name: 'save' }));
 
@@ -655,7 +670,7 @@ describe('PaymentModal integration', () => {
         incomeTypeId: 8,
         serviceId: 9,
         paymentSourceId: 6,
-        paymentOrderNumber: 'ПКО-2026-0009',
+        paymentOrderNumber: 'ПКО-2026-0099',
         paymentDocumentDate: '2026-04-20',
         type: 'Income',
       }),

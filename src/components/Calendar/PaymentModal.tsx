@@ -16,6 +16,7 @@ import type {
   Invoice,
   InvoiceInput,
   ActResponsible,
+  CashOrderType,
   ApplyClientBalanceResult,
   PaymentOverpaymentHandling,
 } from '../../types';
@@ -53,6 +54,11 @@ type LinkedInvoiceContext = {
 
 function isCashPaymentSourceName(name?: string | null): boolean {
   return Boolean(name && /кас|налич|cash/i.test(name));
+}
+
+function isCashOrderNumberForType(value: string, type: CashOrderType): boolean {
+  const prefix = type === 'Incoming' ? 'ПКО' : 'РКО';
+  return value.trim().toLocaleUpperCase('ru-RU').startsWith(prefix);
 }
 
 function parseDecimal(value: string): number {
@@ -139,6 +145,7 @@ export function PaymentModal({
   linkedInvoice,
 }: PaymentModalProps) {
   const formRef = useRef<HTMLFormElement>(null);
+  const autoCashOrderDraftRef = useRef<{ number: string; date: string; type: CashOrderType } | null>(null);
 
   const { clients, loading: clientsLoading } = useClients();
   const { legalEntities, loading: legalEntitiesLoading, error: legalEntitiesError } = useLegalEntities();
@@ -259,6 +266,7 @@ export function PaymentModal({
   const isCashPaymentSource = isCashPaymentSourceName(selectedPaymentSource?.name);
   const isIncomingCashPayment = formData.type === 'Income' && isCashPaymentSource;
   const isOutgoingCashPayment = formData.type === 'Expense' && isCashPaymentSource;
+  const cashOrderType: CashOrderType = formData.type === 'Expense' ? 'Outgoing' : 'Incoming';
   const showPaymentDocumentFields = Boolean(
     formData.paymentOrderNumber
     || formData.paymentDocumentDate
@@ -412,6 +420,97 @@ export function PaymentModal({
     hasLockedInvoice,
     invoicePickerOpen,
     invoiceSearch,
+    isOpen,
+  ]);
+
+  useEffect(() => {
+    if (!isOpen || !isCashPaymentSource) {
+      autoCashOrderDraftRef.current = null;
+      return;
+    }
+
+    const documentDate =
+      formData.paymentDocumentDate ||
+      formData.lastPaymentDate ||
+      formData.paidDate ||
+      formData.date ||
+      todayYMD();
+    const currentNumber = formData.paymentOrderNumber.trim();
+    const currentDraft = autoCashOrderDraftRef.current;
+
+    if (
+      currentNumber &&
+      currentDraft &&
+      currentNumber === currentDraft.number &&
+      currentDraft.date === documentDate &&
+      currentDraft.type === cashOrderType
+    ) {
+      return;
+    }
+
+    if (currentNumber && currentNumber !== currentDraft?.number) {
+      const canReplaceNonCashNumber = !currentDraft && !isCashOrderNumberForType(currentNumber, cashOrderType);
+      if (!canReplaceNonCashNumber) {
+        return;
+      }
+    }
+
+    let cancelled = false;
+    const previousDraftNumber = currentDraft?.number ?? '';
+    const numberBeforeRequest = currentNumber;
+    const shouldReplaceNonCashNumber = Boolean(
+      currentNumber &&
+      !currentDraft &&
+      !isCashOrderNumberForType(currentNumber, cashOrderType),
+    );
+    void apiService
+      .getNextCashOrderNumber(cashOrderType, documentDate)
+      .then((result) => {
+        if (cancelled || !result?.number) return;
+
+        const resultDate = toDateInputValue(result.date) || documentDate;
+        setFormData((prev) => {
+          const prevNumber = prev.paymentOrderNumber.trim();
+          if (
+            prevNumber &&
+            prevNumber !== previousDraftNumber &&
+            (!shouldReplaceNonCashNumber || prevNumber !== numberBeforeRequest)
+          ) {
+            return prev;
+          }
+
+          autoCashOrderDraftRef.current = {
+            number: result.number,
+            date: resultDate,
+            type: result.type ?? cashOrderType,
+          };
+
+          if (prev.paymentOrderNumber === result.number && prev.paymentDocumentDate === resultDate) {
+            return prev;
+          }
+
+          return {
+            ...prev,
+            paymentOrderNumber: result.number,
+            paymentDocumentDate: prev.paymentDocumentDate || resultDate,
+          };
+        });
+      })
+      .catch(() => {
+        // Если номер заранее получить не удалось, сервер присвоит его при сохранении платежа.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    cashOrderType,
+    formData.date,
+    formData.lastPaymentDate,
+    formData.paidDate,
+    formData.paymentDocumentDate,
+    formData.paymentOrderNumber,
+    isCashPaymentSource,
     isOpen,
   ]);
 
@@ -906,6 +1005,18 @@ export function PaymentModal({
     setFormData((s) => ({ ...s, paidAmount: value }));
   };
 
+  const resolvePaymentOrderNumberForSubmit = () => {
+    const value = formData.paymentOrderNumber.trim();
+    if (!value) return undefined;
+
+    const draft = autoCashOrderDraftRef.current;
+    if (isCashPaymentSource && draft?.number === value) {
+      return undefined;
+    }
+
+    return value;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const pickedCat = incomeTypes.find((it) => String(it.id) === formData.incomeTypeId);
@@ -1051,7 +1162,7 @@ export function PaymentModal({
         paymentStatusId: formData.paymentStatusId
           ? parseInt(formData.paymentStatusId, 10)
           : undefined,
-        paymentOrderNumber: formData.paymentOrderNumber.trim() || undefined,
+        paymentOrderNumber: resolvePaymentOrderNumberForSubmit(),
         paymentDocumentDate: formData.paymentDocumentDate
           ? fromInputToApiDate(formData.paymentDocumentDate)
           : undefined,
@@ -1556,7 +1667,7 @@ export function PaymentModal({
       serviceId: formData.serviceId ? parseInt(formData.serviceId, 10) : undefined,
       paymentSourceId: formData.paymentSourceId ? parseInt(formData.paymentSourceId, 10) : undefined,
       paymentStatusId: formData.paymentStatusId ? parseInt(formData.paymentStatusId, 10) : undefined,
-      paymentOrderNumber: formData.paymentOrderNumber.trim() || undefined,
+      paymentOrderNumber: resolvePaymentOrderNumberForSubmit(),
       paymentDocumentDate: formData.paymentDocumentDate
         ? fromInputToApiDate(formData.paymentDocumentDate)
         : undefined,

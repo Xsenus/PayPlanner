@@ -1840,8 +1840,18 @@ public class PaymentsController : ControllerBase
     {
         var prefix = type == CashOrderType.Incoming ? "ПКО" : "РКО";
         var yearPrefix = $"{prefix}-{date:yyyy}-";
-        var count = await _db.CashOrders.CountAsync(order => order.Number.StartsWith(yearPrefix), ct);
-        return $"{yearPrefix}{count + 1:0000}";
+        var sequence = await _db.CashOrders.CountAsync(order => order.Number.StartsWith(yearPrefix), ct) + 1;
+
+        while (true)
+        {
+            var number = $"{yearPrefix}{sequence:0000}";
+            if (!await _db.CashOrders.AnyAsync(order => order.Number == number, ct))
+            {
+                return number;
+            }
+
+            sequence++;
+        }
     }
 
     private static string BuildPaymentOverpaymentRefundKey(int paymentId) => $"payment-overpayment-refund:{paymentId}";

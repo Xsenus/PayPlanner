@@ -3296,6 +3296,11 @@ export class ApiService {
     return this.request<CashOrder>(`/cash-orders/from-money-operation/${operationId}`, { method: 'POST' });
   }
 
+  async getNextCashOrderNumber(type: CashOrder['type'], date: string) {
+    const q = buildQuery({ type, date });
+    return this.request<NextCashOrderNumber>(`/cash-orders/next-number${q}`);
+  }
+
   async createCashOrder(payload: CashOrder) {
     return this.request<CashOrder>('/cash-orders', {
       method: 'POST',
@@ -3560,6 +3565,7 @@ import type {
   CashInventoryCreateRequest,
   CashOrder,
   CashOrderRegister,
+  NextCashOrderNumber,
   BankStatementImportBatch,
   BankStatementImportBatchDetail,
   BankStatementImportRollbackResult,

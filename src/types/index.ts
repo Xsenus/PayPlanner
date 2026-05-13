@@ -628,6 +628,12 @@ export interface CashOrder {
   updatedAt?: string | null;
 }
 
+export interface NextCashOrderNumber {
+  number: string;
+  type: CashOrderType;
+  date: string;
+}
+
 export interface CashBookDay {
   date: string;
   openingBalance: number;

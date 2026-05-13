@@ -47,6 +47,22 @@ public class CashOrdersController : ControllerBase
         return Content(BuildCashBookPrintHtml(cashBook), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
+    [HttpGet("next-number")]
+    public async Task<IActionResult> GetNextNumber(
+        [FromQuery] CashOrderType type,
+        [FromQuery] DateTime? date,
+        CancellationToken ct)
+    {
+        var effectiveDate = (date ?? DateTime.Today).Date;
+        var number = await GenerateNumberAsync(type, effectiveDate, ct);
+        return Ok(new
+        {
+            number,
+            type,
+            date = effectiveDate,
+        });
+    }
+
     [HttpGet("paged")]
     public async Task<ActionResult<PagedResponse<CashOrderDto>>> GetPaged(
         [FromQuery] DateTime? from,
@@ -800,8 +816,18 @@ public class CashOrdersController : ControllerBase
     {
         var prefix = type == CashOrderType.Incoming ? "ПКО" : "РКО";
         var yearPrefix = $"{prefix}-{date:yyyy}-";
-        var count = await _db.CashOrders.CountAsync(order => order.Number.StartsWith(yearPrefix), ct);
-        return $"{yearPrefix}{count + 1:0000}";
+        var sequence = await _db.CashOrders.CountAsync(order => order.Number.StartsWith(yearPrefix), ct) + 1;
+
+        while (true)
+        {
+            var number = $"{yearPrefix}{sequence:0000}";
+            if (!await _db.CashOrders.AnyAsync(order => order.Number == number, ct))
+            {
+                return number;
+            }
+
+            sequence++;
+        }
     }
 
     private async Task<string> GenerateInventoryNumberAsync(DateTime date, CancellationToken ct)

@@ -12,6 +12,49 @@ namespace PayPlanner.Api.Tests;
 public class CashOrdersControllerTests
 {
     [Fact]
+    public async Task GetNextNumber_ReturnsNextUnusedCashOrderNumber()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = "ПКО-2026-0001",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 1),
+                Amount = 1_000m,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "ПКО-2026-0003",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 2),
+                Amount = 2_000m,
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+        var action = await controller.GetNextNumber(
+            CashOrderType.Incoming,
+            new DateTime(2026, 4, 20),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        Assert.NotNull(ok.Value);
+        var value = ok.Value;
+        var number = value.GetType().GetProperty("number")?.GetValue(value);
+        var type = value.GetType().GetProperty("type")?.GetValue(value);
+        var date = value.GetType().GetProperty("date")?.GetValue(value);
+
+        Assert.Equal("ПКО-2026-0004", number);
+        Assert.Equal(CashOrderType.Incoming, type);
+        Assert.Equal(new DateTime(2026, 4, 20), date);
+    }
+
+    [Fact]
     public async Task CreateInventory_CalculatesDifferenceAndCreatesCorrectionOrder()
     {
         await using var db = await CreateContextAsync();
