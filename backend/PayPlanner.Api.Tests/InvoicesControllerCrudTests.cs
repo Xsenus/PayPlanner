@@ -300,6 +300,124 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Update_PersistsSignedWorkflowStatusAcrossSiblingInvoiceRows()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Sibling Status");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createAction = await controller.Create(
+            CreateRequest("INV-SIGN-SIBLING", clientId, new DateTime(2026, 4, 20), 12_000m),
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var parent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        db.Payments.Add(new Payment
+        {
+            Account = parent.Account,
+            AccountDate = parent.AccountDate,
+            Amount = 6_000m,
+            ClientId = parent.ClientId,
+            CreatedAt = DateTime.UtcNow,
+            Date = parent.Date.AddDays(30),
+            DocumentKind = DocumentKind.Invoice,
+            InvoiceId = parent.InvoiceId,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.NotSigned,
+            PlannedDate = parent.Date.AddDays(30),
+            Status = PaymentStatus.Pending,
+            Type = parent.Type,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var updateRequest = CreateRequest("INV-SIGN-SIBLING", clientId, new DateTime(2026, 4, 20), 12_000m);
+        updateRequest.WorkflowStatus = InvoiceWorkflowStatus.SignedByClient;
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(InvoiceWorkflowStatus.SignedByClient, dto.WorkflowStatus);
+        Assert.NotNull(dto.SentForSigningAt);
+        Assert.NotNull(dto.SignedAt);
+
+        db.ChangeTracker.Clear();
+        var invoiceRows = await db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.InvoiceId == parent.InvoiceId && payment.DocumentKind == DocumentKind.Invoice)
+            .OrderBy(payment => payment.Id)
+            .ToListAsync();
+
+        Assert.Equal(2, invoiceRows.Count);
+        Assert.All(invoiceRows, row =>
+        {
+            Assert.Equal(InvoiceWorkflowStatus.SignedByClient, row.InvoiceWorkflowStatus);
+            Assert.NotNull(row.InvoiceSentForSigningAt);
+            Assert.NotNull(row.InvoiceSignedAt);
+        });
+    }
+
+    [Fact]
+    public async Task UpdateWorkflowStatus_PersistsStatusAcrossSiblingInvoiceRows()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Quick Sibling Status");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createAction = await controller.Create(
+            CreateRequest("INV-SIGN-QUICK-SIBLING", clientId, new DateTime(2026, 4, 20), 12_000m),
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var parent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        db.Payments.Add(new Payment
+        {
+            Account = parent.Account,
+            AccountDate = parent.AccountDate,
+            Amount = 18_000m,
+            ClientId = parent.ClientId,
+            CreatedAt = DateTime.UtcNow,
+            Date = parent.Date.AddDays(30),
+            DocumentKind = DocumentKind.Invoice,
+            InvoiceId = parent.InvoiceId,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.NotSigned,
+            PlannedDate = parent.Date.AddDays(30),
+            Status = PaymentStatus.Pending,
+            Type = parent.Type,
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var updateAction = await controller.UpdateWorkflowStatus(
+            createdDto.Id,
+            new UpdateNamedStatusRequest { Status = InvoiceWorkflowStatus.SignedByClient },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var dto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(InvoiceWorkflowStatus.SignedByClient, dto.WorkflowStatus);
+
+        db.ChangeTracker.Clear();
+        var statuses = await db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.InvoiceId == parent.InvoiceId && payment.DocumentKind == DocumentKind.Invoice)
+            .Select(payment => payment.InvoiceWorkflowStatus)
+            .Distinct()
+            .ToListAsync();
+
+        var status = Assert.Single(statuses);
+        Assert.Equal(InvoiceWorkflowStatus.SignedByClient, status);
+    }
+
+    [Fact]
     public async Task UpdateWorkflowStatus_AcceptsRequiresClientSignature_WithoutChangingPaymentStatus()
     {
         await using var db = await CreateContextAsync();

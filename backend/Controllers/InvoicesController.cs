@@ -476,8 +476,10 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.OnSigning;
-        payment.InvoiceSentForSigningAt ??= DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        ApplyInvoiceWorkflowStatus(payment, InvoiceWorkflowStatus.OnSigning, now, reason: null);
+        await SyncSiblingInvoiceWorkflowStatusesAsync(payment, InvoiceWorkflowStatus.OnSigning, now, reason: null, ct);
+
         var dto = await SaveAndReloadInvoiceAsync(payment, ct);
         return Ok(dto);
     }
@@ -492,9 +494,8 @@ public class InvoicesController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
-        payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.SignedByClient;
-        payment.InvoiceSentForSigningAt ??= now;
-        payment.InvoiceSignedAt ??= now;
+        ApplyInvoiceWorkflowStatus(payment, InvoiceWorkflowStatus.SignedByClient, now, reason: null);
+        await SyncSiblingInvoiceWorkflowStatusesAsync(payment, InvoiceWorkflowStatus.SignedByClient, now, reason: null, ct);
         var dto = await SaveAndReloadInvoiceAsync(payment, ct);
         return Ok(dto);
     }
@@ -508,9 +509,9 @@ public class InvoicesController : ControllerBase
             return NotFound();
         }
 
-        payment.InvoiceWorkflowStatus = InvoiceWorkflowStatus.NotSigned;
-        payment.InvoiceSentForSigningAt = null;
-        payment.InvoiceSignedAt = null;
+        var now = DateTime.UtcNow;
+        ApplyInvoiceWorkflowStatus(payment, InvoiceWorkflowStatus.NotSigned, now, reason: null);
+        await SyncSiblingInvoiceWorkflowStatusesAsync(payment, InvoiceWorkflowStatus.NotSigned, now, reason: null, ct);
         var dto = await SaveAndReloadInvoiceAsync(payment, ct);
         return Ok(dto);
     }
@@ -559,6 +560,8 @@ public class InvoicesController : ControllerBase
 
         var now = DateTime.UtcNow;
         payment.InvoiceWorkflowStatus = workflowStatus;
+        ApplyInvoiceWorkflowStatus(payment, workflowStatus, now, reason);
+        await SyncSiblingInvoiceWorkflowStatusesAsync(payment, workflowStatus, now, reason, ct);
 
         switch (workflowStatus)
         {
@@ -980,6 +983,7 @@ public class InvoicesController : ControllerBase
             CreatedAt = DateTime.UtcNow,
         };
 
+        ApplyInvoiceWorkflowStatus(payment, workflowStatus, DateTime.UtcNow, reason: null);
         payment.SystemNotes = InvoiceLineItemStorage.RemoveFromSystemNotes(payment.SystemNotes);
 
         var responsibleIds = await ResolveInvoiceResponsibleIdsAsync(caseOwner.ClientId, caseOwner.LegalEntityId, request.ResponsibleIds, ct);
@@ -1177,6 +1181,7 @@ public class InvoicesController : ControllerBase
         payment.Amount = request.Amount;
         payment.Status = request.Status;
         payment.InvoiceWorkflowStatus = workflowStatus;
+        ApplyInvoiceWorkflowStatus(payment, workflowStatus, now, actionReason);
         payment.Type = request.Type;
         payment.Description = Normalize(request.Description) ?? string.Empty;
         payment.IsNotForAccounting = request.IsNotForAccounting;
@@ -1224,6 +1229,7 @@ public class InvoicesController : ControllerBase
         }
 
         ApplyPaidFlags(payment, request.PaidDate);
+        await SyncSiblingInvoiceWorkflowStatusesAsync(payment, workflowStatus, now, actionReason, ct);
 
         if (originalStatus != payment.Status)
         {
@@ -3379,6 +3385,73 @@ public class InvoicesController : ControllerBase
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
         ApplyPersistedPaymentState(dto, payment);
         return dto;
+    }
+
+    private void ApplyInvoiceWorkflowStatus(Payment payment, string workflowStatus, DateTime now, string? reason)
+    {
+        payment.InvoiceWorkflowStatus = workflowStatus;
+
+        switch (workflowStatus)
+        {
+            case InvoiceWorkflowStatus.Draft:
+            case InvoiceWorkflowStatus.NotSigned:
+            case InvoiceWorkflowStatus.RequiresClientSignature:
+            case InvoiceWorkflowStatus.OnApproval:
+            case InvoiceWorkflowStatus.Approved:
+            case InvoiceWorkflowStatus.ApprovalRejected:
+            case InvoiceWorkflowStatus.NeedsCorrection:
+                payment.InvoiceSentForSigningAt = null;
+                payment.InvoiceSignedAt = null;
+                payment.InvoiceCancelledAt = null;
+                payment.InvoiceCancelledByUserId = null;
+                payment.InvoiceCancelledReason = null;
+                break;
+            case InvoiceWorkflowStatus.OnSigning:
+                payment.InvoiceSentForSigningAt ??= now;
+                payment.InvoiceSignedAt = null;
+                payment.InvoiceCancelledAt = null;
+                payment.InvoiceCancelledByUserId = null;
+                payment.InvoiceCancelledReason = null;
+                break;
+            case InvoiceWorkflowStatus.SignedByClient:
+                payment.InvoiceSentForSigningAt ??= now;
+                payment.InvoiceSignedAt ??= now;
+                payment.InvoiceCancelledAt = null;
+                payment.InvoiceCancelledByUserId = null;
+                payment.InvoiceCancelledReason = null;
+                break;
+            case InvoiceWorkflowStatus.Cancelled:
+                payment.InvoiceCancelledAt ??= now;
+                payment.InvoiceCancelledByUserId ??= User.GetUserId();
+                payment.InvoiceCancelledReason ??= reason ?? "Быстрая смена статуса документа";
+                break;
+        }
+    }
+
+    private async Task SyncSiblingInvoiceWorkflowStatusesAsync(
+        Payment payment,
+        string workflowStatus,
+        DateTime now,
+        string? reason,
+        CancellationToken ct)
+    {
+        var invoiceEntityId = payment.InvoiceId ?? payment.Invoice?.Id;
+        if (!invoiceEntityId.HasValue || invoiceEntityId.Value <= 0)
+        {
+            return;
+        }
+
+        var siblings = await _db.Payments
+            .Where(candidate =>
+                candidate.InvoiceId == invoiceEntityId.Value
+                && candidate.Id != payment.Id
+                && candidate.DocumentKind == DocumentKind.Invoice)
+            .ToListAsync(ct);
+
+        foreach (var sibling in siblings)
+        {
+            ApplyInvoiceWorkflowStatus(sibling, workflowStatus, now, reason);
+        }
     }
 
     private async Task<List<InvoiceDto>> QueryInvoiceDtosAsync(
