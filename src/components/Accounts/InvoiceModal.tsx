@@ -358,6 +358,49 @@ function normalizeInvoiceClientCases(invoice: Invoice | null): ClientCaseOption[
   return [];
 }
 
+function parsePositiveId(value?: string | null): number | null {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isClientCaseLinkedToOwner(
+  clientCase: Pick<ClientCaseOption, 'clientId' | 'legalEntityId'>,
+  ownerClientId: number | null,
+  ownerLegalEntityId: number | null,
+): boolean {
+  return (clientCase.clientId ?? null) === ownerClientId
+    && (clientCase.legalEntityId ?? null) === ownerLegalEntityId;
+}
+
+function filterClientCaseIdsForOwner(
+  ids: number[],
+  options: ClientCaseOption[],
+  ownerClientId: number | null,
+  ownerLegalEntityId: number | null,
+  optionsLoaded = false,
+): number[] {
+  if (!ownerClientId && !ownerLegalEntityId) {
+    return [];
+  }
+
+  const optionsById = new Map(options.map((option) => [option.id, option]));
+  const result: number[] = [];
+  ids.forEach((id) => {
+    if (!Number.isFinite(id) || id <= 0 || result.includes(id)) {
+      return;
+    }
+
+    const option = optionsById.get(id);
+    if (option && isClientCaseLinkedToOwner(option, ownerClientId, ownerLegalEntityId)) {
+      result.push(id);
+    } else if (!option && !optionsLoaded) {
+      result.push(id);
+    }
+  });
+
+  return result;
+}
+
 function normalizeInvoiceActs(invoice: Invoice | null): ActOption[] {
   if (invoice?.acts?.length) {
     return invoice.acts.map((item) => ({
@@ -875,6 +918,7 @@ export function InvoiceModal({
   const [paymentPreviewError, setPaymentPreviewError] = useState<string | null>(null);
   const [clientCasesLoading, setClientCasesLoading] = useState(false);
   const [clientCasesError, setClientCasesError] = useState<string | null>(null);
+  const [clientCasesLoadedOwnerKey, setClientCasesLoadedOwnerKey] = useState('');
   const [actsLoading, setActsLoading] = useState(false);
   const [actsError, setActsError] = useState<string | null>(null);
   const [invoiceRules, setInvoiceRules] = useState({ maxClientCasesPerInvoice: 1, maxActsPerInvoice: 1 });
@@ -1256,12 +1300,22 @@ export function InvoiceModal({
     [legalEntities, form.expenseLegalEntityId],
   );
   const caseOwnerClientId = resolveCaseOwnerClientId(form.type, form.clientId, form.expenseClientId);
-  const caseOwnerLegalEntityId = form.type === 'Expense'
+  const rawCaseOwnerLegalEntityId = form.type === 'Expense'
     ? (form.expenseLegalEntityId || form.legalEntityId)
     : form.legalEntityId;
-  const caseOwnerKey = caseOwnerClientId ? `client:${caseOwnerClientId}` : caseOwnerLegalEntityId ? `legal:${caseOwnerLegalEntityId}` : '';
-  const selectedCaseOwnerClient = isIncome ? selectedClient : selectedExpenseClient;
-  const selectedCaseOwnerLegalEntity = isIncome ? selectedLegalEntity : (selectedExpenseLegalEntity ?? selectedLegalEntity);
+  const caseOwnerClientIdNumber = parsePositiveId(caseOwnerClientId);
+  const caseOwnerLegalEntityIdNumber = caseOwnerClientIdNumber ? null : parsePositiveId(rawCaseOwnerLegalEntityId);
+  const caseOwnerKey = caseOwnerClientIdNumber
+    ? `client:${caseOwnerClientIdNumber}`
+    : caseOwnerLegalEntityIdNumber
+      ? `legal:${caseOwnerLegalEntityIdNumber}`
+      : '';
+  const selectedCaseOwnerClient = isIncome ? selectedClient : (selectedExpenseClient ?? selectedClient);
+  const selectedCaseOwnerLegalEntity = caseOwnerClientIdNumber
+    ? null
+    : isIncome
+      ? selectedLegalEntity
+      : (selectedExpenseLegalEntity ?? selectedLegalEntity);
   const selectedResponsibleSourceClient = isIncome
     ? selectedClient
     : (selectedExpenseClient ?? selectedClient);
@@ -1563,20 +1617,23 @@ export function InvoiceModal({
       if (!open || !caseOwnerKey) {
         setClientCaseOptions([]);
         setClientCasesError(null);
+        setClientCasesLoadedOwnerKey('');
         return;
       }
 
-      const clientId = caseOwnerClientId ? Number.parseInt(caseOwnerClientId, 10) : undefined;
-      const legalEntityId = caseOwnerLegalEntityId ? Number.parseInt(caseOwnerLegalEntityId, 10) : undefined;
+      const clientId = caseOwnerClientIdNumber ?? undefined;
+      const legalEntityId = caseOwnerLegalEntityIdNumber ?? undefined;
       if ((!clientId || !Number.isFinite(clientId) || clientId <= 0)
         && (!legalEntityId || !Number.isFinite(legalEntityId) || legalEntityId <= 0)) {
         setClientCaseOptions([]);
         setClientCasesError(null);
+        setClientCasesLoadedOwnerKey('');
         return;
       }
 
       setClientCasesLoading(true);
       setClientCasesError(null);
+      setClientCasesLoadedOwnerKey('');
       try {
         const response = await apiService.getCases({
           clientId: clientId && clientId > 0 ? clientId : undefined,
@@ -1587,10 +1644,12 @@ export function InvoiceModal({
             (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
           );
           setClientCaseOptions(nextOptions);
+          setClientCasesLoadedOwnerKey(caseOwnerKey);
         }
       } catch (error) {
         if (!cancelled) {
           setClientCaseOptions([]);
+          setClientCasesLoadedOwnerKey('');
           setClientCasesError(error instanceof Error ? error.message : 'Не удалось загрузить дела');
         }
       } finally {
@@ -1602,7 +1661,34 @@ export function InvoiceModal({
     return () => {
       cancelled = true;
     };
-  }, [open, caseOwnerClientId, caseOwnerLegalEntityId, caseOwnerKey]);
+  }, [open, caseOwnerClientIdNumber, caseOwnerLegalEntityIdNumber, caseOwnerKey]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setSelectedClientCaseIds((prev) => {
+      const next = filterClientCaseIdsForOwner(
+        prev,
+        clientCaseOptions,
+        caseOwnerClientIdNumber,
+        caseOwnerLegalEntityIdNumber,
+        clientCasesLoadedOwnerKey === caseOwnerKey,
+      );
+
+      return next.length === prev.length && next.every((id, index) => id === prev[index])
+        ? prev
+        : next;
+    });
+  }, [
+    caseOwnerClientIdNumber,
+    caseOwnerKey,
+    caseOwnerLegalEntityIdNumber,
+    clientCaseOptions,
+    clientCasesLoadedOwnerKey,
+    open,
+  ]);
 
   useEffect(() => {
     if (open) {
@@ -1613,6 +1699,7 @@ export function InvoiceModal({
       setActOptions(normalizeInvoiceActs(invoice));
       setClientCaseOptions(normalizeInvoiceClientCases(invoice));
       setSelectedClientCaseIds(resumeDraft?.selectedClientCaseIds ?? normalizeInvoiceClientCaseIds(invoice, defaultClientCaseId));
+      setClientCasesLoadedOwnerKey('');
       setCaseDropdownOpen(false);
       setCreateCaseOpen(false);
       setActDropdownOpen(false);
@@ -2014,6 +2101,7 @@ export function InvoiceModal({
     if (nextType !== form.type && nextCaseOwnerKey !== caseOwnerKey) {
       setSelectedClientCaseIds([]);
       setClientCaseOptions([]);
+      setClientCasesLoadedOwnerKey('');
       setCaseDropdownOpen(false);
       setCreateCaseOpen(false);
     }
@@ -2042,6 +2130,7 @@ export function InvoiceModal({
       if (nextCaseOwnerKey !== caseOwnerKey) {
         setSelectedClientCaseIds([]);
         setClientCaseOptions([]);
+        setClientCasesLoadedOwnerKey('');
       }
       setCaseDropdownOpen(false);
       setActDropdownOpen(false);
@@ -2065,6 +2154,7 @@ export function InvoiceModal({
       setActOptions([]);
       setSelectedClientCaseIds([]);
       setClientCaseOptions([]);
+      setClientCasesLoadedOwnerKey('');
       setCaseDropdownOpen(false);
       setActDropdownOpen(false);
     }
@@ -2082,6 +2172,7 @@ export function InvoiceModal({
     if (form.expenseClientId !== nextClientId && nextCaseOwnerClientId !== caseOwnerClientId) {
       setSelectedClientCaseIds([]);
       setClientCaseOptions([]);
+      setClientCasesLoadedOwnerKey('');
       setCaseDropdownOpen(false);
       setCreateCaseOpen(false);
     }
@@ -2100,6 +2191,7 @@ export function InvoiceModal({
     if ((form.expenseLegalEntityId !== nextLegalEntityId || form.expenseClientId) && nextCaseOwnerKey !== caseOwnerKey) {
       setSelectedClientCaseIds([]);
       setClientCaseOptions([]);
+      setClientCasesLoadedOwnerKey('');
       setCaseDropdownOpen(false);
       setCreateCaseOpen(false);
     }
@@ -2116,6 +2208,7 @@ export function InvoiceModal({
     if (form.expenseClientId || form.expenseLegalEntityId) {
       setSelectedClientCaseIds([]);
       setClientCaseOptions([]);
+      setClientCasesLoadedOwnerKey('');
       setCaseDropdownOpen(false);
       setCreateCaseOpen(false);
     }
@@ -2154,13 +2247,13 @@ export function InvoiceModal({
   };
 
   const handleCreateClientCase = async (patch: Partial<ClientCase>) => {
-    if (!caseOwnerClientId && !caseOwnerLegalEntityId) {
+    if (!caseOwnerClientIdNumber && !caseOwnerLegalEntityIdNumber) {
       throw new Error(isIncome ? 'Сначала выберите клиента' : 'Сначала выберите клиента, к которому относится расход');
     }
 
     const created = await apiService.createCase({
-      clientId: caseOwnerClientId ? Number(caseOwnerClientId) : null,
-      legalEntityId: caseOwnerLegalEntityId ? Number(caseOwnerLegalEntityId) : null,
+      clientId: caseOwnerClientIdNumber,
+      legalEntityId: caseOwnerLegalEntityIdNumber,
       title: patch.title?.trim() ?? '',
       description: patch.description?.trim(),
       status: patch.status ?? 'Open',
@@ -2355,7 +2448,13 @@ export function InvoiceModal({
   ): InvoiceInput => {
     const { statusOverride, planOverride, dueDateOverride, replaceInstallmentPlan } = options;
     const safeAmount = parseMoneyInput(form.amount);
-    const clientCaseIds = selectedClientCaseIds.filter((id) => Number.isFinite(id) && id > 0);
+    const clientCaseIds = filterClientCaseIdsForOwner(
+      selectedClientCaseIds,
+      clientCaseOptions,
+      caseOwnerClientIdNumber,
+      caseOwnerLegalEntityIdNumber,
+      clientCasesLoadedOwnerKey === caseOwnerKey,
+    );
     const actIds = selectedActs.map((item) => item.id).filter((id) => Number.isFinite(id) && id > 0);
     const effectiveInstallmentPlan = planOverride === undefined ? installmentPlan : planOverride;
     const effectiveDueDate = dueDateOverride === undefined ? form.dueDate : (dueDateOverride ?? '');
@@ -2402,7 +2501,21 @@ export function InvoiceModal({
         ? (effectiveInstallmentPlan ? cloneInstallmentPlan(effectiveInstallmentPlan) : null)
         : undefined,
     };
-  }, [form, installmentPlan, installmentPlanTouched, invoice?.number, lineItems, mode, selectedActs, selectedClientCaseIds]);
+  }, [
+    caseOwnerClientIdNumber,
+    caseOwnerKey,
+    caseOwnerLegalEntityIdNumber,
+    clientCaseOptions,
+    clientCasesLoadedOwnerKey,
+    form,
+    installmentPlan,
+    installmentPlanTouched,
+    invoice?.number,
+    lineItems,
+    mode,
+    selectedActs,
+    selectedClientCaseIds,
+  ]);
 
   const resolveInstallmentDueDateForSave = useCallback(async (
     planOverride?: InstallmentPlanInput | null,
@@ -3127,13 +3240,13 @@ export function InvoiceModal({
   const canShowRelatedPaymentActions = mode === 'edit' && !!onAddRelatedPayment;
   const createCaseStub = useMemo<ClientCase>(() => ({
     id: 0,
-    clientId: caseOwnerClientId ? Number(caseOwnerClientId) : null,
-    legalEntityId: caseOwnerLegalEntityId ? Number(caseOwnerLegalEntityId) : null,
+    clientId: caseOwnerClientIdNumber,
+    legalEntityId: caseOwnerLegalEntityIdNumber,
     title: '',
     description: '',
     status: 'Open',
     createdAt: new Date().toISOString(),
-  }), [caseOwnerClientId, caseOwnerLegalEntityId]);
+  }), [caseOwnerClientIdNumber, caseOwnerLegalEntityIdNumber]);
   const statusHistorySection = (
     <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
       <div className="space-y-3">

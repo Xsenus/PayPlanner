@@ -83,6 +83,12 @@ vi.mock('../../hooks/useTranslation', () => ({
   useTranslation: () => ({ t: () => undefined }),
 }));
 
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: { id: 7, role: { id: 1 } },
+  }),
+}));
+
 vi.mock('../../hooks/useDictionaries', () => ({
   useDictionaries: () => ({
     invoiceUnits: invoiceUnitsMock,
@@ -2354,6 +2360,59 @@ describe('InvoiceModal integration', () => {
     );
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Очистить' })[0]);
+    const form = document.getElementById('invoice-edit-form') as HTMLFormElement | null;
+    expect(form).toBeTruthy();
+    fireEvent.submit(form!);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        clientCaseId: null,
+        clientCaseIds: [],
+      }));
+    });
+  });
+
+  it('drops stale client cases that are not linked to the selected counterparty', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const invoice = {
+      id: 822,
+      invoiceEntityId: 822,
+      number: '822',
+      date: '2026-04-15',
+      dueDate: '2026-04-20',
+      amount: 5000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      clientCaseId: 5,
+      clientCaseIds: [5],
+      clientCases: [
+        {
+          id: 5,
+          clientId: 2,
+          title: 'Foreign case',
+          status: 'Open',
+          createdAt: '2026-04-14T10:00:00Z',
+        },
+      ],
+      lineItems: [{ name: 'Income service', quantity: 1, unit: 'pcs', price: 5000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createTestClient(1, 'Selected client'), createTestClient(2, 'Other client')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
     const form = document.getElementById('invoice-edit-form') as HTMLFormElement | null;
     expect(form).toBeTruthy();
     fireEvent.submit(form!);

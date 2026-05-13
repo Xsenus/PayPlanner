@@ -253,7 +253,7 @@ public class InvoicesControllerValidationTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
         var message = Assert.IsType<string>(badRequest.Value);
-        Assert.Equal($"Client cases are not linked to selected counterparty: {foreignCaseId}", message);
+        Assert.Equal($"Дела не связаны с выбранным клиентом или юрлицом: {foreignCaseId}", message);
     }
 
     [Fact]

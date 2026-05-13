@@ -3091,7 +3091,7 @@ public class InvoicesController : ControllerBase
 
         if (foreignClientCaseIds.Count > 0)
         {
-            return (BadRequest($"Client cases are not linked to selected counterparty: {string.Join(", ", foreignClientCaseIds)}"), new List<int>());
+            return (BadRequest($"Дела не связаны с выбранным клиентом или юрлицом: {string.Join(", ", foreignClientCaseIds)}"), new List<int>());
         }
 
         return (null, clientCaseIds);
