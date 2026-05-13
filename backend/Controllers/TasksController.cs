@@ -20,6 +20,7 @@ namespace PayPlanner.Api.Controllers;
 public class TasksController : ControllerBase
 {
     private const long MaxTaskFileBytes = 25L * 1024L * 1024L;
+    private const string InternalTaskObjectName = "Внутренняя задача";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -1617,6 +1618,11 @@ public class TasksController : ControllerBase
     {
         var hasClient = request.ClientId is > 0;
         var hasLegalEntity = request.LegalEntityId is > 0;
+        if (request.IsInternal)
+        {
+            return TaskClientBinding.Valid(null, InternalTaskObjectName, null, string.Empty, null, null);
+        }
+
         if (hasClient == hasLegalEntity)
         {
             return TaskClientBinding.Invalid("Укажите одного контрагента задачи: клиента или юрлицо.");
@@ -1692,9 +1698,11 @@ public class TasksController : ControllerBase
     }
 
     private static string BuildObjectName(string clientName, string? caseTitle)
-        => string.IsNullOrWhiteSpace(caseTitle)
-            ? clientName.Trim()
-            : $"{clientName.Trim()} - {caseTitle.Trim()}";
+        => string.IsNullOrWhiteSpace(clientName)
+            ? InternalTaskObjectName
+            : string.IsNullOrWhiteSpace(caseTitle)
+                ? clientName.Trim()
+                : $"{clientName.Trim()} - {caseTitle.Trim()}";
 
     private static TaskClientBinding BuildCaseBinding(ClientCase clientCase)
     {
@@ -1739,7 +1747,14 @@ public class TasksController : ControllerBase
     {
         var hasClient = request.ClientId is > 0;
         var hasLegalEntity = request.LegalEntityId is > 0;
-        if (hasClient == hasLegalEntity)
+        if (request.IsInternal)
+        {
+            if (hasClient || hasLegalEntity || request.ClientCaseId is > 0)
+            {
+                return "Для внутренней задачи не выбирайте контрагента или дело.";
+            }
+        }
+        else if (hasClient == hasLegalEntity)
         {
             return "Укажите одного контрагента задачи: клиента или юрлицо.";
         }
@@ -1777,6 +1792,7 @@ public class TasksController : ControllerBase
             ClientName = binding?.ClientName ?? entity.Client?.Name ?? string.Empty,
             LegalEntityId = entity.LegalEntityId,
             LegalEntityName = binding?.LegalEntityName ?? GetLegalEntityName(entity.LegalEntity),
+            IsInternal = !entity.ClientId.HasValue && !entity.LegalEntityId.HasValue,
             ClientCaseId = entity.ClientCaseId,
             ClientCaseTitle = binding?.ClientCaseTitle ?? entity.ClientCase?.Title ?? string.Empty,
             ObjectName = entity.ObjectName,
@@ -2436,7 +2452,7 @@ public class TasksController : ControllerBase
         string? ClientCaseTitle,
         string? Error)
     {
-        public string OwnerName => ClientId.HasValue ? ClientName : LegalEntityName;
+        public string OwnerName => !string.IsNullOrWhiteSpace(ClientName) ? ClientName : LegalEntityName;
 
         public static TaskClientBinding Valid(
             int? clientId,

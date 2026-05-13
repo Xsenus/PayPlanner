@@ -34,6 +34,7 @@ export interface TaskJournalItem {
   clientName?: string;
   legalEntityId?: number | null;
   legalEntityName?: string;
+  isInternal?: boolean;
   clientCaseId?: number | null;
   clientCaseTitle?: string;
   objectName: string;
@@ -121,6 +122,7 @@ export interface TaskJournalAutomationCreateResult {
 
 export type TaskJournalUpsertPayload = Omit<TaskJournalItem, 'id' | 'createdAt' | 'updatedAt' | 'authorUserId' | 'authorName'> & {
   changeComment?: string | null;
+  isInternal?: boolean;
 };
 
 const STORAGE_KEY = 'pp.task_journal.items.v1';

@@ -438,6 +438,27 @@ describe('TaskJournal', () => {
     expect(toastMock.error).toHaveBeenCalledWith('Укажите контрагента задачи.', 'Журнал задач');
   });
 
+  it('creates an internal task without a counterparty', async () => {
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+
+    fireEvent.click(screen.getByTestId('task-internal-checkbox'));
+    fireEvent.change(screen.getByTestId('task-title-input'), { target: { value: 'Internal process' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      isInternal: true,
+      clientId: null,
+      legalEntityId: null,
+      clientCaseId: null,
+      objectName: 'Внутренняя задача',
+      title: 'Internal process',
+    }));
+  });
+
   it('saves selected client and case from the task form', async () => {
     await renderJournal();
 

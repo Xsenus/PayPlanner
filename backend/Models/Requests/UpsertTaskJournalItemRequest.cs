@@ -4,6 +4,7 @@ public class UpsertTaskJournalItemRequest
 {
     public int? ClientId { get; set; }
     public int? LegalEntityId { get; set; }
+    public bool IsInternal { get; set; }
     public int? ClientCaseId { get; set; }
     public string ObjectName { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;

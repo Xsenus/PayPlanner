@@ -7,6 +7,7 @@ public class TaskJournalItemDto
     public string ClientName { get; set; } = string.Empty;
     public int? LegalEntityId { get; set; }
     public string LegalEntityName { get; set; } = string.Empty;
+    public bool IsInternal { get; set; }
     public int? ClientCaseId { get; set; }
     public string ClientCaseTitle { get; set; } = string.Empty;
     public string ObjectName { get; set; } = string.Empty;

@@ -265,6 +265,8 @@ function writeTaskJournalFilterPreferences(userId: number | null, preferences: T
   }
 }
 
+const INTERNAL_TASK_OBJECT_NAME = 'Внутренняя задача';
+
 const emptyForm = (
   assigneeName: string,
   assigneeUserId?: number | null,
@@ -278,6 +280,7 @@ const emptyForm = (
   };
 
   return {
+    isInternal: false,
     clientId: null,
     legalEntityId: null,
     clientCaseId: null,
@@ -382,6 +385,7 @@ function moveDueAtToDate(currentDueAt: string, targetDate: Date) {
 
 function taskToPayload(task: TaskJournalItem, overrides: Partial<TaskJournalUpsertPayload> = {}): TaskJournalUpsertPayload {
   return {
+    isInternal: task.isInternal ?? (!task.clientId && !task.legalEntityId),
     clientId: task.clientId ?? null,
     legalEntityId: task.legalEntityId ?? null,
     clientCaseId: task.clientCaseId ?? null,
@@ -1300,7 +1304,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   };
 
   const handleSave = async (form: TaskForm, taskId?: number) => {
-    if (!form.clientId && !form.legalEntityId) {
+    if (!form.isInternal && !form.clientId && !form.legalEntityId) {
       toast.error('Укажите контрагента задачи.', 'Журнал задач');
       return;
     }
@@ -1315,7 +1319,11 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
 
     const normalized: TaskForm = {
       ...form,
-      objectName: form.objectName.trim(),
+      isInternal: Boolean(form.isInternal),
+      clientId: form.isInternal ? null : form.clientId,
+      legalEntityId: form.isInternal ? null : form.legalEntityId,
+      clientCaseId: form.isInternal ? null : form.clientCaseId,
+      objectName: form.isInternal ? INTERNAL_TASK_OBJECT_NAME : form.objectName.trim(),
       title: form.title.trim(),
       description: form.description.trim(),
       result: form.result.trim(),
@@ -3137,6 +3145,7 @@ function TaskModal({
   const [form, setForm] = useState<TaskForm>(() => {
     if (state?.task) {
       const rest = {
+        isInternal: state.task.isInternal ?? (!state.task.clientId && !state.task.legalEntityId),
         clientId: state.task.clientId ?? null,
         legalEntityId: state.task.legalEntityId ?? null,
         clientCaseId: state.task.clientCaseId ?? null,
@@ -3223,7 +3232,7 @@ function TaskModal({
       .sort((a, b) => new Date(b.latest.uploadedAt).getTime() - new Date(a.latest.uploadedAt).getTime());
   }, [files]);
   const { cases: clientCases, loading: casesLoading } = useClientCases(form.clientId ?? undefined, {
-    enabled: Boolean(form.clientId || form.legalEntityId),
+    enabled: !form.isInternal && Boolean(form.clientId || form.legalEntityId),
     legalEntityId: form.legalEntityId ?? undefined,
   });
   const selectableClientCases = useMemo(
@@ -3239,14 +3248,28 @@ function TaskModal({
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const selectedCounterpartyValue = form.clientId
+  const selectedCounterpartyValue = form.isInternal
+    ? ''
+    : form.clientId
     ? `client:${form.clientId}`
     : form.legalEntityId
       ? `legal:${form.legalEntityId}`
       : '';
 
-  const handleCounterpartyChange = (value: string) => {
+  const handleInternalChange = (checked: boolean) => {
     if (isReadOnly) return;
+    setForm((prev) => ({
+      ...prev,
+      isInternal: checked,
+      clientId: checked ? null : prev.clientId,
+      legalEntityId: checked ? null : prev.legalEntityId,
+      clientCaseId: checked ? null : prev.clientCaseId,
+      objectName: checked ? INTERNAL_TASK_OBJECT_NAME : '',
+    }));
+  };
+
+  const handleCounterpartyChange = (value: string) => {
+    if (isReadOnly || form.isInternal) return;
     const [kind, rawId] = value.split(':');
     const id = Number(rawId) || null;
     if (kind === 'legal' && id) {
@@ -3273,7 +3296,7 @@ function TaskModal({
   };
 
   const handleCaseChange = (value: string) => {
-    if (isReadOnly) return;
+    if (isReadOnly || form.isInternal) return;
     const clientCaseId = Number(value) || null;
     const clientCase = selectableClientCases.find((item) => item.id === clientCaseId);
     setForm((prev) => ({
@@ -3700,6 +3723,23 @@ function TaskModal({
             </section>
           ) : null}
 
+          <label className="mb-5 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={Boolean(form.isInternal)}
+              disabled={isReadOnly}
+              onChange={(event) => handleInternalChange(event.target.checked)}
+              data-testid="task-internal-checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span>
+              <span className="font-semibold text-slate-900">Внутренняя задача</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-500">
+                Для задач сотрудников без привязки к клиенту, юридическому лицу или делу.
+              </span>
+            </span>
+          </label>
+
           <div className="grid gap-5 lg:grid-cols-2">
             <Field label="Контрагент">
               <LookupSelect
@@ -3714,7 +3754,7 @@ function TaskModal({
                 emptyOptionDescription="Контрагент обязателен для задачи"
                 buttonClassName="h-11 border-slate-200 focus:border-blue-400"
                 noOptionsText="Контрагенты не найдены"
-                disabled={isReadOnly}
+                disabled={isReadOnly || form.isInternal}
               />
             </Field>
             <Field label="Исполнитель">
@@ -3734,14 +3774,14 @@ function TaskModal({
               <input value={form.assigneeName} onChange={(event) => update('assigneeName', event.target.value)} disabled={isReadOnly} className="form-input" />
             </Field>
             <Field label="Наименование задачи">
-              <input ref={titleInputRef} value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} className="form-input" placeholder="Что нужно сделать" />
+              <input ref={titleInputRef} value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} data-testid="task-title-input" className="form-input" placeholder="Что нужно сделать" />
             </Field>
             <Field label="Дело">
               <select
                 aria-label="Дело"
                 value={form.clientCaseId ?? ''}
                 onChange={(event) => handleCaseChange(event.target.value)}
-                disabled={isReadOnly || (!form.clientId && !form.legalEntityId) || casesLoading}
+                disabled={isReadOnly || form.isInternal || (!form.clientId && !form.legalEntityId) || casesLoading}
                 className="form-input disabled:bg-slate-50 disabled:text-slate-400"
               >
                 <option value="">Без дела</option>

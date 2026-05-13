@@ -38,6 +38,30 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateTask_AllowsInternalTaskWithoutClient()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "РђРІС‚РѕСЂ");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            IsInternal = true,
+            Title = "РџСЂРѕРІРµСЂРёС‚СЊ РІРЅСѓС‚СЂРµРЅРЅРёР№ РїСЂРѕС†РµСЃСЃ",
+            DueAt = DateTime.UtcNow.AddHours(2),
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+
+        Assert.True(dto.IsInternal);
+        Assert.Null(dto.ClientId);
+        Assert.Null(dto.LegalEntityId);
+        Assert.Null(dto.ClientCaseId);
+        Assert.Equal("Внутренняя задача", dto.ObjectName);
+    }
+
+    [Fact]
     public async Task CreateTask_BindsClientAndClientCase()
     {
         await using var db = await CreateContextAsync();
