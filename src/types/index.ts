@@ -1804,6 +1804,7 @@ export interface Payment {
   clientCaseId?: number | null;
   dealTypeId?: number | null;
   incomeTypeId?: number | null;
+  serviceId?: number | null;
   paymentSourceId?: number | null;
   paymentStatusId?: number | null;
   client?: Client | null;
@@ -1811,6 +1812,7 @@ export interface Payment {
   clientCase?: ClientCase | null;
   dealType?: DealType | null;
   incomeType?: IncomeType | null;
+  service?: ServiceDictionaryItem | null;
   paymentSource?: PaymentSource | null;
   paymentStatusEntity?: PaymentStatusEntity;
   invoiceId?: number | null;
@@ -1836,6 +1838,7 @@ export type PaymentPayload = Omit<
   | 'clientCase'
   | 'dealType'
   | 'incomeType'
+  | 'service'
   | 'paymentSource'
   | 'paymentStatusEntity'
   | 'outstandingAmount'

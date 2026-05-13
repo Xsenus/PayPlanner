@@ -142,7 +142,7 @@ export function PaymentModal({
 
   const { clients, loading: clientsLoading } = useClients();
   const { legalEntities, loading: legalEntitiesLoading, error: legalEntitiesError } = useLegalEntities();
-  const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
+  const { dealTypes, incomeTypes, paymentSources, services = [] } = useDictionaries();
   const { t } = useTranslation();
   const { confirm } = useDialog();
   const toast = useToast();
@@ -178,6 +178,7 @@ export function PaymentModal({
     clientCaseId: '',
     dealTypeId: '',
     incomeTypeId: '',
+    serviceId: '',
     paymentSourceId: '',
     paymentStatusId: '',
     invoiceId: '',
@@ -508,6 +509,7 @@ export function PaymentModal({
             (p.clientCaseId ?? linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: p.dealTypeId?.toString() || '',
           incomeTypeId: p.incomeTypeId?.toString() || '',
+          serviceId: p.serviceId?.toString() || '',
           paymentSourceId: p.paymentSourceId?.toString() || '',
           paymentStatusId: p.paymentStatusId?.toString() || '',
           invoiceId: (p.invoiceId ?? linkedInvoice?.invoiceEntityId)?.toString() || '',
@@ -549,6 +551,7 @@ export function PaymentModal({
           clientCaseId: (linkedInvoice?.clientCaseId ?? defaultClientCaseId)?.toString() || '',
           dealTypeId: '',
           incomeTypeId: '',
+          serviceId: '',
           paymentSourceId: '',
           paymentStatusId: '',
           invoiceId: linkedInvoice?.invoiceEntityId?.toString() || '',
@@ -1041,6 +1044,7 @@ export function PaymentModal({
         clientCaseId: formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined,
         dealTypeId: formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined,
         incomeTypeId: formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined,
+        serviceId: formData.serviceId ? parseInt(formData.serviceId, 10) : undefined,
         paymentSourceId: formData.paymentSourceId
           ? parseInt(formData.paymentSourceId, 10)
           : undefined,
@@ -1549,6 +1553,7 @@ export function PaymentModal({
       clientCaseId: formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined,
       dealTypeId: formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined,
       incomeTypeId: formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined,
+      serviceId: formData.serviceId ? parseInt(formData.serviceId, 10) : undefined,
       paymentSourceId: formData.paymentSourceId ? parseInt(formData.paymentSourceId, 10) : undefined,
       paymentStatusId: formData.paymentStatusId ? parseInt(formData.paymentStatusId, 10) : undefined,
       paymentOrderNumber: formData.paymentOrderNumber.trim() || undefined,
@@ -1801,6 +1806,7 @@ export function PaymentModal({
 
   const selDealTypeId = formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined;
   const selIncomeTypeId = formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined;
+  const selServiceId = formData.serviceId ? parseInt(formData.serviceId, 10) : undefined;
   const selSourceId = formData.paymentSourceId ? parseInt(formData.paymentSourceId, 10) : undefined;
   const formId = payment ? `payment-form-${payment.id}` : 'payment-form-new';
   const centeredLabelClass = 'mb-2 block text-center text-sm font-medium text-gray-700';
@@ -2054,6 +2060,18 @@ export function PaymentModal({
                         <select name="incomeTypeId" value={formData.incomeTypeId} onChange={handleChange} className={paymentInfoSelectClass}>
                           <option value="">{formData.type === 'Income' ? t('selectIncomeType') ?? 'Select income type' : t('selectExpenseType') ?? 'Select expense type'}</option>
                           {buildOptionsWithSelected(incomeTypes, selIncomeTypeId, (it) => it.isActive && it.paymentType === formData.type).map((it) => (<option key={it.id} value={String(it.id)}>{it.name}{!it.isActive ? ' (inactive)' : ''}{it.paymentType !== formData.type ? ' (other direction)' : ''}</option>))}
+                        </select>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className={centeredLabelClass}>Тип услуги</label>
+                        <select name="serviceId" value={formData.serviceId} onChange={handleChange} className={paymentInfoSelectClass}>
+                          <option value="">Выберите тип услуги</option>
+                          {buildOptionsWithSelected(services, selServiceId, (service) => service.isActive).map((service) => (
+                            <option key={service.id} value={String(service.id)}>
+                              {service.name}
+                              {!service.isActive ? ' (не активно)' : ''}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>

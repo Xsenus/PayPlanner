@@ -208,6 +208,7 @@ public class PaymentsController : ControllerBase
         e.ContractId = model.ContractId;
         e.DealTypeId = model.DealTypeId;
         e.IncomeTypeId = model.IncomeTypeId;
+        e.ServiceId = model.ServiceId;
         e.PaymentSourceId = model.PaymentSourceId;
         e.PaymentStatusId = model.PaymentStatusId;
         e.InvoiceId = model.InvoiceId;
@@ -476,6 +477,7 @@ public class PaymentsController : ControllerBase
         e.ContractId = model.ContractId;
         e.DealTypeId = model.DealTypeId;
         e.IncomeTypeId = model.IncomeTypeId;
+        e.ServiceId = model.ServiceId;
         e.PaymentSourceId = model.PaymentSourceId;
         e.PaymentStatusId = model.PaymentStatusId;
         e.PaidDate = model.PaidDate;
@@ -868,6 +870,7 @@ public class PaymentsController : ControllerBase
         source.ContractId = model.ContractId;
         source.DealTypeId = model.DealTypeId;
         source.IncomeTypeId = model.IncomeTypeId;
+        source.ServiceId = model.ServiceId;
         source.PaymentSourceId = model.PaymentSourceId;
         source.PaymentStatusId = model.PaymentStatusId;
         source.InvoiceId = model.InvoiceId;
@@ -3042,6 +3045,20 @@ public class PaymentsController : ControllerBase
                         IsActive = payment.IncomeType.IsActive,
                         CreatedAt = payment.IncomeType.CreatedAt,
                         PaymentType = payment.IncomeType.PaymentType,
+                    },
+                Service = payment.Service == null
+                    ? null
+                    : new ServiceDictionaryItem
+                    {
+                        Id = payment.Service.Id,
+                        Name = payment.Service.Name,
+                        Description = payment.Service.Description,
+                        Unit = payment.Service.Unit,
+                        DefaultPrice = payment.Service.DefaultPrice,
+                        CategoryId = payment.Service.CategoryId,
+                        ColorHex = payment.Service.ColorHex,
+                        IsActive = payment.Service.IsActive,
+                        CreatedAt = payment.Service.CreatedAt,
                     },
                 PaymentSource = payment.PaymentSource == null
                     ? null

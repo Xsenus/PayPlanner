@@ -840,6 +840,8 @@ public class PaymentsControllerTests
         var serviceIncomeType = new IncomeType { Name = "Service income", PaymentType = PaymentType.Income };
         var parentDealType = new DealType { Name = "Parent deal" };
         var legalDealType = new DealType { Name = "Legal services" };
+        var parentService = new ServiceDictionaryItem { Name = "Parent service" };
+        var legalService = new ServiceDictionaryItem { Name = "Юридическая услуга" };
         var draftPaymentStatus = new PaymentStatusEntity { Name = "Draft" };
         var completedPaymentStatus = new PaymentStatusEntity { Name = "Completed" };
         db.AddRange(
@@ -851,6 +853,8 @@ public class PaymentsControllerTests
             serviceIncomeType,
             parentDealType,
             legalDealType,
+            parentService,
+            legalService,
             draftPaymentStatus,
             completedPaymentStatus);
         await db.SaveChangesAsync();
@@ -864,6 +868,7 @@ public class PaymentsControllerTests
         representative.PaymentSourceId = bankSource.Id;
         representative.IncomeTypeId = parentIncomeType.Id;
         representative.DealTypeId = parentDealType.Id;
+        representative.ServiceId = parentService.Id;
         representative.PaymentStatusId = draftPaymentStatus.Id;
 
         var installment = CreatePayment(new DateTime(2026, 4, 20), 25_000m, "Installment 1/8");
@@ -886,6 +891,7 @@ public class PaymentsControllerTests
         update.PaymentSourceId = cashSource.Id;
         update.IncomeTypeId = serviceIncomeType.Id;
         update.DealTypeId = legalDealType.Id;
+        update.ServiceId = legalService.Id;
         update.PaymentStatusId = completedPaymentStatus.Id;
         update.Status = PaymentStatus.Completed;
         update.PaidAmount = installment.Amount;
@@ -901,6 +907,7 @@ public class PaymentsControllerTests
         Assert.Equal(cashSource.Id, updated.PaymentSourceId);
         Assert.Equal(serviceIncomeType.Id, updated.IncomeTypeId);
         Assert.Equal(legalDealType.Id, updated.DealTypeId);
+        Assert.Equal(legalService.Id, updated.ServiceId);
         Assert.Equal(completedPaymentStatus.Id, updated.PaymentStatusId);
         Assert.Equal(PaymentStatus.Completed, updated.Status);
         Assert.True(updated.IsPaid);
@@ -912,6 +919,7 @@ public class PaymentsControllerTests
         Assert.Equal(cashSource.Id, stored.PaymentSourceId);
         Assert.Equal(serviceIncomeType.Id, stored.IncomeTypeId);
         Assert.Equal(legalDealType.Id, stored.DealTypeId);
+        Assert.Equal(legalService.Id, stored.ServiceId);
         Assert.Equal(completedPaymentStatus.Id, stored.PaymentStatusId);
         Assert.Equal(PaymentStatus.Completed, stored.Status);
         Assert.StartsWith("ПКО-2026-", stored.PaymentOrderNumber);
@@ -933,6 +941,7 @@ public class PaymentsControllerTests
         edited.PaymentSourceId = cashSource.Id;
         edited.IncomeTypeId = serviceIncomeType.Id;
         edited.DealTypeId = legalDealType.Id;
+        edited.ServiceId = legalService.Id;
         edited.PaymentStatusId = completedPaymentStatus.Id;
         edited.Status = PaymentStatus.Completed;
         edited.PaidAmount = installment.Amount;
@@ -947,6 +956,7 @@ public class PaymentsControllerTests
         var editedPayment = Assert.IsType<Payment>(editedOk.Value);
         Assert.Equal("ПКО-2026-0099", editedPayment.PaymentOrderNumber);
         Assert.Equal(paidDate.AddDays(1), editedPayment.PaymentDocumentDate);
+        Assert.Equal(legalService.Id, editedPayment.ServiceId);
 
         db.ChangeTracker.Clear();
         var editedOrder = await db.CashOrders.AsNoTracking().SingleAsync(order => order.PaymentId == installment.Id);
@@ -1106,13 +1116,18 @@ public class PaymentsControllerTests
             Name = "Сделка",
         };
 
+        var service = new ServiceDictionaryItem
+        {
+            Name = "Юридическая услуга",
+        };
+
         var invoice = new Invoice
         {
             Number = "INV-401",
             Date = new DateTime(2026, 4, 8),
         };
 
-        db.AddRange(client, clientCase, incomeType, paymentSource, paymentStatus, dealType, invoice);
+        db.AddRange(client, clientCase, incomeType, paymentSource, paymentStatus, dealType, service, invoice);
         await db.SaveChangesAsync();
 
         var invoiceDocument = CreatePayment(invoice.Date, 12_000m, "Счёт INV-401");
@@ -1153,6 +1168,7 @@ public class PaymentsControllerTests
             PaymentSourceId = paymentSource.Id,
             PaymentStatusId = paymentStatus.Id,
             DealTypeId = dealType.Id,
+            ServiceId = service.Id,
             InvoiceId = invoice.Id,
             Account = "LEGACY-401",
             AccountDate = invoice.Date.AddDays(1),
@@ -1174,6 +1190,7 @@ public class PaymentsControllerTests
         Assert.Equal(paymentSource.Id, updated.PaymentSourceId);
         Assert.Equal(paymentStatus.Id, updated.PaymentStatusId);
         Assert.Equal(dealType.Id, updated.DealTypeId);
+        Assert.Equal(service.Id, updated.ServiceId);
         Assert.Equal(updateModel.PaidDate!.Value.Date, updated.LastPaymentDate);
         Assert.Contains("Ручное примечание", updated.SystemNotes);
         Assert.Equal(1, updated.SystemNotes.Split('\n').Count(line => line.Contains("Исходная")));
@@ -1182,6 +1199,7 @@ public class PaymentsControllerTests
         Assert.Equal(invoice.Id, stored.InvoiceId);
         Assert.Equal(invoice.Number, stored.Account);
         Assert.Equal("LEGACY-401", stored.LegacyAccountNumber);
+        Assert.Equal(service.Id, stored.ServiceId);
         Assert.Equal(3, stored.RescheduleCount);
     }
 

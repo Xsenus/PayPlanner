@@ -75,11 +75,18 @@ vi.mock('../../hooks/useLegalEntities', () => ({
 
 vi.mock('../../hooks/useDictionaries', () => ({
   useDictionaries: () => ({
-    dealTypes: [],
-    incomeTypes: [],
+    dealTypes: [
+      { id: 7, name: 'Юридические услуги', description: '', colorHex: '#000000', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
+    ],
+    incomeTypes: [
+      { id: 8, name: 'Доход от услуг', description: '', colorHex: '#000000', isActive: true, createdAt: '2026-04-01T00:00:00Z', paymentType: 'Income' },
+    ],
     paymentSources: [
       { id: 5, name: 'Банковский перевод', description: '', colorHex: '#000000', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
       { id: 6, name: 'Наличные', description: '', colorHex: '#000000', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
+    ],
+    services: [
+      { id: 9, name: 'Тип юр услуги', description: '', unit: 'шт', defaultPrice: 0, colorHex: '#000000', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
     ],
   }),
 }));
@@ -619,9 +626,21 @@ describe('PaymentModal integration', () => {
     const dateInput = document.body.querySelector(
       'input[name="paymentDocumentDate"]',
     ) as HTMLInputElement | null;
+    const dealTypeSelect = document.body.querySelector('select[name="dealTypeId"]') as HTMLSelectElement | null;
+    const incomeTypeSelect = document.body.querySelector('select[name="incomeTypeId"]') as HTMLSelectElement | null;
+    const serviceSelect = document.body.querySelector('select[name="serviceId"]') as HTMLSelectElement | null;
+    const sourceSelect = document.body.querySelector('select[name="paymentSourceId"]') as HTMLSelectElement | null;
     expect(orderInput).not.toBeNull();
     expect(dateInput).not.toBeNull();
+    expect(dealTypeSelect).not.toBeNull();
+    expect(incomeTypeSelect).not.toBeNull();
+    expect(serviceSelect).not.toBeNull();
+    expect(sourceSelect).not.toBeNull();
 
+    fireEvent.change(dealTypeSelect!, { target: { value: '7' } });
+    fireEvent.change(incomeTypeSelect!, { target: { value: '8' } });
+    fireEvent.change(serviceSelect!, { target: { value: '9' } });
+    fireEvent.change(sourceSelect!, { target: { value: '6' } });
     fireEvent.change(orderInput!, { target: { value: 'ПКО-2026-0009' } });
     fireEvent.change(dateInput!, { target: { value: '2026-04-20' } });
     fireEvent.click(screen.getByRole('button', { name: 'save' }));
@@ -632,6 +651,9 @@ describe('PaymentModal integration', () => {
         id: 992,
         clientId: 77,
         clientCaseId: 501,
+        dealTypeId: 7,
+        incomeTypeId: 8,
+        serviceId: 9,
         paymentSourceId: 6,
         paymentOrderNumber: 'ПКО-2026-0009',
         paymentDocumentDate: '2026-04-20',
