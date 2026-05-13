@@ -376,6 +376,29 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('shows only non-closed cases in the task case selector', async () => {
+    casesState.cases = [
+      { id: 100, clientId: 10, title: 'Открытое дело', status: 'Open', createdAt: todayAt(8) } as ClientCase,
+      { id: 101, clientId: 10, title: 'Приостановленное дело', status: 'OnHold', createdAt: todayAt(8) } as ClientCase,
+      { id: 102, clientId: 10, title: 'Закрытое дело', status: 'Closed', createdAt: todayAt(8) } as ClientCase,
+    ];
+
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
+
+    const caseSelect = screen.getByRole('combobox', { name: 'Дело' });
+    const options = Array.from(caseSelect.querySelectorAll('option')).map((option) => option.textContent);
+
+    expect(options).toContain('Открытое дело');
+    expect(options).toContain('Приостановленное дело');
+    expect(options).not.toContain('Закрытое дело');
+  });
+
   it('saves selected legal entity and legal entity case from the task form', async () => {
     await renderJournal();
 

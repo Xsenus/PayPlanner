@@ -34,7 +34,7 @@ import { useClientCases } from '../../hooks/useClientCases';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type TaskJournalSettingsDto } from '../../services/api';
-import type { Client, LegalEntitySummary } from '../../types';
+import type { Client, ClientCase, LegalEntitySummary } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import {
   isTaskJournalActive,
@@ -478,6 +478,11 @@ function getTaskClientName(task: TaskJournalItem) {
 
 function getTaskCaseTitle(task: TaskJournalItem) {
   return task.clientCaseTitle?.trim() || '';
+}
+
+function isClosedClientCase(clientCase: ClientCase) {
+  const status = String(clientCase.status ?? '').trim().toLowerCase();
+  return status === 'closed' || status === 'закрыто' || status === 'закрыт';
 }
 
 function getLegalEntityDisplayName(entity: Pick<LegalEntitySummary, 'id' | 'shortName' | 'fullName'> | null | undefined) {
@@ -2503,6 +2508,10 @@ function TaskModal({
     enabled: Boolean(form.clientId || form.legalEntityId),
     legalEntityId: form.legalEntityId ?? undefined,
   });
+  const selectableClientCases = useMemo(
+    () => clientCases.filter((clientCase) => !isClosedClientCase(clientCase) || clientCase.id === form.clientCaseId),
+    [clientCases, form.clientCaseId],
+  );
   const isReadOnly = state?.mode === 'view';
   const canRequestDeadlineChange = Boolean(taskId && isReadOnly && taskSettings.allowExecutorDeadlineChangeRequests);
   const canManageFiles = Boolean(taskId && !isReadOnly);
@@ -2548,7 +2557,7 @@ function TaskModal({
   const handleCaseChange = (value: string) => {
     if (isReadOnly) return;
     const clientCaseId = Number(value) || null;
-    const clientCase = clientCases.find((item) => item.id === clientCaseId);
+    const clientCase = selectableClientCases.find((item) => item.id === clientCaseId);
     setForm((prev) => ({
       ...prev,
       clientCaseId,
@@ -2815,7 +2824,7 @@ function TaskModal({
                 className="form-input disabled:bg-slate-50 disabled:text-slate-400"
               >
                 <option value="">Без дела</option>
-                {clientCases.map((clientCase) => (
+                {selectableClientCases.map((clientCase) => (
                   <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
                 ))}
               </select>
