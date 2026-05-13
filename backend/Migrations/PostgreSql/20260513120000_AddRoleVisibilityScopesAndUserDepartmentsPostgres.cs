@@ -1,10 +1,15 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using PayPlanner.Api.Data;
 
 #nullable disable
 
 namespace PayPlanner.Api.Migrations.PostgreSql
 {
     /// <inheritdoc />
+    [DbContext(typeof(PostgreSqlPaymentContext))]
+    [Migration("20260513120000_AddRoleVisibilityScopesAndUserDepartmentsPostgres")]
     public partial class AddRoleVisibilityScopesAndUserDepartmentsPostgres : Migration
     {
         /// <inheritdoc />
