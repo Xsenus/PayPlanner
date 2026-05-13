@@ -838,6 +838,39 @@ function buildTimelineDropDate(day: Date, relativeY: number) {
   return next;
 }
 
+function parseLocalInputDate(value: string) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getMinuteOfDay(date: Date) {
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function taskMatchesAssignee(task: TaskJournalItem, assigneeUserId?: number | null, assigneeName?: string) {
+  if (assigneeUserId && (task.assigneeUserId === assigneeUserId || hasAssigneeParticipant(task, String(assigneeUserId)))) {
+    return true;
+  }
+
+  const normalizedName = assigneeName?.trim().toLowerCase();
+  if (!normalizedName) {
+    return false;
+  }
+
+  return [task.assigneeName, ...getTaskAssigneeNames(task)]
+    .map((value) => value.trim().toLowerCase())
+    .some((value) => value === normalizedName);
+}
+
+function formatTimeRange(start: Date, durationMinutes: number) {
+  const end = new Date(start.getTime() + normalizeTaskDuration(durationMinutes) * 60 * 1000);
+  return `${formatTimeOnly(start)}-${formatTimeOnly(end)}`;
+}
+
 function unique(values: string[]) {
   return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
 }
@@ -1955,6 +1988,7 @@ export function TaskJournal({ initialView = 'list', mode = 'journal', routeTaskI
         <TaskModal
           key={modal.task ? `edit-${modal.task.id}` : 'create'}
           state={modal}
+          tasks={tasks}
           assignees={assignees}
           clients={clients}
           legalEntities={legalEntities}
@@ -3143,8 +3177,154 @@ function TaskCalendar({
   );
 }
 
+function TaskDaySchedulePanel({
+  tasks,
+  selectedDueAt,
+  plannedDurationMinutes,
+  assigneeUserId,
+  assigneeName,
+  currentTaskId,
+}: {
+  tasks: TaskJournalItem[];
+  selectedDueAt: string;
+  plannedDurationMinutes: number | null | undefined;
+  assigneeUserId?: number | null;
+  assigneeName?: string;
+  currentTaskId: number | null;
+}) {
+  const selectedDate = useMemo(() => parseLocalInputDate(selectedDueAt), [selectedDueAt]);
+  const plannedDuration = normalizeTaskDuration(plannedDurationMinutes);
+  const assigneeLabel = assigneeName?.trim() || 'Исполнитель не выбран';
+
+  const dayTasks = useMemo(() => {
+    if (!selectedDate) {
+      return [];
+    }
+
+    return tasks
+      .filter((task) => {
+        const due = new Date(task.dueAt);
+        return !Number.isNaN(due.getTime()) && isSameDay(due, selectedDate);
+      })
+      .sort((a, b) => getTaskStartMinute(a) - getTaskStartMinute(b) || a.id - b.id);
+  }, [selectedDate, tasks]);
+
+  const activeDayTasks = useMemo(() => dayTasks.filter((task) => isTaskJournalActive(task.status)), [dayTasks]);
+  const assigneeDayTasks = useMemo(
+    () => dayTasks.filter((task) => taskMatchesAssignee(task, assigneeUserId, assigneeName)),
+    [assigneeName, assigneeUserId, dayTasks],
+  );
+  const activeAssigneeDayTasks = useMemo(
+    () => assigneeDayTasks.filter((task) => isTaskJournalActive(task.status)),
+    [assigneeDayTasks],
+  );
+
+  const selectedStartMinute = selectedDate ? getMinuteOfDay(selectedDate) : null;
+  const selectedEndMinute = selectedStartMinute === null ? null : selectedStartMinute + plannedDuration;
+  const conflictSource = activeAssigneeDayTasks.length > 0 || assigneeUserId || assigneeName?.trim()
+    ? activeAssigneeDayTasks
+    : activeDayTasks;
+  const conflicts = selectedStartMinute === null || selectedEndMinute === null
+    ? []
+    : conflictSource.filter((task) =>
+      task.id !== currentTaskId &&
+      intervalsOverlap(selectedStartMinute, selectedEndMinute, getTaskStartMinute(task), getTaskEndMinute(task)));
+  const dayLoadMinutes = activeDayTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
+  const assigneeLoadMinutes = activeAssigneeDayTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
+
+  if (!selectedDate) {
+    return (
+      <section data-testid="task-day-schedule-panel" className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+        Выберите дату и время, чтобы увидеть расписание и загрузку на день.
+      </section>
+    );
+  }
+
+  return (
+    <section data-testid="task-day-schedule-panel" className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
+            <CalendarClock className="h-4 w-4" />
+            Расписание на день
+          </div>
+          <h3 className="mt-1 text-base font-semibold text-slate-900">
+            {formatDateOnly(selectedDate)}, слот {formatTimeRange(selectedDate, plannedDuration)}
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">
+            {assigneeLabel}: {activeAssigneeDayTasks.length} активных задач · {formatDuration(assigneeLoadMinutes)}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+          <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">
+            Всего: {dayTasks.length}
+          </span>
+          <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">
+            Активных: {activeDayTasks.length} · {formatDuration(dayLoadMinutes)}
+          </span>
+          <span className={`rounded-full px-3 py-1 ring-1 ${conflicts.length > 0 ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}`}>
+            {conflicts.length > 0 ? `Пересечения: ${conflicts.length}` : 'Свободно'}
+          </span>
+        </div>
+      </div>
+
+      {dayTasks.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-blue-200 bg-white/70 px-4 py-5 text-sm text-slate-500">
+          На выбранный день задач пока нет.
+        </div>
+      ) : (
+        <div className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
+          {dayTasks.map((task) => {
+            const start = new Date(task.dueAt);
+            const duration = normalizeTaskDuration(task.plannedDurationMinutes);
+            const isCurrent = task.id === currentTaskId;
+            const sameAssignee = taskMatchesAssignee(task, assigneeUserId, assigneeName);
+            const isConflict = conflicts.some((item) => item.id === task.id);
+            const assigneeNames = getTaskAssigneeNames(task).join(', ');
+
+            return (
+              <article
+                key={task.id}
+                className={`rounded-xl border bg-white px-3 py-2 shadow-sm ${
+                  isConflict
+                    ? 'border-rose-200 ring-1 ring-rose-200'
+                    : sameAssignee
+                      ? 'border-blue-200'
+                      : 'border-slate-200'
+                }`}
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-slate-900">{formatTimeRange(start, duration)}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusClass(task.status)}`}>
+                        {getStatusLabel(task.status)}
+                      </span>
+                      {isCurrent ? (
+                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                          Текущая
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 truncate text-sm font-semibold text-slate-800">{task.title}</p>
+                    <p className="mt-0.5 truncate text-xs text-slate-500">{assigneeNames}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${sameAssignee ? 'bg-blue-50 text-blue-700' : 'bg-slate-50 text-slate-500'}`}>
+                    {formatDuration(duration)}
+                  </span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TaskModal({
   state,
+  tasks,
   assignees,
   clients,
   legalEntities,
@@ -3161,6 +3341,7 @@ function TaskModal({
   onDuplicate,
 }: {
   state: ModalState;
+  tasks: TaskJournalItem[];
   assignees: TaskJournalAssignee[];
   clients: Client[];
   legalEntities: LegalEntitySummary[];
@@ -3229,6 +3410,7 @@ function TaskModal({
   const [uploadingDocumentKey, setUploadingDocumentKey] = useState<string | null>(null);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [quickPanel, setQuickPanel] = useState<'assignee' | 'observer' | null>(null);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const selectedClient = useMemo(
     () => clients.find((client) => client.id === form.clientId) ?? null,
     [clients, form.clientId],
@@ -3836,8 +4018,44 @@ function TaskModal({
               </select>
             </Field>
             <Field label="Дата и время исполнения">
-              <input type="datetime-local" value={form.dueAt} onChange={(event) => update('dueAt', event.target.value)} disabled={isReadOnly} className="form-input" />
+              <div className="flex gap-2">
+                <input
+                  type="datetime-local"
+                  value={form.dueAt}
+                  onChange={(event) => update('dueAt', event.target.value)}
+                  disabled={isReadOnly}
+                  data-testid="task-due-at-input"
+                  className="form-input min-w-0 flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => setScheduleOpen((value) => !value)}
+                  data-testid="task-day-schedule-toggle"
+                  aria-expanded={scheduleOpen}
+                  title="Расписание на выбранный день"
+                  className={`inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition ${
+                    scheduleOpen
+                      ? 'border-blue-300 bg-blue-50 text-blue-700'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+                >
+                  <CalendarClock className="h-4 w-4" />
+                  <span className="hidden sm:inline">Расписание</span>
+                </button>
+              </div>
             </Field>
+            {scheduleOpen ? (
+              <div className="lg:col-span-2">
+                <TaskDaySchedulePanel
+                  tasks={tasks}
+                  selectedDueAt={form.dueAt}
+                  plannedDurationMinutes={form.plannedDurationMinutes}
+                  assigneeUserId={form.assigneeUserId}
+                  assigneeName={form.assigneeName}
+                  currentTaskId={taskId}
+                />
+              </div>
+            ) : null}
             <Field label="Длительность">
               <select
                 value={normalizeTaskDuration(form.plannedDurationMinutes)}

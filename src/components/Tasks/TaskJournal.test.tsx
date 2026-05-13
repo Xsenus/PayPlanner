@@ -101,6 +101,11 @@ function todayAt(hours: number, minutes = 0) {
   return value.toISOString();
 }
 
+function toDatetimeLocalInputValue(date: Date) {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
 function dateKey(date: Date) {
   return [
     date.getFullYear(),
@@ -503,6 +508,51 @@ describe('TaskJournal', () => {
       objectName: 'Внутренняя задача',
       title: 'Internal process',
     }));
+  });
+
+  it('shows the selected day schedule from the task date field', async () => {
+    const busySlot = new Date();
+    busySlot.setDate(busySlot.getDate() + 3);
+    busySlot.setHours(14, 0, 0, 0);
+
+    const selectedSlot = new Date(busySlot);
+    selectedSlot.setHours(14, 30, 0, 0);
+
+    const otherDay = new Date(busySlot);
+    otherDay.setDate(otherDay.getDate() + 1);
+
+    await renderJournal([
+      createTask({
+        title: 'Busy slot',
+        dueAt: busySlot.toISOString(),
+        plannedDurationMinutes: 60,
+        assigneeUserId: 7,
+        assigneeName: 'Администратор',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+      createTask({
+        id: 102,
+        title: 'Other day task',
+        dueAt: otherDay.toISOString(),
+        assigneeUserId: 7,
+        assigneeName: 'Администратор',
+      }),
+    ], { waitForTitle: 'Busy slot' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+
+    fireEvent.change(screen.getByTestId('task-due-at-input'), {
+      target: { value: toDatetimeLocalInputValue(selectedSlot) },
+    });
+    fireEvent.click(screen.getByTestId('task-day-schedule-toggle'));
+
+    const panel = screen.getByTestId('task-day-schedule-panel');
+    expect(within(panel).getByText('Busy slot')).toBeTruthy();
+    expect(within(panel).queryByText('Other day task')).toBeNull();
+    expect(within(panel).getByText(/Пересечения: 1/)).toBeTruthy();
   });
 
   it('saves selected client and case from the task form', async () => {
