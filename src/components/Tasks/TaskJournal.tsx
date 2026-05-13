@@ -736,6 +736,13 @@ function buildTimelineTaskPlacements(tasks: TaskJournalItem[]) {
   });
 }
 
+function getTimelineDayMinWidth(laneCount: number) {
+  return Math.max(
+    TIMELINE_DAY_MIN_WIDTH,
+    Math.max(1, laneCount) * (TIMELINE_TASK_MIN_READABLE_WIDTH + TIMELINE_TASK_LANE_GAP),
+  );
+}
+
 function buildTimelineDropDate(day: Date, relativeY: number) {
   const safeRelativeY = Number.isFinite(relativeY) ? relativeY : 0;
   const minutesFromStart = Math.round((safeRelativeY / TIMELINE_MINUTE_HEIGHT) / TIMELINE_SNAP_MINUTES) * TIMELINE_SNAP_MINUTES;
@@ -811,6 +818,10 @@ const TIMELINE_START_MINUTE = TIMELINE_START_HOUR * 60;
 const TIMELINE_END_MINUTE = TIMELINE_END_HOUR * 60;
 const TIMELINE_MINUTE_HEIGHT = TIMELINE_HOUR_HEIGHT / 60;
 const TIMELINE_SNAP_MINUTES = 15;
+const TIMELINE_TIME_COLUMN_WIDTH = 72;
+const TIMELINE_DAY_MIN_WIDTH = 180;
+const TIMELINE_TASK_MIN_READABLE_WIDTH = 116;
+const TIMELINE_TASK_LANE_GAP = 8;
 
 export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteTaskChange }: TaskJournalProps) {
   const { user, isAdmin } = useAuth();
@@ -2273,6 +2284,36 @@ function TaskTimelineCalendar({
       .slice(0, 8);
   }, [weekTasks]);
 
+  const timelineDayLayouts = useMemo(() => {
+    const map = new Map<string, { placements: ReturnType<typeof buildTimelineTaskPlacements>; minWidth: number; laneCount: number }>();
+
+    visibleDays.forEach((day) => {
+      const key = toDateKey(day);
+      const placements = buildTimelineTaskPlacements(tasksByDate.get(key) ?? []);
+      const laneCount = Math.max(1, ...placements.map((placement) => placement.laneCount));
+      map.set(key, {
+        placements,
+        minWidth: getTimelineDayMinWidth(laneCount),
+        laneCount,
+      });
+    });
+
+    return map;
+  }, [tasksByDate, visibleDays]);
+  const timelineGridTemplateColumns = useMemo(
+    () => `${TIMELINE_TIME_COLUMN_WIDTH}px ${visibleDays
+      .map((day) => `minmax(${timelineDayLayouts.get(toDateKey(day))?.minWidth ?? TIMELINE_DAY_MIN_WIDTH}px, 1fr)`)
+      .join(' ')}`,
+    [timelineDayLayouts, visibleDays],
+  );
+  const timelineMinWidth = useMemo(
+    () => TIMELINE_TIME_COLUMN_WIDTH + visibleDays.reduce(
+      (sum, day) => sum + (timelineDayLayouts.get(toDateKey(day))?.minWidth ?? TIMELINE_DAY_MIN_WIDTH),
+      0,
+    ),
+    [timelineDayLayouts, visibleDays],
+  );
+
   const legend = [
     { label: 'Выполненные/отмененные', dotClassName: 'bg-slate-500' },
     { label: 'Мои / выбранный исполнитель', dotClassName: 'bg-emerald-600' },
@@ -2356,8 +2397,12 @@ function TaskTimelineCalendar({
           ) : null}
 
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <div className="min-w-[1280px]">
-              <div className="grid grid-cols-[72px_repeat(7,minmax(160px,1fr))] border-b border-slate-200 bg-slate-50">
+            <div style={{ minWidth: timelineMinWidth }}>
+              <div
+                data-testid="task-timeline-header-grid"
+                className="grid border-b border-slate-200 bg-slate-50"
+                style={{ gridTemplateColumns: timelineGridTemplateColumns }}
+              >
                 <div className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Самара</div>
                 {visibleDays.map((day) => {
                   const key = toDateKey(day);
@@ -2383,7 +2428,11 @@ function TaskTimelineCalendar({
                 })}
               </div>
 
-              <div className="grid grid-cols-[72px_repeat(7,minmax(160px,1fr))]">
+              <div
+                data-testid="task-timeline-body-grid"
+                className="grid"
+                style={{ gridTemplateColumns: timelineGridTemplateColumns }}
+              >
                 <div className="relative bg-slate-50" style={{ height: timelineHeight }}>
                   {hourLabels.map((hour, index) => (
                     <div
@@ -2398,8 +2447,7 @@ function TaskTimelineCalendar({
 
                 {visibleDays.map((day) => {
                   const key = toDateKey(day);
-                  const dayTasks = tasksByDate.get(key) ?? [];
-                  const placements = buildTimelineTaskPlacements(dayTasks);
+                  const placements = timelineDayLayouts.get(key)?.placements ?? [];
                   const isToday = isSameDay(day, now);
 
                   return (
@@ -2444,8 +2492,9 @@ function TaskTimelineCalendar({
                         const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
                         const start = new Date(task.dueAt);
                         const end = new Date(start.getTime() + normalizeTaskDuration(task.plannedDurationMinutes) * 60 * 1000);
-                        const width = `calc(${100 / laneCount}% - 8px)`;
-                        const left = `calc(${(lane * 100) / laneCount}% + 4px)`;
+                        const width = `calc(${100 / laneCount}% - ${TIMELINE_TASK_LANE_GAP}px)`;
+                        const left = `calc(${(lane * 100) / laneCount}% + ${TIMELINE_TASK_LANE_GAP / 2}px)`;
+                        const isCompactTask = height < 52;
 
                         return (
                           <article
@@ -2461,17 +2510,19 @@ function TaskTimelineCalendar({
                               event.dataTransfer.setData('text/plain', String(task.id));
                               event.dataTransfer.effectAllowed = 'move';
                             }}
-                            className={`absolute z-10 overflow-hidden rounded-lg border-l-4 px-2 py-1.5 text-left text-xs shadow-sm transition hover:z-30 hover:ring-2 hover:ring-blue-200 ${tone.className} ${
+                            className={`absolute z-10 min-w-[7.25rem] overflow-hidden rounded-lg border-l-4 px-2 text-left text-xs shadow-sm transition hover:z-30 hover:ring-2 hover:ring-blue-200 ${isCompactTask ? 'py-1' : 'py-1.5'} ${tone.className} ${
                               movingTaskId === task.id ? 'opacity-60' : ''
                             } ${highlightedTaskId === task.id ? 'ring-2 ring-blue-300' : ''}`}
                             style={{ top, height, left, width }}
                             title={`${task.title}\n${formatTimeOnly(start)}-${formatTimeOnly(end)}\n${getTaskAssigneeNames(task).join(', ')}`}
                           >
-                            <div className="flex items-start justify-between gap-1">
-                              <button type="button" onClick={() => onEdit(task)} className="min-w-0 text-left">
+                            <div className="flex h-full items-start justify-between gap-1">
+                              <button type="button" onClick={() => onEdit(task)} className="min-w-0 flex-1 text-left">
                                 <span className="block truncate font-bold uppercase leading-4">{task.title}</span>
-                                <span className="mt-0.5 block truncate font-semibold opacity-90">{formatTimeOnly(start)}-{formatTimeOnly(end)}</span>
-                                <span className="mt-0.5 block truncate opacity-90">{getTaskAssigneeNames(task).join(', ')}</span>
+                                <span className={`block truncate font-semibold opacity-90 ${isCompactTask ? 'mt-0' : 'mt-0.5'}`}>{formatTimeOnly(start)}-{formatTimeOnly(end)}</span>
+                                {!isCompactTask ? (
+                                  <span className="mt-0.5 block truncate opacity-90">{getTaskAssigneeNames(task).join(', ')}</span>
+                                ) : null}
                               </button>
                               {isTaskJournalActive(task.status) ? (
                                 <button

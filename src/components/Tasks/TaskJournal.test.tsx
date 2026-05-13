@@ -733,6 +733,27 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-timeline-task-102')).toBeTruthy();
   });
 
+  it('keeps overlapping workload timeline tasks wide enough to show text', async () => {
+    const overlappingTasks = Array.from({ length: 6 }, (_, index) => createTask({
+      id: 200 + index,
+      title: `Пересекающаяся задача ${index + 1}`,
+      dueAt: todayAt(13),
+      plannedDurationMinutes: 60,
+      assigneeUserId: 7,
+      assigneeName: 'Администратор',
+    }));
+
+    await renderJournal(overlappingTasks, {
+      initialView: 'timeline',
+    });
+
+    const bodyGrid = screen.getByTestId('task-timeline-body-grid') as HTMLElement;
+
+    expect(bodyGrid.style.gridTemplateColumns).toContain('minmax(744px, 1fr)');
+    expect(screen.getByTestId('task-timeline-task-200').className).toContain('min-w-[7.25rem]');
+    expect(screen.getByText('Пересекающаяся задача 1')).toBeTruthy();
+  });
+
   it('moves a task to another time slot in the workload timeline', async () => {
     await renderJournal([createTask({ dueAt: todayAt(11), plannedDurationMinutes: 60 })], { initialView: 'timeline' });
 
