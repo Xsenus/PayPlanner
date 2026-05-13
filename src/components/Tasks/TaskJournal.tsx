@@ -543,7 +543,18 @@ function getTaskCaseTitle(task: TaskJournalItem) {
 
 function isClosedClientCase(clientCase: ClientCase) {
   const status = String(clientCase.status ?? '').trim().toLowerCase();
-  return status === 'closed' || status === 'закрыто' || status === 'закрыт';
+  const normalized = status.replace(/ё/g, 'е');
+  return normalized === '2'
+    || normalized.includes('closed')
+    || normalized.includes('complete')
+    || normalized.includes('archiv')
+    || normalized.includes('cancel')
+    || normalized.includes('done')
+    || normalized.includes('закры')
+    || normalized.includes('заверш')
+    || normalized.includes('оконч')
+    || normalized.includes('архив')
+    || normalized.includes('отмен');
 }
 
 function getLegalEntityDisplayName(entity: Pick<LegalEntitySummary, 'id' | 'shortName' | 'fullName'> | null | undefined) {

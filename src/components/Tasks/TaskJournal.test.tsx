@@ -609,6 +609,10 @@ describe('TaskJournal', () => {
       { id: 100, clientId: 10, title: 'Открытое дело', status: 'Open', createdAt: todayAt(8) } as ClientCase,
       { id: 101, clientId: 10, title: 'Приостановленное дело', status: 'OnHold', createdAt: todayAt(8) } as ClientCase,
       { id: 102, clientId: 10, title: 'Закрытое дело', status: 'Closed', createdAt: todayAt(8) } as ClientCase,
+      { id: 103, clientId: 10, title: 'Закрытое импортом', status: 'Закрытое', createdAt: todayAt(8) } as ClientCase,
+      { id: 104, clientId: 10, title: 'Завершенное дело', status: 'Завершено', createdAt: todayAt(8) } as ClientCase,
+      { id: 105, clientId: 10, title: 'Архивное дело', status: 'Archived', createdAt: todayAt(8) } as ClientCase,
+      { id: 106, clientId: 10, title: 'Числовой закрытый статус', status: '2', createdAt: todayAt(8) } as ClientCase,
     ];
 
     await renderJournal();
@@ -625,6 +629,10 @@ describe('TaskJournal', () => {
     expect(options).toContain('Открытое дело');
     expect(options).toContain('Приостановленное дело');
     expect(options).not.toContain('Закрытое дело');
+    expect(options).not.toContain('Закрытое импортом');
+    expect(options).not.toContain('Завершенное дело');
+    expect(options).not.toContain('Архивное дело');
+    expect(options).not.toContain('Числовой закрытый статус');
   });
 
   it('saves selected legal entity and legal entity case from the task form', async () => {
