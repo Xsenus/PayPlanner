@@ -156,7 +156,7 @@ function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
 
 async function renderJournal(
   tasks: TaskJournalItem[] = [createTask()],
-  options: { initialView?: 'list' | 'board' | 'calendar'; assignees?: TaskJournalAssignee[] } = {},
+  options: { initialView?: 'list' | 'board' | 'calendar' | 'timeline'; assignees?: TaskJournalAssignee[] } = {},
 ) {
   apiMock.getTaskJournalItems.mockResolvedValue({
     items: tasks,
@@ -173,7 +173,7 @@ async function renderJournal(
   });
 
   render(<TaskJournal initialView={options.initialView} />);
-  await screen.findAllByText('Тестовая задача');
+  await screen.findAllByText(tasks[0]?.title ?? 'Тестовая задача');
 }
 
 describe('TaskJournal', () => {
@@ -715,6 +715,50 @@ describe('TaskJournal', () => {
     expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
       plannedDurationMinutes: 75,
     }));
+  });
+
+  it('renders a weekly workload timeline with color legend', async () => {
+    await renderJournal([
+      createTask({ assigneeUserId: 7, assigneeName: 'Администратор' }),
+      createTask({ id: 102, title: 'Закрытая задача', status: 'done', result: 'Готово', assigneeUserId: 7, assigneeName: 'Администратор' }),
+    ]);
+
+    fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'all' } });
+    fireEvent.click(screen.getByRole('button', { name: /Нагрузка/i }));
+
+    expect(screen.getByText('Календарь нагрузки')).toBeTruthy();
+    expect(screen.getByText('Мои / выбранный исполнитель')).toBeTruthy();
+    expect(screen.getByText('Выполненные/отмененные')).toBeTruthy();
+    expect(screen.getByTestId('task-timeline-task-101')).toBeTruthy();
+    expect(screen.getByTestId('task-timeline-task-102')).toBeTruthy();
+  });
+
+  it('moves a task to another time slot in the workload timeline', async () => {
+    await renderJournal([createTask({ dueAt: todayAt(11), plannedDurationMinutes: 60 })], { initialView: 'timeline' });
+
+    const targetDay = screen.getByTestId(`task-timeline-day-${dateKey(new Date())}`);
+    targetDay.getBoundingClientRect = vi.fn(() => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 832,
+      right: 180,
+      width: 180,
+      height: 832,
+      toJSON: () => ({}),
+    }));
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.dragStart(screen.getByTestId('task-timeline-task-101'), { dataTransfer });
+    fireEvent.dragOver(targetDay, { dataTransfer, clientY: 96 });
+    fireEvent.drop(targetDay, { dataTransfer, clientY: 96 });
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    const movedDueAt = new Date(payload.dueAt);
+    expect(movedDueAt.getHours()).toBe(8);
+    expect(movedDueAt.getMinutes()).toBe(0);
   });
 
   it('loads task history and adds a comment from the edit form', async () => {

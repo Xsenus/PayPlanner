@@ -56,7 +56,7 @@ import {
 } from '../../utils/taskJournalStore';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 
-type ViewMode = 'list' | 'board' | 'calendar';
+type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 type PeriodMode = 'day' | 'week' | 'month';
 type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
@@ -611,6 +611,143 @@ function statusClass(status: TaskJournalStatus) {
   }
 }
 
+function formatTimeOnly(value: Date | string) {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function getTimelineHourLabels() {
+  return Array.from(
+    { length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 },
+    (_, index) => TIMELINE_START_HOUR + index,
+  );
+}
+
+function getTaskStartMinute(task: TaskJournalItem) {
+  const date = new Date(task.dueAt);
+  if (Number.isNaN(date.getTime())) {
+    return TIMELINE_START_MINUTE;
+  }
+
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function getTaskEndMinute(task: TaskJournalItem) {
+  return getTaskStartMinute(task) + normalizeTaskDuration(task.plannedDurationMinutes);
+}
+
+function getTaskAssigneeNames(task: TaskJournalItem) {
+  const participantNames = getTaskParticipants(task, 'assignee').map(getParticipantDisplayName).filter(Boolean);
+  return unique(participantNames.length > 0 ? participantNames : [task.assigneeName || 'Без исполнителя']);
+}
+
+function getTimelineTaskTone(task: TaskJournalItem, currentUserId: number | null, assigneeFilter: string) {
+  const dueTime = new Date(task.dueAt).getTime();
+  const isOverdue = isTaskJournalActive(task.status) && Number.isFinite(dueTime) && dueTime < Date.now();
+  const isSelectedAssignee =
+    assigneeFilter !== 'all' &&
+    (String(task.assigneeUserId ?? '') === assigneeFilter || hasAssigneeParticipant(task, assigneeFilter));
+  const isOwnTask = isSelectedAssignee || isTaskExecutorForUser(task, currentUserId);
+
+  if (task.status === 'done' || task.status === 'cancelled') {
+    return {
+      label: 'Выполненные/отмененные',
+      className: 'border-slate-500 bg-slate-500 text-white',
+      dotClassName: 'bg-slate-500',
+    };
+  }
+
+  if (isOverdue || task.status === 'overdueApproval') {
+    return {
+      label: 'Просроченные',
+      className: 'border-rose-600 bg-rose-600 text-white',
+      dotClassName: 'bg-rose-600',
+    };
+  }
+
+  if (isOwnTask) {
+    return {
+      label: 'Мои / выбранный исполнитель',
+      className: 'border-emerald-700 bg-emerald-600 text-white',
+      dotClassName: 'bg-emerald-600',
+    };
+  }
+
+  if (task.priority === 'high' || task.priority === 'urgent') {
+    return {
+      label: 'Высокий приоритет',
+      className: 'border-orange-600 bg-orange-500 text-white',
+      dotClassName: 'bg-orange-500',
+    };
+  }
+
+  if (task.status === 'onApproval' || task.status === 'revision') {
+    return {
+      label: 'Согласование/доработка',
+      className: 'border-violet-600 bg-violet-600 text-white',
+      dotClassName: 'bg-violet-600',
+    };
+  }
+
+  if (task.status === 'waiting') {
+    return {
+      label: 'Ожидание',
+      className: 'border-amber-600 bg-amber-500 text-white',
+      dotClassName: 'bg-amber-500',
+    };
+  }
+
+  return {
+    label: 'Остальные задачи',
+    className: 'border-sky-600 bg-sky-600 text-white',
+    dotClassName: 'bg-sky-600',
+  };
+}
+
+function buildTimelineTaskPlacements(tasks: TaskJournalItem[]) {
+  const sorted = tasks
+    .slice()
+    .sort((a, b) => getTaskStartMinute(a) - getTaskStartMinute(b) || a.id - b.id);
+  const laneEnds: number[] = [];
+  const laneByTask = new Map<number, number>();
+
+  sorted.forEach((task) => {
+    const start = getTaskStartMinute(task);
+    const end = getTaskEndMinute(task);
+    const lane = laneEnds.findIndex((laneEnd) => laneEnd <= start);
+    const nextLane = lane >= 0 ? lane : laneEnds.length;
+    laneEnds[nextLane] = end;
+    laneByTask.set(task.id, nextLane);
+  });
+
+  const laneCount = Math.max(1, laneEnds.length);
+  return sorted.map((task) => {
+    const rawStart = getTaskStartMinute(task);
+    const rawEnd = getTaskEndMinute(task);
+    const clampedStart = Math.min(TIMELINE_END_MINUTE - TIMELINE_SNAP_MINUTES, Math.max(TIMELINE_START_MINUTE, rawStart));
+    const clampedEnd = Math.max(clampedStart + TIMELINE_SNAP_MINUTES, Math.min(TIMELINE_END_MINUTE, rawEnd));
+    return {
+      task,
+      lane: laneByTask.get(task.id) ?? 0,
+      laneCount,
+      top: (clampedStart - TIMELINE_START_MINUTE) * TIMELINE_MINUTE_HEIGHT,
+      height: Math.max(36, (clampedEnd - clampedStart) * TIMELINE_MINUTE_HEIGHT),
+    };
+  });
+}
+
+function buildTimelineDropDate(day: Date, relativeY: number) {
+  const safeRelativeY = Number.isFinite(relativeY) ? relativeY : 0;
+  const minutesFromStart = Math.round((safeRelativeY / TIMELINE_MINUTE_HEIGHT) / TIMELINE_SNAP_MINUTES) * TIMELINE_SNAP_MINUTES;
+  const targetMinutes = Math.min(
+    TIMELINE_END_MINUTE - TIMELINE_SNAP_MINUTES,
+    Math.max(TIMELINE_START_MINUTE, TIMELINE_START_MINUTE + minutesFromStart),
+  );
+  const next = startOfDay(day);
+  next.setHours(Math.floor(targetMinutes / 60), targetMinutes % 60, 0, 0);
+  return next;
+}
+
 function unique(values: string[]) {
   return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
 }
@@ -667,6 +804,13 @@ function serializeCsvValue(value: string) {
 }
 
 const WEEKDAY_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const TIMELINE_START_HOUR = 8;
+const TIMELINE_END_HOUR = 21;
+const TIMELINE_HOUR_HEIGHT = 64;
+const TIMELINE_START_MINUTE = TIMELINE_START_HOUR * 60;
+const TIMELINE_END_MINUTE = TIMELINE_END_HOUR * 60;
+const TIMELINE_MINUTE_HEIGHT = TIMELINE_HOUR_HEIGHT / 60;
+const TIMELINE_SNAP_MINUTES = 15;
 
 export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteTaskChange }: TaskJournalProps) {
   const { user, isAdmin } = useAuth();
@@ -1014,6 +1158,12 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     setCalendarSelectedDate(next);
   };
 
+  const shiftTimelineWeek = (direction: -1 | 1) => {
+    const next = addDays(calendarAnchorDate, direction * 7);
+    setCalendarAnchorDate(next);
+    setCalendarSelectedDate(next);
+  };
+
   const resetCalendarPeriod = () => {
     const today = new Date();
     setCalendarAnchorDate(today);
@@ -1269,6 +1419,38 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     }
   };
 
+  const handleTimelineTaskMove = async (task: TaskJournalItem, targetDueAt: Date) => {
+    if (isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings)) {
+      toast.error('Исполнитель может запросить перенос срока в карточке задачи.', 'Календарь нагрузки');
+      openTaskEditor(task, { syncRoute: true });
+      return;
+    }
+
+    if (!task.clientId && !task.legalEntityId) {
+      toast.error('У задачи не указан контрагент. Откройте задачу и заполните контрагента перед переносом.', 'Календарь нагрузки');
+      openTaskEditor(task, { syncRoute: true });
+      return;
+    }
+
+    const currentDueAt = new Date(task.dueAt);
+    if (!Number.isNaN(currentDueAt.getTime()) && currentDueAt.getTime() === targetDueAt.getTime()) {
+      return;
+    }
+
+    setCalendarMovingTaskId(task.id);
+    try {
+      await apiService.updateTaskJournalItem(task.id, taskToPayload(task, { dueAt: targetDueAt.toISOString() }));
+      setCalendarSelectedDate(targetDueAt);
+      toast.success('Задача перенесена на шкале нагрузки.', 'Календарь нагрузки');
+      await refreshTasks();
+      emitTaskChange();
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось перенести задачу по шкале.'), 'Календарь нагрузки');
+    } finally {
+      setCalendarMovingTaskId(null);
+    }
+  };
+
   const handleCalendarTaskResize = async (task: TaskJournalItem, deltaMinutes: -15 | 15) => {
     if (isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings)) {
       toast.error('Исполнитель не может менять длительность задачи напрямую.', 'Календарь задач');
@@ -1490,18 +1672,20 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           </div>
 
           <div className="flex flex-wrap justify-end gap-2">
-            <div className="flex rounded-xl bg-slate-100 p-1">
-              {(['day', 'week', 'month'] as PeriodMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setPeriodMode(mode)}
-                  className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${periodMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-                >
-                  {mode === 'day' ? 'День' : mode === 'week' ? 'Неделя' : 'Месяц'}
-                </button>
-              ))}
-            </div>
+            {viewMode !== 'timeline' ? (
+              <div className="flex rounded-xl bg-slate-100 p-1">
+                {(['day', 'week', 'month'] as PeriodMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setPeriodMode(mode)}
+                    className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${periodMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                  >
+                    {mode === 'day' ? 'День' : mode === 'week' ? 'Неделя' : 'Месяц'}
+                  </button>
+                ))}
+              </div>
+            ) : null}
 
             <div className="flex rounded-xl bg-slate-100 p-1">
               <button
@@ -1527,6 +1711,14 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
               >
                 <CalendarDays className="h-4 w-4" />
                 Календарь
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('timeline')}
+                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${viewMode === 'timeline' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+              >
+                <CalendarClock className="h-4 w-4" />
+                Нагрузка
               </button>
             </div>
           </div>
@@ -1570,7 +1762,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
             onEdit={openTaskEditor}
             onDone={(task) => setTaskStatus(task, 'done')}
           />
-        ) : (
+        ) : viewMode === 'calendar' ? (
           <TaskCalendar
             tasks={filteredTasks}
             mode={periodMode}
@@ -1592,6 +1784,25 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
             taskSettings={taskSettings}
             movingTaskId={calendarMovingTaskId}
             resizingTaskId={calendarResizingTaskId}
+          />
+        ) : (
+          <TaskTimelineCalendar
+            tasks={filteredTasks}
+            anchorDate={calendarAnchorDate}
+            highlightedTaskId={highlightedTaskId}
+            loading={loading}
+            assigneeFilter={assigneeFilter}
+            onPrevious={() => shiftTimelineWeek(-1)}
+            onNext={() => shiftTimelineWeek(1)}
+            onToday={resetCalendarPeriod}
+            onCreateDate={openTaskCreateForDate}
+            onMoveTask={handleTimelineTaskMove}
+            onEdit={openTaskEditor}
+            onDone={(task) => setTaskStatus(task, 'done')}
+            currentUserId={currentUserId}
+            isAdminUser={isAdminUser}
+            taskSettings={taskSettings}
+            movingTaskId={calendarMovingTaskId}
           />
         )}
       </div>
@@ -1971,6 +2182,324 @@ function TaskBoard({
         </section>
       ))}
     </div>
+  );
+}
+
+function TaskTimelineCalendar({
+  tasks,
+  anchorDate,
+  highlightedTaskId,
+  loading,
+  assigneeFilter,
+  onPrevious,
+  onNext,
+  onToday,
+  onCreateDate,
+  onMoveTask,
+  onEdit,
+  onDone,
+  currentUserId,
+  isAdminUser,
+  taskSettings,
+  movingTaskId,
+}: {
+  tasks: TaskJournalItem[];
+  anchorDate: Date;
+  highlightedTaskId: number | null;
+  loading: boolean;
+  assigneeFilter: string;
+  onPrevious: () => void;
+  onNext: () => void;
+  onToday: () => void;
+  onCreateDate: (date: Date) => void;
+  onMoveTask: (task: TaskJournalItem, dueAt: Date) => void;
+  onEdit: (task: TaskJournalItem) => void;
+  onDone: (task: TaskJournalItem) => void;
+  currentUserId: number | null;
+  isAdminUser: boolean;
+  taskSettings: TaskJournalSettingsDto;
+  movingTaskId: number | null;
+}) {
+  const visibleDays = useMemo(() => {
+    const start = startOfWeek(anchorDate);
+    return Array.from({ length: 7 }, (_, index) => addDays(start, index));
+  }, [anchorDate]);
+  const visibleDayKeys = useMemo(() => new Set(visibleDays.map(toDateKey)), [visibleDays]);
+  const hourLabels = useMemo(getTimelineHourLabels, []);
+  const timelineHeight = (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * TIMELINE_HOUR_HEIGHT;
+
+  const tasksByDate = useMemo(() => {
+    const map = new Map<string, TaskJournalItem[]>();
+    tasks.forEach((task) => {
+      const key = toDateKey(new Date(task.dueAt));
+      if (!visibleDayKeys.has(key)) {
+        return;
+      }
+
+      const items = map.get(key) ?? [];
+      items.push(task);
+      map.set(key, items);
+    });
+
+    map.forEach((items) => {
+      items.sort((a, b) => getTaskStartMinute(a) - getTaskStartMinute(b) || a.id - b.id);
+    });
+
+    return map;
+  }, [tasks, visibleDayKeys]);
+
+  const weekTasks = useMemo(
+    () => visibleDays.flatMap((day) => tasksByDate.get(toDateKey(day)) ?? []),
+    [tasksByDate, visibleDays],
+  );
+
+  const weekWorkload = useMemo(() => {
+    const byAssignee = new Map<string, { name: string; count: number; duration: number; done: number }>();
+    weekTasks.forEach((task) => {
+      const names = getTaskAssigneeNames(task);
+      names.forEach((name) => {
+        const item = byAssignee.get(name) ?? { name, count: 0, duration: 0, done: 0 };
+        item.count += 1;
+        item.duration += normalizeTaskDuration(task.plannedDurationMinutes);
+        if (task.status === 'done') {
+          item.done += 1;
+        }
+        byAssignee.set(name, item);
+      });
+    });
+
+    return Array.from(byAssignee.values())
+      .sort((a, b) => b.duration - a.duration || b.count - a.count || a.name.localeCompare(b.name, 'ru'))
+      .slice(0, 8);
+  }, [weekTasks]);
+
+  const legend = [
+    { label: 'Выполненные/отмененные', dotClassName: 'bg-slate-500' },
+    { label: 'Мои / выбранный исполнитель', dotClassName: 'bg-emerald-600' },
+    { label: 'Высокий приоритет', dotClassName: 'bg-orange-500' },
+    { label: 'Согласование/доработка', dotClassName: 'bg-violet-600' },
+    { label: 'Просроченные', dotClassName: 'bg-rose-600' },
+    { label: 'Остальные задачи', dotClassName: 'bg-sky-600' },
+  ];
+
+  const now = new Date();
+  const currentTimeTop =
+    ((now.getHours() * 60 + now.getMinutes()) - TIMELINE_START_MINUTE) * TIMELINE_MINUTE_HEIGHT;
+  const showCurrentTime = visibleDayKeys.has(toDateKey(now))
+    && currentTimeTop >= 0
+    && currentTimeTop <= timelineHeight;
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            <CalendarClock className="h-4 w-4" />
+            Календарь нагрузки
+          </div>
+          <h2 className="mt-2 text-xl font-semibold text-slate-900">{formatPeriodTitle(anchorDate, 'week')}</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {weekTasks.length > 0 ? `В недельной шкале задач: ${weekTasks.length}` : 'На неделе задач нет'}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {legend.map((item) => (
+              <span key={item.label} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+                <span className={`h-2.5 w-2.5 rounded-full ${item.dotClassName}`} />
+                {item.label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onPrevious}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+            aria-label="Предыдущая неделя"
+            title="Предыдущая неделя"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onToday}
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Сегодня
+          </button>
+          <button
+            type="button"
+            onClick={onNext}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+            aria-label="Следующая неделя"
+            title="Следующая неделя"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="px-6 py-12 text-center text-sm text-slate-500">Загружаем календарь нагрузки...</div>
+      ) : (
+        <div className="p-4">
+          {weekWorkload.length > 0 ? (
+            <div className="mb-4 flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+              {weekWorkload.map((item) => (
+                <span key={item.name} className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                  {item.name}: {item.count} · {formatDuration(item.duration)}
+                  {item.done > 0 ? ` · готово ${item.done}` : ''}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <div className="min-w-[1280px]">
+              <div className="grid grid-cols-[72px_repeat(7,minmax(160px,1fr))] border-b border-slate-200 bg-slate-50">
+                <div className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Самара</div>
+                {visibleDays.map((day) => {
+                  const key = toDateKey(day);
+                  const dayTasks = tasksByDate.get(key) ?? [];
+                  const dayDuration = dayTasks
+                    .filter((task) => isTaskJournalActive(task.status))
+                    .reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
+                  return (
+                    <div key={key} className="border-l border-slate-200 px-3 py-3 text-center">
+                      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{WEEKDAY_LABELS[visibleDays.indexOf(day)]}</div>
+                      <div className="mt-1 text-2xl font-semibold text-slate-900">{day.getDate()}</div>
+                      <div className="mt-1 text-xs text-slate-500">{dayTasks.length} · {formatDuration(dayDuration)}</div>
+                      <button
+                        type="button"
+                        onClick={() => onCreateDate(day)}
+                        className="mt-2 inline-flex h-7 items-center justify-center rounded-lg border border-blue-200 bg-white px-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                      >
+                        <Plus className="mr-1 h-3.5 w-3.5" />
+                        Задача
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="grid grid-cols-[72px_repeat(7,minmax(160px,1fr))]">
+                <div className="relative bg-slate-50" style={{ height: timelineHeight }}>
+                  {hourLabels.map((hour, index) => (
+                    <div
+                      key={hour}
+                      className="absolute left-0 right-0 -translate-y-2 px-3 text-right text-xs font-semibold text-slate-500"
+                      style={{ top: index * TIMELINE_HOUR_HEIGHT }}
+                    >
+                      {String(hour).padStart(2, '0')}:00
+                    </div>
+                  ))}
+                </div>
+
+                {visibleDays.map((day) => {
+                  const key = toDateKey(day);
+                  const dayTasks = tasksByDate.get(key) ?? [];
+                  const placements = buildTimelineTaskPlacements(dayTasks);
+                  const isToday = isSameDay(day, now);
+
+                  return (
+                    <div
+                      key={key}
+                      data-testid={`task-timeline-day-${key}`}
+                      className={`relative border-l border-slate-200 ${isToday ? 'bg-blue-50/30' : 'bg-white'}`}
+                      style={{ height: timelineHeight }}
+                      onDragOver={(event) => {
+                        if (event.dataTransfer.types.includes('application/x-task-id') || event.dataTransfer.types.includes('text/plain')) {
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = 'move';
+                        }
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        const taskId = Number(event.dataTransfer.getData('application/x-task-id') || event.dataTransfer.getData('text/plain'));
+                        const task = tasks.find((item) => item.id === taskId);
+                        if (!task) {
+                          return;
+                        }
+
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        onMoveTask(task, buildTimelineDropDate(day, event.clientY - rect.top));
+                      }}
+                    >
+                      {hourLabels.slice(0, -1).map((hour, index) => (
+                        <div
+                          key={hour}
+                          className="absolute left-0 right-0 border-t border-slate-200"
+                          style={{ top: index * TIMELINE_HOUR_HEIGHT }}
+                        />
+                      ))}
+                      {showCurrentTime && isToday ? (
+                        <div className="absolute left-0 right-0 z-20 border-t-2 border-rose-500" style={{ top: currentTimeTop }}>
+                          <span className="absolute -top-2 left-1 rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">сейчас</span>
+                        </div>
+                      ) : null}
+
+                      {placements.map(({ task, top, height, lane, laneCount }) => {
+                        const tone = getTimelineTaskTone(task, currentUserId, assigneeFilter);
+                        const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
+                        const start = new Date(task.dueAt);
+                        const end = new Date(start.getTime() + normalizeTaskDuration(task.plannedDurationMinutes) * 60 * 1000);
+                        const width = `calc(${100 / laneCount}% - 8px)`;
+                        const left = `calc(${(lane * 100) / laneCount}% + 4px)`;
+
+                        return (
+                          <article
+                            key={task.id}
+                            draggable={isTaskJournalActive(task.status) && !isReadOnly}
+                            data-testid={`task-timeline-task-${task.id}`}
+                            onDragStart={(event) => {
+                              if (isReadOnly) {
+                                event.preventDefault();
+                                return;
+                              }
+                              event.dataTransfer.setData('application/x-task-id', String(task.id));
+                              event.dataTransfer.setData('text/plain', String(task.id));
+                              event.dataTransfer.effectAllowed = 'move';
+                            }}
+                            className={`absolute z-10 overflow-hidden rounded-lg border-l-4 px-2 py-1.5 text-left text-xs shadow-sm transition hover:z-30 hover:ring-2 hover:ring-blue-200 ${tone.className} ${
+                              movingTaskId === task.id ? 'opacity-60' : ''
+                            } ${highlightedTaskId === task.id ? 'ring-2 ring-blue-300' : ''}`}
+                            style={{ top, height, left, width }}
+                            title={`${task.title}\n${formatTimeOnly(start)}-${formatTimeOnly(end)}\n${getTaskAssigneeNames(task).join(', ')}`}
+                          >
+                            <div className="flex items-start justify-between gap-1">
+                              <button type="button" onClick={() => onEdit(task)} className="min-w-0 text-left">
+                                <span className="block truncate font-bold uppercase leading-4">{task.title}</span>
+                                <span className="mt-0.5 block truncate font-semibold opacity-90">{formatTimeOnly(start)}-{formatTimeOnly(end)}</span>
+                                <span className="mt-0.5 block truncate opacity-90">{getTaskAssigneeNames(task).join(', ')}</span>
+                              </button>
+                              {isTaskJournalActive(task.status) ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    onDone(task);
+                                  }}
+                                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/20 text-white transition hover:bg-white/30"
+                                  title="Завершить"
+                                  aria-label="Завершить задачу"
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                </button>
+                              ) : null}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
