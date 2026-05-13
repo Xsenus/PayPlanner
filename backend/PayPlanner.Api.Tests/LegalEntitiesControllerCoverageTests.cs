@@ -282,8 +282,9 @@ public class LegalEntitiesControllerCoverageTests
     public async Task GetAll_GetPaged_AndGetById_HideMainCompanies_ForRegularUsers()
     {
         await using var db = await CreateContextAsync();
+        var regularUser = await CreateUserAsync(db, isActive: true);
         var mainCompanyId = await CreateLegalEntityAsync(db, "Main Company");
-        var visibleId = await CreateLegalEntityAsync(db, "Searchable Service");
+        var visibleId = await CreateLegalEntityAsync(db, "Searchable Service", responsibleUserId: regularUser.Id);
         var anotherId = await CreateLegalEntityAsync(db, "Vector");
 
         var adminController = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
@@ -314,13 +315,14 @@ public class LegalEntitiesControllerCoverageTests
         var pagedSearchItem = Assert.Single(pagedSearch.Items);
         Assert.Equal(visibleId, pagedSearchItem.Id);
 
-        var regularController = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 2, isAdmin: false);
+        var regularController = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: regularUser.Id, isAdmin: false);
         Assert.IsType<NotFoundResult>((await regularController.GetById(mainCompanyId, CancellationToken.None)).Result);
 
         var visibleOk = Assert.IsType<OkObjectResult>((await regularController.GetById(visibleId, CancellationToken.None)).Result);
         var visibleDto = Assert.IsType<LegalEntityDetailDto>(visibleOk.Value);
         Assert.Equal(visibleId, visibleDto.Id);
 
+        Assert.IsType<NotFoundResult>((await regularController.GetById(anotherId, CancellationToken.None)).Result);
         Assert.IsType<NotFoundResult>((await regularController.GetById(anotherId + 100, CancellationToken.None)).Result);
     }
 
@@ -958,7 +960,8 @@ public class LegalEntitiesControllerCoverageTests
         PaymentContext db,
         string shortName,
         string? inn = null,
-        string? address = null)
+        string? address = null,
+        int? responsibleUserId = null)
     {
         var entity = new LegalEntity
         {
@@ -966,6 +969,7 @@ public class LegalEntitiesControllerCoverageTests
             FullName = shortName,
             Inn = inn,
             Address = address,
+            ResponsibleUserId = responsibleUserId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };

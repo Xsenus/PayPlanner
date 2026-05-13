@@ -48,6 +48,63 @@ public class LegalEntitiesControllerTests
     }
 
     [Fact]
+    public async Task GetAllAndPaged_ForRegularUser_ReturnOnlyAssignedLegalEntities()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var otherUserId = await CreateUserAsync(db);
+        var assignedId = await CreateLegalEntityAsync(db, "Назначенное юрлицо", userId);
+        var otherId = await CreateLegalEntityAsync(db, "Чужое юрлицо", otherUserId);
+        var unassignedId = await CreateLegalEntityAsync(db, "Юрлицо без ответственного");
+
+        var controller = CreateController(db, userId, isAdmin: false);
+
+        var listAction = await controller.GetAll(null, CancellationToken.None);
+        var listOk = Assert.IsType<OkObjectResult>(listAction.Result);
+        var listItems = Assert.IsAssignableFrom<IEnumerable<LegalEntityListItemDto>>(listOk.Value).ToList();
+        var listItem = Assert.Single(listItems);
+        Assert.Equal(assignedId, listItem.Id);
+
+        var pagedAction = await controller.GetPaged(
+            search: null,
+            page: 1,
+            pageSize: 25,
+            ct: CancellationToken.None);
+        var pagedOk = Assert.IsType<OkObjectResult>(pagedAction.Result);
+        var page = Assert.IsType<PagedResponse<LegalEntityListItemDto>>(pagedOk.Value);
+        Assert.Equal(1, page.Total);
+        Assert.Equal(assignedId, Assert.Single(page.Items).Id);
+
+        var assignedResult = await controller.GetById(assignedId, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(assignedResult.Result);
+        Assert.IsType<NotFoundResult>((await controller.GetById(otherId, CancellationToken.None)).Result);
+        Assert.IsType<NotFoundResult>((await controller.GetById(unassignedId, CancellationToken.None)).Result);
+    }
+
+    [Fact]
+    public async Task Create_ForRegularUser_AssignsCurrentUserAsResponsible()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var otherUserId = await CreateUserAsync(db);
+        var controller = CreateController(db, userId, isAdmin: false);
+        var request = BuildRequest();
+        request.ResponsibleUserId = otherUserId;
+
+        var action = await controller.Create(request, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<LegalEntityDetailDto>(created.Value);
+        Assert.Equal(userId, dto.ResponsibleUserId);
+
+        var storedResponsibleId = await db.LegalEntities
+            .Where(entity => entity.Id == dto.Id)
+            .Select(entity => entity.ResponsibleUserId)
+            .SingleAsync();
+        Assert.Equal(userId, storedResponsibleId);
+    }
+
+    [Fact]
     public async Task Delete_RemovesDeletedCompanyFromMainCompanySettings()
     {
         await using var db = await CreateContextAsync();
@@ -855,12 +912,13 @@ public class LegalEntitiesControllerTests
         return client.Id;
     }
 
-    private static async Task<int> CreateLegalEntityAsync(PaymentContext db, string shortName)
+    private static async Task<int> CreateLegalEntityAsync(PaymentContext db, string shortName, int? responsibleUserId = null)
     {
         var entity = new LegalEntity
         {
             ShortName = shortName,
             FullName = shortName,
+            ResponsibleUserId = responsibleUserId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -911,20 +969,25 @@ public class LegalEntitiesControllerTests
         return db;
     }
 
-    private static LegalEntitiesController CreateController(PaymentContext db, int userId)
-        => CreateController(db, new NoopLegalEntityEnrichmentService(), userId);
+    private static LegalEntitiesController CreateController(PaymentContext db, int userId, bool isAdmin = true)
+        => CreateController(db, new NoopLegalEntityEnrichmentService(), userId, isAdmin);
 
     private static LegalEntitiesController CreateController(
         PaymentContext db,
         ILegalEntityEnrichmentService enrichmentService,
-        int userId)
+        int userId,
+        bool isAdmin = true)
     {
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim(ClaimTypes.Role, "admin"),
             new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
             new Claim(ClaimTypes.Name, "Тестовый пользователь"),
         };
+
+        if (isAdmin)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
 
         var controller = new LegalEntitiesController(db, enrichmentService, new NoopFormRequirementsService());
         controller.ControllerContext = new ControllerContext

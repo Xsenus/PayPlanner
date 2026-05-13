@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
@@ -233,6 +233,13 @@ namespace PayPlanner.Api.Extensions
             if (isAdmin) return q;
             if (!responsibleUserId.HasValue) return q.Where(_ => false);
             return q.Where(c => c.ResponsibleUserId == responsibleUserId.Value);
+        }
+
+        public static IQueryable<LegalEntity> ApplyLegalEntityVisibility(this IQueryable<LegalEntity> q, bool isAdmin, int? responsibleUserId)
+        {
+            if (isAdmin) return q;
+            if (!responsibleUserId.HasValue) return q.Where(_ => false);
+            return q.Where(e => e.ResponsibleUserId == responsibleUserId.Value);
         }
 
         public static IQueryable<Client> ApplyCounterpartyRoleFilter(this IQueryable<Client> q, string? counterpartyRole)

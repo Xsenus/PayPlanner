@@ -48,6 +48,18 @@ public class LegalEntitiesController : ControllerBase
 
     private sealed record MainCompanySettingsState(IReadOnlyList<int> CompanyIds, int? DefaultCompanyId);
 
+    private async Task<(int? UserId, bool IsAdmin)> GetCurrentAccessAsync(CancellationToken ct)
+    {
+        var currentUserId = User.GetUserId();
+        if (!currentUserId.HasValue)
+        {
+            return (null, IsAdmin());
+        }
+
+        var isAdmin = IsAdmin() || await _db.IsUserAdminAsync(currentUserId.Value, ct);
+        return (currentUserId, isAdmin);
+    }
+
     private async Task<MainCompanySettingsState> LoadMainCompanySettingsStateAsync(CancellationToken ct)
     {
         var values = await _db.SystemSettings
@@ -233,7 +245,16 @@ public class LegalEntitiesController : ControllerBase
             query = query.Where(item => !state.CompanyIds.Contains(item.Id));
         }
 
+        var access = await GetCurrentAccessAsync(ct);
+        query = query.ApplyLegalEntityVisibility(access.IsAdmin, access.UserId);
+
         return query;
+    }
+
+    private async Task<IQueryable<LegalEntity>> ApplyResponsibleVisibilityAsync(IQueryable<LegalEntity> query, CancellationToken ct)
+    {
+        var access = await GetCurrentAccessAsync(ct);
+        return query.ApplyLegalEntityVisibility(access.IsAdmin, access.UserId);
     }
 
     private async Task<bool> ResponsibleUserExistsAsync(int? responsibleUserId, CancellationToken ct)
@@ -885,6 +906,12 @@ public class LegalEntitiesController : ControllerBase
     [RequestSizeLimit(MaxLegalEntityRequestSizeBytes)]
     public async Task<ActionResult<LegalEntityDetailDto>> Create([FromBody] LegalEntityRequest request, CancellationToken ct)
     {
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.UserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
         var requirementsSection = string.Equals(request.FormRequirementsSection, "clients-modal-legal", StringComparison.OrdinalIgnoreCase)
             ? "clients-modal-legal"
             : "legal-entities";
@@ -902,7 +929,11 @@ public class LegalEntitiesController : ControllerBase
             return BadRequest("Необходимо указать краткое название");
         }
 
-        if (!await ResponsibleUserExistsAsync(request.ResponsibleUserId, ct))
+        var responsibleUserId = access.IsAdmin
+            ? request.ResponsibleUserId
+            : access.UserId.Value;
+
+        if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
         {
             return BadRequest("Указанный ответственный не найден или неактивен");
         }
@@ -942,7 +973,7 @@ public class LegalEntitiesController : ControllerBase
             Phone = NormalizeOptional(request.Phone),
             Email = NormalizeOptional(request.Email),
             Director = NormalizeOptional(request.Director),
-            ResponsibleUserId = request.ResponsibleUserId,
+            ResponsibleUserId = responsibleUserId,
             ClientStatusId = request.ClientStatusId,
             IsClientAndSupplier = request.IsClientAndSupplier,
             Country = NormalizeOptional(request.Country),
@@ -1013,12 +1044,20 @@ public class LegalEntitiesController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var entity = await _db.LegalEntities
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.UserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var query = await ApplyResponsibleVisibilityAsync(_db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
             .Include(le => le.ClientStatus)
-            .FirstOrDefaultAsync(le => le.Id == id, ct);
+            .AsQueryable(), ct);
+
+        var entity = await query.FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {
             return NotFound();
@@ -1601,12 +1640,14 @@ public class LegalEntitiesController : ControllerBase
             return NotFound();
         }
 
-        var entity = await _db.LegalEntities
+        var query = await ApplyResponsibleVisibilityAsync(_db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
             .Include(le => le.ClientStatus)
-            .FirstOrDefaultAsync(le => le.Id == id, ct);
+            .AsQueryable(), ct);
+
+        var entity = await query.FirstOrDefaultAsync(le => le.Id == id, ct);
 
         if (entity is null)
         {
@@ -1749,18 +1790,30 @@ public class LegalEntitiesController : ControllerBase
             return BadRequest("Необходимо указать краткое название");
         }
 
-        var entity = await _db.LegalEntities
+        var access = await GetCurrentAccessAsync(ct);
+        if (!access.UserId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var query = await ApplyResponsibleVisibilityAsync(_db.LegalEntities
             .Include(le => le.Clients)
             .Include(le => le.Addresses)
             .Include(le => le.ResponsibleUser)
             .Include(le => le.ClientStatus)
-            .FirstOrDefaultAsync(le => le.Id == id, ct);
+            .AsQueryable(), ct);
+
+        var entity = await query.FirstOrDefaultAsync(le => le.Id == id, ct);
         if (entity is null)
         {
             return NotFound();
         }
 
-        if (!await ResponsibleUserExistsAsync(request.ResponsibleUserId, ct))
+        var responsibleUserId = access.IsAdmin
+            ? request.ResponsibleUserId
+            : entity.ResponsibleUserId;
+
+        if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
         {
             return BadRequest("Указанный ответственный не найден или неактивен");
         }
@@ -1797,7 +1850,7 @@ public class LegalEntitiesController : ControllerBase
         entity.Phone = NormalizeOptional(request.Phone);
         entity.Email = NormalizeOptional(request.Email);
         entity.Director = NormalizeOptional(request.Director);
-        entity.ResponsibleUserId = request.ResponsibleUserId;
+        entity.ResponsibleUserId = responsibleUserId;
         entity.ClientStatusId = request.ClientStatusId;
         entity.IsClientAndSupplier = request.IsClientAndSupplier;
         entity.Country = NormalizeOptional(request.Country);
