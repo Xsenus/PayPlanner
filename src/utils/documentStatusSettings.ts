@@ -8,21 +8,45 @@ const flagByKind: Record<DocumentStatusKind, keyof DocumentStatusEntity> = {
   contract: 'useForContracts',
 };
 
+const mandatoryDocumentStatusLabels: Record<string, string> = {
+  RequiresClientSignature: 'Требуется подпись клиента',
+};
+
+const mandatoryDocumentStatusCodes = Object.keys(mandatoryDocumentStatusLabels);
+
+function ensureMandatoryDocumentStatusCodes<T extends string>(codes: T[], fallback: readonly T[], allowed: Set<string>) {
+  mandatoryDocumentStatusCodes.forEach((mandatoryCode) => {
+    if (!allowed.has(mandatoryCode) || codes.includes(mandatoryCode as T)) {
+      return;
+    }
+
+    const fallbackIndex = fallback.findIndex((code) => code === mandatoryCode);
+    const insertAt = codes.findIndex((code) => fallback.findIndex((fallbackCode) => fallbackCode === code) > fallbackIndex);
+    if (insertAt >= 0) {
+      codes.splice(insertAt, 0, mandatoryCode as T);
+    } else {
+      codes.push(mandatoryCode as T);
+    }
+  });
+
+  return codes;
+}
+
 export function getDocumentStatusCodes<T extends string>(
   statuses: DocumentStatusEntity[] | null,
   kind: DocumentStatusKind,
   fallback: readonly T[],
 ): T[] {
-  if (!statuses?.length) return [...fallback];
-
   const allowed = new Set<string>(fallback);
+  if (!statuses?.length) return ensureMandatoryDocumentStatusCodes([...fallback], fallback, allowed);
+
   const flag = flagByKind[kind];
   const configured = statuses
     .filter((status) => status.isActive && !!status[flag] && allowed.has(status.code))
     .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0) || left.name.localeCompare(right.name, 'ru'))
     .map((status) => status.code as T);
 
-  return configured.length > 0 ? configured : [...fallback];
+  return ensureMandatoryDocumentStatusCodes(configured.length > 0 ? configured : [...fallback], fallback, allowed);
 }
 
 export function getDocumentStatusLabels<T extends string>(
@@ -38,9 +62,15 @@ export function getDocumentStatusLabels<T extends string>(
     .filter((status) => !!status[flag] && status.name.trim().length > 0)
     .forEach((status) => {
       if (status.code in labels) {
-        labels[status.code as T] = status.name.trim();
+        labels[status.code as T] = mandatoryDocumentStatusLabels[status.code] ?? status.name.trim();
       }
     });
+
+  mandatoryDocumentStatusCodes.forEach((code) => {
+    if (code in labels) {
+      labels[code as T] = mandatoryDocumentStatusLabels[code];
+    }
+  });
 
   return labels;
 }

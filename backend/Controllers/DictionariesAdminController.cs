@@ -39,6 +39,20 @@ public class DictionariesAdminController : ControllerBase
         return null;
     }
 
+    private static void ApplyMandatoryDocumentStatusRules(DocumentStatusEntity status, DocumentStatusSeed seed)
+    {
+        if (!DocumentWorkflowStatus.IsMandatory(seed.Code)) return;
+
+        status.Name = seed.Name;
+        status.Description = seed.Description;
+        status.ColorHex = string.IsNullOrWhiteSpace(status.ColorHex) ? seed.ColorHex : status.ColorHex;
+        status.IsActive = true;
+        status.UseForInvoices = seed.UseForInvoices;
+        status.UseForActs = seed.UseForActs;
+        status.UseForContracts = seed.UseForContracts;
+        status.SortOrder = seed.SortOrder;
+    }
+
     private sealed record SimpleDictionaryMeta(
         Func<CancellationToken, Task<List<object>>> LoadAsNoTrackingAsync,
         Func<CancellationToken, Task<List<object>>> LoadTrackingAsync,
@@ -870,6 +884,7 @@ public class DictionariesAdminController : ControllerBase
         m.Description = m.Description?.Trim() ?? string.Empty;
         m.ColorHex = string.IsNullOrWhiteSpace(m.ColorHex) ? seed.Value.ColorHex : m.ColorHex.Trim();
         m.SortOrder = m.SortOrder == 0 ? seed.Value.SortOrder : m.SortOrder;
+        ApplyMandatoryDocumentStatusRules(m, seed.Value);
         _db.DocumentStatuses.Add(m);
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/document-statuses/{m.Id}", m);
@@ -899,6 +914,7 @@ public class DictionariesAdminController : ControllerBase
         e.UseForActs = m.UseForActs;
         e.UseForContracts = m.UseForContracts;
         e.SortOrder = m.SortOrder == 0 ? seed.Value.SortOrder : m.SortOrder;
+        ApplyMandatoryDocumentStatusRules(e, seed.Value);
         await _db.SaveChangesAsync();
         return Ok(e);
     }
@@ -923,6 +939,14 @@ public class DictionariesAdminController : ControllerBase
     {
         var e = await _db.DocumentStatuses.FindAsync(id);
         if (e is null) return NotFound();
+        var seed = ResolveDocumentStatusSeed(e.Code);
+        if (seed is not null && DocumentWorkflowStatus.IsMandatory(seed.Value.Code))
+        {
+            ApplyMandatoryDocumentStatusRules(e, seed.Value);
+            await _db.SaveChangesAsync();
+            return Ok(new { e.Id, e.IsActive });
+        }
+
         e.IsActive = !e.IsActive;
         await _db.SaveChangesAsync();
         return Ok(new { e.Id, e.IsActive });

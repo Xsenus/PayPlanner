@@ -90,6 +90,9 @@ public static class DocumentWorkflowStatus
     public static readonly IReadOnlySet<string> AllCodes = BuildSet(
         InvoiceCodes.Concat(ActCodes).Concat(ContractCodes).ToArray());
 
+    public static readonly IReadOnlySet<string> MandatoryCodes = BuildSet(
+        RequiresClientSignature);
+
     public static string? Normalize(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -99,6 +102,12 @@ public static class DocumentWorkflowStatus
 
         var trimmed = value.Trim();
         return AllCodes.FirstOrDefault(status => string.Equals(status, trimmed, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static bool IsMandatory(string? value)
+    {
+        var normalized = Normalize(value);
+        return normalized is not null && MandatoryCodes.Contains(normalized);
     }
 
     private static HashSet<string> BuildSet(params string[] values)

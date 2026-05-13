@@ -1138,7 +1138,20 @@ namespace PayPlanner.Api.Services
                 }
                 else
                 {
+                    if (DocumentWorkflowStatus.IsMandatory(status.Code))
+                    {
+                        existing.Name = status.Name;
+                        existing.Description = status.Description;
+                        existing.ColorHex = status.ColorHex;
+                        existing.IsActive = true;
+                        existing.UseForInvoices = status.UseForInvoices;
+                        existing.UseForActs = status.UseForActs;
+                        existing.UseForContracts = status.UseForContracts;
+                        existing.SortOrder = status.SortOrder;
+                    }
+
                     if (string.IsNullOrWhiteSpace(existing.Name)) existing.Name = status.Name;
+                    if (string.IsNullOrWhiteSpace(existing.Description)) existing.Description = status.Description;
                     if (string.IsNullOrWhiteSpace(existing.ColorHex)) existing.ColorHex = status.ColorHex;
                     if (existing.SortOrder == 0) existing.SortOrder = status.SortOrder;
                 }
