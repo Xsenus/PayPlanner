@@ -606,6 +606,77 @@ describe('InvoiceModal integration', () => {
     expect(screen.getAllByText(/₽/).length).toBeGreaterThan(1);
   });
 
+  it('asks how to reconcile payments before saving an invoice amount mismatch', async () => {
+    const invoice = {
+      id: 531,
+      invoiceEntityId: 31,
+      number: '31',
+      date: '2026-04-02',
+      dueDate: '2026-04-03',
+      amount: 45000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 45000 }],
+    } as unknown as Invoice;
+
+    const relatedPayments = [
+      {
+        id: 532,
+        invoiceId: 31,
+        amount: 15000,
+        outstandingAmount: 15000,
+        date: '2026-04-10',
+        plannedDate: '2026-04-10',
+        type: 'Income',
+        status: 'Pending',
+        description: 'Первый платеж по счету №31',
+        account: '31',
+        accountDate: '2026-04-02',
+      },
+      {
+        id: 533,
+        invoiceId: 31,
+        amount: 15000,
+        outstandingAmount: 15000,
+        date: '2026-05-10',
+        plannedDate: '2026-05-10',
+        type: 'Income',
+        status: 'Pending',
+        description: 'Второй платеж по счету №31',
+        account: '31',
+        accountDate: '2026-04-02',
+      },
+    ] as unknown as Payment[];
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    const { container } = render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createTestClient(1, 'Тестовый клиент')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={relatedPayments}
+      />,
+    );
+
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement);
+
+    expect(await screen.findByText('Сверка суммы счета и платежей')).toBeTruthy();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить только счет' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ amount: 45000 }));
+    });
+  });
+
   it('loads and renders linked money operations for the invoice', async () => {
     const invoice = {
       id: 540,

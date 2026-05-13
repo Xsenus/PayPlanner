@@ -3667,23 +3667,25 @@ public class InvoicesController : ControllerBase
             return null;
         }
 
-        var existingGeneratedPayments = await _db.Payments
+        var existingPaymentRows = await _db.Payments
             .Include(payment => payment.Responsibles)
             .Where(payment =>
                 payment.InvoiceId == invoiceEntityId.Value
-                && payment.Id != invoicePayment.Id
-                && (payment.DocumentKind != DocumentKind.Invoice
-                    || (payment.SystemNotes != null
-                        && payment.SystemNotes.Contains(InstallmentPaymentMarker))))
+                && payment.Id != invoicePayment.Id)
             .ToListAsync(ct);
 
-        var existingInstallmentPayments = existingGeneratedPayments
+        var existingInstallmentPayments = existingPaymentRows
             .Select(payment => new
             {
                 Payment = payment,
                 Metadata = ExtractInstallmentPaymentMetadata(payment.SystemNotes),
             })
             .Where(item => item.Metadata is not null)
+            .ToList();
+        var legacyInstallmentCandidates = existingPaymentRows
+            .Where(IsLegacyInvoiceInstallmentCandidate)
+            .OrderBy(payment => payment.Date)
+            .ThenBy(payment => payment.Id)
             .ToList();
 
         if (!ShouldReplaceInstallmentPlan(request))
@@ -3694,17 +3696,23 @@ public class InvoicesController : ControllerBase
 
         if (request.InstallmentPlan is null || request.InstallmentPlan.Items.Count == 0)
         {
-            foreach (var existing in existingInstallmentPayments)
+            var paymentsToRemove = existingInstallmentPayments
+                .Select(item => item.Payment)
+                .Concat(legacyInstallmentCandidates)
+                .DistinctBy(payment => payment.Id)
+                .ToList();
+
+            foreach (var existing in paymentsToRemove)
             {
-                if (HasProtectedInstallmentActivity(existing.Payment))
+                if (HasProtectedInstallmentActivity(existing))
                 {
                     return BadRequest("Нельзя удалить график рассрочки: по одному из платежей уже есть движение.");
                 }
             }
 
-            if (existingInstallmentPayments.Count > 0)
+            if (paymentsToRemove.Count > 0)
             {
-                _db.Payments.RemoveRange(existingInstallmentPayments.Select(item => item.Payment));
+                _db.Payments.RemoveRange(paymentsToRemove);
             }
 
             return null;
@@ -3770,6 +3778,27 @@ public class InvoicesController : ControllerBase
                 continue;
             }
 
+            var legacyInstallment = FindLegacyInstallmentCandidate(legacyInstallmentCandidates, item, retainedPaymentIds);
+            if (legacyInstallment is not null)
+            {
+                retainedPaymentIds.Add(legacyInstallment.Id);
+
+                if (HasProtectedInstallmentActivity(legacyInstallment)
+                    && !InstallmentPaymentMatches(legacyInstallment, item, request, invoicePayment))
+                {
+                    return BadRequest(BuildLegacyInstallmentConflictMessage(legacyInstallment));
+                }
+
+                ApplyInstallmentPayment(
+                    legacyInstallment,
+                    invoicePayment,
+                    request,
+                    request.InstallmentPlan,
+                    item,
+                    responsibleIds);
+                continue;
+            }
+
             var generatedPayment = new Payment
             {
                 CreatedAt = DateTime.UtcNow,
@@ -3801,7 +3830,60 @@ public class InvoicesController : ControllerBase
             _db.Payments.Remove(existing.Payment);
         }
 
+        foreach (var legacyPayment in legacyInstallmentCandidates.Where(payment => !retainedPaymentIds.Contains(payment.Id)))
+        {
+            if (HasProtectedInstallmentActivity(legacyPayment))
+            {
+                return BadRequest(BuildLegacyInstallmentConflictMessage(legacyPayment));
+            }
+
+            _db.Payments.Remove(legacyPayment);
+        }
+
         return null;
+    }
+
+    private static bool IsLegacyInvoiceInstallmentCandidate(Payment payment)
+    {
+        return payment.DocumentKind == DocumentKind.Invoice
+            && ExtractInstallmentPaymentMetadata(payment.SystemNotes) is null;
+    }
+
+    private static Payment? FindLegacyInstallmentCandidate(
+        IReadOnlyCollection<Payment> candidates,
+        InvoiceInstallmentPlanItemRequest item,
+        IReadOnlySet<int> retainedPaymentIds)
+    {
+        var availableCandidates = candidates
+            .Where(payment => !retainedPaymentIds.Contains(payment.Id))
+            .ToList();
+
+        return availableCandidates
+            .Where(payment => LegacyInstallmentDateMatches(payment, item) && Math.Abs(payment.Amount - item.Payment) <= 0.01m)
+            .OrderBy(payment => payment.Id)
+            .FirstOrDefault()
+            ?? availableCandidates
+                .Where(payment => LegacyInstallmentDateMatches(payment, item) && !HasProtectedInstallmentActivity(payment))
+                .OrderBy(payment => payment.Id)
+                .FirstOrDefault()
+            ?? availableCandidates
+                .Where(payment => !HasProtectedInstallmentActivity(payment))
+                .OrderBy(payment => payment.Date)
+                .ThenBy(payment => payment.Id)
+                .FirstOrDefault();
+    }
+
+    private static bool LegacyInstallmentDateMatches(Payment payment, InvoiceInstallmentPlanItemRequest item)
+    {
+        return payment.Date.Date == item.Date.Date
+            || payment.PlannedDate.Date == item.Date.Date;
+    }
+
+    private static string BuildLegacyInstallmentConflictMessage(Payment payment)
+    {
+        return "Нельзя перестроить график рассрочки: "
+            + $"старый платеж от {payment.Date:dd.MM.yyyy} на сумму {payment.Amount:0.##} уже имеет оплату. "
+            + "Удалите или отредактируйте этот платеж вручную.";
     }
 
     private async Task SyncLinkedPaymentBindingsAsync(

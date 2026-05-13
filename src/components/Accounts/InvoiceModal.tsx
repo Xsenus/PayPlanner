@@ -49,6 +49,10 @@ import {
   isGeneratedInstallmentPayment,
   isInvoiceManagedPayment,
 } from '../../utils/invoicePayments';
+import {
+  buildInvoiceAmountReconciliation,
+  type InvoiceAmountReconciliation,
+} from '../../utils/invoiceAmountReconciliation';
 import { getAppliedClientBalanceAmount } from '../../utils/systemNotes';
 
 type FormState = {
@@ -96,6 +100,7 @@ type LineItemLookupState = { lineItemId: string } | null;
 type InvoiceCancellationScope = 'All' | 'UnpaidInstallmentsOnly';
 type InvoiceCancellationMoneyAction = 'Reject' | 'LeaveAsAdvance' | 'Refund' | 'Reallocate';
 type InvoiceCancellationRefundSource = 'Bank' | 'Cash' | 'Card' | 'EMoney';
+type InvoiceAmountReconciliationDecision = 'save' | 'manage' | 'cancel';
 
 const LINE_ITEM_GRID_TEMPLATE =
   'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(8.5rem,0.85fr)_2.75rem]';
@@ -930,6 +935,7 @@ export function InvoiceModal({
     [relatedPayments],
   );
   const [displayPayments, setDisplayPayments] = useState<Payment[]>(visibleRelatedPayments);
+  const [amountReconciliationDialog, setAmountReconciliationDialog] = useState<InvoiceAmountReconciliation | null>(null);
   const [linkedMoneyOperations, setLinkedMoneyOperations] = useState<MoneyOperation[]>([]);
   const [linkedMoneyOperationsLoading, setLinkedMoneyOperationsLoading] = useState(false);
   const [linkedMoneyOperationsError, setLinkedMoneyOperationsError] = useState<string | null>(null);
@@ -955,6 +961,13 @@ export function InvoiceModal({
   const lastAutoContractClientIdRef = useRef<string>('');
   const contractOptionsRevisionRef = useRef(0);
   const downloadMenuRef = useRef<HTMLDivElement | null>(null);
+  const relatedPaymentsSectionRef = useRef<HTMLElement | null>(null);
+  const amountReconciliationResolverRef = useRef<((decision: InvoiceAmountReconciliationDecision) => void) | null>(null);
+
+  useEffect(() => () => {
+    amountReconciliationResolverRef.current?.('cancel');
+    amountReconciliationResolverRef.current = null;
+  }, []);
 
   const calculateLineItemsTotal = useCallback(
     (items: LineItem[]) => {
@@ -2436,6 +2449,34 @@ export function InvoiceModal({
     return normalizedReason;
   }, [requiresFinancialActionReason]);
 
+  const requestAmountReconciliationDecision = useCallback((
+    details: InvoiceAmountReconciliation,
+  ): Promise<InvoiceAmountReconciliationDecision> => {
+    setAmountReconciliationDialog(details);
+    return new Promise((resolve) => {
+      amountReconciliationResolverRef.current = resolve;
+    });
+  }, []);
+
+  const resolveAmountReconciliationDecision = useCallback((decision: InvoiceAmountReconciliationDecision) => {
+    amountReconciliationResolverRef.current?.(decision);
+    amountReconciliationResolverRef.current = null;
+    setAmountReconciliationDialog(null);
+  }, []);
+
+  const focusRelatedPaymentsAfterAmountMismatch = useCallback((details: InvoiceAmountReconciliation) => {
+    setLocalError(
+      details.direction === 'increase'
+        ? `Сумма счета больше выставленных платежей на ${formatCurrencySmart(details.difference).full}. Добавьте недостающий платеж или сохраните счет без изменения платежей.`
+        : `Сумма счета меньше выставленных платежей на ${formatCurrencySmart(details.difference).full}. Удалите или отредактируйте лишние платежи вручную.`,
+    );
+    relatedPaymentsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    if (details.direction === 'increase' && onAddRelatedPayment) {
+      onAddRelatedPayment();
+    }
+  }, [onAddRelatedPayment]);
+
   type BuildInvoicePayloadOptions = {
     statusOverride?: PaymentStatus;
     planOverride?: InstallmentPlanInput | null;
@@ -2680,6 +2721,19 @@ export function InvoiceModal({
     if (selectedActs.length > invoiceRules.maxActsPerInvoice) {
       setLocalError(`В счёте можно указать не более ${invoiceRules.maxActsPerInvoice} акта(ов).`);
       return;
+    }
+
+    const amountReconciliation = buildInvoiceAmountReconciliation(relatedPayments, invoice?.amount, parsedAmount);
+    if (amountReconciliation) {
+      const decision = await requestAmountReconciliationDecision(amountReconciliation);
+      if (decision === 'cancel') {
+        return;
+      }
+
+      if (decision === 'manage') {
+        focusRelatedPaymentsAfterAmountMismatch(amountReconciliation);
+        return;
+      }
     }
 
     const currentOwnerKey = form.clientId
@@ -4227,7 +4281,7 @@ export function InvoiceModal({
 
               {documentsSection}
 
-              <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+              <section ref={relatedPaymentsSectionRef} className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                           <header className="mb-3 flex items-center justify-between">
                             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Позиции счета</span>
                             <button
@@ -5366,6 +5420,91 @@ export function InvoiceModal({
               >
                 {cancelSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
                 Продолжить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {amountReconciliationDialog && (
+        <div className="fixed inset-0 z-[2450] flex items-center justify-center bg-slate-900/50 px-4 py-6">
+          <div className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Сверка суммы счета и платежей</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Найдено расхождение между суммой счета, выставленными платежами и оплатами.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => resolveAmountReconciliationDecision('cancel')}
+                className="rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Закрыть"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-4 text-sm text-slate-700">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Сумма счета</div>
+                  <div className="mt-1 text-base font-semibold text-slate-900">
+                    {formatCurrencySmart(amountReconciliationDialog.invoiceAmount).full}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Выставлено платежей</div>
+                  <div className="mt-1 text-base font-semibold text-slate-900">
+                    {formatCurrencySmart(amountReconciliationDialog.plannedAmount).full}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Получено оплат</div>
+                  <div className="mt-1 text-base font-semibold text-slate-900">
+                    {formatCurrencySmart(amountReconciliationDialog.paidAmount).full}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">Расхождение</div>
+                  <div className="mt-1 text-base font-semibold text-amber-900">
+                    {formatCurrencySmart(amountReconciliationDialog.difference).full}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-blue-800">
+                {amountReconciliationDialog.direction === 'increase'
+                  ? 'Сумма счета стала больше суммы выставленных платежей. Можно добавить платежи на недостающую сумму или сохранить только счет.'
+                  : 'Сумма счета стала меньше суммы выставленных платежей или оплат. Лишние платежи нужно удалить или отредактировать вручную.'}
+              </div>
+              <p className="text-xs leading-5 text-slate-500">
+                При сохранении платеж из строки счета повторно не создается. Связанные платежи остаются как есть, пока вы не измените их отдельно.
+              </p>
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 px-5 py-4 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => resolveAmountReconciliationDecision('cancel')}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Вернуться
+              </button>
+              <button
+                type="button"
+                onClick={() => resolveAmountReconciliationDecision('manage')}
+                className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+              >
+                {amountReconciliationDialog.direction === 'increase' ? 'Добавить платежи' : 'Редактировать платежи'}
+              </button>
+              <button
+                type="button"
+                onClick={() => resolveAmountReconciliationDecision('save')}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+              >
+                Сохранить только счет
               </button>
             </div>
           </div>
