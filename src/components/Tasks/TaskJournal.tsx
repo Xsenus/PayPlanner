@@ -142,7 +142,7 @@ const METRIC_FILTER_LABELS: Record<MetricFilter, string> = {
 };
 
 const PARTICIPANT_ROLE_LABELS: Record<TaskJournalParticipantRole, string> = {
-  assignee: 'Исполнители',
+  assignee: 'Дополнительные исполнители',
   approver: 'Согласующие',
   observer: 'Наблюдатели',
 };
@@ -3098,6 +3098,19 @@ function TaskModal({
     () => (form.participants ?? []).filter((participant) => participant.role === 'approver'),
     [form.participants],
   );
+  const isImplicitPrimaryAssigneeParticipant = useCallback((participant: TaskJournalParticipant) => {
+    if (participant.role !== 'assignee') return false;
+    if (form.assigneeUserId) {
+      return participant.userId === form.assigneeUserId;
+    }
+
+    const primaryName = form.assigneeName.trim().toLowerCase();
+    return Boolean(primaryName) && getParticipantDisplayName(participant).trim().toLowerCase() === primaryName;
+  }, [form.assigneeName, form.assigneeUserId]);
+  const additionalParticipantsCount = useMemo(
+    () => (form.participants ?? []).filter((participant) => !isImplicitPrimaryAssigneeParticipant(participant)).length,
+    [form.participants, isImplicitPrimaryAssigneeParticipant],
+  );
   const fileGroups = useMemo(() => {
     const grouped = new Map<string, TaskJournalFile[]>();
     files.forEach((file) => {
@@ -3196,41 +3209,75 @@ function TaskModal({
   const isParticipantSelected = (role: TaskJournalParticipantRole, userId: number) =>
     (form.participants ?? []).some((participant) => participant.role === role && participant.userId === userId);
 
-  const toggleParticipant = (role: TaskJournalParticipantRole, assignee: TaskJournalAssignee) => {
+  const addParticipant = (role: TaskJournalParticipantRole, assignee: TaskJournalAssignee) => {
     if (isReadOnly) return;
+    if (form.assigneeUserId === assignee.id || isParticipantSelected(role, assignee.id)) return;
+
     setForm((prev) => {
       const participants = prev.participants ?? [];
-      const exists = participants.some((participant) => participant.role === role && participant.userId === assignee.id);
-
       return {
         ...prev,
-        participants: exists
-          ? participants.filter((participant) => !(participant.role === role && participant.userId === assignee.id))
-          : [
-              ...participants,
-              {
-                userId: assignee.id,
-                role,
-                displayName: assignee.name,
-                name: assignee.name,
-                email: assignee.email,
-                sortOrder: participants.filter((participant) => participant.role === role).length,
-                approvalStatus: 'pending',
-                resolution: '',
-              },
-            ],
+        participants: [
+          ...participants,
+          {
+            userId: assignee.id,
+            role,
+            displayName: assignee.name,
+            name: assignee.name,
+            email: assignee.email,
+            sortOrder: participants.filter((participant) => participant.role === role).length,
+            approvalStatus: 'pending',
+            resolution: '',
+          },
+        ],
       };
     });
   };
 
+  const removeParticipant = (role: TaskJournalParticipantRole, participant: TaskJournalParticipant) => {
+    if (isReadOnly || isImplicitPrimaryAssigneeParticipant(participant)) return;
+
+    setForm((prev) => {
+      const displayName = getParticipantDisplayName(participant).trim().toLowerCase();
+      return {
+        ...prev,
+        participants: (prev.participants ?? []).filter((item) => {
+          if (item.role !== role) return true;
+          if (participant.id && item.id === participant.id) return false;
+          if (participant.userId && item.userId === participant.userId) return false;
+          return getParticipantDisplayName(item).trim().toLowerCase() !== displayName;
+        }),
+      };
+    });
+  };
+
+  const getVisibleParticipantsByRole = (role: TaskJournalParticipantRole) =>
+    (form.participants ?? [])
+      .filter((participant) => participant.role === role && !isImplicitPrimaryAssigneeParticipant(participant))
+      .slice()
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+  const getAvailableAssigneesForRole = (role: TaskJournalParticipantRole) =>
+    assignees.filter((assignee) => assignee.id !== form.assigneeUserId && !isParticipantSelected(role, assignee.id));
+
   const setPrimaryAssignee = (assigneeId: number | null) => {
     if (isReadOnly) return;
     const selected = assignees.find((assignee) => assignee.id === assigneeId);
-    setForm((prev) => ({
-      ...prev,
-      assigneeUserId: assigneeId,
-      assigneeName: selected?.name ?? (assigneeId ? prev.assigneeName : ''),
-    }));
+    setForm((prev) => {
+      const previousAssigneeUserId = prev.assigneeUserId;
+      const previousAssigneeName = prev.assigneeName.trim().toLowerCase();
+      return {
+        ...prev,
+        assigneeUserId: assigneeId,
+        assigneeName: selected?.name ?? (assigneeId ? prev.assigneeName : ''),
+        participants: (prev.participants ?? []).filter((participant) => {
+          if (participant.role !== 'assignee') return true;
+          if (previousAssigneeUserId && participant.userId === previousAssigneeUserId) return false;
+          if (assigneeId && participant.userId === assigneeId) return false;
+          return !previousAssigneeName || getParticipantDisplayName(participant).trim().toLowerCase() !== previousAssigneeName;
+        }),
+      };
+    });
   };
 
   const saveWithStatus = async (status: TaskJournalStatus) => {
@@ -3285,7 +3332,7 @@ function TaskModal({
     setActionMenuOpen(false);
   };
 
-  const availableObservers = assignees.filter((assignee) => !isParticipantSelected('observer', assignee.id));
+  const availableObservers = getAvailableAssigneesForRole('observer');
   const completionButtonLabel = approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
     ? 'На согласование'
     : 'Завершить';
@@ -3549,7 +3596,7 @@ function TaskModal({
                   onChange={(event) => {
                     const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
                     if (selected) {
-                      toggleParticipant('observer', selected);
+                      addParticipant('observer', selected);
                     }
                   }}
                   className="form-input bg-white"
@@ -3652,33 +3699,75 @@ function TaskModal({
                 <p className="mt-1 text-sm text-slate-500">Выберите дополнительных исполнителей, наблюдателей и согласующих из пользователей системы.</p>
               </div>
               <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">
-                {(form.participants ?? []).length} участников
+                {additionalParticipantsCount} доп. участников
               </span>
             </div>
             <div className="mt-4 grid gap-4 lg:grid-cols-3">
-              {(['assignee', 'approver', 'observer'] as TaskJournalParticipantRole[]).map((role) => (
-                <Field key={role} label={PARTICIPANT_ROLE_LABELS[role]}>
-                  <div className="max-h-52 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2">
-                    {assignees.length === 0 ? (
-                      <div className="px-3 py-6 text-center text-sm text-slate-400">Пользователи не найдены</div>
-                    ) : assignees.map((assignee) => (
-                      <label key={`${role}-${assignee.id}`} className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-2 text-sm transition hover:bg-slate-50">
-                        <input
-                          type="checkbox"
-                          checked={isParticipantSelected(role, assignee.id)}
-                          disabled={isReadOnly}
-                          onChange={() => toggleParticipant(role, assignee)}
-                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="min-w-0">
-                          <span className="block truncate font-semibold text-slate-700">{assignee.name}</span>
-                          {assignee.email ? <span className="block truncate text-xs text-slate-400">{assignee.email}</span> : null}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </Field>
-              ))}
+              {(['assignee', 'approver', 'observer'] as TaskJournalParticipantRole[]).map((role) => {
+                const visibleParticipants = getVisibleParticipantsByRole(role);
+                const availableAssignees = getAvailableAssigneesForRole(role);
+
+                return (
+                  <Field key={role} label={PARTICIPANT_ROLE_LABELS[role]}>
+                    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="min-h-24 space-y-2">
+                        {visibleParticipants.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-slate-200 px-3 py-5 text-center text-sm text-slate-400">
+                            Пока никто не добавлен
+                          </div>
+                        ) : visibleParticipants.map((participant, index) => {
+                          const participantName = getParticipantDisplayName(participant);
+                          return (
+                            <div
+                              key={`${role}-${participant.id ?? participant.userId ?? participantName}-${index}`}
+                              className="flex items-start justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate font-semibold text-slate-700">{participantName}</span>
+                                {participant.email ? <span className="block truncate text-xs text-slate-400">{participant.email}</span> : null}
+                              </span>
+                              {!isReadOnly ? (
+                                <button
+                                  type="button"
+                                  onClick={() => removeParticipant(role, participant)}
+                                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white hover:text-rose-600"
+                                  aria-label={`Удалить участника ${participantName}`}
+                                  title="Удалить"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {!isReadOnly ? (
+                        <select
+                          aria-label={`Добавить: ${PARTICIPANT_ROLE_LABELS[role]}`}
+                          value=""
+                          onChange={(event) => {
+                            const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
+                            if (selected) {
+                              addParticipant(role, selected);
+                            }
+                          }}
+                          className="form-input bg-white"
+                          disabled={availableAssignees.length === 0}
+                        >
+                          <option value="">
+                            {availableAssignees.length === 0 ? 'Нет доступных пользователей' : '+ Добавить из справочника'}
+                          </option>
+                          {availableAssignees.map((assignee) => (
+                            <option key={assignee.id} value={assignee.id}>
+                              {assignee.email ? `${assignee.name} - ${assignee.email}` : assignee.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                    </div>
+                  </Field>
+                );
+              })}
             </div>
 
             {state?.task && approverParticipants.length > 0 ? (

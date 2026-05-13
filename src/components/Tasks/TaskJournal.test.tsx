@@ -616,6 +616,40 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('adds extra participants from dropdowns without duplicating the primary executor', async () => {
+    await renderJournal([
+      createTask({
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Дополнительный исполнитель', email: 'helper@example.com' },
+      ],
+    });
+
+    fireEvent.click(screen.getByTitle('Редактировать'));
+    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+
+    const extraExecutorSelect = screen.getByLabelText('Добавить: Дополнительные исполнители');
+    expect(within(extraExecutorSelect).queryByRole('option', { name: /Администратор/ })).toBeNull();
+
+    fireEvent.change(extraExecutorSelect, { target: { value: '8' } });
+    expect(screen.getByRole('button', { name: 'Удалить участника Дополнительный исполнитель' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    expect(payload.participants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'assignee', userId: 7, displayName: 'Администратор' }),
+      expect.objectContaining({ role: 'assignee', userId: 8, displayName: 'Дополнительный исполнитель' }),
+    ]));
+    expect(payload.participants.filter((participant) => participant.role === 'assignee' && participant.userId === 7)).toHaveLength(1);
+  });
+
   it('sends a change comment with task edits', async () => {
     await renderJournal();
 
