@@ -912,6 +912,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
       setHighlightedTaskId(task.id);
 
       if (options?.syncRoute ?? true) {
+        lastOpenedRouteTaskIdRef.current = task.id;
         onRouteTaskChange?.(task.id);
       }
     },
@@ -1015,14 +1016,6 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     }
 
     const showTask = (task: TaskJournalItem) => {
-      skipNextFilterSaveRef.current = true;
-      setViewMode('list');
-      setQuickFilter('all');
-      setMetricFilter('none');
-      setStatusFilter('all');
-      setAssigneeFilter('all');
-      setTypeFilter('all');
-      setSearch('');
       openTaskEditor(task, { syncRoute: false });
       lastOpenedRouteTaskIdRef.current = routeTaskId;
     };

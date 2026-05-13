@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskJournal } from './TaskJournal';
@@ -156,7 +157,7 @@ function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
 
 async function renderJournal(
   tasks: TaskJournalItem[] = [createTask()],
-  options: { initialView?: 'list' | 'board' | 'calendar' | 'timeline'; assignees?: TaskJournalAssignee[] } = {},
+  options: { initialView?: 'list' | 'board' | 'calendar' | 'timeline'; assignees?: TaskJournalAssignee[]; withRoute?: boolean } = {},
 ) {
   apiMock.getTaskJournalItems.mockResolvedValue({
     items: tasks,
@@ -172,7 +173,12 @@ async function renderJournal(
     allowExecutorDeadlineChangeRequests: true,
   });
 
-  render(<TaskJournal initialView={options.initialView} />);
+  function RoutedJournal() {
+    const [routeTaskId, setRouteTaskId] = useState<number | null>(null);
+    return <TaskJournal initialView={options.initialView} routeTaskId={routeTaskId} onRouteTaskChange={setRouteTaskId} />;
+  }
+
+  render(options.withRoute ? <RoutedJournal /> : <TaskJournal initialView={options.initialView} />);
   await screen.findAllByText(tasks[0]?.title ?? 'Тестовая задача');
 }
 
@@ -281,6 +287,52 @@ describe('TaskJournal', () => {
     await waitFor(() => {
       expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
         quickFilter: 'all',
+      });
+    });
+  });
+
+  it('keeps the search filter after opening a task from the filtered journal', async () => {
+    await renderJournal([
+      createTask({
+        id: 101,
+        title: 'Egor task',
+        clientName: 'Egorov Sergey',
+        objectName: 'EGOROV - BANKRUPTCY',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+      createTask({
+        id: 102,
+        title: 'Other task',
+        clientName: 'Petrov Petr',
+        objectName: 'PETROV - BANKRUPTCY',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+    ], { withRoute: true });
+
+    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: 'EGOROV' } });
+
+    expect(await screen.findByText('Egor task')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Other task')).toBeNull());
+
+    const row = screen.getByText('Egor task').closest('tr');
+    expect(row).toBeTruthy();
+    const rowButtons = within(row as HTMLTableRowElement).getAllByRole('button');
+    fireEvent.click(rowButtons[1]);
+
+    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+
+    expect(searchInput.value).toBe('EGOROV');
+    expect(screen.getByText('Egor task')).toBeTruthy();
+    expect(screen.queryByText('Other task')).toBeNull();
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
+        search: 'EGOROV',
       });
     });
   });
