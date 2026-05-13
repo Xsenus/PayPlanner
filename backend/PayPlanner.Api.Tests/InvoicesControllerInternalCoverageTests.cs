@@ -2006,6 +2006,7 @@ public class InvoicesControllerInternalCoverageTests
                 ActIds = [ownAct.Id, 88_001],
             },
             null,
+            null,
             CancellationToken.None);
 
         var missingError = Assert.IsType<BadRequestObjectResult>(GetTupleField(missingResult, "Item1"));
@@ -2021,6 +2022,7 @@ public class InvoicesControllerInternalCoverageTests
                 ActIds = [foreignAct.Id, foreignActTwo.Id],
             },
             null,
+            null,
             CancellationToken.None);
 
         var foreignError = Assert.IsType<BadRequestObjectResult>(GetTupleField(foreignResult, "Item1"));
@@ -2035,6 +2037,7 @@ public class InvoicesControllerInternalCoverageTests
             {
                 ActIds = [linkedAct.Id, linkedActTwo.Id],
             },
+            null,
             null,
             CancellationToken.None);
 

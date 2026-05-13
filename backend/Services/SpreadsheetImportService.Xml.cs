@@ -581,9 +581,10 @@ public sealed partial class SpreadsheetImportService
                     quantity = 1m;
                 }
 
-                var price = TryParseDecimal(GetOneCDirectValue(row, "Цена"))
-                    ?? TryParseDecimal(GetOneCDirectValue(row, "ЦенаБезНДС"))
-                    ?? (rowAmount.HasValue ? Math.Round(rowAmount.Value / quantity, 2) : null);
+                var price = rowAmount.HasValue
+                    ? Math.Round(rowAmount.Value / quantity, 2)
+                    : TryParseDecimal(GetOneCDirectValue(row, "Цена"))
+                        ?? TryParseDecimal(GetOneCDirectValue(row, "ЦенаБезНДС"));
                 var name = NormalizeText(GetOneCDirectValue(row, "Содержание"))
                     ?? NormalizeText(GetOneCReferenceValue(GetOneCDirectProperty(row, "Номенклатура"), "Наименование"))
                     ?? NormalizeText(tableName);

@@ -289,7 +289,7 @@ public class InvoicesControllerValidationTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
         var message = Assert.IsType<string>(badRequest.Value);
-        Assert.Equal($"Acts are not linked to selected counterparty: {foreignActId}", message);
+        Assert.Equal($"Акты не связаны с выбранным клиентом или юрлицом: {foreignActId}", message);
     }
 
     [Fact]
@@ -313,7 +313,7 @@ public class InvoicesControllerValidationTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
         var message = Assert.IsType<string>(badRequest.Value);
-        Assert.Equal($"Acts are already linked to another invoice: {actId}", message);
+        Assert.Equal($"Акты уже привязаны к другому счету: {actId}", message);
     }
 
     [Fact]
@@ -813,6 +813,67 @@ public class InvoicesControllerValidationTests
         var action = await controller.Update(invoiceId, request, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task Update_AllowsActLinkedToSiblingPaymentOfSameInvoice_AndSavesEditedAmount()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Update Act Same Aggregate Client");
+        var invoiceId = await CreateInvoiceAsync(db, clientId, "INV-UPD-ACT-SAME");
+        var invoice = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == invoiceId);
+        Assert.NotNull(invoice.InvoiceId);
+
+        var siblingPayment = new Payment
+        {
+            Account = "INV-UPD-ACT-SAME",
+            AccountDate = new DateTime(2026, 4, 10),
+            InvoiceId = invoice.InvoiceId,
+            Amount = 10_000m,
+            ClientId = clientId,
+            Date = new DateTime(2026, 4, 12),
+            PlannedDate = new DateTime(2026, 4, 12),
+            Description = "Linked invoice payment",
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Completed,
+            Type = PaymentType.Income,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Payments.Add(siblingPayment);
+        await db.SaveChangesAsync();
+
+        var actId = await CreateActAsync(db, clientId, "ACT-UPD-SAME-AGGREGATE");
+        var linkedAct = await db.Acts.SingleAsync(act => act.Id == actId);
+        linkedAct.InvoiceId = siblingPayment.Id;
+        linkedAct.InvoiceNumber = "INV-UPD-ACT-SAME";
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true, userId: null);
+        var request = CreateRequest("INV-UPD-ACT-SAME", clientId, new DateTime(2026, 4, 10));
+        request.Amount = 165_000m;
+        request.ActIds = [actId];
+        request.LineItems =
+        [
+            new InvoiceLineItemRequest
+            {
+                Name = "Corrected invoice line",
+                Quantity = 1m,
+                Unit = "шт",
+                Price = 165_000m,
+            },
+        ];
+
+        var action = await controller.Update(invoiceId, request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        Assert.IsType<InvoiceDto>(ok.Value);
+
+        var storedInvoice = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == invoiceId);
+        Assert.Equal(165_000m, storedInvoice.Amount);
+
+        var storedAct = await db.Acts.AsNoTracking().SingleAsync(act => act.Id == actId);
+        Assert.Equal(invoiceId, storedAct.InvoiceId);
+        Assert.Equal("INV-UPD-ACT-SAME", storedAct.InvoiceNumber);
     }
 
     [Fact]

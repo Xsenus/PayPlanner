@@ -935,7 +935,7 @@ public class InvoicesController : ControllerBase
             return clientCaseValidation.Error;
         }
 
-        var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request.LegalEntityId, request, null, ct);
+        var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request.LegalEntityId, request, null, null, ct);
         if (actValidation.Error is not null)
         {
             return actValidation.Error;
@@ -1103,7 +1103,8 @@ public class InvoicesController : ControllerBase
             return clientCaseValidation.Error;
         }
 
-        var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request.LegalEntityId, request, id, ct);
+        var existingInvoiceEntityId = payment.InvoiceId ?? payment.Invoice?.Id;
+        var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request.LegalEntityId, request, id, existingInvoiceEntityId, ct);
         if (actValidation.Error is not null)
         {
             return actValidation.Error;
@@ -3097,7 +3098,13 @@ public class InvoicesController : ControllerBase
         return (null, clientCaseIds);
     }
 
-    private async Task<(ActionResult? Error, List<int> ActIds)> ValidateInvoiceActsAsync(int? clientId, int? legalEntityId, UpsertInvoiceRequest request, int? invoiceId, CancellationToken ct)
+    private async Task<(ActionResult? Error, List<int> ActIds)> ValidateInvoiceActsAsync(
+        int? clientId,
+        int? legalEntityId,
+        UpsertInvoiceRequest request,
+        int? invoicePaymentId,
+        int? invoiceEntityId,
+        CancellationToken ct)
     {
         var actIds = NormalizeInvoiceActIds(request);
         if (actIds.Count == 0)
@@ -3124,8 +3131,10 @@ public class InvoicesController : ControllerBase
             return (BadRequest($"Unknown actIds: {string.Join(", ", missingIds)}"), new List<int>());
         }
 
+        var allowedInvoicePaymentIds = await ResolveAllowedInvoiceActPaymentIdsAsync(invoicePaymentId, invoiceEntityId, ct);
+
         var foreignClientActIds = acts
-            .Where(x => !(invoiceId.HasValue && x.InvoiceId == invoiceId.Value)
+            .Where(x => !(x.InvoiceId.HasValue && allowedInvoicePaymentIds.Contains(x.InvoiceId.Value))
                 && (x.ClientId != clientId || x.LegalEntityId != legalEntityId))
             .Select(x => x.Id)
             .OrderBy(x => x)
@@ -3133,21 +3142,42 @@ public class InvoicesController : ControllerBase
 
         if (foreignClientActIds.Count > 0)
         {
-            return (BadRequest($"Acts are not linked to selected counterparty: {string.Join(", ", foreignClientActIds)}"), new List<int>());
+            return (BadRequest($"Акты не связаны с выбранным клиентом или юрлицом: {string.Join(", ", foreignClientActIds)}"), new List<int>());
         }
 
         var linkedToOtherInvoices = acts
-            .Where(x => x.InvoiceId.HasValue && x.InvoiceId.Value != invoiceId)
+            .Where(x => x.InvoiceId.HasValue && !allowedInvoicePaymentIds.Contains(x.InvoiceId.Value))
             .Select(x => x.Id)
             .OrderBy(x => x)
             .ToList();
 
         if (linkedToOtherInvoices.Count > 0)
         {
-            return (BadRequest($"Acts are already linked to another invoice: {string.Join(", ", linkedToOtherInvoices)}"), new List<int>());
+            return (BadRequest($"Акты уже привязаны к другому счету: {string.Join(", ", linkedToOtherInvoices)}"), new List<int>());
         }
 
         return (null, actIds);
+    }
+
+    private async Task<HashSet<int>> ResolveAllowedInvoiceActPaymentIdsAsync(int? invoicePaymentId, int? invoiceEntityId, CancellationToken ct)
+    {
+        var ids = new HashSet<int>();
+        if (invoicePaymentId.HasValue && invoicePaymentId.Value > 0)
+        {
+            ids.Add(invoicePaymentId.Value);
+        }
+
+        if (invoiceEntityId.HasValue && invoiceEntityId.Value > 0)
+        {
+            var siblingPaymentIds = await _db.Payments
+                .AsNoTracking()
+                .Where(payment => payment.InvoiceId == invoiceEntityId.Value)
+                .Select(payment => payment.Id)
+                .ToListAsync(ct);
+            ids.UnionWith(siblingPaymentIds);
+        }
+
+        return ids;
     }
 
     private static readonly Expression<Func<InvoiceQueryItem, InvoiceProjectionRaw>> ProjectionRaw = x => new InvoiceProjectionRaw

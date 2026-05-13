@@ -296,6 +296,34 @@ public class SpreadsheetImportServiceOneCXmlTests
     }
 
     [Fact]
+    public async Task ApplyAsync_UsesOneCRowAmountForLinePrice_WhenKubExportsTotalAsPrice()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+        var xml = BuildOneCSingleInvoiceXml("INV-QTY", "2022-01-21T00:00:00", "165000.00")
+            .Replace(
+                "<Свойство Имя=\"Количество\" Тип=\"Число\"><Значение>1</Значение></Свойство>",
+                "<Свойство Имя=\"Количество\" Тип=\"Число\"><Значение>2</Значение></Свойство>",
+                StringComparison.Ordinal);
+
+        await ApplyAllSelectableRowsAsync(service, new[]
+        {
+            new SpreadsheetImportUploadFile("1c_export_qty.zip", CreateZip("1c_export.xml", xml)),
+        });
+
+        await using var db = CreateContext(connection);
+        var payment = await db.Payments
+            .Include(item => item.InvoiceLineItems)
+            .SingleAsync(payment => payment.Account == "INV-QTY");
+
+        Assert.Equal(165_000m, payment.Amount);
+        var lineItem = Assert.Single(payment.InvoiceLineItems);
+        Assert.Equal(2m, lineItem.Quantity);
+        Assert.Equal(82_500m, lineItem.Price);
+        Assert.Equal(165_000m, lineItem.Quantity * lineItem.Price);
+    }
+
+    [Fact]
     public async Task ApplyAsync_LinksActByInvoiceNumber_WhenInvoiceExternalIdIsRepeated()
     {
         await using var connection = await CreateOpenConnectionAsync();
