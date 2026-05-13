@@ -858,11 +858,11 @@ export function Payments({
     async (payment: Payment) => {
       const isTransferredRemainder = isTransferredRemainderPayment(payment);
       const isRemainderSource = isPartialRemainderSourcePayment(payment);
-      if (isInvoiceManagedPayment(payment) || isTransferredRemainder || isRemainderSource) {
+      if (payment.documentKind === 'Invoice' || isTransferredRemainder || isRemainderSource) {
         toast.error(
           isTransferredRemainder || isRemainderSource
             ? 'Перенос остатка нельзя удалить обычным удалением.'
-            : 'Счет и график рассрочки удаляются через раздел "Счета".',
+            : 'Документ счета удаляется через раздел "Счета".',
           t('payments') ?? 'Платежи',
         );
         return false;
@@ -897,11 +897,10 @@ export function Payments({
     async (payment: Payment) => {
       const isTransferredRemainder = isTransferredRemainderPayment(payment);
       const isRemainderSource = isPartialRemainderSourcePayment(payment);
-      if (isInvoiceManagedPayment(payment) || isTransferredRemainder || isRemainderSource) {
+      const invoiceManagedPayment = isInvoiceManagedPayment(payment);
+      if (isTransferredRemainder || isRemainderSource) {
         toast.error(
-          isTransferredRemainder || isRemainderSource
-            ? 'Перенос остатка нельзя аннулировать обычным действием.'
-            : 'Счет и график рассрочки управляют этим платежом. Измените статус через счет.',
+          'Перенос остатка нельзя аннулировать обычным действием.',
           t('payments') ?? 'Платежи',
         );
         return false;
@@ -924,7 +923,11 @@ export function Payments({
       if (!confirmed) return false;
 
       try {
-        await apiService.updatePayment(payment.id, buildCancelledPaymentPayload(payment));
+        if (invoiceManagedPayment) {
+          await apiService.updateInvoiceManagedPayment(payment.id, buildCancelledPaymentPayload(payment));
+        } else {
+          await apiService.updatePayment(payment.id, buildCancelledPaymentPayload(payment));
+        }
         toast.success('Платеж аннулирован.', t('payments') ?? 'Платежи');
         await refresh();
         return true;
@@ -1685,7 +1688,7 @@ export function Payments({
                 canEdit={paymentsPermissions.canEdit}
                 canDelete={paymentsPermissions.canDelete}
                 canEditPayment={() => true}
-                canDeletePayment={(payment) => !isInvoiceManagedPayment(payment) && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment)}
+                canDeletePayment={(payment) => payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment)}
                 columns={visiblePaymentColumns}
                 draggingColumn={draggingColumn}
                 onColumnDragStart={handleColumnDragStart}
@@ -1902,7 +1905,7 @@ export function Payments({
                     Редактировать
                   </button>
                 ) : null}
-                {routePaymentPreview && paymentsPermissions.canEdit && routePaymentPreview.status !== 'Cancelled' && !isInvoiceManagedPayment(routePaymentPreview) ? (
+                {routePaymentPreview && paymentsPermissions.canEdit && routePaymentPreview.status !== 'Cancelled' && !isTransferredRemainderPayment(routePaymentPreview) && !isPartialRemainderSourcePayment(routePaymentPreview) ? (
                   <button
                     type="button"
                     onClick={async () => {
@@ -1915,7 +1918,7 @@ export function Payments({
                     Аннулировать
                   </button>
                 ) : null}
-                {routePaymentPreview && paymentsPermissions.canDelete && !isInvoiceManagedPayment(routePaymentPreview) && !isTransferredRemainderPayment(routePaymentPreview) && !isPartialRemainderSourcePayment(routePaymentPreview) ? (
+                {routePaymentPreview && paymentsPermissions.canDelete && routePaymentPreview.documentKind !== 'Invoice' && !isTransferredRemainderPayment(routePaymentPreview) && !isPartialRemainderSourcePayment(routePaymentPreview) ? (
                   <button
                     type="button"
                     onClick={async () => {
@@ -1986,7 +1989,7 @@ export function Payments({
         type={modalType}
         onDelete={
           paymentsPermissions.canDelete
-          && (!editingPayment || (!isInvoiceManagedPayment(editingPayment) && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
+          && (!editingPayment || (editingPayment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
             ? async (id) => {
                 try {
                   await apiService.deletePayment(id);

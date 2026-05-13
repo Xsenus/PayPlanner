@@ -692,7 +692,7 @@ public class PaymentsControllerTests
     }
 
     [Fact]
-    public async Task Delete_RejectsGeneratedInstallmentPayment_WhenTargetIsInvoiceManagedPayment()
+    public async Task Delete_RemovesGeneratedInstallmentPayment_AndKeepsInvoiceAggregate()
     {
         await using var db = await CreateContextAsync();
         var invoice = await CreateInvoiceAggregateAsync(db);
@@ -702,10 +702,10 @@ public class PaymentsControllerTests
         var actionResult = await controller.Delete(invoice.InstallmentPaymentIds[0], CancellationToken.None);
         db.ChangeTracker.Clear();
 
-        var conflict = Assert.IsType<ConflictObjectResult>(actionResult);
-        Assert.Contains(InvoiceManagedPaymentRules.DeleteBlockedMessage, conflict.Value?.ToString());
+        Assert.IsType<NoContentResult>(actionResult);
+        Assert.Null(await db.Payments.FindAsync(invoice.InstallmentPaymentIds[0]));
         Assert.NotNull(await db.Payments.FindAsync(invoice.ParentPaymentId));
-        Assert.Equal(3, await db.Payments.CountAsync(payment => payment.InvoiceId == invoice.InvoiceEntityId));
+        Assert.Equal(2, await db.Payments.CountAsync(payment => payment.InvoiceId == invoice.InvoiceEntityId));
         Assert.NotNull(await db.Invoices.FindAsync(invoice.InvoiceEntityId));
         Assert.NotNull(await db.Payments.FindAsync(invoice.UnrelatedPaymentId));
     }

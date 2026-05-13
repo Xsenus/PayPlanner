@@ -4663,12 +4663,12 @@ export function ClientDetail({
 
   const removePayment = async (target: Payment | number) => {
     const isLockedPayment = typeof target !== "number"
-      && (isInvoiceManagedPayment(target) || isTransferredRemainderPayment(target) || isPartialRemainderSourcePayment(target));
+      && (target.documentKind === "Invoice" || isTransferredRemainderPayment(target) || isPartialRemainderSourcePayment(target));
     if (isLockedPayment) {
       toast.error(
         isTransferredRemainderPayment(target as Payment) || isPartialRemainderSourcePayment(target as Payment)
           ? "Перенесенный остаток нельзя удалить отдельно."
-          : 'Счет и график рассрочки удаляются через раздел "Счета".',
+          : 'Документ счета удаляется через раздел "Счета".',
         "Платежи",
       );
       return false;
@@ -8675,7 +8675,7 @@ export function ClientDetail({
                                           </button>
                                         ) : null}
                                         {clientPermissions.canDelete &&
-                                        !isInvoiceManagedPayment(payment) &&
+                                        payment.documentKind !== "Invoice" &&
                                         !isTransferredRemainderPayment(payment) &&
                                         !isPartialRemainderSourcePayment(payment) ? (
                                           <button
@@ -10515,7 +10515,7 @@ export function ClientDetail({
           }}
           onDelete={
             clientPermissions.canDelete &&
-            (!editingPayment || (!isInvoiceManagedPayment(editingPayment) && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
+            (!editingPayment || (editingPayment.documentKind !== "Invoice" && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
               ? async (id: number) => {
                   const removed = await removePayment(editingPayment ?? id);
                   if (removed) {

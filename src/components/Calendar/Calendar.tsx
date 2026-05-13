@@ -269,11 +269,12 @@ export function Calendar({ onOpenClient }: CalendarProps) {
 
   const handleDeletePayment = async (payment: Payment) => {
     const isTransferredRemainder = isTransferredRemainderPayment(payment);
-    if (isInvoiceManagedPayment(payment) || isTransferredRemainder) {
+    const isRemainderSource = isPartialRemainderSourcePayment(payment);
+    if (payment.documentKind === 'Invoice' || isTransferredRemainder || isRemainderSource) {
       toast.error(
-        isTransferredRemainder
+        isTransferredRemainder || isRemainderSource
           ? 'Перенесенный остаток нельзя удалить отдельно.'
-          : 'Счет и график рассрочки удаляются через раздел "Счета".',
+          : 'Документ счета удаляется через раздел "Счета".',
         'Платежи',
       );
       return;
@@ -768,7 +769,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               canEdit={calendarPermissions.canEdit}
               canDelete={calendarPermissions.canDelete}
               canEditPayment={() => true}
-              canDeletePayment={(payment) => !isInvoiceManagedPayment(payment) && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment)}
+              canDeletePayment={(payment) => payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment)}
               columns={visiblePaymentColumns}
               draggingColumn={draggingColumn}
               onColumnDragStart={handleColumnDragStart}
@@ -809,7 +810,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           payment={editingPayment}
           onDelete={
             calendarPermissions.canDelete
-            && (!editingPayment || (!isInvoiceManagedPayment(editingPayment) && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
+            && (!editingPayment || (editingPayment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
               ? async (id) => {
                   try {
                     await deletePayment(id);

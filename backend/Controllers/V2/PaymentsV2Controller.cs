@@ -350,7 +350,13 @@ public class PaymentsV2Controller : ControllerBase
     {
         var entity = await _db.Payments.FindAsync(id);
         if (entity is null) return NotFound();
-        if (InvoiceManagedPaymentRules.IsInvoiceManagedPayment(entity))
+        if (
+            InvoiceManagedPaymentRules.IsInvoiceManagedPayment(entity)
+            && (
+                entity.DocumentKind == DocumentKind.Invoice
+                || InvoiceManagedPaymentRules.IsGeneratedInvoiceRemainderPayment(entity)
+            )
+        )
         {
             return Conflict(new { message = InvoiceManagedPaymentRules.DeleteBlockedMessage });
         }

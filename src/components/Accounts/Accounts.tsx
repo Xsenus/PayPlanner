@@ -2105,11 +2105,11 @@ export function Accounts({
   const handleDeletePayment = async (payment: Payment) => {
     const isTransferredRemainder = isTransferredRemainderPayment(payment);
     const isRemainderSource = isPartialRemainderSourcePayment(payment);
-    if (isInvoiceManagedPayment(payment) || isTransferredRemainder || isRemainderSource) {
+    if (payment.documentKind === 'Invoice' || isTransferredRemainder || isRemainderSource) {
       toast.error(
         isTransferredRemainder || isRemainderSource
           ? 'Перенесенный остаток нельзя удалить отдельно.'
-          : 'Счет и график рассрочки удаляются через раздел "Счета".',
+          : 'Документ счета удаляется через раздел "Счета".',
         'Платежи счета',
       );
       return;
@@ -2338,7 +2338,7 @@ export function Accounts({
       }}
       onDelete={
         canDelete
-        && (!editingPayment || (!isInvoiceManagedPayment(editingPayment) && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
+        && (!editingPayment || (editingPayment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
           ? async (id) => {
               await apiService.deletePayment(id);
               toast.success('Платеж удален.');
@@ -3401,7 +3401,7 @@ export function Accounts({
                                                     <Pencil className="h-4 w-4" />
                                                   </button>
                                                 )}
-                                                {canDelete && !isInvoiceManagedPayment(payment) && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment) && (
+                                                {canDelete && payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment) && (
                                                   <button
                                                     type="button"
                                                     onClick={(event) => {

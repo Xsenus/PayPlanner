@@ -935,4 +935,171 @@ describe('PaymentModal integration', () => {
     expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Аннулировать' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('annuls an invoice-managed payment from the payment card', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={onClose}
+        onSubmit={onSubmit}
+        payment={{
+          id: 1102,
+          date: '2026-03-31',
+          plannedDate: '2026-03-31',
+          amount: 165_000,
+          paidAmount: 165_000,
+          status: 'Completed',
+          description: 'Счет №94 от 24 апреля 2025 г.',
+          isPaid: true,
+          paidDate: '2026-03-31',
+          lastPaymentDate: '2026-03-31',
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+          invoiceId: 94,
+          account: '94',
+          accountDate: '2025-04-24',
+          documentKind: 'Payment',
+          createdAt: '2026-03-31T00:00:00Z',
+          systemNotes: '[pp:installment-payment] {"sequence":1}',
+          rescheduleCount: 0,
+        }}
+        linkedInvoice={{
+          invoiceEntityId: 94,
+          invoiceRecordId: 1102,
+          number: '94',
+          date: '2025-04-24',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Аннулировать' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 1102,
+        status: 'Cancelled',
+        isPaid: false,
+        paidAmount: 0,
+        invoiceId: 94,
+      }),
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('moves an invoice-managed payment from the payment card', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={onClose}
+        onSubmit={onSubmit}
+        payment={{
+          id: 1103,
+          date: '2026-03-31',
+          plannedDate: '2026-03-31',
+          amount: 165_000,
+          paidAmount: 165_000,
+          status: 'Completed',
+          description: 'Счет №94 от 24 апреля 2025 г.',
+          isPaid: true,
+          paidDate: '2026-03-31',
+          lastPaymentDate: '2026-03-31',
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+          invoiceId: 94,
+          account: '94',
+          accountDate: '2025-04-24',
+          documentKind: 'Payment',
+          createdAt: '2026-03-31T00:00:00Z',
+          systemNotes: '[pp:installment-payment] {"sequence":1}',
+          rescheduleCount: 0,
+        }}
+        linkedInvoice={{
+          invoiceEntityId: 94,
+          invoiceRecordId: 1102,
+          number: '94',
+          date: '2025-04-24',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Перенести' }));
+    fireEvent.change(screen.getByLabelText('Новая дата платежа'), {
+      target: { value: '2026-04-15' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить перенос' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 1103,
+        date: '2026-04-15',
+        plannedDate: '2026-04-15',
+        status: 'Completed',
+        paidAmount: 165_000,
+        invoiceId: 94,
+      }),
+    );
+    expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Перенести' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('deletes an invoice-managed installment payment from the payment card when deletion is allowed', async () => {
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={onClose}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onDelete={onDelete}
+        payment={{
+          id: 1104,
+          date: '2026-03-31',
+          plannedDate: '2026-03-31',
+          amount: 165_000,
+          paidAmount: 165_000,
+          status: 'Completed',
+          description: 'Счет №94 от 24 апреля 2025 г.',
+          isPaid: true,
+          paidDate: '2026-03-31',
+          lastPaymentDate: '2026-03-31',
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+          invoiceId: 94,
+          account: '94',
+          accountDate: '2025-04-24',
+          documentKind: 'Payment',
+          createdAt: '2026-03-31T00:00:00Z',
+          systemNotes: '[pp:installment-payment] {"sequence":1}',
+          rescheduleCount: 0,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'delete' }));
+
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith(1104));
+    expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Удалить' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

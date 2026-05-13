@@ -2887,13 +2887,25 @@ public class PaymentsController : ControllerBase
             return Conflict(new { message = PaymentRemainderTransferRules.SourceDeleteBlockedMessage });
         }
 
-        if (InvoiceManagedPaymentRules.IsInvoiceManagedPayment(payment))
+        if (
+            InvoiceManagedPaymentRules.IsInvoiceManagedPayment(payment)
+            && (
+                payment.DocumentKind == DocumentKind.Invoice
+                || InvoiceManagedPaymentRules.IsGeneratedInvoiceRemainderPayment(payment)
+            )
+        )
         {
             return Conflict(new { message = InvoiceManagedPaymentRules.DeleteBlockedMessage });
         }
 
+        var invoiceId = payment.InvoiceId;
         _db.Payments.Remove(payment);
         await _db.SaveChangesAsync(ct);
+        if (invoiceId.HasValue && invoiceId.Value > 0)
+        {
+            await InvoicePaymentStateService.RefreshInvoiceAggregateAsync(_db, invoiceId.Value, DateTime.UtcNow, ct);
+            await _db.SaveChangesAsync(ct);
+        }
         return NoContent();
     }
 }

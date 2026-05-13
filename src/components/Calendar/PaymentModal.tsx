@@ -30,7 +30,6 @@ import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 import { getAppliedClientBalanceAmount, getVisibleSystemNoteLines } from '../../utils/systemNotes';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import {
-  isInvoiceManagedPayment,
   isPartialRemainderSourcePayment,
   isTransferredRemainderPayment,
   parsePartialRemainderTransferMetadata,
@@ -229,6 +228,8 @@ export function PaymentModal({
   const [invoiceCreateLookupsError, setInvoiceCreateLookupsError] = useState<string | null>(null);
   const [rescheduleRemainder, setRescheduleRemainder] = useState(false);
   const [rescheduleDate, setRescheduleDate] = useState<string>('');
+  const [paymentMoveOpen, setPaymentMoveOpen] = useState(false);
+  const [paymentMoveDate, setPaymentMoveDate] = useState('');
   const [remainderToolsOpen, setRemainderToolsOpen] = useState(false);
   const [adjustPaidAmount, setAdjustPaidAmount] = useState('');
   const [adjustRemainderDate, setAdjustRemainderDate] = useState('');
@@ -441,6 +442,8 @@ export function PaymentModal({
       setInvoiceSearch('');
       setInvoicePickerError(null);
       setInvoiceCreateSeedContractId('');
+      setPaymentMoveOpen(false);
+      setPaymentMoveDate('');
       setFetchedClientBalance(0);
       setBalanceApplyAmount('');
       setAppliedClientBalanceAmount(0);
@@ -547,6 +550,8 @@ export function PaymentModal({
         (p ? toDateInputValue(p.plannedDate) || toDateInputValue(p.date) : null) || todayYMD();
       const splitMetadata = p ? parsePartialRemainderTransferMetadata(p) : null;
       setRescheduleDate(fallbackDate);
+      setPaymentMoveDate(fallbackDate);
+      setPaymentMoveOpen(false);
       setRescheduleRemainder(false);
       setRemainderToolsOpen(false);
       setAdjustPaidAmount(
@@ -1468,8 +1473,82 @@ export function PaymentModal({
     && (isProtectedTransferredRemainder || isProtectedRemainderSource)
     && (onRollbackRemainderTransfer || onAdjustRemainderTransfer),
   );
-  const canDelete = !!payment && !!onDelete && !isInvoiceManagedPayment(payment) && !isProtectedTransferredRemainder && !isProtectedRemainderSource;
-  const canCancelPayment = !!payment && !isInvoiceManagedPayment(payment) && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
+  const isRepresentativeInvoicePayment = payment?.documentKind === 'Invoice';
+  const canDelete = !!payment && !!onDelete && !isRepresentativeInvoicePayment && !isProtectedTransferredRemainder && !isProtectedRemainderSource;
+  const canCancelPayment = !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
+  const canMovePayment = !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
+
+  const buildActionPaymentPayload = (
+    overrides: { date?: string; plannedDate?: string } = {},
+  ): PaymentPayload | null => {
+    const normalizedDate = fromInputToApiDate(overrides.date ?? formData.date);
+    if (!normalizedDate) {
+      return null;
+    }
+
+    const normalizedPlannedDate =
+      fromInputToApiDate(overrides.plannedDate ?? formData.plannedDate) ?? normalizedDate;
+    const normalizedPaidDate =
+      formData.isPaid && formData.paidDate ? fromInputToApiDate(formData.paidDate) : undefined;
+    const safePaidAmount = Math.max(parseDecimal(formData.paidAmount), 0);
+    const normalizedLastPaymentDate = formData.lastPaymentDate
+      ? fromInputToApiDate(formData.lastPaymentDate)
+      : safePaidAmount > 0
+        ? normalizedPaidDate ?? normalizedDate
+        : undefined;
+    const amount = parseDecimal(formData.amount);
+    const shouldPersistLegacyAccountFields = Boolean(payment && !formData.invoiceId);
+    const submitOverpaymentAmount = Math.max(Number((safePaidAmount - amount).toFixed(2)), 0);
+
+    return {
+      date: normalizedDate,
+      plannedDate: normalizedPlannedDate,
+      amount,
+      paidAmount: Number(safePaidAmount.toFixed(2)),
+      lastPaymentDate: normalizedLastPaymentDate,
+      type: formData.type,
+      status: formData.status,
+      description: formData.description,
+      isPaid: formData.isPaid,
+      paidDate: normalizedPaidDate,
+      notes: formData.notes,
+      systemNotes: (formData.systemNotes ?? '').trim(),
+      rescheduleCount: formData.rescheduleCount ?? 0,
+      clientId: formData.clientId ? parseInt(formData.clientId, 10) : undefined,
+      legalEntityId: formData.legalEntityId ? parseInt(formData.legalEntityId, 10) : undefined,
+      expenseClientId:
+        formData.type === 'Expense' && formData.expenseClientId
+          ? parseInt(formData.expenseClientId, 10)
+          : undefined,
+      expenseLegalEntityId:
+        formData.type === 'Expense' && formData.expenseLegalEntityId
+          ? parseInt(formData.expenseLegalEntityId, 10)
+          : undefined,
+      clientCaseId: formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined,
+      dealTypeId: formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined,
+      incomeTypeId: formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined,
+      paymentSourceId: formData.paymentSourceId ? parseInt(formData.paymentSourceId, 10) : undefined,
+      paymentStatusId: formData.paymentStatusId ? parseInt(formData.paymentStatusId, 10) : undefined,
+      paymentOrderNumber: formData.paymentOrderNumber.trim() || undefined,
+      paymentDocumentDate: formData.paymentDocumentDate
+        ? fromInputToApiDate(formData.paymentDocumentDate)
+        : undefined,
+      invoiceId: formData.invoiceId ? parseInt(formData.invoiceId, 10) : undefined,
+      account: shouldPersistLegacyAccountFields ? formData.account?.trim() || undefined : undefined,
+      accountDate:
+        shouldPersistLegacyAccountFields && formData.accountDate
+          ? fromInputToApiDate(formData.accountDate)
+          : undefined,
+      overpaymentHandling:
+        formData.type === 'Income' && submitOverpaymentAmount > 0.005
+          ? overpaymentHandling || undefined
+          : undefined,
+      overpaymentComment:
+        formData.type === 'Income' && submitOverpaymentAmount > 0.005
+          ? overpaymentComment.trim() || undefined
+          : undefined,
+    };
+  };
 
   const openRemainderTools = () => {
     if (!payment) return;
@@ -1485,6 +1564,49 @@ export function PaymentModal({
       || formData.date,
     );
     setRemainderToolsOpen(true);
+  };
+
+  const openPaymentMoveTools = () => {
+    setPaymentMoveDate(paymentMoveDate || formData.plannedDate || formData.date || todayYMD());
+    setPaymentMoveOpen(true);
+  };
+
+  const handleMovePayment = async () => {
+    if (!payment || loading) return;
+
+    const normalizedMoveDate = fromInputToApiDate(paymentMoveDate);
+    if (!normalizedMoveDate) {
+      toast.error('Укажите новую дату платежа.');
+      return;
+    }
+
+    const approved = await confirm({
+      title: 'Перенести платеж',
+      description: `Дата платежа будет изменена на ${toRuDate(normalizedMoveDate) || normalizedMoveDate}. Продолжить?`,
+      confirmLabel: 'Перенести',
+      cancelLabel: 'Отмена',
+      variant: 'primary',
+    });
+    if (!approved) return;
+
+    const paymentData = buildActionPaymentPayload({
+      date: normalizedMoveDate,
+      plannedDate: normalizedMoveDate,
+    });
+    if (!paymentData) {
+      toast.error('Не удалось подготовить данные платежа.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await onSubmit({ id: payment.id, ...paymentData });
+      onClose();
+    } catch {
+      return;
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRollbackRemainderTransfer = async () => {
@@ -2581,10 +2703,51 @@ export function PaymentModal({
               </div>
             )}
 
+            {paymentMoveOpen && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Новая дата платежа
+                    <input
+                      type="date"
+                      value={paymentMoveDate}
+                      onChange={(event) => setPaymentMoveDate(event.target.value)}
+                      className="mt-1 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-center focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMoveOpen(false)}
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50">
+                      Отмена
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleMovePayment()}
+                      disabled={loading}
+                      className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-60">
+                      Сохранить перенос
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="border-t border-gray-200 py-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center">
                   <div className="flex flex-wrap items-center gap-2">
+                  {canMovePayment && (
+                    <button
+                      type="button"
+                      onClick={openPaymentMoveTools}
+                      disabled={loading}
+                      className="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-blue-50 px-4 py-2 font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-60">
+                      <History className="h-4 w-4" />
+                      Перенести
+                    </button>
+                  )}
                   {canCancelPayment && (
                     <button
                       type="button"
