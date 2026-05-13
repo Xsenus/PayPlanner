@@ -367,6 +367,62 @@ public sealed class NotificationService : INotificationService
             cancellationToken);
     }
 
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(
+        TaskJournalItem task,
+        IReadOnlyList<string> changeLabels,
+        string actorName,
+        int actorUserId,
+        string? comment = null,
+        CancellationToken cancellationToken = default)
+    {
+        var channels = ResolveTaskMessageChannels(task);
+        var recipients = ResolveTaskNotificationUserIds(task, actorUserId);
+        if (channels.Count == 0 || recipients.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var message = new NotificationMessage(
+            $"Изменения по задаче: {task.Title}",
+            BuildTaskChangedBody(task, changeLabels, actorName, comment),
+            Purpose: NotificationPurposes.TaskReminder);
+        var eventKey = $"task:{task.Id}:changed:{DateTime.UtcNow:yyyyMMddHHmmssfff}:{actorUserId}";
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var userId in recipients)
+        {
+            deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+        }
+
+        return deliveries;
+    }
+
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCommentAsync(
+        TaskJournalItem task,
+        TaskJournalComment comment,
+        CancellationToken cancellationToken = default)
+    {
+        var channels = ResolveTaskMessageChannels(task);
+        var actorUserId = comment.AuthorUserId ?? 0;
+        var recipients = ResolveTaskNotificationUserIds(task, actorUserId);
+        if (channels.Count == 0 || recipients.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var message = new NotificationMessage(
+            $"Комментарий по задаче: {task.Title}",
+            BuildTaskCommentBody(task, comment),
+            Purpose: NotificationPurposes.TaskReminder);
+        var eventKey = $"task:{task.Id}:comment:{comment.Id}";
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var userId in recipients)
+        {
+            deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+        }
+
+        return deliveries;
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> SendAsync(
         NotificationRecipient recipient,
         NotificationMessage message,
@@ -1096,6 +1152,81 @@ public sealed class NotificationService : INotificationService
         }
 
         return string.Join('\n', lines);
+    }
+
+    private static string BuildTaskChangedBody(
+        TaskJournalItem task,
+        IReadOnlyList<string> changeLabels,
+        string actorName,
+        string? comment)
+    {
+        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var lines = new List<string>
+        {
+            $"{actorName} изменил(а) задачу.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок: {dueText}",
+        };
+
+        if (changeLabels.Count > 0)
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Изменения: {string.Join(", ", changeLabels)}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(comment))
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Комментарий: {comment.Trim()}");
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildTaskCommentBody(TaskJournalItem task, TaskJournalComment comment)
+    {
+        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        return string.Join('\n', new[]
+        {
+            $"{comment.AuthorName} добавил(а) комментарий по задаче.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок: {dueText}",
+            string.Empty,
+            comment.Text.Trim()
+        });
+    }
+
+    private static IReadOnlyList<string> ResolveTaskMessageChannels(TaskJournalItem task)
+        => DeserializeList(task.ChannelsJson)
+            .Where(channel => channel is NotificationChannels.Email or NotificationChannels.Telegram)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static IReadOnlyList<int> ResolveTaskNotificationUserIds(TaskJournalItem task, int actorUserId)
+    {
+        var userIds = new List<int>();
+        if (task.AuthorUserId.HasValue)
+        {
+            userIds.Add(task.AuthorUserId.Value);
+        }
+
+        if (task.AssigneeUserId.HasValue)
+        {
+            userIds.Add(task.AssigneeUserId.Value);
+        }
+
+        userIds.AddRange(task.Participants
+            .Where(participant => participant.UserId.HasValue)
+            .Select(participant => participant.UserId!.Value));
+
+        return userIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct()
+            .ToList();
     }
 
     private static IReadOnlyList<string> DeserializeList(string? raw)

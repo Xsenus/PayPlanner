@@ -1102,6 +1102,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
       title: form.title.trim(),
       description: form.description.trim(),
       result: form.result.trim(),
+      changeComment: form.changeComment?.trim() || null,
       dueAt: fromLocalInputValue(form.dueAt),
       plannedDurationMinutes: normalizeTaskDuration(form.plannedDurationMinutes),
       tags: unique(form.tags),
@@ -2502,6 +2503,7 @@ function TaskModal({
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [changeComment, setChangeComment] = useState('');
   const [deadlineRequestDueAt, setDeadlineRequestDueAt] = useState(() => state?.task ? toLocalInputValue(state.task.dueAt) : '');
   const [deadlineRequestReason, setDeadlineRequestReason] = useState('');
   const [deadlineRequestSaving, setDeadlineRequestSaving] = useState(false);
@@ -2660,7 +2662,7 @@ function TaskModal({
 
   const saveWithStatus = async (status: TaskJournalStatus) => {
     const task = state?.task;
-    const nextForm = { ...form, status };
+    const nextForm = withChangeComment({ ...form, status });
 
     if (status === 'done' && !nextForm.result.trim()) {
       toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
@@ -2676,6 +2678,11 @@ function TaskModal({
 
     await onSave(nextForm, task?.id);
   };
+
+  const withChangeComment = (nextForm: TaskForm = form): TaskForm => ({
+    ...nextForm,
+    changeComment: changeComment.trim() || null,
+  });
 
   const handleCompletionAction = async () => {
     const nextStatus: TaskJournalStatus = approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
@@ -3159,32 +3166,48 @@ function TaskModal({
             </Field>
           </div>
 
-          <div className="mt-5 grid gap-5 lg:grid-cols-2">
-            <Field label="Напоминания">
-              <div className="grid gap-2 sm:grid-cols-2">
-                {REMINDER_OPTIONS.map((option) => (
-                  <label key={option.value} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                    <input type="checkbox" checked={form.reminders.includes(option.value)} disabled={isReadOnly} onChange={() => toggleArray('reminders', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                    {option.label}
-                  </label>
-                ))}
-              </div>
-            </Field>
-            <Field label="Каналы уведомлений">
-              <div className="grid gap-2 sm:grid-cols-3">
-                {CHANNEL_OPTIONS.map((option) => {
-                  const Icon = option.icon;
-                  return (
+          <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Изменения и уведомления</h3>
+            {taskId && !isReadOnly ? (
+              <Field label="Комментарий к изменению" className="mt-4">
+                <textarea
+                  value={changeComment}
+                  onChange={(event) => setChangeComment(event.target.value)}
+                  className="form-textarea min-h-[84px]"
+                  rows={3}
+                  maxLength={4000}
+                  placeholder="Что изменили по задаче"
+                />
+              </Field>
+            ) : null}
+
+            <div className="mt-4 grid gap-5 lg:grid-cols-2">
+              <Field label="Напоминания">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {REMINDER_OPTIONS.map((option) => (
                     <label key={option.value} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                      <input type="checkbox" checked={form.channels.includes(option.value)} disabled={isReadOnly} onChange={() => toggleArray('channels', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                      <Icon className="h-4 w-4 text-slate-400" />
+                      <input type="checkbox" checked={form.reminders.includes(option.value)} disabled={isReadOnly} onChange={() => toggleArray('reminders', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                       {option.label}
                     </label>
-                  );
-                })}
-              </div>
-            </Field>
-          </div>
+                  ))}
+                </div>
+              </Field>
+              <Field label="Каналы уведомлений">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {CHANNEL_OPTIONS.map((option) => {
+                    const Icon = option.icon;
+                    return (
+                      <label key={option.value} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                        <input type="checkbox" checked={form.channels.includes(option.value)} disabled={isReadOnly} onChange={() => toggleArray('channels', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <Icon className="h-4 w-4 text-slate-400" />
+                        {option.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              </Field>
+            </div>
+          </section>
 
           <Field label="Теги" className="mt-5">
             <input
@@ -3463,7 +3486,7 @@ function TaskModal({
               Сохранить результат
             </button>
           ) : (
-            <button type="button" onClick={() => void onSave(form, state?.task?.id)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+            <button type="button" onClick={() => void onSave(withChangeComment(), state?.task?.id)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
             </button>
           )}

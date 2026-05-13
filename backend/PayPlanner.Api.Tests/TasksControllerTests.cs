@@ -203,6 +203,40 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateTask_WithChangeComment_AddsCommentAndNotification()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var assignee = await CreateAdminUserAsync(db, "assignee@example.com", "Исполнитель");
+        var client = await CreateClientAsync(db, "Сидоров Семен Семенович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, notificationService, author);
+
+        var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Проверить определения",
+            DueAt = task.DueAt.AddHours(2),
+            Status = "inProgress",
+            ChangeComment = "Поменяли срок и передали в работу.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.IsType<TaskJournalItemDto>(ok.Value);
+
+        var comments = await db.TaskJournalComments
+            .AsNoTracking()
+            .Where(item => item.TaskJournalItemId == task.Id)
+            .ToListAsync();
+        Assert.Contains(comments, item => item.Kind == "comment" && item.Text == "Поменяли срок и передали в работу.");
+        var notification = Assert.Single(notificationService.ChangedTasks);
+        Assert.Equal(task.Id, notification.TaskId);
+        Assert.Equal("Поменяли срок и передали в работу.", notification.Comment);
+        Assert.Contains(notification.ChangeLabels, item => item.Contains("Наименование", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task UpdateTask_RestrictsExecutorFullEditWhenSettingEnabled()
     {
         await using var db = await CreateContextAsync();
@@ -659,9 +693,11 @@ public class TasksControllerTests
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var assignee = await CreateAdminUserAsync(db, "assignee@example.com", "Исполнитель");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
-        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
-        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, notificationService, author);
 
         var result = await controller.CreateComment(task.Id, new CreateTaskJournalCommentRequest
         {
@@ -674,6 +710,7 @@ public class TasksControllerTests
         Assert.Equal("comment", comment.Kind);
         Assert.Equal("Клиент прислал документы.", comment.Text);
         Assert.Equal(author.Id, comment.AuthorUserId);
+        Assert.Single(notificationService.CommentTaskIds, task.Id);
     }
 
     [Fact]
@@ -1094,6 +1131,8 @@ public class TasksControllerTests
     private sealed class RecordingNotificationService : INotificationService
     {
         public List<int> CompletedTaskIds { get; } = [];
+        public List<(int TaskId, IReadOnlyList<string> ChangeLabels, string? Comment)> ChangedTasks { get; } = [];
+        public List<int> CommentTaskIds { get; } = [];
 
         public Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
@@ -1134,6 +1173,18 @@ public class TasksControllerTests
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCompletedAsync(TaskJournalItem task, CancellationToken cancellationToken = default)
         {
             CompletedTaskIds.Add(task.Id);
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default)
+        {
+            ChangedTasks.Add((task.Id, changeLabels, comment));
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCommentAsync(TaskJournalItem task, TaskJournalComment comment, CancellationToken cancellationToken = default)
+        {
+            CommentTaskIds.Add(task.Id);
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
     }

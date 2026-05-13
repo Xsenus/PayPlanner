@@ -564,6 +564,21 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('sends a change comment with task edits', async () => {
+    await renderJournal();
+
+    fireEvent.click(screen.getByTitle('Редактировать'));
+    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+
+    fireEvent.change(screen.getByPlaceholderText('Что изменили по задаче'), { target: { value: 'Поменяли уведомления и срок.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      changeComment: 'Поменяли уведомления и срок.',
+    }));
+  });
+
   it('duplicates a task from the task actions menu', async () => {
     apiMock.createTaskJournalItem.mockResolvedValue(createTask({ id: 202, title: 'Тестовая задача (копия)' }));
     await renderJournal();

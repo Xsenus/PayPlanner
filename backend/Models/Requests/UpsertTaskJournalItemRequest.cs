@@ -16,6 +16,7 @@ public class UpsertTaskJournalItemRequest
     public string Priority { get; set; } = "normal";
     public string Status { get; set; } = "new";
     public string? Result { get; set; }
+    public string? ChangeComment { get; set; }
     public List<string> Reminders { get; set; } = [];
     public List<string> Channels { get; set; } = [];
     public List<string> Tags { get; set; } = [];

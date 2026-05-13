@@ -119,7 +119,9 @@ export interface TaskJournalAutomationCreateResult {
   skippedCount: number;
 }
 
-export type TaskJournalUpsertPayload = Omit<TaskJournalItem, 'id' | 'createdAt' | 'updatedAt' | 'authorUserId' | 'authorName'>;
+export type TaskJournalUpsertPayload = Omit<TaskJournalItem, 'id' | 'createdAt' | 'updatedAt' | 'authorUserId' | 'authorName'> & {
+  changeComment?: string | null;
+};
 
 const STORAGE_KEY = 'pp.task_journal.items.v1';
 export const TASK_JOURNAL_EVENT = 'pp.task_journal.changed';

@@ -699,6 +699,7 @@ public class TasksController : ControllerBase
         _db.TaskJournalComments.Add(comment);
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        await _notificationService.NotifyTaskCommentAsync(entity, comment, ct);
 
         return Created($"/api/tasks/{entity.Id}/comments/{comment.Id}", MapComment(comment));
     }
@@ -1129,6 +1130,7 @@ public class TasksController : ControllerBase
         var becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
             && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
         var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus);
+        var changeComment = NormalizeOptional(request.ChangeComment);
 
         entity.ClientId = binding.ClientId;
         entity.LegalEntityId = binding.LegalEntityId;
@@ -1161,7 +1163,23 @@ public class TasksController : ControllerBase
             AddTaskHistory(entity, access, $"Изменены поля: {string.Join(", ", changeLabels)}.");
         }
 
+        TaskJournalComment? userComment = null;
+        if (changeComment is not null)
+        {
+            userComment = CreateTaskComment(entity.Id, access, "comment", changeComment);
+            _db.TaskJournalComments.Add(userComment);
+        }
+
         await _db.SaveChangesAsync(ct);
+        if (changeLabels.Count > 0)
+        {
+            await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, changeComment, ct);
+        }
+        else if (userComment is not null)
+        {
+            await _notificationService.NotifyTaskCommentAsync(entity, userComment, ct);
+        }
+
         if (becameDone)
         {
             await _notificationService.NotifyTaskCompletedAsync(entity, ct);
@@ -1239,6 +1257,22 @@ public class TasksController : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        if (statusChanged || resultChanged)
+        {
+            var changeLabels = new List<string>();
+            if (statusChanged)
+            {
+                changeLabels.Add("Статус");
+            }
+
+            if (resultChanged)
+            {
+                changeLabels.Add("Результат");
+            }
+
+            await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, null, ct);
+        }
+
         if (becameDone)
         {
             await _notificationService.NotifyTaskCompletedAsync(entity, ct);
@@ -1333,6 +1367,13 @@ public class TasksController : ControllerBase
             access,
             BuildApprovalHistoryText(decision, participant.DisplayName, resolution));
         await _db.SaveChangesAsync(ct);
+        await _notificationService.NotifyTaskChangedAsync(
+            entity,
+            ["Согласование"],
+            access.DisplayName,
+            access.UserId,
+            resolution,
+            ct);
         return Ok(Map(entity));
     }
 
@@ -1709,6 +1750,12 @@ public class TasksController : ControllerBase
         if (request.DueAt == default)
         {
             return "Укажите дату и время исполнения.";
+        }
+
+        var changeComment = NormalizeOptional(request.ChangeComment);
+        if (changeComment is { Length: > 4000 })
+        {
+            return "Комментарий к изменению не должен превышать 4000 символов.";
         }
 
         if (string.Equals(request.Status, "done", StringComparison.OrdinalIgnoreCase)
