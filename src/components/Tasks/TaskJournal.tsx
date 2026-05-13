@@ -17,6 +17,7 @@ import {
   ListFilter,
   Mail,
   MessageSquare,
+  MoreHorizontal,
   Pencil,
   Phone,
   Plus,
@@ -1151,7 +1152,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
       cancelLabel: 'Отмена',
       variant: 'danger',
     });
-    if (!accepted) return;
+    if (!accepted) return false;
     try {
       await apiService.deleteTaskJournalItem(task.id);
       toast.success('Задача удалена.', 'Журнал задач');
@@ -1161,8 +1162,38 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
       setHighlightedTaskId((previous) => (previous === task.id ? null : previous));
       await refreshTasks();
       emitTaskChange();
+      return true;
     } catch {
       toast.error('Не удалось удалить задачу.', 'Журнал задач');
+      return false;
+    }
+  };
+
+  const handleDuplicateTask = async (task: TaskJournalItem) => {
+    const participants = (task.participants ?? []).map((participant) => ({
+      ...participant,
+      id: undefined,
+      approvalStatus: 'pending' as const,
+      resolution: '',
+      respondedAt: null,
+    }));
+
+    try {
+      const created = await apiService.createTaskJournalItem(taskToPayload(task, {
+        title: `${task.title} (копия)`,
+        status: 'new',
+        result: '',
+        participants,
+      }));
+      toast.success('Задача продублирована.', 'Журнал задач');
+      closeTaskModal();
+      await refreshTasks();
+      openTaskEditor(created, { syncRoute: true });
+      emitTaskChange();
+      return true;
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось продублировать задачу.'), 'Журнал задач');
+      return false;
     }
   };
 
@@ -1579,6 +1610,8 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           onSave={handleSave}
           onResultSave={handleResultSave}
           onApprovalDecision={handleApprovalDecision}
+          onDelete={handleDelete}
+          onDuplicate={handleDuplicateTask}
         />
       ) : null}
     </div>
@@ -2408,6 +2441,8 @@ function TaskModal({
   onSave,
   onResultSave,
   onApprovalDecision,
+  onDelete,
+  onDuplicate,
 }: {
   state: ModalState;
   assignees: TaskJournalAssignee[];
@@ -2418,18 +2453,21 @@ function TaskModal({
   currentUserName: string;
   taskSettings: TaskJournalSettingsDto;
   onClose: () => void;
-  onSave: (form: TaskForm, taskId?: number) => void;
-  onResultSave: (task: TaskJournalItem, status: TaskJournalStatus, result: string) => void;
+  onSave: (form: TaskForm, taskId?: number) => void | Promise<void>;
+  onResultSave: (task: TaskJournalItem, status: TaskJournalStatus, result: string) => void | Promise<void>;
   onApprovalDecision: (
     taskId: number,
     decision: 'approved' | 'revisionRequested',
     resolution?: string,
     participantId?: number,
-  ) => void;
+  ) => void | Promise<void>;
+  onDelete: (task: TaskJournalItem) => boolean | Promise<boolean>;
+  onDuplicate: (task: TaskJournalItem) => boolean | Promise<boolean>;
 }) {
   const toast = useToast();
   const { confirm } = useDialog();
   const taskId = state?.task?.id ?? null;
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
   const newFileInputRef = useRef<HTMLInputElement | null>(null);
   const versionInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [form, setForm] = useState<TaskForm>(() => {
@@ -2470,6 +2508,8 @@ function TaskModal({
   const [files, setFiles] = useState<TaskJournalFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [uploadingDocumentKey, setUploadingDocumentKey] = useState<string | null>(null);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [quickPanel, setQuickPanel] = useState<'assignee' | 'observer' | null>(null);
   const selectedClient = useMemo(
     () => clients.find((client) => client.id === form.clientId) ?? null,
     [clients, form.clientId],
@@ -2607,6 +2647,68 @@ function TaskModal({
       };
     });
   };
+
+  const setPrimaryAssignee = (assigneeId: number | null) => {
+    if (isReadOnly) return;
+    const selected = assignees.find((assignee) => assignee.id === assigneeId);
+    setForm((prev) => ({
+      ...prev,
+      assigneeUserId: assigneeId,
+      assigneeName: selected?.name ?? (assigneeId ? prev.assigneeName : ''),
+    }));
+  };
+
+  const saveWithStatus = async (status: TaskJournalStatus) => {
+    const task = state?.task;
+    const nextForm = { ...form, status };
+
+    if (status === 'done' && !nextForm.result.trim()) {
+      toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
+      setForm(nextForm);
+      return;
+    }
+
+    setForm(nextForm);
+    if (isReadOnly && task) {
+      await onResultSave(task, status, nextForm.result);
+      return;
+    }
+
+    await onSave(nextForm, task?.id);
+  };
+
+  const handleCompletionAction = async () => {
+    const nextStatus: TaskJournalStatus = approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
+      ? 'onApproval'
+      : 'done';
+    await saveWithStatus(nextStatus);
+  };
+
+  const handleDeleteTask = async () => {
+    const task = state?.task;
+    if (!task || isReadOnly) return;
+    const deleted = await onDelete(task);
+    if (deleted) {
+      onClose();
+    }
+  };
+
+  const handleDuplicateTask = async () => {
+    const task = state?.task;
+    if (!task || isReadOnly) return;
+    await onDuplicate(task);
+  };
+
+  const openQuickPanel = (panel: 'assignee' | 'observer') => {
+    if (isReadOnly) return;
+    setQuickPanel((current) => (current === panel ? null : panel));
+    setActionMenuOpen(false);
+  };
+
+  const availableObservers = assignees.filter((assignee) => !isParticipantSelected('observer', assignee.id));
+  const completionButtonLabel = approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
+    ? 'На согласование'
+    : 'Завершить';
 
   useEffect(() => {
     if (!taskId) {
@@ -2763,17 +2865,124 @@ function TaskModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
       <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
-          <div>
+        <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
             <h2 className="text-2xl font-semibold text-slate-900">{state?.mode === 'view' ? 'Просмотр задачи' : state?.mode === 'edit' ? 'Редактировать задачу' : 'Новая задача'}</h2>
             <p className="mt-1 text-sm text-slate-500">Заполните контрагента, исполнителя, срок и правила напоминаний.</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Закрыть">
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex shrink-0 flex-wrap items-start justify-end gap-2">
+            {state?.task ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void saveWithStatus('inProgress')}
+                  className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+                >
+                  В работу
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleCompletionAction()}
+                  className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                >
+                  {completionButtonLabel}
+                </button>
+                {!isReadOnly ? (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setActionMenuOpen((open) => !open)}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+                      aria-label="Действия с задачей"
+                      title="Действия с задачей"
+                    >
+                      <MoreHorizontal className="h-5 w-5" />
+                    </button>
+                    {actionMenuOpen ? (
+                      <div className="absolute right-0 z-20 mt-2 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white py-2 text-sm shadow-xl">
+                        <button type="button" onClick={() => openQuickPanel('observer')} className="block w-full px-4 py-2 text-left text-slate-700 transition hover:bg-slate-50">
+                          Добавить подписчика-наблюдателя
+                        </button>
+                        <button type="button" onClick={() => openQuickPanel('assignee')} className="block w-full px-4 py-2 text-left text-slate-700 transition hover:bg-slate-50">
+                          Сменить исполнителя
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActionMenuOpen(false);
+                            setQuickPanel(null);
+                            titleInputRef.current?.focus();
+                          }}
+                          className="block w-full px-4 py-2 text-left text-slate-700 transition hover:bg-slate-50"
+                        >
+                          Редактировать
+                        </button>
+                        <button type="button" onClick={() => void saveWithStatus('waiting')} className="block w-full px-4 py-2 text-left text-slate-700 transition hover:bg-slate-50">
+                          Поставить на паузу
+                        </button>
+                        <button type="button" onClick={() => void saveWithStatus('inProgress')} className="block w-full px-4 py-2 text-left text-slate-700 transition hover:bg-slate-50">
+                          Вернуть в работу
+                        </button>
+                        <button type="button" onClick={() => void handleDuplicateTask()} className="block w-full px-4 py-2 text-left text-slate-700 transition hover:bg-slate-50">
+                          Дублировать
+                        </button>
+                        <button type="button" onClick={() => void handleDeleteTask()} className="block w-full px-4 py-2 text-left text-rose-600 transition hover:bg-rose-50">
+                          Удалить
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Закрыть">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="min-h-0 overflow-y-auto px-6 py-5">
+          {quickPanel === 'assignee' ? (
+            <section className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+              <Field label="Новый исполнитель">
+                <select
+                  aria-label="Новый исполнитель"
+                  value={form.assigneeUserId ?? ''}
+                  onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
+                  className="form-input bg-white"
+                >
+                  <option value="">Без привязки к пользователю</option>
+                  {assignees.map((assignee) => (
+                    <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+                  ))}
+                </select>
+              </Field>
+            </section>
+          ) : null}
+
+          {quickPanel === 'observer' ? (
+            <section className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+              <Field label="Наблюдатель">
+                <select
+                  aria-label="Наблюдатель"
+                  value=""
+                  onChange={(event) => {
+                    const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
+                    if (selected) {
+                      toggleParticipant('observer', selected);
+                    }
+                  }}
+                  className="form-input bg-white"
+                >
+                  <option value="">Выберите наблюдателя</option>
+                  {availableObservers.map((assignee) => (
+                    <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+                  ))}
+                </select>
+              </Field>
+            </section>
+          ) : null}
+
           <div className="grid gap-5 lg:grid-cols-2">
             <Field label="Контрагент">
               <LookupSelect
@@ -2795,12 +3004,7 @@ function TaskModal({
               <select
                 value={form.assigneeUserId ?? ''}
                 disabled={isReadOnly}
-                onChange={(event) => {
-                  const nextId = Number(event.target.value) || null;
-                  const selected = assignees.find((assignee) => assignee.id === nextId);
-                  update('assigneeUserId', nextId);
-                  update('assigneeName', selected?.name ?? form.assigneeName);
-                }}
+                onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
                 className="form-input"
               >
                 <option value="">Без привязки к пользователю</option>
@@ -2813,7 +3017,7 @@ function TaskModal({
               <input value={form.assigneeName} onChange={(event) => update('assigneeName', event.target.value)} disabled={isReadOnly} className="form-input" />
             </Field>
             <Field label="Наименование задачи">
-              <input value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} className="form-input" placeholder="Что нужно сделать" />
+              <input ref={titleInputRef} value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} className="form-input" placeholder="Что нужно сделать" />
             </Field>
             <Field label="Дело">
               <select
@@ -3255,11 +3459,11 @@ function TaskModal({
         <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-4 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Отмена</button>
           {isReadOnly && state?.task ? (
-            <button type="button" onClick={() => onResultSave(state.task!, form.status, form.result)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+            <button type="button" onClick={() => void onResultSave(state.task!, form.status, form.result)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               Сохранить результат
             </button>
           ) : (
-            <button type="button" onClick={() => onSave(form, state?.task?.id)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+            <button type="button" onClick={() => void onSave(form, state?.task?.id)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
             </button>
           )}

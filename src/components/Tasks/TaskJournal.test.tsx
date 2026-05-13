@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskJournal } from './TaskJournal';
 import type { Client, ClientCase, LegalEntitySummary } from '../../types';
-import type { TaskJournalItem } from '../../utils/taskJournalStore';
+import type { TaskJournalAssignee, TaskJournalItem } from '../../utils/taskJournalStore';
 
 const apiMock = vi.hoisted(() => ({
   getTaskJournalItems: vi.fn(),
@@ -156,7 +156,7 @@ function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
 
 async function renderJournal(
   tasks: TaskJournalItem[] = [createTask()],
-  options: { initialView?: 'list' | 'board' | 'calendar' } = {},
+  options: { initialView?: 'list' | 'board' | 'calendar'; assignees?: TaskJournalAssignee[] } = {},
 ) {
   apiMock.getTaskJournalItems.mockResolvedValue({
     items: tasks,
@@ -164,7 +164,7 @@ async function renderJournal(
     page: 1,
     pageSize: 200,
   });
-  apiMock.getTaskJournalAssignees.mockResolvedValue([
+  apiMock.getTaskJournalAssignees.mockResolvedValue(options.assignees ?? [
     { id: 7, name: 'Администратор', email: 'admin@example.com' },
   ]);
   apiMock.getTaskJournalSettings.mockResolvedValue({
@@ -509,6 +509,77 @@ describe('TaskJournal', () => {
     expect(toastMock.error).toHaveBeenCalledWith('Перед завершением задачи заполните результат.', 'Журнал задач');
     expect(await screen.findByRole('heading', { name: 'Редактировать задачу' })).toBeTruthy();
     expect(screen.getAllByText('Результат').length).toBeGreaterThan(0);
+  });
+
+  it('sends an edited task to approval when approvers are configured', async () => {
+    await renderJournal([
+      createTask({
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+          { userId: 8, role: 'approver', displayName: 'Согласующий', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Согласующий', email: 'approver@example.com' },
+      ],
+    });
+
+    fireEvent.click(screen.getByTitle('Редактировать'));
+    expect(await screen.findByRole('heading', { name: 'Редактировать задачу' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'На согласование' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      status: 'onApproval',
+      participants: expect.arrayContaining([
+        expect.objectContaining({ role: 'approver', userId: 8, approvalStatus: 'pending' }),
+      ]),
+    }));
+  });
+
+  it('adds an observer from the task actions menu', async () => {
+    await renderJournal([createTask()], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Наблюдатель', email: 'observer@example.com' },
+      ],
+    });
+
+    fireEvent.click(screen.getByTitle('Редактировать'));
+    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Действия с задачей' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить подписчика-наблюдателя' }));
+    fireEvent.change(screen.getByLabelText('Наблюдатель'), { target: { value: '8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      participants: expect.arrayContaining([
+        expect.objectContaining({ role: 'observer', userId: 8, displayName: 'Наблюдатель' }),
+      ]),
+    }));
+  });
+
+  it('duplicates a task from the task actions menu', async () => {
+    apiMock.createTaskJournalItem.mockResolvedValue(createTask({ id: 202, title: 'Тестовая задача (копия)' }));
+    await renderJournal();
+
+    fireEvent.click(screen.getByTitle('Редактировать'));
+    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Действия с задачей' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Дублировать' }));
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Тестовая задача (копия)',
+      status: 'new',
+      result: '',
+    }));
   });
 
   it('opens executor task in view mode and saves only result', async () => {
