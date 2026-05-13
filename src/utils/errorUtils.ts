@@ -44,6 +44,15 @@ export function extractDisplayErrorMessage(
 
   const stripped = stripHttpEnvelope(raw);
   const parsed = tryParseValidationPayload(stripped) ?? tryParseValidationPayload(raw);
+  const httpStatus = raw.match(/^HTTP\s+(\d+)/i)?.[1] ?? stripped.match(/^HTTP\s+(\d+)/i)?.[1];
+
+  if (httpStatus === '401') {
+    return 'Сессия истекла. Войдите снова.';
+  }
+
+  if (httpStatus === '403') {
+    return 'Недостаточно прав для выполнения действия.';
+  }
 
   if (parsed) {
     const base = parsed.message?.trim() || fallback;

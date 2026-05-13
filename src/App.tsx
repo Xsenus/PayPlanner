@@ -698,6 +698,7 @@ function AppContent() {
 
   const hardSignOut = () => {
     try {
+      localStorage.removeItem('pp_token');
       localStorage.removeItem('auth_token');
       localStorage.removeItem('pp.jwt');
       sessionStorage.removeItem('auth_token');

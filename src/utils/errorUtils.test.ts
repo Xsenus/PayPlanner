@@ -23,6 +23,22 @@ describe('extractDisplayErrorMessage', () => {
     expect(message).toBe('Не удалось сохранить профиль');
   });
 
+  it('shows an explicit message when the session expired', () => {
+    const error = new Error('HTTP 401 Unauthorized at /api/tasks');
+
+    const message = extractDisplayErrorMessage(error, 'Не удалось сохранить задачу.');
+
+    expect(message).toBe('Сессия истекла. Войдите снова.');
+  });
+
+  it('shows an explicit message when the action is forbidden', () => {
+    const error = new Error('HTTP 403 Forbidden at /api/tasks');
+
+    const message = extractDisplayErrorMessage(error, 'Не удалось сохранить задачу.');
+
+    expect(message).toBe('Недостаточно прав для выполнения действия.');
+  });
+
   it('falls back for browser-level network errors', () => {
     const error = new Error('Failed to fetch');
 

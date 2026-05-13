@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { apiService, extractResponseErrorMessage } from './api';
+import { AUTH_SESSION_EXPIRED_EVENT, apiService, extractResponseErrorMessage } from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  localStorage.clear();
+  sessionStorage.clear();
 });
 
 describe('extractResponseErrorMessage', () => {
@@ -35,6 +37,34 @@ describe('extractResponseErrorMessage', () => {
     });
 
     await expect(extractResponseErrorMessage(response)).resolves.toBe('Короткая текстовая ошибка');
+  });
+});
+
+describe('apiService auth handling', () => {
+  it('uses the primary pp_token storage key for API requests', async () => {
+    localStorage.setItem('pp_token', 'main-token');
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([]), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.getTaskJournalNotifications();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer main-token');
+  });
+
+  it('emits a session-expired event when the API returns 401', async () => {
+    const listener = vi.fn();
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+    const fetchMock = vi.fn(async () => new Response('', { status: 401, statusText: 'Unauthorized' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiService.getTaskJournalNotifications()).rejects.toThrow('Сессия истекла. Войдите снова.');
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
   });
 });
 

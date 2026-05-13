@@ -1,12 +1,22 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
+export const AUTH_SESSION_EXPIRED_EVENT = 'payplanner:auth-session-expired';
+const AUTH_SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Войдите снова.';
+const AUTH_TOKEN_STORAGE_KEYS = ['pp_token', 'auth_token', 'pp.jwt'];
 
 function getAuthToken(): string | null {
   return (
-    localStorage.getItem('auth_token') ||
-    localStorage.getItem('pp.jwt') ||
+    AUTH_TOKEN_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean) ||
     sessionStorage.getItem('auth_token') ||
     null
   );
+}
+
+function notifyAuthSessionExpired() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent(AUTH_SESSION_EXPIRED_EVENT));
 }
 
 export type DictKind =
@@ -901,6 +911,11 @@ export class ApiService {
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        notifyAuthSessionExpired();
+        throw new Error(`HTTP 401 Unauthorized at ${url} - ${AUTH_SESSION_EXPIRED_MESSAGE}`);
+      }
+
       const text = await extractResponseErrorMessage(response);
       throw new Error(
         `HTTP ${response.status} ${response.statusText} at ${url} ${text ? `- ${text}` : ''}`,

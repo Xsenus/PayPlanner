@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { authService, type User } from '../services/authService';
-import { apiService } from '../services/api';
+import { AUTH_SESSION_EXPIRED_EVENT, apiService } from '../services/api';
 import type { UserActivityStatus } from '../types/userActivity';
 
 interface AuthContextType {
@@ -68,6 +68,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     fetchUser().finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      authService.logout();
+      setUser(null);
+      setLoading(false);
+    };
+
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
   }, []);
 
   const signIn = async (email: string, password: string) => {
