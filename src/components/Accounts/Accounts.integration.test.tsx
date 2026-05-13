@@ -18,6 +18,8 @@ const {
   refreshAccountsMock,
   refreshPayablesDashboardMock,
   toastErrorMock,
+  updateInvoiceWorkflowStatusMock,
+  changeInvoicesResponsibleMock,
   updateInvoiceManagedPaymentMock,
   updatePaymentMock,
   getDocumentStatusesMock,
@@ -36,6 +38,8 @@ const {
   refreshAccountsMock: vi.fn(),
   refreshPayablesDashboardMock: vi.fn(),
   toastErrorMock: vi.fn(),
+  updateInvoiceWorkflowStatusMock: vi.fn(),
+  changeInvoicesResponsibleMock: vi.fn(),
   updateInvoiceManagedPaymentMock: vi.fn(),
   updatePaymentMock: vi.fn(),
   getDocumentStatusesMock: vi.fn(),
@@ -306,6 +310,8 @@ vi.mock('../../services/api', () => ({
     getClients: getClientsMock,
     getContracts: getContractsMock,
     getActResponsibles: getActResponsiblesMock,
+    updateInvoiceWorkflowStatus: updateInvoiceWorkflowStatusMock,
+    changeInvoicesResponsible: changeInvoicesResponsibleMock,
     updateInvoiceManagedPayment: updateInvoiceManagedPaymentMock,
     updatePayment: updatePaymentMock,
     getDocumentStatuses: getDocumentStatusesMock,
@@ -440,7 +446,50 @@ vi.mock('../DateRange/DatePeriodPicker', () => ({
 }));
 
 vi.mock('../ui/FormPromptModal', () => ({
-  FormPromptModal: () => null,
+  FormPromptModal: ({
+    open,
+    title,
+    description,
+    fields,
+    onConfirm,
+    confirmLabel = 'Подтвердить',
+  }: {
+    open: boolean;
+    title: string;
+    description?: string;
+    fields: Array<{
+      key: string;
+      label: string;
+      value: string;
+      onChange: (value: string) => void;
+      options?: Array<{ value: string; label: string }>;
+    }>;
+    onConfirm: () => void | Promise<void>;
+    confirmLabel?: string;
+  }) => (
+    open ? (
+      <div role="dialog" aria-label={title}>
+        {description ? <p>{description}</p> : null}
+        {fields.map((field) => (
+          <label key={field.key}>
+            {field.label}
+            <select
+              aria-label={field.label}
+              value={field.value}
+              onChange={(event) => field.onChange(event.target.value)}
+            >
+              {(field.options ?? []).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+        <button type="button" onClick={() => void onConfirm()}>{confirmLabel}</button>
+      </div>
+    ) : null
+  ),
 }));
 
 vi.mock('../ui/LookupSelect', () => ({
@@ -523,6 +572,8 @@ describe('Accounts integration', () => {
     refreshAccountsMock.mockReset();
     refreshPayablesDashboardMock.mockReset();
     toastErrorMock.mockReset();
+    updateInvoiceWorkflowStatusMock.mockReset();
+    changeInvoicesResponsibleMock.mockReset();
     updateInvoiceManagedPaymentMock.mockReset();
     updatePaymentMock.mockReset();
     getDocumentStatusesMock.mockReset();
@@ -579,6 +630,8 @@ describe('Accounts integration', () => {
       pageSize: 200,
     });
     getActResponsiblesMock.mockResolvedValue([]);
+    updateInvoiceWorkflowStatusMock.mockResolvedValue({});
+    changeInvoicesResponsibleMock.mockResolvedValue({ updated: 1, responsibleUserId: 9 });
     updateInvoiceManagedPaymentMock.mockResolvedValue(createSiblingPayment());
     updatePaymentMock.mockResolvedValue(createSiblingPayment());
     getDocumentStatusesMock.mockResolvedValue([]);
@@ -711,6 +764,66 @@ describe('Accounts integration', () => {
     expect(row).toBeTruthy();
     expect(within(row as HTMLTableRowElement).getByText('Оплачен')).toBeTruthy();
     expect(within(row as HTMLTableRowElement).getByText('Подписан клиентом')).toBeTruthy();
+  });
+
+  it('changes the document status from the accounts journal row', async () => {
+    render(<Accounts />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Изменить статус документа счета №24' }));
+
+    expect(screen.queryByTestId('invoice-modal')).toBeNull();
+    expect(screen.getByText('Смена статуса документа')).toBeTruthy();
+
+    const signedStatusButton = screen.getAllByText('Подписан клиентом')
+      .map((element) => element.closest('button'))
+      .find((element): element is HTMLButtonElement => Boolean(element));
+    expect(signedStatusButton).toBeTruthy();
+    fireEvent.click(signedStatusButton);
+    fireEvent.click(screen.getByRole('button', { name: /Изменить статус счета №24/ }));
+
+    await waitFor(() => {
+      expect(updateInvoiceWorkflowStatusMock).toHaveBeenCalledWith(528, 'SignedByClient', null);
+    });
+    expect(refreshAccountsMock).toHaveBeenCalled();
+  });
+
+  it('changes the responsible user from the accounts journal row', async () => {
+    getActResponsiblesMock.mockResolvedValue([
+      { id: 8, fullName: 'Old Responsible' },
+      { id: 11, fullName: 'New Responsible' },
+    ]);
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        createAccountRow({
+          invoice: createInvoice({
+            responsibleId: 8,
+            responsibleName: 'Old Responsible',
+          }),
+        }),
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сменить ответственного счета №24' }));
+
+    expect(screen.queryByTestId('invoice-modal')).toBeNull();
+    const dialog = await screen.findByRole('dialog', { name: 'Смена ответственного' });
+    expect(within(dialog).getByText('Назначьте нового ответственного для выбранного счета.')).toBeTruthy();
+
+    fireEvent.change(within(dialog).getByLabelText('Ответственный'), { target: { value: '11' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => {
+      expect(changeInvoicesResponsibleMock).toHaveBeenCalledWith([528], 11);
+    });
+    expect(refreshAccountsMock).toHaveBeenCalled();
   });
 
   it('uses the document status dictionary label in the accounts journal', async () => {

@@ -12,6 +12,7 @@ import {
   Search,
   Table2,
   Trash2,
+  UserRound,
   WalletCards,
   X,
 } from 'lucide-react';
@@ -563,6 +564,8 @@ export function Accounts({
   const [changeResponsibleSubmitting, setChangeResponsibleSubmitting] = useState(false);
   const [changeResponsibleError, setChangeResponsibleError] = useState<string | null>(null);
   const [nextResponsibleId, setNextResponsibleId] = useState('');
+  const [responsibleChangeInvoiceIds, setResponsibleChangeInvoiceIds] = useState<number[]>([]);
+  const [responsibleChangeSubjectInvoice, setResponsibleChangeSubjectInvoice] = useState<Invoice | null>(null);
   const [statusChangeInvoice, setStatusChangeInvoice] = useState<Invoice | null>(null);
   const [statusChangeValue, setStatusChangeValue] = useState<InvoiceWorkflowStatus>('NotSigned');
   const [statusChangeReason, setStatusChangeReason] = useState('');
@@ -1391,8 +1394,12 @@ export function Accounts({
     }
   }, [canDelete, clearInvoiceSelection, confirm, page, pagedAccounts, refreshAccounts, toast]);
 
-  const openChangeResponsiblePrompt = useCallback(async () => {
-    if (!canEdit || selectedInvoiceCount === 0) return;
+  const openChangeResponsiblePrompt = useCallback(async (targetInvoice?: Invoice) => {
+    if (!canEdit) return;
+
+    const targetInvoiceIds = targetInvoice ? [targetInvoice.id] : selectedInvoiceIds;
+    if (targetInvoiceIds.length === 0) return;
+    const targetSingleInvoice = targetInvoice ?? (targetInvoiceIds.length === 1 ? singleSelectedInvoice : null);
 
     try {
       const responsibles = await ensureResponsiblesLoaded();
@@ -1402,11 +1409,13 @@ export function Accounts({
       }
 
       const defaultResponsibleId =
-        singleSelectedInvoice?.responsibleId
-          ? String(singleSelectedInvoice.responsibleId)
+        targetSingleInvoice?.responsibleId
+          ? String(targetSingleInvoice.responsibleId)
           : String(responsibles[0].id);
 
       setNextResponsibleId(defaultResponsibleId);
+      setResponsibleChangeInvoiceIds(targetInvoiceIds);
+      setResponsibleChangeSubjectInvoice(targetSingleInvoice);
       setChangeResponsibleError(null);
       setChangeResponsibleOpen(true);
     } catch (err) {
@@ -1414,10 +1423,19 @@ export function Accounts({
         extractDisplayErrorMessage(err, 'Не удалось загрузить список ответственных.'),
       );
     }
-  }, [canEdit, ensureResponsiblesLoaded, selectedInvoiceCount, singleSelectedInvoice]);
+  }, [canEdit, ensureResponsiblesLoaded, selectedInvoiceIds, singleSelectedInvoice]);
 
   const submitResponsibleChange = useCallback(async () => {
     if (!canEdit) return;
+
+    const targetInvoiceIds = responsibleChangeInvoiceIds.length > 0
+      ? responsibleChangeInvoiceIds
+      : selectedInvoiceIds;
+    if (targetInvoiceIds.length === 0) {
+      setChangeResponsibleError('Выберите счет.');
+      return;
+    }
+    const targetSingleInvoice = responsibleChangeSubjectInvoice ?? singleSelectedInvoice;
 
     const responsibleUserId = Number(nextResponsibleId);
     if (!Number.isFinite(responsibleUserId) || responsibleUserId <= 0) {
@@ -1428,18 +1446,18 @@ export function Accounts({
     const selectedResponsibleLabel =
       actResponsibles.find((responsible) => String(responsible.id) === nextResponsibleId)?.fullName
       ?? (
-        singleSelectedInvoice?.responsibleId
-        && String(singleSelectedInvoice.responsibleId) === nextResponsibleId
-          ? singleSelectedInvoice.responsibleName
+        targetSingleInvoice?.responsibleId
+        && String(targetSingleInvoice.responsibleId) === nextResponsibleId
+          ? targetSingleInvoice.responsibleName
           : null
       )
       ?? 'выбранного ответственного';
     const approved = await confirm({
       title: 'Подтверждение сохранения',
       description:
-        selectedInvoiceIds.length === 1
+        targetInvoiceIds.length === 1
           ? `Сохранить нового ответственного (${selectedResponsibleLabel}) для выбранного счета?`
-          : `Сохранить нового ответственного (${selectedResponsibleLabel}) для выбранных счетов: ${selectedInvoiceIds.length}?`,
+          : `Сохранить нового ответственного (${selectedResponsibleLabel}) для выбранных счетов: ${targetInvoiceIds.length}?`,
       confirmLabel: 'Сохранить',
       cancelLabel: 'Отмена',
     });
@@ -1451,8 +1469,10 @@ export function Accounts({
     try {
       setChangeResponsibleSubmitting(true);
       setChangeResponsibleError(null);
-      await apiService.changeInvoicesResponsible(selectedInvoiceIds, responsibleUserId);
+      await apiService.changeInvoicesResponsible(targetInvoiceIds, responsibleUserId);
       setChangeResponsibleOpen(false);
+      setResponsibleChangeInvoiceIds([]);
+      setResponsibleChangeSubjectInvoice(null);
       await refreshAccounts();
       toast.success('Ответственный обновлен.');
     } catch (err) {
@@ -1462,7 +1482,18 @@ export function Accounts({
     } finally {
       setChangeResponsibleSubmitting(false);
     }
-  }, [actResponsibles, canEdit, confirm, nextResponsibleId, refreshAccounts, selectedInvoiceIds, singleSelectedInvoice, toast]);
+  }, [
+    actResponsibles,
+    canEdit,
+    confirm,
+    nextResponsibleId,
+    refreshAccounts,
+    responsibleChangeInvoiceIds,
+    responsibleChangeSubjectInvoice,
+    selectedInvoiceIds,
+    singleSelectedInvoice,
+    toast,
+  ]);
 
   const openInvoiceStatusChange = useCallback((invoice: Invoice) => {
     if (!canEdit) return;
@@ -2211,8 +2242,9 @@ export function Accounts({
 
   const responsibleOptions = useMemo(() => {
     const dictionaryItems = [...actResponsibles];
-    const currentResponsibleId = singleSelectedInvoice?.responsibleId ?? null;
-    const currentResponsibleName = singleSelectedInvoice?.responsibleName ?? null;
+    const currentInvoice = responsibleChangeSubjectInvoice ?? singleSelectedInvoice;
+    const currentResponsibleId = currentInvoice?.responsibleId ?? null;
+    const currentResponsibleName = currentInvoice?.responsibleName ?? null;
 
     if (
       currentResponsibleId
@@ -2232,7 +2264,7 @@ export function Accounts({
         label: responsible.fullName,
       })),
     ];
-  }, [actResponsibles, singleSelectedInvoice?.responsibleId, singleSelectedInvoice?.responsibleName]);
+  }, [actResponsibles, responsibleChangeSubjectInvoice, singleSelectedInvoice]);
 
   const tableMenuTitle =
     selectedInvoiceCount === 1
@@ -2288,6 +2320,7 @@ export function Accounts({
     'Статус оплаты, сумма, дата оплаты и связанные платежи не меняются.',
     'Изменение сохранится сразу после подтверждения и список счетов обновится.',
   ];
+  const responsibleChangeCount = responsibleChangeInvoiceIds.length || selectedInvoiceCount;
 
   const paymentModalElement = (
     <PaymentModal
@@ -2963,6 +2996,11 @@ export function Accounts({
                     const clientId = typeof invoice?.clientId === 'number' ? invoice.clientId : null;
                     const isExpanded = expandedAccounts[row.accountNumber] ?? false;
                     const colSpan = orderedVisibleColumns.length + 1 + (canEdit || canDelete ? 1 : 0);
+                    const responsibleLabel = invoice?.responsibles?.length
+                      ? invoice.responsibles.map((item) => item.fullName).join(', ')
+                      : invoice?.responsibleName
+                        ? invoice.responsibleName
+                        : '—';
 
                     return (
                       <Fragment key={`${row.accountNumber}-${invoice?.id ?? 'no-invoice'}`}>
@@ -3082,6 +3120,7 @@ export function Accounts({
                                         }}
                                         className="inline-flex max-w-full rounded-full transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                         title="Изменить статус документа"
+                                        aria-label={`Изменить статус документа счета №${invoice.number}`}
                                       >
                                         <span className={`${statusBadgeClass} ${documentStatusClass}`}>
                                           {documentStatusLabel}
@@ -3197,11 +3236,23 @@ export function Accounts({
                               case 'responsible':
                                 return (
                                   <td key={column.key} className="px-4 py-3 text-center align-middle">
-                                    {invoice?.responsibles?.length
-                                      ? invoice.responsibles.map((item) => item.fullName).join(', ')
-                                      : invoice?.responsibleName
-                                        ? invoice.responsibleName
-                                        : '—'}
+                                    {invoice && canEdit ? (
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          void openChangeResponsiblePrompt(invoice);
+                                        }}
+                                        className="inline-flex max-w-full items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-blue-700 transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                        title="Сменить ответственного"
+                                        aria-label={`Сменить ответственного счета №${invoice.number}`}
+                                      >
+                                        <span className="truncate">{responsibleLabel}</span>
+                                        <Pencil className="h-3.5 w-3.5 shrink-0" />
+                                      </button>
+                                    ) : (
+                                      responsibleLabel
+                                    )}
                                   </td>
                                 );
                               case 'type':
@@ -3223,6 +3274,20 @@ export function Accounts({
                           {(canEdit || canDelete) && (
                             <td className="px-4 py-3">
                               <div className="flex items-center justify-end gap-2">
+                                {canEdit && invoice && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void openChangeResponsiblePrompt(invoice);
+                                    }}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-blue-200 text-blue-700 hover:bg-blue-50"
+                                    title="Сменить ответственного"
+                                    aria-label={`Сменить ответственного счета №${invoice.number}`}
+                                  >
+                                    <UserRound className="h-4 w-4" />
+                                  </button>
+                                )}
                                 {canEdit && invoice && (
                                   <button
                                     type="button"
@@ -3432,9 +3497,9 @@ export function Accounts({
           open={changeResponsibleOpen}
           title="Смена ответственного"
           description={
-            selectedInvoiceCount === 1
+            responsibleChangeCount === 1
               ? 'Назначьте нового ответственного для выбранного счета.'
-              : `Назначьте нового ответственного для счетов: ${selectedInvoiceCount}.`
+              : `Назначьте нового ответственного для счетов: ${responsibleChangeCount}.`
           }
           fields={[
             {
@@ -3460,6 +3525,8 @@ export function Accounts({
           ]}
           onCancel={() => {
             setChangeResponsibleOpen(false);
+            setResponsibleChangeInvoiceIds([]);
+            setResponsibleChangeSubjectInvoice(null);
             setChangeResponsibleError(null);
           }}
           onConfirm={submitResponsibleChange}
