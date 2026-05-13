@@ -203,6 +203,84 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateTask_RestrictsExecutorFullEditWhenSettingEnabled()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "assignee@example.com", "Исполнитель", canEdit: true);
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var originalDueAt = task.DueAt;
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Изменить задачу",
+            DueAt = originalDueAt.AddDays(1),
+            Status = "new",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("Тестовая задача", stored.Title);
+        Assert.Equal(originalDueAt, stored.DueAt);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_AllowsExecutorToSaveResultWithoutEditPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, result: null);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Документы переданы постановщику.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+
+        Assert.Equal("done", dto.Status);
+        Assert.Equal("Документы переданы постановщику.", dto.Result);
+    }
+
+    [Fact]
+    public async Task CreateDeadlineChangeRequest_AddsHistoryAndKeepsDueAt()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var originalDueAt = task.DueAt;
+        var requestedDueAt = originalDueAt.AddDays(2);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.CreateDeadlineChangeRequest(task.Id, new CreateTaskJournalDeadlineChangeRequest
+        {
+            RequestedDueAt = requestedDueAt,
+            Reason = "Жду документы от клиента.",
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var comment = Assert.IsType<TaskJournalCommentDto>(created.Value);
+
+        Assert.Equal("system", comment.Kind);
+        Assert.Contains("запросил перенос срока", comment.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Жду документы от клиента", comment.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(originalDueAt, await db.TaskJournalItems
+            .Where(item => item.Id == task.Id)
+            .Select(item => item.DueAt)
+            .SingleAsync());
+    }
+
+    [Fact]
     public async Task GetTasks_SearchesByClientAndClientCase()
     {
         await using var db = await CreateContextAsync();
@@ -868,6 +946,40 @@ public class TasksControllerTests
     {
         var role = await db.Roles.FirstOrDefaultAsync(item => item.Name == "admin")
             ?? new Role { Name = "admin", Description = "Администратор" };
+        var user = new User
+        {
+            Email = email,
+            FullName = fullName,
+            PasswordHash = "test",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static async Task<User> CreateTaskUserAsync(PaymentContext db, string email, string fullName, bool canEdit)
+    {
+        var role = new Role
+        {
+            Name = $"tasks-{Guid.NewGuid():N}",
+            Description = "Пользователь задач",
+            Permissions =
+            [
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Tasks,
+                    CanView = true,
+                    CanCreate = false,
+                    CanEdit = canEdit,
+                    CanDelete = canEdit,
+                    CanExport = true,
+                },
+            ],
+        };
+
         var user = new User
         {
             Email = email,

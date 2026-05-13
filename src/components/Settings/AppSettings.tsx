@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bell, Database, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { Bell, ClipboardList, Database, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -15,6 +15,7 @@ import { MainCompanySettings } from './MainCompanySettings';
 import { MoneyAccountSettings } from './MoneyAccountSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { SpreadsheetImportSettings } from './SpreadsheetImportSettings';
+import { TaskJournalSettings } from './TaskJournalSettings';
 import { UserMergeSettings } from './UserMergeSettings';
 import type {
   ContractNumberingSettingsDto,
@@ -30,6 +31,7 @@ import type {
 
 type SettingsSection =
   | 'companies'
+  | 'tasks'
   | 'general'
   | 'integrations'
   | 'notifications'
@@ -48,6 +50,7 @@ const NOTIFICATION_CHANNEL_PARAM = 'notificationChannel';
 const NOTIFICATION_SENDER_PARAM = 'notificationSender';
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'companies',
+  'tasks',
   'general',
   'integrations',
   'notifications',
@@ -156,6 +159,7 @@ export function AppSettings() {
 
   const activeSectionTitle = useMemo(() => {
     if (activeSection === 'companies') return 'Компании сервиса';
+    if (activeSection === 'tasks') return 'Журнал задач';
     if (activeSection === 'general') return 'Финансовые правила';
     if (activeSection === 'integrations') return 'Ключи и внешние сервисы';
     if (activeSection === 'notifications') return 'Уведомления';
@@ -707,6 +711,20 @@ export function AppSettings() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => selectSection('tasks')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'tasks'
+                        ? 'border-sky-200 bg-sky-100 text-sky-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-sky-100 hover:bg-sky-50/60'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <ClipboardList className="h-4 w-4" />
+                      Журнал задач
+                    </span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => selectSection('general')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'general'
@@ -846,6 +864,12 @@ export function AppSettings() {
                 <MainCompanySettings />
                 <MoneyAccountSettings />
                 <BankDirectorySettings />
+              </div>
+            )}
+
+            {activeSection === 'tasks' && (
+              <div className="space-y-6">
+                <TaskJournalSettings />
               </div>
             )}
 

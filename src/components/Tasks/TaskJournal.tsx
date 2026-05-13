@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Clock3,
   Download,
+  Eye,
   FileText,
   History,
   LayoutGrid,
@@ -32,7 +33,7 @@ import { useClients } from '../../hooks/useClients';
 import { useClientCases } from '../../hooks/useClientCases';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useToast } from '../../hooks/useToast';
-import { apiService } from '../../services/api';
+import { apiService, type TaskJournalSettingsDto } from '../../services/api';
 import type { Client, LegalEntitySummary } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import {
@@ -56,7 +57,7 @@ import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 
 type ViewMode = 'list' | 'board' | 'calendar';
 type PeriodMode = 'day' | 'week' | 'month';
-type ModalState = { mode: 'create' | 'edit'; task?: TaskJournalItem; dueAt?: string } | null;
+type ModalState = { mode: 'create' | 'edit' | 'view'; task?: TaskJournalItem; dueAt?: string } | null;
 type TaskJournalProps = {
   initialView?: ViewMode;
   routeTaskId?: number | null;
@@ -64,6 +65,11 @@ type TaskJournalProps = {
 };
 
 type TaskForm = TaskJournalUpsertPayload & { dueAt: string };
+
+const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
+  restrictExecutorEditing: true,
+  allowExecutorDeadlineChangeRequests: true,
+};
 
 const STATUS_OPTIONS: Array<{ value: TaskJournalStatus; label: string }> = [
   { value: 'new', label: 'Новая' },
@@ -383,6 +389,25 @@ function hasPendingApprovers(task: TaskJournalItem) {
   return getTaskParticipants(task, 'approver').some((participant) => participant.approvalStatus !== 'approved');
 }
 
+function isTaskExecutorForUser(task: TaskJournalItem, userId: number | null) {
+  if (!userId) return false;
+  return task.assigneeUserId === userId ||
+    getTaskParticipants(task, 'assignee').some((participant) => participant.userId === userId);
+}
+
+function isTaskReadOnlyForCurrentUser(
+  task: TaskJournalItem,
+  currentUserId: number | null,
+  isAdminUser: boolean,
+  settings: TaskJournalSettingsDto,
+) {
+  if (!settings.restrictExecutorEditing || isAdminUser || !currentUserId) {
+    return false;
+  }
+
+  return isTaskExecutorForUser(task, currentUserId) && task.authorUserId !== currentUserId;
+}
+
 function priorityClass(priority: TaskJournalPriority) {
   switch (priority) {
     case 'urgent':
@@ -475,12 +500,13 @@ function serializeCsvValue(value: string) {
 const WEEKDAY_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
 export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteTaskChange }: TaskJournalProps) {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const toast = useToast();
   const { confirm } = useDialog();
   const { clients } = useClients();
   const { legalEntities } = useLegalEntities();
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
+  const [taskSettings, setTaskSettings] = useState<TaskJournalSettingsDto>(DEFAULT_TASK_JOURNAL_SETTINGS);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [automationCandidates, setAutomationCandidates] = useState<TaskJournalCaseAutomationCandidate[]>([]);
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
@@ -503,6 +529,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
 
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
+  const isAdminUser = isAdmin();
 
   useEffect(() => {
     setViewMode(initialView);
@@ -510,14 +537,17 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
-      setModal({ mode: 'edit', task });
+      setModal({
+        mode: isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings) ? 'view' : 'edit',
+        task,
+      });
       setHighlightedTaskId(task.id);
 
       if (options?.syncRoute ?? true) {
         onRouteTaskChange?.(task.id);
       }
     },
-    [onRouteTaskChange],
+    [currentUserId, isAdminUser, onRouteTaskChange, taskSettings],
   );
 
   const openTaskCreate = useCallback(() => {
@@ -545,14 +575,16 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const refreshTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const [tasksResponse, assigneeResponse, automationResponse] = await Promise.all([
+      const [tasksResponse, assigneeResponse, automationResponse, settingsResponse] = await Promise.all([
         apiService.getTaskJournalItems({ page: 1, pageSize: 200 }),
         apiService.getTaskJournalAssignees(),
         apiService.getTaskJournalCaseAutomationCandidates({ inactiveDays: 14, limit: 20 }),
+        apiService.getTaskJournalSettings(),
       ]);
       setTasks(tasksResponse.items);
       setAssignees(assigneeResponse);
       setAutomationCandidates(automationResponse);
+      setTaskSettings(settingsResponse);
     } catch {
       toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');
     } finally {
@@ -850,6 +882,24 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     }
   };
 
+  const handleResultSave = async (task: TaskJournalItem, status: TaskJournalStatus, result: string) => {
+    const normalizedResult = result.trim();
+    if (status === 'done' && !normalizedResult) {
+      toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
+      return;
+    }
+
+    try {
+      await apiService.updateTaskJournalStatus(task.id, status, normalizedResult);
+      toast.success('Результат по задаче сохранен.', 'Журнал задач');
+      closeTaskModal();
+      await refreshTasks();
+      emitTaskChange();
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить результат по задаче.'), 'Журнал задач');
+    }
+  };
+
   const handleDelete = async (task: TaskJournalItem) => {
     const accepted = await confirm({
       title: 'Удалить задачу?',
@@ -912,6 +962,12 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   };
 
   const handleCalendarTaskMove = async (task: TaskJournalItem, targetDate: Date) => {
+    if (isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings)) {
+      toast.error('Исполнитель может запросить перенос срока в карточке задачи.', 'Календарь задач');
+      openTaskEditor(task, { syncRoute: true });
+      return;
+    }
+
     if (isSameDay(new Date(task.dueAt), targetDate)) {
       setCalendarSelectedDate(targetDate);
       return;
@@ -939,6 +995,12 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   };
 
   const handleCalendarTaskResize = async (task: TaskJournalItem, deltaMinutes: -15 | 15) => {
+    if (isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings)) {
+      toast.error('Исполнитель не может менять длительность задачи напрямую.', 'Календарь задач');
+      openTaskEditor(task, { syncRoute: true });
+      return;
+    }
+
     const nextDuration = normalizeTaskDuration((task.plannedDurationMinutes ?? 60) + deltaMinutes);
     if (nextDuration === normalizeTaskDuration(task.plannedDurationMinutes)) {
       return;
@@ -1153,6 +1215,9 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           <TaskTable
             tasks={filteredTasks}
             highlightedTaskId={highlightedTaskId}
+            currentUserId={currentUserId}
+            isAdminUser={isAdminUser}
+            taskSettings={taskSettings}
             onEdit={openTaskEditor}
             onDelete={handleDelete}
             onStatusChange={setTaskStatus}
@@ -1163,6 +1228,9 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           <TaskBoard
             columns={boardColumns}
             highlightedTaskId={highlightedTaskId}
+            currentUserId={currentUserId}
+            isAdminUser={isAdminUser}
+            taskSettings={taskSettings}
             onEdit={openTaskEditor}
             onDone={(task) => setTaskStatus(task, 'done')}
           />
@@ -1183,6 +1251,9 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
             onResizeTask={handleCalendarTaskResize}
             onEdit={openTaskEditor}
             onDone={(task) => setTaskStatus(task, 'done')}
+            currentUserId={currentUserId}
+            isAdminUser={isAdminUser}
+            taskSettings={taskSettings}
             movingTaskId={calendarMovingTaskId}
             resizingTaskId={calendarResizingTaskId}
           />
@@ -1199,8 +1270,10 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           counterpartyOptions={counterpartyOptions}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
+          taskSettings={taskSettings}
           onClose={closeTaskModal}
           onSave={handleSave}
+          onResultSave={handleResultSave}
           onApprovalDecision={handleApprovalDecision}
         />
       ) : null}
@@ -1307,6 +1380,9 @@ function MetricCard({ label, value, icon: Icon, tone }: { label: string; value: 
 function TaskTable({
   tasks,
   highlightedTaskId,
+  currentUserId,
+  isAdminUser,
+  taskSettings,
   onEdit,
   onDelete,
   onStatusChange,
@@ -1314,6 +1390,9 @@ function TaskTable({
 }: {
   tasks: TaskJournalItem[];
   highlightedTaskId: number | null;
+  currentUserId: number | null;
+  isAdminUser: boolean;
+  taskSettings: TaskJournalSettingsDto;
   onEdit: (task: TaskJournalItem) => void;
   onDelete: (task: TaskJournalItem) => void;
   onStatusChange: (task: TaskJournalItem, status: TaskJournalStatus) => void;
@@ -1349,6 +1428,7 @@ function TaskTable({
               const taskAssignees = getTaskParticipants(task, 'assignee');
               const taskApprovers = getTaskParticipants(task, 'approver');
               const taskObservers = getTaskParticipants(task, 'observer');
+              const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
 
               return (
                 <tr
@@ -1403,15 +1483,21 @@ function TaskTable({
                   </td>
                   <td className="max-w-[260px] px-4 py-4 text-sm text-slate-600">{task.result || '—'}</td>
                   <td className="px-4 py-4">
-                    <select
-                      value={task.status}
-                      onChange={(event) => onStatusChange(task, event.target.value as TaskJournalStatus)}
-                      className={`rounded-xl border-0 px-3 py-2 text-sm font-semibold outline-none ${statusClass(task.status)}`}
-                    >
-                      {STATUS_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
+                    {isReadOnly ? (
+                      <span className={`inline-flex rounded-xl px-3 py-2 text-sm font-semibold ${statusClass(task.status)}`}>
+                        {getStatusLabel(task.status)}
+                      </span>
+                    ) : (
+                      <select
+                        value={task.status}
+                        onChange={(event) => onStatusChange(task, event.target.value as TaskJournalStatus)}
+                        className={`rounded-xl border-0 px-3 py-2 text-sm font-semibold outline-none ${statusClass(task.status)}`}
+                      >
+                        {STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    )}
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex justify-end gap-2">
@@ -1420,12 +1506,14 @@ function TaskTable({
                           <CheckCircle2 className="h-4 w-4" />
                         </button>
                       ) : null}
-                      <button type="button" onClick={() => onEdit(task)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" title="Редактировать">
-                        <Pencil className="h-4 w-4" />
+                      <button type="button" onClick={() => onEdit(task)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" title={isReadOnly ? 'Просмотр' : 'Редактировать'}>
+                        {isReadOnly ? <Eye className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
                       </button>
-                      <button type="button" onClick={() => onDelete(task)} className="rounded-xl p-2 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700" title="Удалить">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {!isReadOnly ? (
+                        <button type="button" onClick={() => onDelete(task)} className="rounded-xl p-2 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700" title="Удалить">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -1441,11 +1529,17 @@ function TaskTable({
 function TaskBoard({
   columns,
   highlightedTaskId,
+  currentUserId,
+  isAdminUser,
+  taskSettings,
   onEdit,
   onDone,
 }: {
   columns: Array<{ key: string; title: string; tone: string; items: TaskJournalItem[] }>;
   highlightedTaskId: number | null;
+  currentUserId: number | null;
+  isAdminUser: boolean;
+  taskSettings: TaskJournalSettingsDto;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
 }) {
@@ -1467,6 +1561,7 @@ function TaskBoard({
             ) : column.items.map((task) => {
               const TypeIcon = getTypeMeta(task.type).icon;
               const isHighlighted = highlightedTaskId === task.id;
+              const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
               return (
                 <article
                   key={task.id}
@@ -1478,8 +1573,8 @@ function TaskBoard({
                     <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${priorityClass(task.priority)}`}>
                       {getPriorityLabel(task.priority)}
                     </span>
-                    <button type="button" onClick={() => onEdit(task)} className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" title="Редактировать">
-                      <Pencil className="h-4 w-4" />
+                    <button type="button" onClick={() => onEdit(task)} className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" title={isReadOnly ? 'Просмотр' : 'Редактировать'}>
+                      {isReadOnly ? <Eye className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
                     </button>
                   </div>
                   <div className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{getTaskClientName(task)}</div>
@@ -1535,6 +1630,9 @@ function TaskCalendar({
   onResizeTask,
   onEdit,
   onDone,
+  currentUserId,
+  isAdminUser,
+  taskSettings,
   movingTaskId,
   resizingTaskId,
 }: {
@@ -1553,6 +1651,9 @@ function TaskCalendar({
   onResizeTask: (task: TaskJournalItem, deltaMinutes: -15 | 15) => void;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
+  currentUserId: number | null;
+  isAdminUser: boolean;
+  taskSettings: TaskJournalSettingsDto;
   movingTaskId: number | null;
   resizingTaskId: number | null;
 }) {
@@ -1786,32 +1887,41 @@ function TaskCalendar({
                     </div>
 
                     <div className="mt-2 space-y-1.5">
-                      {dayTasks.slice(0, mode === 'day' ? 8 : 3).map((task) => (
-                        <button
-                          key={task.id}
-                          type="button"
-                          draggable={isTaskJournalActive(task.status)}
-                          data-testid={`task-calendar-task-${task.id}`}
-                          onDragStart={(event) => {
-                            event.dataTransfer.setData('application/x-task-id', String(task.id));
-                            event.dataTransfer.setData('text/plain', String(task.id));
-                            event.dataTransfer.effectAllowed = 'move';
-                          }}
-                          onClick={() => onEdit(task)}
-                          title={`${task.title}\n${getTaskClientName(task)}\nПеретащите карточку на другой день, чтобы перенести срок.`}
-                          className={`block w-full rounded-lg border px-2 py-1.5 text-left text-xs transition hover:border-blue-200 hover:bg-blue-50 ${
-                            movingTaskId === task.id
-                              ? 'border-blue-300 bg-blue-100 opacity-60'
-                              : highlightedTaskId === task.id
-                                ? 'border-blue-300 bg-blue-50'
-                                : 'border-slate-100 bg-slate-50'
-                          }`}
-                        >
-                          <span className="block truncate font-semibold text-slate-900">{task.title}</span>
-                          <span className="mt-0.5 block truncate text-slate-500">{getTaskClientName(task)}</span>
-                          <span className="mt-1 block text-[11px] font-semibold text-slate-400">{formatDuration(task.plannedDurationMinutes)}</span>
-                        </button>
-                      ))}
+                      {dayTasks.slice(0, mode === 'day' ? 8 : 3).map((task) => {
+                        const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
+                        return (
+                          <button
+                            key={task.id}
+                            type="button"
+                            draggable={isTaskJournalActive(task.status) && !isReadOnly}
+                            data-testid={`task-calendar-task-${task.id}`}
+                            onDragStart={(event) => {
+                              if (isReadOnly) {
+                                event.preventDefault();
+                                return;
+                              }
+                              event.dataTransfer.setData('application/x-task-id', String(task.id));
+                              event.dataTransfer.setData('text/plain', String(task.id));
+                              event.dataTransfer.effectAllowed = 'move';
+                            }}
+                            onClick={() => onEdit(task)}
+                            title={isReadOnly
+                              ? `${task.title}\n${getTaskClientName(task)}`
+                              : `${task.title}\n${getTaskClientName(task)}\nПеретащите карточку на другой день, чтобы перенести срок.`}
+                            className={`block w-full rounded-lg border px-2 py-1.5 text-left text-xs transition hover:border-blue-200 hover:bg-blue-50 ${
+                              movingTaskId === task.id
+                                ? 'border-blue-300 bg-blue-100 opacity-60'
+                                : highlightedTaskId === task.id
+                                  ? 'border-blue-300 bg-blue-50'
+                                  : 'border-slate-100 bg-slate-50'
+                            }`}
+                          >
+                            <span className="block truncate font-semibold text-slate-900">{task.title}</span>
+                            <span className="mt-0.5 block truncate text-slate-500">{getTaskClientName(task)}</span>
+                            <span className="mt-1 block text-[11px] font-semibold text-slate-400">{formatDuration(task.plannedDurationMinutes)}</span>
+                          </button>
+                        );
+                      })}
                       {dayTasks.length > (mode === 'day' ? 8 : 3) ? (
                         <button
                           type="button"
@@ -1891,6 +2001,7 @@ function TaskCalendar({
                 </div>
               ) : selectedTasks.map((task) => {
                 const TypeIcon = getTypeMeta(task.type).icon;
+                const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
                 return (
                   <article key={task.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
@@ -1921,7 +2032,7 @@ function TaskCalendar({
                       <button
                         type="button"
                         onClick={() => onResizeTask(task, -15)}
-                        disabled={resizingTaskId === task.id || normalizeTaskDuration(task.plannedDurationMinutes) <= 15}
+                        disabled={isReadOnly || resizingTaskId === task.id || normalizeTaskDuration(task.plannedDurationMinutes) <= 15}
                         className="inline-flex h-9 flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                         title="Уменьшить длительность на 15 минут"
                       >
@@ -1930,7 +2041,7 @@ function TaskCalendar({
                       <button
                         type="button"
                         onClick={() => onResizeTask(task, 15)}
-                        disabled={resizingTaskId === task.id || normalizeTaskDuration(task.plannedDurationMinutes) >= 480}
+                        disabled={isReadOnly || resizingTaskId === task.id || normalizeTaskDuration(task.plannedDurationMinutes) >= 480}
                         className="inline-flex h-9 flex-1 items-center justify-center rounded-xl border border-blue-200 bg-white text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                         title="Увеличить длительность на 15 минут"
                       >
@@ -1966,8 +2077,10 @@ function TaskModal({
   counterpartyOptions,
   currentUserId,
   currentUserName,
+  taskSettings,
   onClose,
   onSave,
+  onResultSave,
   onApprovalDecision,
 }: {
   state: ModalState;
@@ -1977,8 +2090,10 @@ function TaskModal({
   counterpartyOptions: LookupSelectOption[];
   currentUserId: number | null;
   currentUserName: string;
+  taskSettings: TaskJournalSettingsDto;
   onClose: () => void;
   onSave: (form: TaskForm, taskId?: number) => void;
+  onResultSave: (task: TaskJournalItem, status: TaskJournalStatus, result: string) => void;
   onApprovalDecision: (
     taskId: number,
     decision: 'approved' | 'revisionRequested',
@@ -2023,6 +2138,9 @@ function TaskModal({
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [deadlineRequestDueAt, setDeadlineRequestDueAt] = useState(() => state?.task ? toLocalInputValue(state.task.dueAt) : '');
+  const [deadlineRequestReason, setDeadlineRequestReason] = useState('');
+  const [deadlineRequestSaving, setDeadlineRequestSaving] = useState(false);
   const [files, setFiles] = useState<TaskJournalFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [uploadingDocumentKey, setUploadingDocumentKey] = useState<string | null>(null);
@@ -2064,8 +2182,12 @@ function TaskModal({
     enabled: Boolean(form.clientId || form.legalEntityId),
     legalEntityId: form.legalEntityId ?? undefined,
   });
+  const isReadOnly = state?.mode === 'view';
+  const canRequestDeadlineChange = Boolean(taskId && isReadOnly && taskSettings.allowExecutorDeadlineChangeRequests);
+  const canManageFiles = Boolean(taskId && !isReadOnly);
 
   const update = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
+    if (isReadOnly && key !== 'result') return;
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -2076,6 +2198,7 @@ function TaskModal({
       : '';
 
   const handleCounterpartyChange = (value: string) => {
+    if (isReadOnly) return;
     const [kind, rawId] = value.split(':');
     const id = Number(rawId) || null;
     if (kind === 'legal' && id) {
@@ -2102,6 +2225,7 @@ function TaskModal({
   };
 
   const handleCaseChange = (value: string) => {
+    if (isReadOnly) return;
     const clientCaseId = Number(value) || null;
     const clientCase = clientCases.find((item) => item.id === clientCaseId);
     setForm((prev) => ({
@@ -2114,6 +2238,7 @@ function TaskModal({
   };
 
   const toggleArray = <T extends string>(key: 'reminders' | 'channels', value: T) => {
+    if (isReadOnly) return;
     setForm((prev) => {
       const current = prev[key] as T[];
       return {
@@ -2127,6 +2252,7 @@ function TaskModal({
     (form.participants ?? []).some((participant) => participant.role === role && participant.userId === userId);
 
   const toggleParticipant = (role: TaskJournalParticipantRole, assignee: TaskJournalAssignee) => {
+    if (isReadOnly) return;
     setForm((prev) => {
       const participants = prev.participants ?? [];
       const exists = participants.some((participant) => participant.role === role && participant.userId === assignee.id);
@@ -2231,9 +2357,29 @@ function TaskModal({
     }
   };
 
+  const handleDeadlineRequest = async () => {
+    const requestedDueAt = fromLocalInputValue(deadlineRequestDueAt);
+    if (!taskId || !deadlineRequestDueAt) return;
+
+    setDeadlineRequestSaving(true);
+    try {
+      const created = await apiService.createTaskJournalDeadlineChangeRequest(taskId, {
+        requestedDueAt,
+        reason: deadlineRequestReason.trim() || null,
+      });
+      setComments((previous) => [created, ...previous]);
+      setDeadlineRequestReason('');
+      toast.success('Запрос переноса срока добавлен в историю задачи.', 'Журнал задач');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось отправить запрос переноса срока.'), 'Журнал задач');
+    } finally {
+      setDeadlineRequestSaving(false);
+    }
+  };
+
   const handleUploadFile = async (fileList: FileList | null | undefined, documentKey?: string) => {
     const file = fileList?.[0];
-    if (!taskId || !file) return;
+    if (!taskId || !file || isReadOnly) return;
 
     const uploadKey = documentKey ?? '__new';
     setUploadingDocumentKey(uploadKey);
@@ -2262,7 +2408,7 @@ function TaskModal({
   };
 
   const handleDeleteFile = async (file: TaskJournalFile) => {
-    if (!taskId) return;
+    if (!taskId || isReadOnly) return;
 
     const accepted = await confirm({
       title: 'Удалить файл?',
@@ -2289,7 +2435,7 @@ function TaskModal({
       <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
           <div>
-            <h2 className="text-2xl font-semibold text-slate-900">{state?.mode === 'edit' ? 'Редактировать задачу' : 'Новая задача'}</h2>
+            <h2 className="text-2xl font-semibold text-slate-900">{state?.mode === 'view' ? 'Просмотр задачи' : state?.mode === 'edit' ? 'Редактировать задачу' : 'Новая задача'}</h2>
             <p className="mt-1 text-sm text-slate-500">Заполните контрагента, исполнителя, срок и правила напоминаний.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Закрыть">
@@ -2312,11 +2458,13 @@ function TaskModal({
                 emptyOptionDescription="Контрагент обязателен для задачи"
                 buttonClassName="h-11 border-slate-200 focus:border-blue-400"
                 noOptionsText="Контрагенты не найдены"
+                disabled={isReadOnly}
               />
             </Field>
             <Field label="Исполнитель">
               <select
                 value={form.assigneeUserId ?? ''}
+                disabled={isReadOnly}
                 onChange={(event) => {
                   const nextId = Number(event.target.value) || null;
                   const selected = assignees.find((assignee) => assignee.id === nextId);
@@ -2332,17 +2480,17 @@ function TaskModal({
               </select>
             </Field>
             <Field label="Имя исполнителя">
-              <input value={form.assigneeName} onChange={(event) => update('assigneeName', event.target.value)} className="form-input" />
+              <input value={form.assigneeName} onChange={(event) => update('assigneeName', event.target.value)} disabled={isReadOnly} className="form-input" />
             </Field>
             <Field label="Наименование задачи">
-              <input value={form.title} onChange={(event) => update('title', event.target.value)} className="form-input" placeholder="Что нужно сделать" />
+              <input value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} className="form-input" placeholder="Что нужно сделать" />
             </Field>
             <Field label="Дело">
               <select
                 aria-label="Дело"
                 value={form.clientCaseId ?? ''}
                 onChange={(event) => handleCaseChange(event.target.value)}
-                disabled={(!form.clientId && !form.legalEntityId) || casesLoading}
+                disabled={isReadOnly || (!form.clientId && !form.legalEntityId) || casesLoading}
                 className="form-input disabled:bg-slate-50 disabled:text-slate-400"
               >
                 <option value="">Без дела</option>
@@ -2352,12 +2500,13 @@ function TaskModal({
               </select>
             </Field>
             <Field label="Дата и время исполнения">
-              <input type="datetime-local" value={form.dueAt} onChange={(event) => update('dueAt', event.target.value)} className="form-input" />
+              <input type="datetime-local" value={form.dueAt} onChange={(event) => update('dueAt', event.target.value)} disabled={isReadOnly} className="form-input" />
             </Field>
             <Field label="Длительность">
               <select
                 value={normalizeTaskDuration(form.plannedDurationMinutes)}
                 onChange={(event) => update('plannedDurationMinutes', Number(event.target.value))}
+                disabled={isReadOnly}
                 className="form-input"
               >
                 {[15, 30, 45, 60, 90, 120, 180, 240, 360, 480].map((minutes) => (
@@ -2366,17 +2515,17 @@ function TaskModal({
               </select>
             </Field>
             <Field label="Тип задачи">
-              <select value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} className="form-input">
+              <select value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} disabled={isReadOnly} className="form-input">
                 {TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </Field>
             <Field label="Приоритет">
-              <select value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} className="form-input">
+              <select value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} disabled={isReadOnly} className="form-input">
                 {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </Field>
             <Field label="Статус">
-              <select value={form.status} onChange={(event) => update('status', event.target.value as TaskJournalStatus)} className="form-input">
+              <select value={form.status} onChange={(event) => update('status', event.target.value as TaskJournalStatus)} disabled={isReadOnly} className="form-input">
                 {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </Field>
@@ -2403,6 +2552,7 @@ function TaskModal({
                         <input
                           type="checkbox"
                           checked={isParticipantSelected(role, assignee.id)}
+                          disabled={isReadOnly}
                           onChange={() => toggleParticipant(role, assignee)}
                           className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                         />
@@ -2440,7 +2590,7 @@ function TaskModal({
                             <div className="mt-0.5 text-xs text-slate-400">{statusLabel}</div>
                             {participant.resolution ? <div className="mt-1 text-xs text-slate-500">{participant.resolution}</div> : null}
                           </div>
-                          {isCurrentApprover && participant.approvalStatus !== 'approved' ? (
+                          {!isReadOnly && isCurrentApprover && participant.approvalStatus !== 'approved' ? (
                             <div className="flex shrink-0 gap-2">
                               <button
                                 type="button"
@@ -2468,7 +2618,7 @@ function TaskModal({
 
           <div className="mt-5 grid gap-5 lg:grid-cols-2">
             <Field label="Описание">
-              <textarea value={form.description} onChange={(event) => update('description', event.target.value)} className="form-textarea" rows={5} placeholder="Контекст, телефоны, комментарии, откуда пришла задача" />
+              <textarea value={form.description} onChange={(event) => update('description', event.target.value)} disabled={isReadOnly} className="form-textarea" rows={5} placeholder="Контекст, телефоны, комментарии, откуда пришла задача" />
             </Field>
             <Field label="Результат">
               <textarea value={form.result} onChange={(event) => update('result', event.target.value)} className="form-textarea" rows={5} placeholder="Итог выполнения или причина ожидания" />
@@ -2480,7 +2630,7 @@ function TaskModal({
               <div className="grid gap-2 sm:grid-cols-2">
                 {REMINDER_OPTIONS.map((option) => (
                   <label key={option.value} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                    <input type="checkbox" checked={form.reminders.includes(option.value)} onChange={() => toggleArray('reminders', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                    <input type="checkbox" checked={form.reminders.includes(option.value)} disabled={isReadOnly} onChange={() => toggleArray('reminders', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                     {option.label}
                   </label>
                 ))}
@@ -2492,7 +2642,7 @@ function TaskModal({
                   const Icon = option.icon;
                   return (
                     <label key={option.value} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                      <input type="checkbox" checked={form.channels.includes(option.value)} onChange={() => toggleArray('channels', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                      <input type="checkbox" checked={form.channels.includes(option.value)} disabled={isReadOnly} onChange={() => toggleArray('channels', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                       <Icon className="h-4 w-4 text-slate-400" />
                       {option.label}
                     </label>
@@ -2505,7 +2655,9 @@ function TaskModal({
           <Field label="Теги" className="mt-5">
             <input
               value={tagText}
+              disabled={isReadOnly}
               onChange={(event) => {
+                if (isReadOnly) return;
                 setTagText(event.target.value);
                 update('tags', unique(event.target.value.split(',')));
               }}
@@ -2513,6 +2665,41 @@ function TaskModal({
               placeholder="контроль, платеж, звонок"
             />
           </Field>
+
+          {canRequestDeadlineChange ? (
+            <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+              <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)_auto] lg:items-end">
+                <Field label="Новый срок">
+                  <input
+                    type="datetime-local"
+                    aria-label="Новый срок для запроса переноса"
+                    value={deadlineRequestDueAt}
+                    onChange={(event) => setDeadlineRequestDueAt(event.target.value)}
+                    className="form-input bg-white"
+                  />
+                </Field>
+                <Field label="Причина">
+                  <textarea
+                    aria-label="Причина переноса срока"
+                    value={deadlineRequestReason}
+                    onChange={(event) => setDeadlineRequestReason(event.target.value)}
+                    className="form-textarea min-h-[44px] bg-white"
+                    rows={1}
+                    maxLength={1000}
+                    placeholder="Коротко опишите причину"
+                  />
+                </Field>
+                <button
+                  type="button"
+                  onClick={() => void handleDeadlineRequest()}
+                  disabled={deadlineRequestSaving || !deadlineRequestDueAt}
+                  className="inline-flex h-11 items-center justify-center rounded-xl border border-amber-300 bg-white px-4 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {deadlineRequestSaving ? 'Отправляем...' : 'Запросить перенос'}
+                </button>
+              </div>
+            </section>
+          ) : null}
 
           <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2523,7 +2710,7 @@ function TaskModal({
                 </h3>
                 <p className="mt-1 text-sm text-slate-500">Документы по задаче с версиями и историей загрузок.</p>
               </div>
-              {taskId ? (
+              {canManageFiles ? (
                 <button
                   type="button"
                   onClick={() => newFileInputRef.current?.click()}
@@ -2584,6 +2771,7 @@ function TaskModal({
                             event.currentTarget.value = '';
                           }}
                         />
+                        {canManageFiles ? (
                         <button
                           type="button"
                           onClick={() => versionInputRefs.current[group.documentKey]?.click()}
@@ -2593,6 +2781,7 @@ function TaskModal({
                           <Plus className="h-4 w-4" />
                           {uploadingDocumentKey === group.documentKey ? 'Загружаем...' : 'Новая версия'}
                         </button>
+                        ) : null}
                       </div>
                     </div>
 
@@ -2622,6 +2811,7 @@ function TaskModal({
                             >
                               <Download className="h-4 w-4" />
                             </button>
+                            {canManageFiles ? (
                             <button
                               type="button"
                               onClick={() => void handleDeleteFile(file)}
@@ -2631,6 +2821,7 @@ function TaskModal({
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
+                            ) : null}
                           </div>
                         </div>
                       ))}
@@ -2733,9 +2924,15 @@ function TaskModal({
 
         <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-4 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Отмена</button>
-          <button type="button" onClick={() => onSave(form, state?.task?.id)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
-            {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
-          </button>
+          {isReadOnly && state?.task ? (
+            <button type="button" onClick={() => onResultSave(state.task!, form.status, form.result)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+              Сохранить результат
+            </button>
+          ) : (
+            <button type="button" onClick={() => onSave(form, state?.task?.id)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+              {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
+            </button>
+          )}
         </div>
       </div>
       <style>{`
@@ -2754,6 +2951,12 @@ function TaskModal({
         .form-textarea:focus {
           border-color: rgb(96 165 250);
           box-shadow: 0 0 0 2px rgb(219 234 254);
+        }
+        .form-input:disabled,
+        .form-textarea:disabled {
+          cursor: not-allowed;
+          background: rgb(248 250 252);
+          color: rgb(100 116 139);
         }
         .form-textarea {
           width: 100%;

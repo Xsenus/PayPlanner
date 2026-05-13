@@ -4,3 +4,9 @@ public class CreateTaskJournalCommentRequest
 {
     public string Text { get; set; } = string.Empty;
 }
+
+public class CreateTaskJournalDeadlineChangeRequest
+{
+    public DateTime RequestedDueAt { get; set; }
+    public string? Reason { get; set; }
+}

@@ -8,6 +8,8 @@ import type { TaskJournalItem } from '../../utils/taskJournalStore';
 const apiMock = vi.hoisted(() => ({
   getTaskJournalItems: vi.fn(),
   getTaskJournalAssignees: vi.fn(),
+  getTaskJournalSettings: vi.fn(),
+  updateTaskJournalSettings: vi.fn(),
   getTaskJournalCaseAutomationCandidates: vi.fn(),
   createTaskJournalCaseAutomationTask: vi.fn(),
   createTaskJournalCaseAutomationTasks: vi.fn(),
@@ -19,6 +21,7 @@ const apiMock = vi.hoisted(() => ({
   updateTaskJournalApproval: vi.fn(),
   getTaskJournalComments: vi.fn(),
   createTaskJournalComment: vi.fn(),
+  createTaskJournalDeadlineChangeRequest: vi.fn(),
   getTaskJournalFiles: vi.fn(),
   uploadTaskJournalFile: vi.fn(),
   downloadTaskJournalFile: vi.fn(),
@@ -41,6 +44,11 @@ const casesState = vi.hoisted(() => ({
 
 const legalEntitiesState = vi.hoisted(() => ({
   legalEntities: [] as LegalEntitySummary[],
+}));
+
+const authState = vi.hoisted((): { user: { id: number; fullName: string; email: string }; isAdmin: boolean } => ({
+  user: { id: 7, fullName: 'Администратор', email: 'admin@example.com' },
+  isAdmin: true,
 }));
 
 vi.mock('../../services/api', () => ({
@@ -80,7 +88,8 @@ vi.mock('../../hooks/useLegalEntities', () => ({
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 7, fullName: 'Администратор', email: 'admin@example.com' },
+    user: authState.user,
+    isAdmin: () => authState.isAdmin,
   }),
 }));
 
@@ -158,6 +167,10 @@ async function renderJournal(
   apiMock.getTaskJournalAssignees.mockResolvedValue([
     { id: 7, name: 'Администратор', email: 'admin@example.com' },
   ]);
+  apiMock.getTaskJournalSettings.mockResolvedValue({
+    restrictExecutorEditing: true,
+    allowExecutorDeadlineChangeRequests: true,
+  });
 
   render(<TaskJournal initialView={options.initialView} />);
   await screen.findAllByText('Тестовая задача');
@@ -166,6 +179,8 @@ async function renderJournal(
 describe('TaskJournal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.user = { id: 7, fullName: 'Администратор', email: 'admin@example.com' };
+    authState.isAdmin = true;
     clientsState.clients = [
       { id: 10, name: 'Иванов Иван Иванович', phone: '+7 900 000-00-00', email: 'client@example.com' } as Client,
     ];
@@ -201,6 +216,16 @@ describe('TaskJournal', () => {
       authorName: 'Администратор',
       kind: 'comment',
       text: 'Комментарий по задаче',
+      createdAt: todayAt(12),
+      updatedAt: null,
+    });
+    apiMock.createTaskJournalDeadlineChangeRequest.mockResolvedValue({
+      id: 502,
+      taskJournalItemId: 101,
+      authorUserId: 7,
+      authorName: 'Администратор',
+      kind: 'system',
+      text: 'Администратор запросил перенос срока задачи.',
       createdAt: todayAt(12),
       updatedAt: null,
     });
@@ -381,6 +406,65 @@ describe('TaskJournal', () => {
     expect(toastMock.error).toHaveBeenCalledWith('Перед завершением задачи заполните результат.', 'Журнал задач');
     expect(await screen.findByRole('heading', { name: 'Редактировать задачу' })).toBeTruthy();
     expect(screen.getAllByText('Результат').length).toBeGreaterThan(0);
+  });
+
+  it('opens executor task in view mode and saves only result', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
+
+    const titleInput = screen.getByDisplayValue('Тестовая задача') as HTMLInputElement;
+    expect(titleInput.disabled).toBe(true);
+
+    const resultInput = screen.getByPlaceholderText('Итог выполнения или причина ожидания') as HTMLTextAreaElement;
+    expect(resultInput.disabled).toBe(false);
+    fireEvent.change(resultInput, { target: { value: 'Результат исполнителя' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить результат' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'new', 'Результат исполнителя'));
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('allows executor to request deadline change without moving task directly', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    await screen.findByRole('heading', { name: 'Просмотр задачи' });
+
+    fireEvent.change(screen.getByLabelText('Новый срок для запроса переноса'), { target: { value: '2026-05-15T10:30' } });
+    fireEvent.change(screen.getByLabelText('Причина переноса срока'), { target: { value: 'Нужны документы от клиента' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Запросить перенос' }));
+
+    await waitFor(() => expect(apiMock.createTaskJournalDeadlineChangeRequest).toHaveBeenCalledWith(101, {
+      requestedDueAt: expect.any(String),
+      reason: 'Нужны документы от клиента',
+    }));
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
   });
 
   it('renders task calendar as a journal subgroup', async () => {

@@ -56,6 +56,8 @@ public class TasksController : ControllerBase
     [
         "new", "inProgress", "waiting", "onApproval", "revision", "overdueApproval"
     ];
+    private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
+    private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
 
     private readonly PaymentContext _db;
     private readonly INotificationService _notificationService;
@@ -267,6 +269,47 @@ public class TasksController : ControllerBase
             .ToListAsync(ct);
 
         return Ok(users);
+    }
+
+    [HttpGet("settings")]
+    public async Task<ActionResult<TaskJournalSettingsDto>> GetSettings(CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        return Ok(await GetTaskJournalSettingsAsync(ct));
+    }
+
+    [HttpPut("settings")]
+    public async Task<ActionResult<TaskJournalSettingsDto>> UpdateSettings(
+        [FromBody] TaskJournalSettingsRequest request,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin)
+        {
+            return Forbid();
+        }
+
+        var now = DateTime.UtcNow;
+        await UpsertSystemSettingAsync(RestrictExecutorEditingSettingKey, request.RestrictExecutorEditing ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(AllowExecutorDeadlineChangeRequestsSettingKey, request.AllowExecutorDeadlineChangeRequests ? "true" : "false", now, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(await GetTaskJournalSettingsAsync(ct));
     }
 
     [HttpGet("calendar.ics")]
@@ -660,6 +703,71 @@ public class TasksController : ControllerBase
         return Created($"/api/tasks/{entity.Id}/comments/{comment.Id}", MapComment(comment));
     }
 
+    [HttpPost("{id:int}/deadline-change-requests")]
+    public async Task<ActionResult<TaskJournalCommentDto>> CreateDeadlineChangeRequest(
+        int id,
+        [FromBody] CreateTaskJournalDeadlineChangeRequest request,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        if (!settings.AllowExecutorDeadlineChangeRequests)
+        {
+            return BadRequest(new { message = "Запрос переноса срока отключен в настройках журнала задач." });
+        }
+
+        if (!IsTaskExecutor(entity, access.UserId) || IsTaskAuthor(entity, access.UserId))
+        {
+            return Forbid();
+        }
+
+        if (request.RequestedDueAt == default)
+        {
+            return BadRequest(new { message = "Укажите новый срок задачи." });
+        }
+
+        var reason = NormalizeOptional(request.Reason);
+        if (reason is not null && reason.Length > 1000)
+        {
+            return BadRequest(new { message = "Причина переноса не должна превышать 1000 символов." });
+        }
+
+        var commentText = BuildDeadlineChangeRequestText(entity, access.DisplayName, request.RequestedDueAt, reason);
+        var comment = CreateTaskComment(
+            entity.Id,
+            access,
+            "system",
+            commentText,
+            JsonSerializer.Serialize(new
+            {
+                type = "deadlineChangeRequest",
+                requestedDueAt = ToIso(request.RequestedDueAt),
+                reason,
+            }, JsonOptions));
+
+        _db.TaskJournalComments.Add(comment);
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        return Created($"/api/tasks/{entity.Id}/comments/{comment.Id}", MapComment(comment));
+    }
+
     [HttpGet("{id:int}/files")]
     public async Task<ActionResult<IReadOnlyList<TaskJournalFileDto>>> GetFiles(int id, CancellationToken ct)
     {
@@ -717,6 +825,11 @@ public class TasksController : ControllerBase
         }
 
         if (!CanPostTaskComment(entity, access))
+        {
+            return Forbid();
+        }
+
+        if (ShouldRestrictExecutorFullEdit(entity, access, await GetTaskJournalSettingsAsync(ct)))
         {
             return Forbid();
         }
@@ -866,6 +979,11 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
+        if (ShouldRestrictExecutorFullEdit(entity, access, await GetTaskJournalSettingsAsync(ct)))
+        {
+            return Forbid();
+        }
+
         var taskFile = await _db.TaskJournalFiles
             .FirstOrDefaultAsync(item => item.Id == fileId && item.TaskJournalItemId == id, ct);
         if (taskFile is null)
@@ -978,6 +1096,11 @@ public class TasksController : ControllerBase
             return NotFound();
         }
 
+        if (ShouldRestrictExecutorFullEdit(entity, access, await GetTaskJournalSettingsAsync(ct)))
+        {
+            return Forbid();
+        }
+
         var validation = ValidateRequest(request);
         if (validation is not null)
         {
@@ -1055,7 +1178,7 @@ public class TasksController : ControllerBase
             return Unauthorized();
         }
 
-        if (!access.IsAdmin && access.Permission?.CanEdit != true)
+        if (!access.IsAdmin && access.Permission?.CanView != true)
         {
             return Forbid();
         }
@@ -1064,6 +1187,11 @@ public class TasksController : ControllerBase
         if (entity is null)
         {
             return NotFound();
+        }
+
+        if (!CanUpdateTaskStatus(entity, access))
+        {
+            return Forbid();
         }
 
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
@@ -1228,6 +1356,11 @@ public class TasksController : ControllerBase
             return NotFound();
         }
 
+        if (ShouldRestrictExecutorFullEdit(entity, access, await GetTaskJournalSettingsAsync(ct)))
+        {
+            return Forbid();
+        }
+
         _db.TaskJournalItems.Remove(entity);
         await _db.SaveChangesAsync(ct);
         return NoContent();
@@ -1262,6 +1395,44 @@ public class TasksController : ControllerBase
         var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Tasks, ct);
         return new TaskAccess(userId.Value, User.GetDisplayName(), isAdmin, permission);
     }
+
+    private async Task<TaskJournalSettingsDto> GetTaskJournalSettingsAsync(CancellationToken ct)
+    {
+        var settings = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.Key == RestrictExecutorEditingSettingKey ||
+                item.Key == AllowExecutorDeadlineChangeRequestsSettingKey)
+            .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
+
+        return new TaskJournalSettingsDto
+        {
+            RestrictExecutorEditing = ParseBoolSetting(settings.GetValueOrDefault(RestrictExecutorEditingSettingKey), true),
+            AllowExecutorDeadlineChangeRequests = ParseBoolSetting(settings.GetValueOrDefault(AllowExecutorDeadlineChangeRequestsSettingKey), true),
+        };
+    }
+
+    private async Task UpsertSystemSettingAsync(string key, string value, DateTime nowUtc, CancellationToken ct)
+    {
+        var setting = await _db.SystemSettings.FirstOrDefaultAsync(item => item.Key == key, ct);
+        if (setting is null)
+        {
+            _db.SystemSettings.Add(new SystemSetting
+            {
+                Key = key,
+                Value = value,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+            });
+            return;
+        }
+
+        setting.Value = value;
+        setting.UpdatedAt = nowUtc;
+    }
+
+    private static bool ParseBoolSetting(string? value, bool fallback)
+        => bool.TryParse(value, out var parsed) ? parsed : fallback;
 
     private async Task<TaskParticipantsResolution> ResolveParticipantsAsync(
         UpsertTaskJournalItemRequest request,
@@ -2003,6 +2174,27 @@ public class TasksController : ControllerBase
         }
     }
 
+    private static bool IsTaskAuthor(TaskJournalItem entity, int userId)
+        => entity.AuthorUserId == userId;
+
+    private static bool IsTaskExecutor(TaskJournalItem entity, int userId)
+        => entity.AssigneeUserId == userId ||
+           entity.Participants.Any(participant =>
+               participant.UserId == userId &&
+               string.Equals(participant.Role, "assignee", StringComparison.OrdinalIgnoreCase));
+
+    private static bool ShouldRestrictExecutorFullEdit(
+        TaskJournalItem entity,
+        TaskAccess access,
+        TaskJournalSettingsDto settings)
+        => settings.RestrictExecutorEditing &&
+           !access.IsAdmin &&
+           IsTaskExecutor(entity, access.UserId) &&
+           !IsTaskAuthor(entity, access.UserId);
+
+    private static bool CanUpdateTaskStatus(TaskJournalItem entity, TaskAccess access)
+        => access.IsAdmin || access.Permission?.CanEdit == true || CanPostTaskComment(entity, access);
+
     private static bool CanPostTaskComment(TaskJournalItem entity, TaskAccess access)
     {
         if (access.IsAdmin || access.Permission?.CanEdit == true)
@@ -2118,6 +2310,21 @@ public class TasksController : ControllerBase
             ? text
             : $"{text} Резолюция: {resolution}";
     }
+
+    private static string BuildDeadlineChangeRequestText(
+        TaskJournalItem entity,
+        string executorName,
+        DateTime requestedDueAt,
+        string? reason)
+    {
+        var text = $"{executorName} запросил перенос срока задачи с {FormatHistoryDateTime(entity.DueAt)} на {FormatHistoryDateTime(requestedDueAt)}.";
+        return string.IsNullOrWhiteSpace(reason)
+            ? text
+            : $"{text} Причина: {reason}";
+    }
+
+    private static string FormatHistoryDateTime(DateTime value)
+        => DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm");
 
     private static string TaskStatusLabel(string? status)
         => status switch

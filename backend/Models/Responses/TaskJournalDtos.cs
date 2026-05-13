@@ -100,3 +100,9 @@ public class TaskJournalAutomationCreateResultDto
     public IReadOnlyList<TaskJournalItemDto> CreatedTasks { get; set; } = Array.Empty<TaskJournalItemDto>();
     public int SkippedCount { get; set; }
 }
+
+public class TaskJournalSettingsDto
+{
+    public bool RestrictExecutorEditing { get; set; } = true;
+    public bool AllowExecutorDeadlineChangeRequests { get; set; } = true;
+}

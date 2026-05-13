@@ -524,6 +524,16 @@ export interface InvoiceDocumentTemplateSettingsDto {
   defaultTemplateHtml: string;
 }
 
+export interface TaskJournalSettingsDto {
+  restrictExecutorEditing: boolean;
+  allowExecutorDeadlineChangeRequests: boolean;
+}
+
+export interface UpdateTaskJournalSettingsRequest {
+  restrictExecutorEditing: boolean;
+  allowExecutorDeadlineChangeRequests: boolean;
+}
+
 export interface MainCompanySettingsDto {
   defaultCompanyId?: number | null;
   companies: LegalEntitySummary[];
@@ -1789,6 +1799,17 @@ export class ApiService {
     return this.request<TaskJournalAssignee[]>('/tasks/assignees');
   }
 
+  async getTaskJournalSettings() {
+    return this.request<TaskJournalSettingsDto>('/tasks/settings');
+  }
+
+  async updateTaskJournalSettings(payload: UpdateTaskJournalSettingsRequest) {
+    return this.request<TaskJournalSettingsDto>('/tasks/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getTaskJournalCaseAutomationCandidates(params?: { inactiveDays?: number; limit?: number }) {
     const q = buildQuery({
       inactiveDays: params?.inactiveDays,
@@ -1878,6 +1899,13 @@ export class ApiService {
     return this.request<TaskJournalComment>(`/tasks/${id}/comments`, {
       method: 'POST',
       body: JSON.stringify({ text }),
+    });
+  }
+
+  async createTaskJournalDeadlineChangeRequest(id: number, payload: { requestedDueAt: string; reason?: string | null }) {
+    return this.request<TaskJournalComment>(`/tasks/${id}/deadline-change-requests`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 
