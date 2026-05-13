@@ -57,6 +57,8 @@ import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 
 type ViewMode = 'list' | 'board' | 'calendar';
 type PeriodMode = 'day' | 'week' | 'month';
+type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
+type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
 type ModalState = { mode: 'create' | 'edit' | 'view'; task?: TaskJournalItem; dueAt?: string } | null;
 type TaskJournalProps = {
   initialView?: ViewMode;
@@ -65,6 +67,16 @@ type TaskJournalProps = {
 };
 
 type TaskForm = TaskJournalUpsertPayload & { dueAt: string };
+
+type TaskJournalFilterPreferences = {
+  quickFilter: QuickFilter;
+  metricFilter: MetricFilter;
+  search: string;
+  statusFilter: TaskJournalStatus | 'active' | 'all';
+  assigneeFilter: string;
+  typeFilter: TaskJournalType | 'all';
+  periodMode: PeriodMode;
+};
 
 const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
@@ -112,11 +124,106 @@ const CHANNEL_OPTIONS: Array<{ value: TaskJournalChannel; label: string; icon: t
   { value: 'telegram', label: 'Telegram', icon: Send },
 ];
 
+const TASK_JOURNAL_FILTERS_STORAGE_PREFIX = 'pp.task_journal.filters.v1';
+
+const QUICK_FILTER_OPTIONS: Array<{ value: QuickFilter; label: string; icon: typeof ClipboardList }> = [
+  { value: 'all', label: 'Все', icon: ListFilter },
+  { value: 'assignedToMe', label: 'Поручено мне', icon: CheckCircle2 },
+  { value: 'authoredByMe', label: 'Я поручил', icon: Send },
+];
+
+const METRIC_FILTER_LABELS: Record<MetricFilter, string> = {
+  none: 'Без быстрого фильтра',
+  active: 'Активные',
+  overdue: 'Просрочены',
+  today: 'Сегодня',
+  highPriority: 'Высокий приоритет',
+};
+
 const PARTICIPANT_ROLE_LABELS: Record<TaskJournalParticipantRole, string> = {
   assignee: 'Исполнители',
   approver: 'Согласующие',
   observer: 'Наблюдатели',
 };
+
+function getTaskJournalFilterStorageKey(userId: number | null) {
+  return `${TASK_JOURNAL_FILTERS_STORAGE_PREFIX}.${userId ? `user:${userId}` : 'guest'}`;
+}
+
+function getDefaultQuickFilter(userId: number | null): QuickFilter {
+  return userId ? 'assignedToMe' : 'all';
+}
+
+function createDefaultFilterPreferences(userId: number | null): TaskJournalFilterPreferences {
+  return {
+    quickFilter: getDefaultQuickFilter(userId),
+    metricFilter: 'none',
+    search: '',
+    statusFilter: 'active',
+    assigneeFilter: 'all',
+    typeFilter: 'all',
+    periodMode: 'day',
+  };
+}
+
+function isQuickFilter(value: unknown): value is QuickFilter {
+  return value === 'all' || value === 'assignedToMe' || value === 'authoredByMe';
+}
+
+function isMetricFilter(value: unknown): value is MetricFilter {
+  return value === 'none' || value === 'active' || value === 'overdue' || value === 'today' || value === 'highPriority';
+}
+
+function isStatusFilter(value: unknown): value is TaskJournalStatus | 'active' | 'all' {
+  return value === 'active' || value === 'all' || STATUS_OPTIONS.some((option) => option.value === value);
+}
+
+function isTypeFilter(value: unknown): value is TaskJournalType | 'all' {
+  return value === 'all' || TYPE_OPTIONS.some((option) => option.value === value);
+}
+
+function isPeriodMode(value: unknown): value is PeriodMode {
+  return value === 'day' || value === 'week' || value === 'month';
+}
+
+function readTaskJournalFilterPreferences(userId: number | null): TaskJournalFilterPreferences {
+  const defaults = createDefaultFilterPreferences(userId);
+  if (typeof window === 'undefined') {
+    return defaults;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(getTaskJournalFilterStorageKey(userId));
+    if (!raw) {
+      return defaults;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<TaskJournalFilterPreferences>;
+    return {
+      quickFilter: isQuickFilter(parsed.quickFilter) ? parsed.quickFilter : defaults.quickFilter,
+      metricFilter: isMetricFilter(parsed.metricFilter) ? parsed.metricFilter : defaults.metricFilter,
+      search: typeof parsed.search === 'string' ? parsed.search : defaults.search,
+      statusFilter: isStatusFilter(parsed.statusFilter) ? parsed.statusFilter : defaults.statusFilter,
+      assigneeFilter: typeof parsed.assigneeFilter === 'string' && parsed.assigneeFilter ? parsed.assigneeFilter : defaults.assigneeFilter,
+      typeFilter: isTypeFilter(parsed.typeFilter) ? parsed.typeFilter : defaults.typeFilter,
+      periodMode: isPeriodMode(parsed.periodMode) ? parsed.periodMode : defaults.periodMode,
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function writeTaskJournalFilterPreferences(userId: number | null, preferences: TaskJournalFilterPreferences) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(getTaskJournalFilterStorageKey(userId), JSON.stringify(preferences));
+  } catch {
+    // Если браузер запретил localStorage, журнал продолжит работать без сохранения фильтров.
+  }
+}
 
 const emptyForm = (assigneeName: string, assigneeUserId?: number | null): TaskForm => {
   const dueAt = new Date();
@@ -258,6 +365,27 @@ function downloadBlob(fileName: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
+async function loadAllTaskJournalItems() {
+  const pageSize = 200;
+  let page = 1;
+  let total = Number.POSITIVE_INFINITY;
+  const items: TaskJournalItem[] = [];
+
+  while (items.length < total) {
+    const response = await apiService.getTaskJournalItems({ page, pageSize });
+    items.push(...response.items);
+    total = response.total;
+
+    if (response.items.length === 0) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return items;
+}
+
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
@@ -395,6 +523,41 @@ function isTaskExecutorForUser(task: TaskJournalItem, userId: number | null) {
     getTaskParticipants(task, 'assignee').some((participant) => participant.userId === userId);
 }
 
+function isTaskAuthoredByUser(task: TaskJournalItem, userId: number | null, userName: string) {
+  if (!userId) return false;
+  return task.authorUserId === userId || (!task.authorUserId && Boolean(userName) && task.authorName === userName);
+}
+
+function matchesQuickFilter(task: TaskJournalItem, quickFilter: QuickFilter, userId: number | null, userName: string) {
+  if (quickFilter === 'assignedToMe') {
+    return isTaskExecutorForUser(task, userId);
+  }
+
+  if (quickFilter === 'authoredByMe') {
+    return isTaskAuthoredByUser(task, userId, userName);
+  }
+
+  return true;
+}
+
+function matchesMetricFilter(task: TaskJournalItem, metricFilter: MetricFilter, nowDate: Date) {
+  const due = new Date(task.dueAt);
+  const active = isTaskJournalActive(task.status);
+
+  switch (metricFilter) {
+    case 'active':
+      return active;
+    case 'overdue':
+      return active && due.getTime() < nowDate.getTime();
+    case 'today':
+      return active && isSameDay(due, nowDate);
+    case 'highPriority':
+      return active && (task.priority === 'high' || task.priority === 'urgent');
+    default:
+      return true;
+  }
+}
+
 function isTaskReadOnlyForCurrentUser(
   task: TaskJournalItem,
   currentUserId: number | null,
@@ -505,6 +668,15 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const { confirm } = useDialog();
   const { clients } = useClients();
   const { legalEntities } = useLegalEntities();
+  const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
+  const currentUserId = user?.id ?? null;
+  const isAdminUser = isAdmin();
+  const initialPreferencesRef = useRef<TaskJournalFilterPreferences | null>(null);
+  if (initialPreferencesRef.current === null) {
+    initialPreferencesRef.current = readTaskJournalFilterPreferences(currentUserId);
+  }
+
+  const initialPreferences = initialPreferencesRef.current;
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
   const [taskSettings, setTaskSettings] = useState<TaskJournalSettingsDto>(DEFAULT_TASK_JOURNAL_SETTINGS);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
@@ -512,12 +684,15 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId));
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialPreferences.quickFilter);
+  const [metricFilter, setMetricFilter] = useState<MetricFilter>(initialPreferences.metricFilter);
+  const [search, setSearch] = useState(initialPreferences.search);
   const [viewMode, setViewMode] = useState<ViewMode>(initialView);
-  const [periodMode, setPeriodMode] = useState<PeriodMode>('day');
-  const [statusFilter, setStatusFilter] = useState<TaskJournalStatus | 'active' | 'all'>('active');
-  const [assigneeFilter, setAssigneeFilter] = useState('all');
-  const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>('all');
+  const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
+  const [statusFilter, setStatusFilter] = useState<TaskJournalStatus | 'active' | 'all'>(initialPreferences.statusFilter);
+  const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
+  const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
   const [modal, setModal] = useState<ModalState>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => new Date());
@@ -526,14 +701,46 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const [calendarResizingTaskId, setCalendarResizingTaskId] = useState<number | null>(null);
   const routeTaskRequestRef = useRef(0);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
-
-  const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
-  const currentUserId = user?.id ?? null;
-  const isAdminUser = isAdmin();
+  const skipNextFilterSaveRef = useRef(false);
 
   useEffect(() => {
     setViewMode(initialView);
   }, [initialView]);
+
+  useEffect(() => {
+    const nextOwnerKey = getTaskJournalFilterStorageKey(currentUserId);
+    if (nextOwnerKey === filterOwnerKey) {
+      return;
+    }
+
+    const nextPreferences = readTaskJournalFilterPreferences(currentUserId);
+    skipNextFilterSaveRef.current = true;
+    setFilterOwnerKey(nextOwnerKey);
+    setQuickFilter(nextPreferences.quickFilter);
+    setMetricFilter(nextPreferences.metricFilter);
+    setSearch(nextPreferences.search);
+    setStatusFilter(nextPreferences.statusFilter);
+    setAssigneeFilter(nextPreferences.assigneeFilter);
+    setTypeFilter(nextPreferences.typeFilter);
+    setPeriodMode(nextPreferences.periodMode);
+  }, [currentUserId, filterOwnerKey]);
+
+  useEffect(() => {
+    if (skipNextFilterSaveRef.current) {
+      skipNextFilterSaveRef.current = false;
+      return;
+    }
+
+    writeTaskJournalFilterPreferences(currentUserId, {
+      quickFilter,
+      metricFilter,
+      search,
+      statusFilter,
+      assigneeFilter,
+      typeFilter,
+      periodMode,
+    });
+  }, [assigneeFilter, currentUserId, metricFilter, periodMode, quickFilter, search, statusFilter, typeFilter]);
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
@@ -575,13 +782,13 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const refreshTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const [tasksResponse, assigneeResponse, automationResponse, settingsResponse] = await Promise.all([
-        apiService.getTaskJournalItems({ page: 1, pageSize: 200 }),
+      const [taskItems, assigneeResponse, automationResponse, settingsResponse] = await Promise.all([
+        loadAllTaskJournalItems(),
         apiService.getTaskJournalAssignees(),
         apiService.getTaskJournalCaseAutomationCandidates({ inactiveDays: 14, limit: 20 }),
         apiService.getTaskJournalSettings(),
       ]);
-      setTasks(tasksResponse.items);
+      setTasks(taskItems);
       setAssignees(assigneeResponse);
       setAutomationCandidates(automationResponse);
       setTaskSettings(settingsResponse);
@@ -647,7 +854,10 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     }
 
     const showTask = (task: TaskJournalItem) => {
+      skipNextFilterSaveRef.current = true;
       setViewMode('list');
+      setQuickFilter('all');
+      setMetricFilter('none');
       setStatusFilter('all');
       setAssigneeFilter('all');
       setTypeFilter('all');
@@ -730,8 +940,35 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     [clients, legalEntities],
   );
 
-  const filteredTasks = useMemo(() => {
+  const scopeFilteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
+
+    return tasks.filter((task) => {
+      const quickOk = matchesQuickFilter(task, quickFilter, currentUserId, currentUserName);
+      const assigneeOk =
+        assigneeFilter === 'all' ||
+        String(task.assigneeUserId ?? task.assigneeName) === assigneeFilter ||
+        hasAssigneeParticipant(task, assigneeFilter);
+      const typeOk = typeFilter === 'all' || task.type === typeFilter;
+      const searchOk = !q || [
+        task.objectName,
+        task.clientName ?? '',
+        task.legalEntityName ?? '',
+        task.clientCaseTitle ?? '',
+        task.title,
+        task.description,
+        task.assigneeName,
+        (task.participants ?? []).map(getParticipantDisplayName).join(' '),
+        task.authorName,
+        task.result,
+        task.tags.join(' '),
+      ].some((value) => value.toLowerCase().includes(q));
+
+      return quickOk && assigneeOk && typeOk && searchOk;
+    });
+  }, [assigneeFilter, currentUserId, currentUserName, quickFilter, search, tasks, typeFilter]);
+
+  const filteredTasks = useMemo(() => {
     const nowDate = new Date();
     const weekStart = startOfWeek(nowDate);
     const monthStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
@@ -743,7 +980,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           : endOfDay(new Date(nowDate.getFullYear(), nowDate.getMonth() + 1, 0));
     const periodStart = periodMode === 'day' ? new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()) : periodMode === 'week' ? weekStart : monthStart;
 
-    return tasks
+    return scopeFilteredTasks
       .filter((task) => {
         const due = new Date(task.dueAt);
         const statusOk =
@@ -752,30 +989,13 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
             : statusFilter === 'active'
               ? isTaskJournalActive(task.status)
               : task.status === statusFilter;
-        const assigneeOk =
-          assigneeFilter === 'all' ||
-          String(task.assigneeUserId ?? task.assigneeName) === assigneeFilter ||
-          hasAssigneeParticipant(task, assigneeFilter);
-        const typeOk = typeFilter === 'all' || task.type === typeFilter;
+        const metricOk = matchesMetricFilter(task, metricFilter, nowDate);
         const periodOk = viewMode !== 'board' || due < periodStart || (due >= periodStart && due <= periodEnd);
-        const searchOk = !q || [
-          task.objectName,
-          task.clientName ?? '',
-          task.legalEntityName ?? '',
-          task.clientCaseTitle ?? '',
-          task.title,
-          task.description,
-          task.assigneeName,
-          (task.participants ?? []).map(getParticipantDisplayName).join(' '),
-          task.authorName,
-          task.result,
-          task.tags.join(' '),
-        ].some((value) => value.toLowerCase().includes(q));
 
-        return statusOk && assigneeOk && typeOk && periodOk && searchOk;
+        return statusOk && metricOk && periodOk;
       })
       .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
-  }, [assigneeFilter, periodMode, search, statusFilter, tasks, typeFilter, viewMode]);
+  }, [metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
 
   const shiftCalendarPeriod = (direction: -1 | 1) => {
     const next =
@@ -795,12 +1015,12 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   };
 
   const stats = useMemo(() => {
-    const active = tasks.filter((task) => isTaskJournalActive(task.status));
+    const active = scopeFilteredTasks.filter((task) => isTaskJournalActive(task.status));
     const overdue = active.filter((task) => new Date(task.dueAt).getTime() < Date.now());
     const today = active.filter((task) => isSameDay(new Date(task.dueAt), new Date()));
     const high = active.filter((task) => task.priority === 'high' || task.priority === 'urgent');
     return { active: active.length, overdue: overdue.length, today: today.length, high: high.length };
-  }, [tasks]);
+  }, [scopeFilteredTasks]);
 
   const boardColumns = useMemo(() => {
     const nowDate = new Date();
@@ -837,6 +1057,24 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
       },
     ];
   }, [filteredTasks, periodMode]);
+
+  const handleQuickFilterChange = (nextFilter: QuickFilter) => {
+    setQuickFilter(nextFilter);
+    setMetricFilter('none');
+
+    if (nextFilter === 'assignedToMe') {
+      setAssigneeFilter('all');
+    }
+  };
+
+  const handleMetricFilterClick = (nextFilter: MetricFilter) => {
+    const resolvedFilter = metricFilter === nextFilter ? 'none' : nextFilter;
+    setMetricFilter(resolvedFilter);
+
+    if (resolvedFilter !== 'none') {
+      setStatusFilter('active');
+    }
+  };
 
   const handleSave = async (form: TaskForm, taskId?: number) => {
     if (!form.clientId && !form.legalEntityId) {
@@ -1097,10 +1335,71 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
         </section>
 
         <section className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Активные" value={stats.active} icon={ClipboardList} tone="blue" />
-          <MetricCard label="Просрочены" value={stats.overdue} icon={TimerReset} tone="rose" />
-          <MetricCard label="Сегодня" value={stats.today} icon={CalendarClock} tone="emerald" />
-          <MetricCard label="Высокий приоритет" value={stats.high} icon={AlarmClock} tone="amber" />
+          <MetricCard
+            label="Активные"
+            value={stats.active}
+            icon={ClipboardList}
+            tone="blue"
+            active={metricFilter === 'active'}
+            onClick={() => handleMetricFilterClick('active')}
+          />
+          <MetricCard
+            label="Просрочены"
+            value={stats.overdue}
+            icon={TimerReset}
+            tone="rose"
+            active={metricFilter === 'overdue'}
+            onClick={() => handleMetricFilterClick('overdue')}
+          />
+          <MetricCard
+            label="Сегодня"
+            value={stats.today}
+            icon={CalendarClock}
+            tone="emerald"
+            active={metricFilter === 'today'}
+            onClick={() => handleMetricFilterClick('today')}
+          />
+          <MetricCard
+            label="Высокий приоритет"
+            value={stats.high}
+            icon={AlarmClock}
+            tone="amber"
+            active={metricFilter === 'highPriority'}
+            onClick={() => handleMetricFilterClick('highPriority')}
+          />
+        </section>
+
+        <section className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap rounded-xl bg-slate-100 p-1">
+            {QUICK_FILTER_OPTIONS.map(({ value, label, icon: Icon }) => (
+              <button
+                key={value}
+                type="button"
+                data-testid={`task-quick-filter-${value}`}
+                aria-pressed={quickFilter === value}
+                onClick={() => handleQuickFilterChange(value)}
+                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  quickFilter === value
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {metricFilter !== 'none' ? (
+            <button
+              type="button"
+              onClick={() => setMetricFilter('none')}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+            >
+              <X className="h-4 w-4" />
+              {METRIC_FILTER_LABELS[metricFilter]}
+            </button>
+          ) : null}
         </section>
 
         <section className="mb-6 grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
@@ -1354,7 +1653,21 @@ function TaskAutomationPanel({
   );
 }
 
-function MetricCard({ label, value, icon: Icon, tone }: { label: string; value: number; icon: typeof ClipboardList; tone: 'blue' | 'rose' | 'emerald' | 'amber' }) {
+function MetricCard({
+  label,
+  value,
+  icon: Icon,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  icon: typeof ClipboardList;
+  tone: 'blue' | 'rose' | 'emerald' | 'amber';
+  active?: boolean;
+  onClick?: () => void;
+}) {
   const toneClass = {
     blue: 'bg-blue-50 text-blue-700',
     rose: 'bg-rose-50 text-rose-700',
@@ -1363,7 +1676,15 @@ function MetricCard({ label, value, icon: Icon, tone }: { label: string; value: 
   }[tone];
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+    <button
+      type="button"
+      data-testid={`task-metric-${label}`}
+      aria-pressed={active}
+      onClick={onClick}
+      className={`w-full rounded-2xl border bg-white px-5 py-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md ${
+        active ? 'border-blue-400 ring-2 ring-blue-100' : 'border-slate-200'
+      }`}
+    >
       <div className="relative flex min-h-[68px] items-center justify-center text-center">
         <div className="min-w-0 px-12">
           <div className="text-sm text-slate-500">{label}</div>
@@ -1373,7 +1694,7 @@ function MetricCard({ label, value, icon: Icon, tone }: { label: string; value: 
           <Icon className="h-5 w-5" />
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 

@@ -179,6 +179,7 @@ async function renderJournal(
 describe('TaskJournal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     authState.user = { id: 7, fullName: 'Администратор', email: 'admin@example.com' };
     authState.isAdmin = true;
     clientsState.clients = [
@@ -255,6 +256,85 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Наименование задачи')).toBeTruthy();
     expect(screen.getByText('Иванов Иван Иванович')).toBeTruthy();
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
+  });
+
+  it('opens with current user quick filter and remembers switching to all tasks', async () => {
+    await renderJournal([
+      createTask(),
+      createTask({
+        id: 102,
+        title: 'Чужая задача',
+        assigneeUserId: 8,
+        assigneeName: 'Другой исполнитель',
+        participants: [
+          { userId: 8, role: 'assignee', displayName: 'Другой исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    expect(screen.getByText('Тестовая задача')).toBeTruthy();
+    expect(screen.queryByText('Чужая задача')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('task-quick-filter-all'));
+
+    expect(await screen.findByText('Чужая задача')).toBeTruthy();
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
+        quickFilter: 'all',
+      });
+    });
+  });
+
+  it('filters tasks authored by the current user from the quick controls', async () => {
+    await renderJournal([
+      createTask(),
+      createTask({
+        id: 102,
+        title: 'Поставленная мной задача',
+        assigneeUserId: 8,
+        assigneeName: 'Другой исполнитель',
+        authorUserId: 7,
+        authorName: 'Администратор',
+        participants: [
+          { userId: 8, role: 'assignee', displayName: 'Другой исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getByTestId('task-quick-filter-authoredByMe'));
+
+    expect(await screen.findByText('Поставленная мной задача')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Тестовая задача')).toBeNull());
+  });
+
+  it('uses metric cards as task filters', async () => {
+    const overdue = new Date();
+    overdue.setDate(overdue.getDate() - 1);
+    overdue.setHours(10, 0, 0, 0);
+
+    const future = new Date();
+    future.setDate(future.getDate() + 2);
+    future.setHours(10, 0, 0, 0);
+
+    await renderJournal([
+      createTask({ dueAt: overdue.toISOString() }),
+      createTask({
+        id: 102,
+        title: 'Будущая задача',
+        dueAt: future.toISOString(),
+        assigneeUserId: 7,
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    expect(screen.getByText('Будущая задача')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Просрочены/i }));
+
+    expect(screen.getByText('Тестовая задача')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Будущая задача')).toBeNull());
   });
 
   it('does not save a new task without a required counterparty', async () => {
