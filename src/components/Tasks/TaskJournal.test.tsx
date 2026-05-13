@@ -339,6 +339,36 @@ describe('TaskJournal', () => {
     });
   });
 
+  it('filters tasks by due date range and remembers the range', async () => {
+    await renderJournal([
+      createTask({
+        id: 101,
+        title: 'May task',
+        dueAt: new Date(2026, 4, 10, 10, 0, 0, 0).toISOString(),
+      }),
+      createTask({
+        id: 102,
+        title: 'June task',
+        dueAt: new Date(2026, 5, 10, 10, 0, 0, 0).toISOString(),
+      }),
+    ]);
+
+    expect(screen.getByText('May task')).toBeTruthy();
+    expect(screen.getByText('June task')).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId('task-date-from-filter'), { target: { value: '2026-05-01' } });
+    fireEvent.change(screen.getByTestId('task-date-to-filter'), { target: { value: '2026-05-31' } });
+
+    expect(await screen.findByText('May task')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('June task')).toBeNull());
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
+        dateFrom: '2026-05-01',
+        dateTo: '2026-05-31',
+      });
+    });
+  });
+
   it('filters tasks authored by the current user from the quick controls', async () => {
     await renderJournal([
       createTask(),

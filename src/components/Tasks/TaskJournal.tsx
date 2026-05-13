@@ -80,6 +80,8 @@ type TaskJournalFilterPreferences = {
   quickFilter: QuickFilter;
   metricFilter: MetricFilter;
   search: string;
+  dateFrom: string;
+  dateTo: string;
   statusFilter: TaskJournalStatus | 'active' | 'all';
   assigneeFilter: string;
   typeFilter: TaskJournalType | 'all';
@@ -161,6 +163,8 @@ function createDefaultFilterPreferences(userId: number | null): TaskJournalFilte
     quickFilter: getDefaultQuickFilter(userId),
     metricFilter: 'none',
     search: '',
+    dateFrom: '',
+    dateTo: '',
     statusFilter: 'active',
     assigneeFilter: 'all',
     typeFilter: 'all',
@@ -188,6 +192,38 @@ function isPeriodMode(value: unknown): value is PeriodMode {
   return value === 'day' || value === 'week' || value === 'month';
 }
 
+function isDateFilterValue(value: unknown): value is string {
+  return typeof value === 'string' && (value === '' || /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function parseDateFilterValue(value: string, boundary: 'start' | 'end') {
+  if (!isDateFilterValue(value) || !value) {
+    return null;
+  }
+
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+
+  return boundary === 'start' ? startOfDay(date) : endOfDay(date);
+}
+
+function getTaskDateRangeBounds(dateFrom: string, dateTo: string) {
+  const from = parseDateFilterValue(dateFrom, 'start');
+  const to = parseDateFilterValue(dateTo, 'end');
+
+  if (from && to && from.getTime() > to.getTime()) {
+    return {
+      from: startOfDay(to),
+      to: endOfDay(from),
+    };
+  }
+
+  return { from, to };
+}
+
 function readTaskJournalFilterPreferences(userId: number | null): TaskJournalFilterPreferences {
   const defaults = createDefaultFilterPreferences(userId);
   if (typeof window === 'undefined') {
@@ -205,6 +241,8 @@ function readTaskJournalFilterPreferences(userId: number | null): TaskJournalFil
       quickFilter: isQuickFilter(parsed.quickFilter) ? parsed.quickFilter : defaults.quickFilter,
       metricFilter: isMetricFilter(parsed.metricFilter) ? parsed.metricFilter : defaults.metricFilter,
       search: typeof parsed.search === 'string' ? parsed.search : defaults.search,
+      dateFrom: isDateFilterValue(parsed.dateFrom) ? parsed.dateFrom : defaults.dateFrom,
+      dateTo: isDateFilterValue(parsed.dateTo) ? parsed.dateTo : defaults.dateTo,
       statusFilter: isStatusFilter(parsed.statusFilter) ? parsed.statusFilter : defaults.statusFilter,
       assigneeFilter: typeof parsed.assigneeFilter === 'string' && parsed.assigneeFilter ? parsed.assigneeFilter : defaults.assigneeFilter,
       typeFilter: isTypeFilter(parsed.typeFilter) ? parsed.typeFilter : defaults.typeFilter,
@@ -859,6 +897,8 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialPreferences.quickFilter);
   const [metricFilter, setMetricFilter] = useState<MetricFilter>(initialPreferences.metricFilter);
   const [search, setSearch] = useState(initialPreferences.search);
+  const [dateFromFilter, setDateFromFilter] = useState(initialPreferences.dateFrom);
+  const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
   const [viewMode, setViewMode] = useState<ViewMode>(initialView);
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
   const [statusFilter, setStatusFilter] = useState<TaskJournalStatus | 'active' | 'all'>(initialPreferences.statusFilter);
@@ -890,6 +930,8 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     setQuickFilter(nextPreferences.quickFilter);
     setMetricFilter(nextPreferences.metricFilter);
     setSearch(nextPreferences.search);
+    setDateFromFilter(nextPreferences.dateFrom);
+    setDateToFilter(nextPreferences.dateTo);
     setStatusFilter(nextPreferences.statusFilter);
     setAssigneeFilter(nextPreferences.assigneeFilter);
     setTypeFilter(nextPreferences.typeFilter);
@@ -906,12 +948,14 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
       quickFilter,
       metricFilter,
       search,
+      dateFrom: dateFromFilter,
+      dateTo: dateToFilter,
       statusFilter,
       assigneeFilter,
       typeFilter,
       periodMode,
     });
-  }, [assigneeFilter, currentUserId, metricFilter, periodMode, quickFilter, search, statusFilter, typeFilter]);
+  }, [assigneeFilter, currentUserId, dateFromFilter, dateToFilter, metricFilter, periodMode, quickFilter, search, statusFilter, typeFilter]);
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
@@ -1106,16 +1150,23 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     [clients, legalEntities],
   );
 
+  const dateRangeBounds = useMemo(() => getTaskDateRangeBounds(dateFromFilter, dateToFilter), [dateFromFilter, dateToFilter]);
+
   const scopeFilteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
 
     return tasks.filter((task) => {
+      const due = new Date(task.dueAt);
       const quickOk = matchesQuickFilter(task, quickFilter, currentUserId, currentUserName);
       const assigneeOk =
         assigneeFilter === 'all' ||
         String(task.assigneeUserId ?? task.assigneeName) === assigneeFilter ||
         hasAssigneeParticipant(task, assigneeFilter);
       const typeOk = typeFilter === 'all' || task.type === typeFilter;
+      const dateOk =
+        !Number.isNaN(due.getTime()) &&
+        (!dateRangeBounds.from || due >= dateRangeBounds.from) &&
+        (!dateRangeBounds.to || due <= dateRangeBounds.to);
       const searchOk = !q || [
         task.objectName,
         task.clientName ?? '',
@@ -1130,9 +1181,9 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
         task.tags.join(' '),
       ].some((value) => value.toLowerCase().includes(q));
 
-      return quickOk && assigneeOk && typeOk && searchOk;
+      return quickOk && assigneeOk && typeOk && dateOk && searchOk;
     });
-  }, [assigneeFilter, currentUserId, currentUserName, quickFilter, search, tasks, typeFilter]);
+  }, [assigneeFilter, currentUserId, currentUserName, dateRangeBounds, quickFilter, search, tasks, typeFilter]);
 
   const filteredTasks = useMemo(() => {
     const nowDate = new Date();
@@ -1638,7 +1689,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
         </section>
 
         <section className="mb-6 grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-          <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_repeat(3,minmax(180px,220px))]">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_repeat(3,minmax(160px,220px))_repeat(2,minmax(150px,180px))]">
             <label className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
@@ -1685,6 +1736,30 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
+
+            <label className="relative block">
+              <span className="pointer-events-none absolute left-3 top-1 text-[10px] font-semibold text-slate-400">Дата с</span>
+              <input
+                type="date"
+                value={dateFromFilter}
+                onChange={(event) => setDateFromFilter(event.target.value)}
+                aria-label="Дата исполнения с"
+                data-testid="task-date-from-filter"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 pt-4 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+
+            <label className="relative block">
+              <span className="pointer-events-none absolute left-3 top-1 text-[10px] font-semibold text-slate-400">Дата по</span>
+              <input
+                type="date"
+                value={dateToFilter}
+                onChange={(event) => setDateToFilter(event.target.value)}
+                aria-label="Дата исполнения по"
+                data-testid="task-date-to-filter"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 pt-4 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
           </div>
 
           <div className="flex flex-wrap justify-end gap-2">
