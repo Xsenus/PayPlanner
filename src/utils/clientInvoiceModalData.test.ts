@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Invoice, Payment } from '../types';
-import { CLIENT_INVOICE_LOOKUP_FROM, CLIENT_INVOICE_LOOKUP_TO } from './clientInvoiceRelatedPayments';
+import {
+  CLIENT_INVOICE_RELATED_PAYMENTS_PAGE_SIZE,
+} from './clientInvoiceRelatedPayments';
 import { refreshClientInvoiceModalData } from './clientInvoiceModalData';
 
 function createInvoice(overrides: Partial<Invoice> = {}): Invoice {
@@ -97,10 +99,12 @@ describe('refreshClientInvoiceModalData', () => {
     expect(refreshPayments).toHaveBeenCalledTimes(1);
     expect(fetchInvoice).toHaveBeenCalledWith(528);
     expect(fetchPayments).toHaveBeenCalledWith({
-      from: CLIENT_INVOICE_LOOKUP_FROM,
-      to: CLIENT_INVOICE_LOOKUP_TO,
-      clientId: 42,
-      caseId: undefined,
+      invoiceId: 528,
+      excludeInvoiceDocuments: false,
+      page: 1,
+      pageSize: CLIENT_INVOICE_RELATED_PAYMENTS_PAGE_SIZE,
+      sortBy: 'date',
+      sortDir: 'asc',
     });
     expect(result.invoice).toBe(freshInvoice);
     expect(result.relatedPayments.map((item) => item.id)).toEqual([528, 529]);
@@ -153,10 +157,12 @@ describe('refreshClientInvoiceModalData', () => {
     expect(refreshPayments).toHaveBeenCalledTimes(1);
     expect(fetchInvoice).toHaveBeenCalledWith(529);
     expect(fetchPayments).toHaveBeenCalledWith({
-      from: CLIENT_INVOICE_LOOKUP_FROM,
-      to: CLIENT_INVOICE_LOOKUP_TO,
-      clientId: 43,
-      caseId: 702,
+      invoiceId: 529,
+      excludeInvoiceDocuments: false,
+      page: 1,
+      pageSize: CLIENT_INVOICE_RELATED_PAYMENTS_PAGE_SIZE,
+      sortBy: 'date',
+      sortDir: 'asc',
     });
     expect(result.invoice).toBe(selectedInvoice);
     expect(result.relatedPayments.map((item) => item.id)).toEqual([529, 530]);

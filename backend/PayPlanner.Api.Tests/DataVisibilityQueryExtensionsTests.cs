@@ -58,6 +58,21 @@ public class DataVisibilityQueryExtensionsTests
             new Payment
             {
                 Id = 4,
+                Invoice = new Invoice
+                {
+                    Payments =
+                    {
+                        new Payment
+                        {
+                            DocumentKind = DocumentKind.Invoice,
+                            Client = new Client { ResponsibleUserId = 10 },
+                        },
+                    },
+                },
+            },
+            new Payment
+            {
+                Id = 5,
                 LegalEntity = new LegalEntity { ResponsibleUserId = 30 },
             },
         };
@@ -68,7 +83,7 @@ public class DataVisibilityQueryExtensionsTests
             .Select(payment => payment.Id)
             .ToArray();
 
-        Assert.Equal(new[] { 1, 2, 3 }, result);
+        Assert.Equal(new[] { 1, 2, 3, 4 }, result);
     }
 
     [Fact]

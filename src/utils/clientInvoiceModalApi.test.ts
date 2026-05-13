@@ -116,4 +116,29 @@ describe('bindClientInvoiceModalApi', () => {
       }),
     ).toThrow('lost payments context');
   });
+
+  it('uses the paged payments api for direct invoice lookups', async () => {
+    const payment = createPayment();
+
+    const service = {
+      getInvoice: vi.fn(() => Promise.resolve(createInvoice())),
+      getPayments: vi.fn(() => Promise.resolve([])),
+      getPaymentsV2: vi.fn(function (this: unknown, params: { invoiceId?: number }) {
+        if (this !== service) {
+          throw new Error('lost payments v2 context');
+        }
+
+        return Promise.resolve({ items: [{ ...payment, invoiceId: params.invoiceId }] });
+      }),
+    };
+
+    const { fetchPayments } = bindClientInvoiceModalApi(service);
+
+    await expect(fetchPayments({ invoiceId: 528 })).resolves.toMatchObject([
+      { id: 901, invoiceId: 528 },
+    ]);
+
+    expect(service.getPayments).not.toHaveBeenCalled();
+    expect(service.getPaymentsV2).toHaveBeenCalledWith({ invoiceId: 528 });
+  });
 });

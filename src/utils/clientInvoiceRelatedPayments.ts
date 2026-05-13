@@ -6,6 +6,7 @@ import {
 
 export const CLIENT_INVOICE_LOOKUP_FROM = '1900-01-01';
 export const CLIENT_INVOICE_LOOKUP_TO = '2100-12-31';
+export const CLIENT_INVOICE_RELATED_PAYMENTS_PAGE_SIZE = 500;
 
 export function resolveClientInvoiceCaseId(invoice?: Invoice | null): number | undefined {
   if (!invoice) {
@@ -42,10 +43,16 @@ interface LoadClientInvoiceRelatedPaymentsOptions {
   clientId: number;
   visiblePayments: Payment[];
   fetchPayments: (params: {
-    from: string;
-    to: string;
-    clientId: number;
+    from?: string;
+    to?: string;
+    clientId?: number;
     caseId?: number;
+    invoiceId?: number;
+    excludeInvoiceDocuments?: boolean;
+    page?: number;
+    pageSize?: number;
+    sortBy?: 'date' | 'amount' | 'createdAt';
+    sortDir?: 'asc' | 'desc';
   }) => Promise<Payment[]>;
 }
 
@@ -60,6 +67,27 @@ export async function loadClientInvoiceRelatedPayments({
   }
 
   const caseId = resolveClientInvoiceCaseId(invoice);
+  const invoicePaymentId = typeof invoice.id === 'number' && invoice.id > 0 ? invoice.id : undefined;
+
+  if (invoicePaymentId) {
+    try {
+      const invoicePaymentPool = await fetchPayments({
+        invoiceId: invoicePaymentId,
+        excludeInvoiceDocuments: false,
+        page: 1,
+        pageSize: CLIENT_INVOICE_RELATED_PAYMENTS_PAGE_SIZE,
+        sortBy: 'date',
+        sortDir: 'asc',
+      });
+      const relatedPayments = collectClientInvoiceRelatedPayments(invoice, invoicePaymentPool);
+
+      if (relatedPayments.length > 0) {
+        return relatedPayments;
+      }
+    } catch {
+      // If the direct invoice lookup is unavailable, keep the older client-wide lookup as a fallback.
+    }
+  }
 
   try {
     const paymentPool = await fetchPayments({

@@ -4,6 +4,7 @@ import type { Invoice, Payment } from '../types';
 import {
   CLIENT_INVOICE_LOOKUP_FROM,
   CLIENT_INVOICE_LOOKUP_TO,
+  CLIENT_INVOICE_RELATED_PAYMENTS_PAGE_SIZE,
   collectClientInvoiceRelatedPayments,
   loadClientInvoiceRelatedPayments,
   resolveClientInvoiceCaseId,
@@ -168,7 +169,7 @@ describe('clientInvoiceRelatedPayments', () => {
     expect(result.map((item) => item.id)).toEqual([552]);
   });
 
-  it('loads related payments for the client invoice with the full lookup window', async () => {
+  it('loads related payments by invoice id before falling back to the client lookup window', async () => {
     const invoice = createInvoice({ id: 528, invoiceEntityId: 24, number: '24', clientCaseIds: [701] });
     const representativePayment = createPayment({
       id: 528,
@@ -189,11 +190,14 @@ describe('clientInvoiceRelatedPayments', () => {
       fetchPayments,
     });
 
+    expect(fetchPayments).toHaveBeenCalledTimes(1);
     expect(fetchPayments).toHaveBeenCalledWith({
-      from: CLIENT_INVOICE_LOOKUP_FROM,
-      to: CLIENT_INVOICE_LOOKUP_TO,
-      clientId: 42,
-      caseId: 701,
+      invoiceId: 528,
+      excludeInvoiceDocuments: false,
+      page: 1,
+      pageSize: CLIENT_INVOICE_RELATED_PAYMENTS_PAGE_SIZE,
+      sortBy: 'date',
+      sortDir: 'asc',
     });
     expect(result.map((item) => item.id)).toEqual([528, 529]);
   });
@@ -206,7 +210,7 @@ describe('clientInvoiceRelatedPayments', () => {
       clientCaseIds: [701, 702],
       clientCaseId: undefined,
     });
-    const fetchPayments = vi.fn().mockResolvedValue([]);
+    const fetchPayments = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
     await loadClientInvoiceRelatedPayments({
       invoice,
@@ -215,7 +219,15 @@ describe('clientInvoiceRelatedPayments', () => {
       fetchPayments,
     });
 
-    expect(fetchPayments).toHaveBeenCalledWith({
+    expect(fetchPayments).toHaveBeenNthCalledWith(1, {
+      invoiceId: 540,
+      excludeInvoiceDocuments: false,
+      page: 1,
+      pageSize: CLIENT_INVOICE_RELATED_PAYMENTS_PAGE_SIZE,
+      sortBy: 'date',
+      sortDir: 'asc',
+    });
+    expect(fetchPayments).toHaveBeenNthCalledWith(2, {
       from: CLIENT_INVOICE_LOOKUP_FROM,
       to: CLIENT_INVOICE_LOOKUP_TO,
       clientId: 42,
@@ -246,6 +258,7 @@ describe('clientInvoiceRelatedPayments', () => {
       fetchPayments,
     });
 
+    expect(fetchPayments).toHaveBeenCalledTimes(2);
     expect(result.map((item) => item.id)).toEqual([530, 531]);
   });
 

@@ -19,6 +19,9 @@ public class PaymentsV2Controller : ControllerBase
 
     public PaymentsV2Controller(PaymentContext db) => _db = db;
 
+    private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+
     [HttpGet]
     public async Task<ActionResult<PaymentsPageResponse>> Get(
         [FromQuery] DateTime? from,
@@ -47,9 +50,12 @@ public class PaymentsV2Controller : ControllerBase
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 500);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null) return Unauthorized();
 
         var query = _db.Payments.AsQueryable()
             .WithPaymentIncludes()
+            .ApplyPaymentVisibility(visibility)
             .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
             .ApplyPaymentFilters(from, to, clientId, caseId, search, clientRole, legalEntityId);
 
@@ -164,8 +170,12 @@ public class PaymentsV2Controller : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null) return Unauthorized();
+
         var entity = await _db.Payments
             .WithPaymentIncludes()
+            .ApplyPaymentVisibility(visibility)
             .AsNoTracking()
             .FirstOrDefaultAsync(payment => payment.Id == id, ct);
 

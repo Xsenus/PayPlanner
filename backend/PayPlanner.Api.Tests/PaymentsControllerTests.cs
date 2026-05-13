@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -462,6 +464,163 @@ public class PaymentsControllerTests
         var actResponse = Assert.IsType<PaymentsPageResponse>(actOk.Value);
         Assert.Collection(actResponse.Items, item => Assert.Equal(linkedPayment.Id, item.Id));
         Assert.DoesNotContain(actResponse.Items, item => item.Id == unrelatedPayment.Id);
+    }
+
+    [Fact]
+    public async Task PaymentsV2_FiltersClientPaymentsThroughInvoiceDocument()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Client with invoice-linked payments", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice
+        {
+            Number = "INV-PAY-V2-CLIENT",
+            Date = new DateTime(2026, 4, 24),
+        };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var invoiceDocument = CreatePayment(invoice.Date, 18_000m, "Invoice document");
+        invoiceDocument.DocumentKind = DocumentKind.Invoice;
+        invoiceDocument.ClientId = client.Id;
+        invoiceDocument.InvoiceId = invoice.Id;
+        invoiceDocument.Account = invoice.Number;
+        invoiceDocument.AccountDate = invoice.Date;
+
+        var linkedPayment = CreatePayment(invoice.Date.AddDays(1), 18_000m, "Payment linked only by invoice");
+        linkedPayment.InvoiceId = invoice.Id;
+        linkedPayment.Account = invoice.Number;
+        linkedPayment.AccountDate = invoice.Date;
+
+        var unrelatedPayment = CreatePayment(invoice.Date.AddDays(2), 7_000m, "Unrelated payment");
+        db.Payments.AddRange(invoiceDocument, linkedPayment, unrelatedPayment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsV2Controller(db);
+
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            clientId: client.Id,
+            caseId: null,
+            excludeInstallmentParents: false,
+            excludeInvoiceDocuments: true,
+            sortBy: "date",
+            sortDir: "asc",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<PaymentsPageResponse>(ok.Value);
+
+        Assert.Collection(response.Items, item => Assert.Equal(linkedPayment.Id, item.Id));
+        Assert.DoesNotContain(response.Items, item => item.Id == invoiceDocument.Id);
+        Assert.DoesNotContain(response.Items, item => item.Id == unrelatedPayment.Id);
+    }
+
+    [Fact]
+    public async Task PaymentsV2_AllowsResponsibleToSeePaymentLinkedThroughInvoiceDocument()
+    {
+        await using var db = await CreateContextAsync();
+
+        var role = new Role
+        {
+            Name = $"payments-user-{Guid.NewGuid():N}",
+            Description = "Payments user",
+        };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+
+        var user = new User
+        {
+            Email = $"elena-{Guid.NewGuid():N}@example.com",
+            PasswordHash = "hash",
+            FullName = "Elena",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var visibleClient = new Client
+        {
+            Name = "Beznyakov",
+            ResponsibleUserId = user.Id,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var hiddenClient = new Client { Name = "Other client", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice
+        {
+            Number = "155",
+            Date = new DateTime(2025, 10, 24),
+        };
+        var hiddenInvoice = new Invoice
+        {
+            Number = "999",
+            Date = new DateTime(2025, 10, 24),
+        };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        db.Invoices.AddRange(invoice, hiddenInvoice);
+        await db.SaveChangesAsync();
+
+        var invoiceDocument = CreatePayment(invoice.Date, 205_000m, "Invoice 155");
+        invoiceDocument.DocumentKind = DocumentKind.Invoice;
+        invoiceDocument.ClientId = visibleClient.Id;
+        invoiceDocument.InvoiceId = invoice.Id;
+        invoiceDocument.Account = invoice.Number;
+        invoiceDocument.AccountDate = invoice.Date;
+
+        var linkedPayment = CreatePayment(invoice.Date.AddDays(1), 25_000m, "Linked payment for invoice 155");
+        linkedPayment.InvoiceId = invoice.Id;
+        linkedPayment.Account = invoice.Number;
+        linkedPayment.AccountDate = invoice.Date;
+
+        var hiddenInvoiceDocument = CreatePayment(hiddenInvoice.Date, 12_000m, "Hidden invoice");
+        hiddenInvoiceDocument.DocumentKind = DocumentKind.Invoice;
+        hiddenInvoiceDocument.ClientId = hiddenClient.Id;
+        hiddenInvoiceDocument.InvoiceId = hiddenInvoice.Id;
+        hiddenInvoiceDocument.Account = hiddenInvoice.Number;
+        hiddenInvoiceDocument.AccountDate = hiddenInvoice.Date;
+
+        var hiddenLinkedPayment = CreatePayment(hiddenInvoice.Date.AddDays(1), 12_000m, "Hidden linked payment");
+        hiddenLinkedPayment.InvoiceId = hiddenInvoice.Id;
+        hiddenLinkedPayment.Account = hiddenInvoice.Number;
+        hiddenLinkedPayment.AccountDate = hiddenInvoice.Date;
+
+        db.Payments.AddRange(invoiceDocument, linkedPayment, hiddenInvoiceDocument, hiddenLinkedPayment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsV2Controller(db, user.Id);
+
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            invoiceId: invoiceDocument.Id,
+            excludeInstallmentParents: false,
+            excludeInvoiceDocuments: true,
+            sortBy: "date",
+            sortDir: "asc",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<PaymentsPageResponse>(ok.Value);
+
+        Assert.Collection(response.Items, item => Assert.Equal(linkedPayment.Id, item.Id));
+        Assert.DoesNotContain(response.Items, item => item.Id == hiddenLinkedPayment.Id);
     }
 
     [Fact]
@@ -3139,6 +3298,26 @@ public class PaymentsControllerTests
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
         return contract;
+    }
+
+    private static PaymentsV2Controller CreatePaymentsV2Controller(PaymentContext db, int userId)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Name, "Test user"),
+        };
+
+        return new PaymentsV2Controller(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test")),
+                },
+            },
+        };
     }
 
     private static Payment CreatePayment(DateTime date, decimal amount, string description)

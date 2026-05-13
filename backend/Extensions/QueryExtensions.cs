@@ -112,11 +112,23 @@ namespace PayPlanner.Api.Extensions
                 var normalizedClientRole = NormalizeClientRole(clientRole);
                 q = normalizedClientRole switch
                 {
-                    "counterparty" => q.Where(p => p.ClientId == clientId.Value),
-                    "expenseClient" => q.Where(p => p.ExpenseClientId == clientId.Value),
+                    "counterparty" => q.Where(p =>
+                        p.ClientId == clientId.Value
+                        || (p.Invoice != null && p.Invoice.Payments.Any(invoicePayment =>
+                            invoicePayment.DocumentKind == DocumentKind.Invoice
+                            && invoicePayment.ClientId == clientId.Value))),
+                    "expenseClient" => q.Where(p =>
+                        p.ExpenseClientId == clientId.Value
+                        || (p.Invoice != null && p.Invoice.Payments.Any(invoicePayment =>
+                            invoicePayment.DocumentKind == DocumentKind.Invoice
+                            && invoicePayment.ExpenseClientId == clientId.Value))),
                     _ => q.Where(p =>
                         p.ClientId == clientId.Value ||
-                        p.ExpenseClientId == clientId.Value),
+                        p.ExpenseClientId == clientId.Value ||
+                        (p.Invoice != null && p.Invoice.Payments.Any(invoicePayment =>
+                            invoicePayment.DocumentKind == DocumentKind.Invoice
+                            && (invoicePayment.ClientId == clientId.Value
+                                || invoicePayment.ExpenseClientId == clientId.Value)))),
                 };
             }
 
@@ -125,11 +137,23 @@ namespace PayPlanner.Api.Extensions
                 var normalizedClientRole = NormalizeClientRole(clientRole);
                 q = normalizedClientRole switch
                 {
-                    "counterparty" => q.Where(p => p.LegalEntityId == legalEntityId.Value),
-                    "expenseClient" => q.Where(p => p.ExpenseLegalEntityId == legalEntityId.Value),
+                    "counterparty" => q.Where(p =>
+                        p.LegalEntityId == legalEntityId.Value
+                        || (p.Invoice != null && p.Invoice.Payments.Any(invoicePayment =>
+                            invoicePayment.DocumentKind == DocumentKind.Invoice
+                            && invoicePayment.LegalEntityId == legalEntityId.Value))),
+                    "expenseClient" => q.Where(p =>
+                        p.ExpenseLegalEntityId == legalEntityId.Value
+                        || (p.Invoice != null && p.Invoice.Payments.Any(invoicePayment =>
+                            invoicePayment.DocumentKind == DocumentKind.Invoice
+                            && invoicePayment.ExpenseLegalEntityId == legalEntityId.Value))),
                     _ => q.Where(p =>
                         p.LegalEntityId == legalEntityId.Value ||
-                        p.ExpenseLegalEntityId == legalEntityId.Value),
+                        p.ExpenseLegalEntityId == legalEntityId.Value ||
+                        (p.Invoice != null && p.Invoice.Payments.Any(invoicePayment =>
+                            invoicePayment.DocumentKind == DocumentKind.Invoice
+                            && (invoicePayment.LegalEntityId == legalEntityId.Value
+                                || invoicePayment.ExpenseLegalEntityId == legalEntityId.Value)))),
                 };
             }
 
@@ -137,7 +161,11 @@ namespace PayPlanner.Api.Extensions
             {
                 q = q.Where(p =>
                     p.ClientCaseId == caseId.Value ||
-                    p.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));
+                    p.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value) ||
+                    (p.Invoice != null && p.Invoice.Payments.Any(invoicePayment =>
+                        invoicePayment.DocumentKind == DocumentKind.Invoice
+                        && (invoicePayment.ClientCaseId == caseId.Value
+                            || invoicePayment.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value)))));
             }
 
             if (!string.IsNullOrWhiteSpace(search))

@@ -9,10 +9,16 @@ interface RefreshClientInvoiceModalDataOptions {
   refreshPayments: () => Promise<unknown>;
   fetchInvoice: (invoiceId: number) => Promise<Invoice>;
   fetchPayments: (params: {
-    from: string;
-    to: string;
-    clientId: number;
+    from?: string;
+    to?: string;
+    clientId?: number;
     caseId?: number;
+    invoiceId?: number;
+    excludeInvoiceDocuments?: boolean;
+    page?: number;
+    pageSize?: number;
+    sortBy?: 'date' | 'amount' | 'createdAt';
+    sortDir?: 'asc' | 'desc';
   }) => Promise<Payment[]>;
 }
 
