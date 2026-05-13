@@ -24,6 +24,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
         public Dictionary<int, int> ServiceCategories { get; } = [];
         public Dictionary<int, int> PaymentStatuses { get; } = [];
         public Dictionary<int, int> ClientStatuses { get; } = [];
+        public Dictionary<int, int> Departments { get; } = [];
         public Dictionary<int, int> Countries { get; } = [];
         public Dictionary<int, int> BaseCurrencies { get; } = [];
         public Dictionary<int, int> ServiceLanguages { get; } = [];
@@ -150,6 +151,10 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
                 (sourceItem, targetItem) => CopyRolePermission(sourceItem, targetItem, maps),
                 new Dictionary<int, int>(),
                 cancellationToken));
+
+        await RunTableAsync(result, target, "Departments", "Отделы", table =>
+            ImportEntitiesAsync(source, target, table, ctx => ctx.Departments.AsNoTracking(), ctx => ctx.Departments,
+                x => x.Id, x => x.Id, x => Key(x.Name), x => Key(x.Name), CopyDepartment, maps.Departments, cancellationToken));
 
         await RunTableAsync(result, target, "Users", "Пользователи", table =>
             ImportUsersAsync(source, target, table, maps, cancellationToken));
@@ -556,7 +561,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
 
             if (existingByEmail.TryGetValue(email, out var existing))
             {
-                CopyUser(sourceItem, existing, roleId, null);
+                CopyUser(sourceItem, existing, roleId, null, maps);
                 maps.Users[sourceItem.Id] = existing.Id;
                 importedUsers.Add((sourceItem, existing));
                 table.Updated += 1;
@@ -564,7 +569,7 @@ public sealed partial class DatabaseImportService : IDatabaseImportService
             }
 
             var created = new User();
-            CopyUser(sourceItem, created, roleId, null);
+            CopyUser(sourceItem, created, roleId, null, maps);
             target.Users.Add(created);
             existingByEmail[email] = created;
             inserted.Add((sourceItem.Id, created));

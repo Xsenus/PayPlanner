@@ -61,6 +61,7 @@ public static class DataVisibilityService
             {
                 item.Id,
                 item.RoleId,
+                item.DepartmentId,
                 item.Department,
                 RoleName = item.Role != null ? item.Role.Name : string.Empty,
             })
@@ -91,12 +92,16 @@ public static class DataVisibilityService
 
         if (!isAdmin
             && string.Equals(scope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(user.Department))
+            && (user.DepartmentId.HasValue || !string.IsNullOrWhiteSpace(user.Department)))
         {
-            var department = user.Department.Trim();
+            var department = user.Department?.Trim();
+            var departmentId = user.DepartmentId;
+            var hasDepartmentName = !string.IsNullOrWhiteSpace(department);
             visibleUserIds = await db.Users
                 .AsNoTracking()
-                .Where(item => item.IsActive && item.Department != null && item.Department == department)
+                .Where(item => item.IsActive
+                    && ((departmentId.HasValue && item.DepartmentId == departmentId.Value)
+                        || (hasDepartmentName && item.Department != null && item.Department == department)))
                 .Select(item => item.Id)
                 .ToListAsync(ct);
 

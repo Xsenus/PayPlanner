@@ -54,6 +54,16 @@ public class DictionariesReadController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("departments")]
+    public async Task<IActionResult> Departments(CancellationToken ct)
+    {
+        var result = await SqliteRetryHelper.ExecuteAsync(
+            _ => _db.Departments.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct),
+            _logger,
+            ct);
+        return Ok(result);
+    }
+
 
     [HttpGet("countries")]
     public async Task<IActionResult> Countries(CancellationToken ct)

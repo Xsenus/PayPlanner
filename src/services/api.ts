@@ -23,6 +23,7 @@ export type DictKind =
   | 'deal-types'
   | 'income-types'
   | 'payment-sources'
+  | 'departments'
   | 'services'
   | 'service-categories'
   | 'client-statuses'
@@ -44,6 +45,8 @@ export type DictItemByKind<K extends DictKind> = K extends 'deal-types'
   ? IncomeType
   : K extends 'payment-sources'
   ? PaymentSource
+  : K extends 'departments'
+  ? BaseDictItem
   : K extends 'services'
   ? ServiceDictionaryItem
   : K extends 'service-categories'

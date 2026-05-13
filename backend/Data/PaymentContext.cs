@@ -1415,6 +1415,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.RoleId)
                   .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasOne(e => e.DepartmentDictionary)
+                  .WithMany(d => d.Users)
+                  .HasForeignKey(e => e.DepartmentId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(e => e.ApprovedBy)
                   .WithMany()
                   .HasForeignKey(e => e.ApprovedByUserId)
@@ -1432,6 +1437,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.UpdatedAt).HasDatabaseName("idx_users_updated");
             entity.HasIndex(e => e.ApprovedAt).HasDatabaseName("idx_users_approvedAt");
             entity.HasIndex(e => e.IsEmployee).HasDatabaseName("idx_users_isemployee");
+            entity.HasIndex(e => e.DepartmentId).HasDatabaseName("idx_users_department_id");
             entity.HasIndex(e => e.Department).HasDatabaseName("idx_users_department");
             entity.HasIndex(e => new { e.EmploymentStartDate, e.EmploymentEndDate })
                   .HasDatabaseName("idx_users_employment_range");
@@ -1442,6 +1448,20 @@ public class PaymentContext : DbContext
                 tb.HasCheckConstraint("CK_Users_Employment_Range",
                     "(\"EmploymentStartDate\" IS NULL OR \"EmploymentEndDate\" IS NULL OR \"EmploymentStartDate\" <= \"EmploymentEndDate\")");
             });
+        });
+
+        modelBuilder.Entity<DepartmentDictionaryItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(120).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.ColorHex).HasMaxLength(20).HasDefaultValue("#2563EB");
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.Name).HasDatabaseName("IX_Departments_Name");
+            entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_Departments_IsActive");
+            entity.HasIndex(e => new { e.IsActive, e.Name }).HasDatabaseName("IX_Departments_IsActive_Name");
         });
 
         modelBuilder.Entity<UserCompanyAccess>(entity =>
@@ -2449,6 +2469,7 @@ public class PaymentContext : DbContext
     public DbSet<TaxSystemModeDictionaryItem> TaxSystemModes { get; set; }
     public DbSet<InvoiceUnitDictionaryItem> InvoiceUnits { get; set; }
     public DbSet<InvoiceItemNameDictionaryItem> InvoiceItemNames { get; set; }
+    public DbSet<DepartmentDictionaryItem> Departments { get; set; }
     public DbSet<Bank> Banks { get; set; }
 
     /// <summary>

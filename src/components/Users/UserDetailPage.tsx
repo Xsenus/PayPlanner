@@ -3,6 +3,7 @@ import { ArrowLeft, Building2, Loader2, Plus, Save, ShieldCheck, Trash2, UserRou
 
 import { authService, type Role, type UpdateUserDto, type User } from '../../services/authService';
 import { apiService, type MainCompanySettingsDto } from '../../services/api';
+import type { BaseDictItem } from '../../types/dictionaries';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -32,6 +33,7 @@ type FormState = {
   messenger: string;
   viber: string;
   isEmployee: boolean;
+  departmentId: string;
   department: string;
   requiresFinancialActionReason: boolean;
   employmentStartDate: string;
@@ -56,6 +58,7 @@ const EMPTY_FORM: FormState = {
   messenger: '',
   viber: '',
   isEmployee: false,
+  departmentId: '',
   department: '',
   requiresFinancialActionReason: false,
   employmentStartDate: '',
@@ -126,6 +129,7 @@ function buildForm(user?: User | null): FormState {
     messenger: user.messenger ?? '',
     viber: user.viber ?? '',
     isEmployee: Boolean(user.isEmployee),
+    departmentId: user.departmentId ? String(user.departmentId) : '',
     department: user.department ?? '',
     requiresFinancialActionReason: Boolean(user.requiresFinancialActionReason),
     employmentStartDate: toDateInputValue(user.employmentStartDate),
@@ -151,7 +155,8 @@ function buildUpdatePayload(form: FormState): UpdateUserDto {
     messenger: form.messenger.trim() || undefined,
     viber: form.viber.trim() || undefined,
     isEmployee: form.isEmployee,
-    department: form.department.trim() || undefined,
+    departmentId: form.departmentId ? Number(form.departmentId) : null,
+    department: form.departmentId ? undefined : form.department.trim(),
     requiresFinancialActionReason: form.requiresFinancialActionReason,
     employmentStartDate: form.employmentStartDate || undefined,
     employmentEndDate: form.employmentEndDate || undefined,
@@ -193,23 +198,34 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   const [roles, setRoles] = useState<Role[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [mainCompanySettings, setMainCompanySettings] = useState<MainCompanySettingsDto | null>(null);
+  const [departments, setDepartments] = useState<BaseDictItem[]>([]);
   const [selectedCompanyToAddId, setSelectedCompanyToAddId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
   const loadData = useCallback(async () => {
-    const [nextRoles, nextUser, nextMainCompanySettings] = await Promise.all([
+    const [nextRoles, nextUser, nextMainCompanySettings, nextDepartments] = await Promise.all([
       authService.getRoles(),
       isCreateMode ? Promise.resolve<User | null>(null) : authService.getUser(userId),
       apiService.getMainCompanySettings(),
+      apiService.getDict('departments'),
     ]);
 
     setRoles(nextRoles);
     setUser(nextUser);
     setMainCompanySettings(nextMainCompanySettings);
+    setDepartments(nextDepartments);
 
     const nextForm = buildForm(nextUser);
+    if (!nextForm.departmentId && nextForm.department) {
+      const departmentName = nextForm.department.trim().toLowerCase();
+      const matchedDepartment = nextDepartments.find((item) => item.name.trim().toLowerCase() === departmentName);
+      if (matchedDepartment) {
+        nextForm.departmentId = String(matchedDepartment.id);
+        nextForm.department = matchedDepartment.name;
+      }
+    }
     if (!nextUser && nextRoles.length > 0) {
       nextForm.roleId = nextRoles.find((role) => role.name.toLowerCase() === 'user')?.id ?? nextRoles[0].id;
     }
@@ -240,6 +256,17 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   const availableCompanyOptions = useMemo(
     () => mainCompanies.filter((company) => !form.companyIds.includes(company.id)).map(buildCompanyOption),
     [form.companyIds, mainCompanies],
+  );
+  const departmentOptions = useMemo<LookupSelectOption[]>(
+    () => departments
+      .filter((department) => department.isActive !== false || String(department.id) === form.departmentId)
+      .map((department) => ({
+        value: String(department.id),
+        label: department.name,
+        description: department.description?.trim() || undefined,
+        keywords: [department.name, department.description ?? ''].filter(Boolean),
+      })),
+    [departments, form.departmentId],
   );
 
   const summaryCards = useMemo(
@@ -278,6 +305,15 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
     setForm((current) => ({ ...current, companyIds: current.companyIds.filter((id) => id !== companyId) }));
   };
 
+  const handleDepartmentChange = (value: string) => {
+    const department = departments.find((item) => String(item.id) === value);
+    setForm((current) => ({
+      ...current,
+      departmentId: value,
+      department: department?.name ?? '',
+    }));
+  };
+
   const handleSave = async () => {
     if (!form.email.trim()) return toast.error('Укажите email пользователя.');
     if (isCreateMode && !form.password.trim()) return toast.error('Для нового пользователя нужно задать пароль.');
@@ -296,7 +332,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
           roleId: form.roleId,
           isActive: form.isActive,
           isEmployee: form.isEmployee,
-          department: form.department.trim() || undefined,
+          departmentId: form.departmentId ? Number(form.departmentId) : undefined,
+          department: form.departmentId ? undefined : form.department.trim() || undefined,
           requiresFinancialActionReason: form.requiresFinancialActionReason,
           companyIds: form.companyIds,
         });
@@ -429,7 +466,20 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                     <input type="checkbox" checked={form.isEmployee} onChange={(event) => handleEmployeeToggle(event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Учитывать как сотрудника
                   </label>
-                  <TextField label="Отдел" value={form.department} onChange={(value) => updateForm('department', value)} disabled={administrativeFieldsDisabled} />
+                  <LookupSelect
+                    label="Отдел"
+                    value={form.departmentId}
+                    options={departmentOptions}
+                    onChange={handleDepartmentChange}
+                    placeholder={departmentOptions.length > 0 ? 'Выберите отдел' : 'Сначала добавьте отдел в справочнике'}
+                    title="Выбор отдела"
+                    searchPlaceholder="Поиск по названию отдела"
+                    emptyOptionLabel="Без отдела"
+                    emptyOptionDescription="Не использовать отдел для этого пользователя"
+                    noOptionsText="Отделы не найдены"
+                    disabled={administrativeFieldsDisabled}
+                    helperText="Отдел выбирается из справочника и участвует в правилах видимости по отделу."
+                  />
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 md:col-span-2">
                     <input type="checkbox" checked={form.requiresFinancialActionReason} onChange={(event) => updateForm('requiresFinancialActionReason', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Требовать причину при действиях с финансовыми документами

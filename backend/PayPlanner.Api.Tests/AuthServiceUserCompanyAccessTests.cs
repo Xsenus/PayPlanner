@@ -126,6 +126,65 @@ public class AuthServiceUserCompanyAccessTests
         Assert.False(sourceExists);
     }
 
+    [Fact]
+    public async Task UpdateUserAsync_AssignsDepartmentFromDictionary()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db);
+        var roleId = await CreateRoleAsync(db, "user");
+        var user = await CreateUserAsync(db, roleId, "department-user@example.com");
+        var department = new DepartmentDictionaryItem { Name = "Юридический отдел", IsActive = true };
+        db.Departments.Add(department);
+        await db.SaveChangesAsync();
+
+        var result = await service.UpdateUserAsync(
+            user.Id,
+            new UpdateUserRequest
+            {
+                DepartmentId = department.Id,
+            },
+            actorUserId: user.Id);
+
+        Assert.NotNull(result);
+        Assert.Equal(department.Id, result!.DepartmentId);
+        Assert.Equal("Юридический отдел", result.Department);
+
+        var storedUser = await db.Users.AsNoTracking().FirstAsync(item => item.Id == user.Id);
+        Assert.Equal(department.Id, storedUser.DepartmentId);
+        Assert.Equal("Юридический отдел", storedUser.Department);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsync_ClearsDepartment_WhenEmptyDepartmentSent()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db);
+        var roleId = await CreateRoleAsync(db, "user");
+        var department = new DepartmentDictionaryItem { Name = "Секретариат", IsActive = true };
+        db.Departments.Add(department);
+        await db.SaveChangesAsync();
+        var user = await CreateUserAsync(db, roleId, "department-clear@example.com");
+        user.DepartmentId = department.Id;
+        user.Department = department.Name;
+        await db.SaveChangesAsync();
+
+        var result = await service.UpdateUserAsync(
+            user.Id,
+            new UpdateUserRequest
+            {
+                Department = string.Empty,
+            },
+            actorUserId: user.Id);
+
+        Assert.NotNull(result);
+        Assert.Null(result!.DepartmentId);
+        Assert.Null(result.Department);
+
+        var storedUser = await db.Users.AsNoTracking().FirstAsync(item => item.Id == user.Id);
+        Assert.Null(storedUser.DepartmentId);
+        Assert.Null(storedUser.Department);
+    }
+
     private static AuthService CreateService(PaymentContext db)
     {
         var configuration = new ConfigurationBuilder()

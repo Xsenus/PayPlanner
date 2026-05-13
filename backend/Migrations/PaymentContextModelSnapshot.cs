@@ -1595,6 +1595,53 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("DealTypes");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.DepartmentDictionaryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ColorHex")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("#2563EB");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_Departments_IsActive");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_Departments_Name");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("IX_Departments_IsActive_Name");
+
+                    b.ToTable("Departments");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.DocumentStatusEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -4828,6 +4875,13 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("DateOfBirth")
                         .HasColumnType("date");
 
+                    b.Property<string>("Department")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DepartmentId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Email")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -4865,10 +4919,6 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<bool>("IsEmployee")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("Department")
-                        .HasMaxLength(120)
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("LastName")
                         .HasMaxLength(100)
@@ -4934,6 +4984,12 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("idx_users_created");
 
+                    b.HasIndex("Department")
+                        .HasDatabaseName("idx_users_department");
+
+                    b.HasIndex("DepartmentId")
+                        .HasDatabaseName("idx_users_department_id");
+
                     b.HasIndex("Email")
                         .IsUnique()
                         .HasDatabaseName("IX_Users_Email");
@@ -4946,9 +5002,6 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsEmployee")
                         .HasDatabaseName("idx_users_isemployee");
-
-                    b.HasIndex("Department")
-                        .HasDatabaseName("idx_users_department");
 
                     b.HasIndex("RoleId")
                         .HasDatabaseName("idx_users_role");
@@ -5929,6 +5982,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("ApprovedByUserId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.DepartmentDictionaryItem", "DepartmentDictionary")
+                        .WithMany("Users")
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.Role", "Role")
                         .WithMany("Users")
                         .HasForeignKey("RoleId")
@@ -5936,6 +5994,8 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("ApprovedBy");
+
+                    b.Navigation("DepartmentDictionary");
 
                     b.Navigation("Role");
                 });
@@ -6048,6 +6108,11 @@ namespace PayPlanner.Api.Migrations
             modelBuilder.Entity("PayPlanner.Api.Models.DealType", b =>
                 {
                     b.Navigation("Payments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.DepartmentDictionaryItem", b =>
+                {
+                    b.Navigation("Users");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.IncomeType", b =>

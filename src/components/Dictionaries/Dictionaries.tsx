@@ -23,6 +23,7 @@ type VisibleKind =
   | 'income-income'
   | 'income-expense'
   | 'payment-sources'
+  | 'departments'
   | 'payment-statuses'
   | 'document-statuses'
   | 'services'
@@ -79,6 +80,7 @@ type RowState =
 const makeKey = (): RowKey => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const TABS: { value: VisibleKind; label: string }[] = [
+  { value: 'departments', label: 'Отделы' },
   { value: 'deal-types', label: 'Тип сделки' },
   { value: 'income-income', label: 'Тип дохода' },
   { value: 'income-expense', label: 'Тип расхода' },
@@ -109,6 +111,8 @@ function defaultColor(kind: VisibleKind): string {
       return '#EF4444';
     case 'payment-sources':
       return '#8B5CF6';
+    case 'departments':
+      return '#2563EB';
     case 'payment-statuses':
       return '#0F766E';
     case 'document-statuses':
@@ -208,6 +212,7 @@ export const Dictionaries = () => {
     'income-income': [],
     'income-expense': [],
     'payment-sources': [],
+    departments: [],
     'payment-statuses': [],
     'document-statuses': [],
     'services': [],

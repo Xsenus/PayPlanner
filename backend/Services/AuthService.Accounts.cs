@@ -11,9 +11,52 @@ public partial class AuthService
     private IQueryable<User> QueryUsersWithRelations()
         => _context.Users
             .Include(x => x.Role)
+            .Include(x => x.DepartmentDictionary)
             .Include(x => x.CompanyAccesses)
                 .ThenInclude(x => x.LegalEntity)
             .Include(x => x.ExternalIdentities);
+
+    private async Task<(int? DepartmentId, string? DepartmentName)> ResolveDepartmentAssignmentAsync(
+        int? departmentId,
+        string? departmentName,
+        CancellationToken cancellationToken)
+    {
+        if (departmentId.HasValue)
+        {
+            var department = await _context.Departments
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == departmentId.Value, cancellationToken);
+
+            if (department is null)
+            {
+                throw new InvalidOperationException("DepartmentNotFound");
+            }
+
+            return (department.Id, department.Name);
+        }
+
+        if (departmentName is null)
+        {
+            return (null, null);
+        }
+
+        var normalizedName = NormalizeOptionalValue(departmentName);
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return (null, null);
+        }
+
+        var existing = await _context.Departments
+            .AsNoTracking()
+            .Where(item => item.Name == normalizedName)
+            .OrderByDescending(item => item.IsActive)
+            .ThenBy(item => item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return existing is null
+            ? (null, normalizedName)
+            : (existing.Id, existing.Name);
+    }
 
     private static ExternalIdentityDto MapExternalIdentity(UserExternalIdentity identity) => new()
     {
@@ -306,9 +349,15 @@ public partial class AuthService
                 user.IsEmployee = request.IsEmployee.Value;
             }
 
-            if (request.Department is not null)
+            if (request.DepartmentId.HasValue || request.Department is not null)
             {
-                user.Department = NormalizeOptionalValue(request.Department);
+                var department = await ResolveDepartmentAssignmentAsync(
+                    request.DepartmentId,
+                    request.Department,
+                    cancellationToken);
+
+                user.DepartmentId = department.DepartmentId;
+                user.Department = department.DepartmentName;
             }
 
             if (request.RequiresFinancialActionReason.HasValue)
@@ -678,7 +727,12 @@ public partial class AuthService
             targetUser.IsEmployee = true;
         }
 
-        if (string.IsNullOrWhiteSpace(targetUser.Department) && !string.IsNullOrWhiteSpace(sourceUser.Department))
+        if (!targetUser.DepartmentId.HasValue && sourceUser.DepartmentId.HasValue)
+        {
+            targetUser.DepartmentId = sourceUser.DepartmentId;
+            targetUser.Department = sourceUser.Department;
+        }
+        else if (string.IsNullOrWhiteSpace(targetUser.Department) && !string.IsNullOrWhiteSpace(sourceUser.Department))
         {
             targetUser.Department = sourceUser.Department;
         }

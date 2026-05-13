@@ -23,6 +23,7 @@ public class User
     public string? Viber { get; set; }
 
     public bool IsEmployee { get; set; } = false;
+    public int? DepartmentId { get; set; }
     public string? Department { get; set; }
     public bool RequiresFinancialActionReason { get; set; } = false;
     public DateTime? EmploymentStartDate { get; set; }
@@ -37,6 +38,7 @@ public class User
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public Role? Role { get; set; }
+    public DepartmentDictionaryItem? DepartmentDictionary { get; set; }
     public User? ApprovedBy { get; set; }
 
     public ICollection<Act> Acts { get; set; } = new List<Act>();

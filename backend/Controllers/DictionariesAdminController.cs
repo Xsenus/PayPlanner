@@ -352,6 +352,88 @@ public class DictionariesAdminController : ControllerBase
         return Ok(new { e.Id, e.IsActive });
     }
 
+    // DepartmentDictionaryItem
+    [HttpPost("departments")]
+    public async Task<IActionResult> CreateDepartment([FromBody] DepartmentDictionaryItem m)
+    {
+        m.Name = (m.Name ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(m.Name)) return BadRequest("Название отдела обязательно.");
+        m.Description = m.Description ?? string.Empty;
+        m.ColorHex = string.IsNullOrWhiteSpace(m.ColorHex) ? "#2563EB" : m.ColorHex.Trim();
+        m.CreatedAt = DateTime.UtcNow;
+        _db.Departments.Add(m);
+        await _db.SaveChangesAsync();
+
+        var users = await _db.Users
+            .Where(user => !user.DepartmentId.HasValue && user.Department == m.Name)
+            .ToListAsync();
+        foreach (var user in users)
+        {
+            user.DepartmentId = m.Id;
+            user.Department = m.Name;
+            user.UpdatedAt = DateTime.UtcNow;
+        }
+
+        if (users.Count > 0)
+        {
+            await _db.SaveChangesAsync();
+        }
+
+        return Created($"/api/dictionaries/departments/{m.Id}", m);
+    }
+
+    [HttpPut("departments/{id:int}")]
+    public async Task<IActionResult> UpdateDepartment(int id, [FromBody] DepartmentDictionaryItem m)
+    {
+        var e = await _db.Departments.FindAsync(id);
+        if (e is null) return NotFound();
+
+        var nextName = (m.Name ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(nextName)) return BadRequest("Название отдела обязательно.");
+
+        var previousName = e.Name;
+        e.Name = nextName;
+        e.Description = m.Description ?? string.Empty;
+        e.ColorHex = string.IsNullOrWhiteSpace(m.ColorHex) ? "#2563EB" : m.ColorHex.Trim();
+        e.IsActive = m.IsActive;
+
+        var users = await _db.Users
+            .Where(user => user.DepartmentId == id || user.Department == previousName)
+            .ToListAsync();
+        foreach (var user in users)
+        {
+            user.DepartmentId = id;
+            user.Department = e.Name;
+            user.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(e);
+    }
+
+    [HttpDelete("departments/{id:int}")]
+    public async Task<IActionResult> DeleteDepartment(int id)
+    {
+        var e = await _db.Departments.FindAsync(id);
+        if (e is null) return NotFound();
+        if (await _db.Users.AsNoTracking().AnyAsync(user => user.DepartmentId == id || user.Department == e.Name))
+            return InUseError(e.Name);
+
+        _db.Departments.Remove(e);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpPost("departments/{id:int}/toggle")]
+    public async Task<IActionResult> ToggleDepartment(int id)
+    {
+        var e = await _db.Departments.FindAsync(id);
+        if (e is null) return NotFound();
+        e.IsActive = !e.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(new { e.Id, e.IsActive });
+    }
+
     // ServiceDictionaryItem
     [HttpPost("services")]
     public async Task<IActionResult> CreateService([FromBody] ServiceDictionaryItem m)

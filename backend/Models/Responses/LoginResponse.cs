@@ -23,6 +23,7 @@ namespace PayPlanner.Api.Models.Responses
         public string? Messenger { get; set; }
         public string? Viber { get; set; }
         public bool IsEmployee { get; set; }
+        public int? DepartmentId { get; set; }
         public string? Department { get; set; }
         public bool RequiresFinancialActionReason { get; set; }
         public DateTime? EmploymentStartDate { get; set; }

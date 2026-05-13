@@ -93,6 +93,15 @@ public sealed partial class DatabaseImportService
         target.CreatedAt = source.CreatedAt;
     }
 
+    private static void CopyDepartment(DepartmentDictionaryItem source, DepartmentDictionaryItem target)
+    {
+        target.Name = source.Name.Trim();
+        target.Description = source.Description;
+        target.ColorHex = source.ColorHex;
+        target.IsActive = source.IsActive;
+        target.CreatedAt = source.CreatedAt;
+    }
+
     private static void CopyCountry(CountryDictionaryItem source, CountryDictionaryItem target)
     {
         target.Name = source.Name.Trim();
@@ -214,7 +223,7 @@ public sealed partial class DatabaseImportService
         target.UpdatedAt = source.UpdatedAt;
     }
 
-    private static void CopyUser(User source, User target, int roleId, int? approvedByUserId)
+    private static void CopyUser(User source, User target, int roleId, int? approvedByUserId, ImportMaps maps)
     {
         target.Email = NormalizeEmail(source.Email);
         target.PasswordHash = source.PasswordHash;
@@ -231,6 +240,7 @@ public sealed partial class DatabaseImportService
         target.Messenger = source.Messenger;
         target.Viber = source.Viber;
         target.IsEmployee = source.IsEmployee;
+        target.DepartmentId = source.DepartmentId.HasValue ? MapId(maps.Departments, source.DepartmentId.Value) : null;
         target.Department = source.Department;
         target.RequiresFinancialActionReason = source.RequiresFinancialActionReason;
         target.EmploymentStartDate = source.EmploymentStartDate;

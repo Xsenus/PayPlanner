@@ -173,7 +173,8 @@ public partial class AuthService
             Messenger = user.Messenger,
             Viber = user.Viber,
             IsEmployee = user.IsEmployee,
-            Department = user.Department,
+            DepartmentId = user.DepartmentId,
+            Department = user.DepartmentDictionary?.Name ?? user.Department,
             RequiresFinancialActionReason = user.RequiresFinancialActionReason,
             EmploymentStartDate = user.EmploymentStartDate,
             EmploymentEndDate = user.EmploymentEndDate,
@@ -395,13 +396,19 @@ public partial class AuthService
             throw new InvalidOperationException("RoleNotFound");
         }
 
+        var departmentAssignment = await ResolveDepartmentAssignmentAsync(
+            request.DepartmentId,
+            request.Department,
+            CancellationToken.None);
+
         var user = new User
         {
             Email = email,
             FullName = (request.FullName ?? string.Empty).Trim(),
             RoleId = requestedRoleId,
             IsEmployee = request.IsEmployee,
-            Department = NormalizeOptionalValue(request.Department),
+            DepartmentId = departmentAssignment.DepartmentId,
+            Department = departmentAssignment.DepartmentName,
             RequiresFinancialActionReason = request.RequiresFinancialActionReason,
             IsActive = IsProtectedSystemUserEmail(email) || request.IsActive,
             IsApproved = true,
