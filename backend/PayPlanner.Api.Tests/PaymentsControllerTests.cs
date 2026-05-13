@@ -828,6 +828,93 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task UpdateInvoiceManaged_PreservesSubmittedPaymentClassificationForInstallment()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Invoice client" };
+        var invoice = new Invoice { Number = "33", Date = new DateTime(2026, 4, 3) };
+        var bankSource = new PaymentSource { Name = "Bank" };
+        var cashSource = new PaymentSource { Name = "Cash" };
+        var parentIncomeType = new IncomeType { Name = "Parent income", PaymentType = PaymentType.Income };
+        var serviceIncomeType = new IncomeType { Name = "Service income", PaymentType = PaymentType.Income };
+        var parentDealType = new DealType { Name = "Parent deal" };
+        var legalDealType = new DealType { Name = "Legal services" };
+        var draftPaymentStatus = new PaymentStatusEntity { Name = "Draft" };
+        var completedPaymentStatus = new PaymentStatusEntity { Name = "Completed" };
+        db.AddRange(
+            client,
+            invoice,
+            bankSource,
+            cashSource,
+            parentIncomeType,
+            serviceIncomeType,
+            parentDealType,
+            legalDealType,
+            draftPaymentStatus,
+            completedPaymentStatus);
+        await db.SaveChangesAsync();
+
+        var representative = CreatePayment(invoice.Date, 200_000m, "Invoice 33");
+        representative.DocumentKind = DocumentKind.Invoice;
+        representative.InvoiceId = invoice.Id;
+        representative.Account = invoice.Number;
+        representative.AccountDate = invoice.Date;
+        representative.ClientId = client.Id;
+        representative.PaymentSourceId = bankSource.Id;
+        representative.IncomeTypeId = parentIncomeType.Id;
+        representative.DealTypeId = parentDealType.Id;
+        representative.PaymentStatusId = draftPaymentStatus.Id;
+
+        var installment = CreatePayment(new DateTime(2026, 4, 20), 25_000m, "Installment 1/8");
+        installment.InvoiceId = invoice.Id;
+        installment.Account = invoice.Number;
+        installment.AccountDate = invoice.Date;
+        installment.ClientId = client.Id;
+        installment.SystemNotes = $"{InstallmentPaymentMarker} {{\"Sequence\":1}}";
+        db.Payments.AddRange(representative, installment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var paidDate = new DateTime(2026, 4, 20);
+        var update = CreatePayment(installment.Date, installment.Amount, "Cash installment 1/8");
+        update.InvoiceId = null;
+        update.Account = "BROKEN";
+        update.AccountDate = new DateTime(2030, 1, 1);
+        update.SystemNotes = installment.SystemNotes;
+        update.PaymentSourceId = cashSource.Id;
+        update.IncomeTypeId = serviceIncomeType.Id;
+        update.DealTypeId = legalDealType.Id;
+        update.PaymentStatusId = completedPaymentStatus.Id;
+        update.Status = PaymentStatus.Completed;
+        update.PaidAmount = installment.Amount;
+        update.PaidDate = paidDate;
+        update.LastPaymentDate = paidDate;
+
+        var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(invoice.Id, updated.InvoiceId);
+        Assert.Equal(invoice.Number, updated.Account);
+        Assert.Equal(cashSource.Id, updated.PaymentSourceId);
+        Assert.Equal(serviceIncomeType.Id, updated.IncomeTypeId);
+        Assert.Equal(legalDealType.Id, updated.DealTypeId);
+        Assert.Equal(completedPaymentStatus.Id, updated.PaymentStatusId);
+        Assert.Equal(PaymentStatus.Completed, updated.Status);
+        Assert.True(updated.IsPaid);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == installment.Id);
+        Assert.Equal(cashSource.Id, stored.PaymentSourceId);
+        Assert.Equal(serviceIncomeType.Id, stored.IncomeTypeId);
+        Assert.Equal(legalDealType.Id, stored.DealTypeId);
+        Assert.Equal(completedPaymentStatus.Id, stored.PaymentStatusId);
+        Assert.Equal(PaymentStatus.Completed, stored.Status);
+    }
+
+    [Fact]
     public async Task UpdateInvoiceManaged_UpdatesRepresentativeInvoicePayment_AndPreservesDocumentKind()
     {
         await using var db = await CreateContextAsync();

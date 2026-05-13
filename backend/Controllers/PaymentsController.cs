@@ -2100,11 +2100,11 @@ public class PaymentsController : ControllerBase
         payment.ContractId = representative.ContractId;
         payment.ClientCaseId = representative.ClientCaseId;
         payment.ClientCaseReference = representative.ClientCaseReference;
-        payment.PaymentSourceId = representative.PaymentSourceId;
-        payment.ServiceId = representative.ServiceId;
-        payment.IncomeTypeId = representative.IncomeTypeId;
-        payment.DealTypeId = representative.DealTypeId;
-        payment.PaymentStatusId = representative.PaymentStatusId;
+        payment.PaymentSourceId ??= representative.PaymentSourceId;
+        payment.ServiceId ??= representative.ServiceId;
+        payment.IncomeTypeId ??= representative.IncomeTypeId;
+        payment.DealTypeId ??= representative.DealTypeId;
+        payment.PaymentStatusId ??= representative.PaymentStatusId;
         payment.CounterpartyName = null;
 
         await SyncPaymentResponsiblesAsync(payment, representative.Responsibles.Select(item => item.UserId), ct);
