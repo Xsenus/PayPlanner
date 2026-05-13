@@ -163,6 +163,7 @@ public class ActsControllerTests
                     User = new ClaimsPrincipal(new ClaimsIdentity(
                     [
                         new Claim(ClaimTypes.NameIdentifier, actor.Id.ToString()),
+                        new Claim(ClaimTypes.Role, "admin"),
                     ], "TestAuth")),
                 },
             },

@@ -3944,6 +3944,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<string>("ViewScope")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("all");
+
                     b.HasKey("Id");
 
                     b.HasIndex("RoleId", "Section")
@@ -4985,6 +4992,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<bool>("IsEmployee")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("Department")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
                     b.Property<string>("LastName")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -5061,6 +5072,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("IsEmployee")
                         .HasDatabaseName("idx_users_isemployee");
+
+                    b.HasIndex("Department")
+                        .HasDatabaseName("idx_users_department");
 
                     b.HasIndex("RoleId")
                         .HasDatabaseName("idx_users_role");

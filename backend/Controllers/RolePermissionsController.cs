@@ -102,6 +102,7 @@ public class RolePermissionsController : ControllerBase
                     CanDelete = values.CanDelete,
                     CanExport = values.CanExport,
                     CanViewAnalytics = values.CanViewAnalytics,
+                    ViewScope = values.ViewScope,
                 });
             }
         }
@@ -165,6 +166,7 @@ public class RolePermissionsController : ControllerBase
                     CanDelete = values.CanDelete,
                     CanExport = values.CanExport,
                     CanViewAnalytics = values.CanViewAnalytics,
+                    ViewScope = values.ViewScope,
                 });
             }
         }
@@ -201,6 +203,7 @@ public class RolePermissionsController : ControllerBase
                         CanDelete = permission.CanDelete,
                         CanExport = permission.CanExport,
                         CanViewAnalytics = permission.CanViewAnalytics,
+                        ViewScope = NormalizeViewScope(RolePermissionCatalog.Calendar, permission.ViewScope),
                     };
                     break;
                 case RolePermissionCatalog.Reports:
@@ -278,13 +281,16 @@ public class RolePermissionsController : ControllerBase
         entity.CanDelete = values.CanDelete;
         entity.CanExport = values.CanExport;
         entity.CanViewAnalytics = values.CanViewAnalytics;
+        entity.ViewScope = values.ViewScope;
     }
 
     private static RolePermissionValues Normalize(string section, RolePermissionValues values)
     {
+        var viewScope = NormalizeViewScope(section, values.ViewScope);
+
         if (!values.CanView)
         {
-            return new RolePermissionValues(false, false, false, false, false, false);
+            return new RolePermissionValues(false, false, false, false, false, false, viewScope);
         }
 
         var canExport = string.Equals(section, RolePermissionCatalog.Roles, StringComparison.OrdinalIgnoreCase)
@@ -304,15 +310,22 @@ public class RolePermissionsController : ControllerBase
                 CanDelete = false,
                 CanExport = false,
                 CanViewAnalytics = false,
+                ViewScope = viewScope,
             };
         }
 
         return values with
         {
             CanExport = canExport,
-            CanViewAnalytics = canViewAnalytics
+            CanViewAnalytics = canViewAnalytics,
+            ViewScope = viewScope
         };
     }
+
+    private static string NormalizeViewScope(string section, string? value)
+        => RolePermissionCatalog.HasDataScope(section)
+            ? DataVisibilityScope.Normalize(value, DataVisibilityScope.Own)
+            : DataVisibilityScope.All;
 
     private static bool IsProtectedRole(string roleName)
         => string.Equals(roleName, SystemAdministratorRoleName, StringComparison.Ordinal);
@@ -325,6 +338,7 @@ public class RolePermissionsController : ControllerBase
             CanEdit = permission.CanEdit,
             CanDelete = permission.CanDelete,
             CanExport = permission.CanExport,
+            ViewScope = NormalizeViewScope(permission.Section, permission.ViewScope),
         };
 
     private static RolePermissionValues ToValues(CalendarPermissionsDto section)
@@ -334,7 +348,8 @@ public class RolePermissionsController : ControllerBase
             section.CanEdit,
             section.CanDelete,
             section.CanExport,
-            section.CanViewAnalytics);
+            section.CanViewAnalytics,
+            NormalizeViewScope(RolePermissionCatalog.Calendar, section.ViewScope));
 
     private static RolePermissionValues ToValues(MenuSectionPermissionsDto section)
         => new(
@@ -343,5 +358,6 @@ public class RolePermissionsController : ControllerBase
             section.CanEdit,
             section.CanDelete,
             section.CanExport,
-            false);
+            false,
+            DataVisibilityScope.Normalize(section.ViewScope, DataVisibilityScope.Own));
 }

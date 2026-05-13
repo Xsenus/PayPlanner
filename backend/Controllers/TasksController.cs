@@ -9,6 +9,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
@@ -1416,12 +1417,7 @@ public class TasksController : ControllerBase
             .Include(task => task.Participants)
                 .ThenInclude(participant => participant.User)
             .AsQueryable();
-        return access.IsAdmin
-            ? query
-            : query.Where(task =>
-                task.AssigneeUserId == access.UserId ||
-                task.AuthorUserId == access.UserId ||
-                task.Participants.Any(participant => participant.UserId == access.UserId));
+        return query.ApplyTaskVisibility(access.Visibility);
     }
 
     private async Task<TaskAccess?> GetTaskAccessAsync(CancellationToken ct)
@@ -1432,9 +1428,15 @@ public class TasksController : ControllerBase
             return null;
         }
 
-        var isAdmin = await _db.IsUserAdminAsync(userId.Value, ct);
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        if (visibility is null)
+        {
+            return null;
+        }
+
+        var isAdmin = visibility.IsAdmin;
         var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Tasks, ct);
-        return new TaskAccess(userId.Value, User.GetDisplayName(), isAdmin, permission);
+        return new TaskAccess(userId.Value, User.GetDisplayName(), isAdmin, permission, visibility);
     }
 
     private async Task<TaskJournalSettingsDto> GetTaskJournalSettingsAsync(CancellationToken ct)
@@ -2396,7 +2398,12 @@ public class TasksController : ControllerBase
             _ => 3,
         };
 
-    private sealed record TaskAccess(int UserId, string DisplayName, bool IsAdmin, RolePermission? Permission);
+    private sealed record TaskAccess(
+        int UserId,
+        string DisplayName,
+        bool IsAdmin,
+        RolePermission? Permission,
+        DataVisibilityAccess Visibility);
 
     private sealed record TaskParticipantDraft(
         int? UserId,

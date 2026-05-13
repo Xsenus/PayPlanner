@@ -46,6 +46,9 @@ public class ActsController : ControllerBase
         _emailService = emailService;
     }
 
+    private Task<DataVisibilityAccess?> ResolveActsVisibilityAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] DateTime? from,
@@ -71,6 +74,11 @@ public class ActsController : ControllerBase
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
+        var visibility = await ResolveActsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
 
         var normalizedWorkflowStatus = NormalizeActWorkflowStatusOrNull(workflowStatus);
         if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
@@ -79,6 +87,7 @@ public class ActsController : ControllerBase
         }
 
         var query = _db.Acts.AsNoTracking()
+            .ApplyActVisibility(visibility)
             .ApplyActFilters(from, to, status, type, clientId, responsibleId, search)
             .ApplyActSort(sortBy, sortDir);
 
@@ -209,7 +218,14 @@ public class ActsController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ActDto>> GetById(int id, CancellationToken ct)
     {
+        var visibility = await ResolveActsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var dto = await _db.Acts.AsNoTracking()
+            .ApplyActVisibility(visibility)
             .Where(a => a.Id == id)
             .Select(MapToDtoExpression)
             .FirstOrDefaultAsync(ct);
@@ -403,6 +419,12 @@ public class ActsController : ControllerBase
         [FromQuery] int? invoiceId = null,
         [FromQuery] int? paymentId = null)
     {
+        var visibility = await ResolveActsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var normalizedWorkflowStatus = NormalizeActWorkflowStatusOrNull(workflowStatus);
         if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
         {
@@ -410,6 +432,7 @@ public class ActsController : ControllerBase
         }
 
         var query = _db.Acts.AsNoTracking()
+            .ApplyActVisibility(visibility)
             .ApplyActFilters(from, to, status, type, clientId, responsibleId, search);
 
         if (legalEntityId.HasValue)
@@ -615,7 +638,14 @@ public class ActsController : ControllerBase
             return ValidationError(nameof(request.WorkflowStatus), "Unknown act workflow status.");
         }
 
+        var visibility = await ResolveActsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var act = await _db.Acts
+            .ApplyActVisibility(visibility)
             .Include(a => a.LineItems)
             .FirstOrDefaultAsync(a => a.Id == id, ct);
         if (act is null)
@@ -671,7 +701,14 @@ public class ActsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        var visibility = await ResolveActsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var act = await _db.Acts
+            .ApplyActVisibility(visibility)
             .Include(item => item.LineItems)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (act is null)
@@ -921,8 +958,15 @@ public class ActsController : ControllerBase
 
     private async Task<Act?> LoadActDocumentAsync(int id, CancellationToken ct)
     {
+        var visibility = await ResolveActsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return null;
+        }
+
         return await _db.Acts
             .AsNoTracking()
+            .ApplyActVisibility(visibility)
             .Include(act => act.Client)
                 .ThenInclude(client => client!.Addresses)
             .Include(act => act.Client)
@@ -1303,12 +1347,21 @@ public class ActsController : ControllerBase
     }
 
     private async Task<Act?> LoadActForWorkflowAsync(int id, CancellationToken ct)
-        => await _db.Acts
+    {
+        var visibility = await ResolveActsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return null;
+        }
+
+        return await _db.Acts
+            .ApplyActVisibility(visibility)
             .Include(act => act.Client)
             .Include(act => act.Responsible)
             .Include(act => act.Invoice)
             .Include(act => act.LineItems)
             .FirstOrDefaultAsync(act => act.Id == id, ct);
+    }
 
     private static string? NormalizeActWorkflowStatusOrNull(string? value)
         => ActWorkflowStatus.Normalize(value);

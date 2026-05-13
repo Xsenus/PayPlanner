@@ -21,6 +21,9 @@ public sealed partial class DatabaseImportService
         target.CanDelete = source.CanDelete;
         target.CanExport = source.CanExport;
         target.CanViewAnalytics = source.CanViewAnalytics;
+        target.ViewScope = RolePermissionCatalog.HasDataScope(source.Section)
+            ? DataVisibilityScope.Normalize(source.ViewScope, DataVisibilityScope.Own)
+            : DataVisibilityScope.All;
     }
 
     private static void CopyDealType(DealType source, DealType target)
@@ -228,6 +231,7 @@ public sealed partial class DatabaseImportService
         target.Messenger = source.Messenger;
         target.Viber = source.Viber;
         target.IsEmployee = source.IsEmployee;
+        target.Department = source.Department;
         target.RequiresFinancialActionReason = source.RequiresFinancialActionReason;
         target.EmploymentStartDate = source.EmploymentStartDate;
         target.EmploymentEndDate = source.EmploymentEndDate;

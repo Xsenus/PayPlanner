@@ -41,6 +41,11 @@ public class AccountsController : ControllerBase
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
 
         if (payablesOnly)
         {
@@ -48,7 +53,7 @@ public class AccountsController : ControllerBase
         }
 
         var candidateQuery = ApplyRegistryFilters(
-            BuildInvoiceCandidateQuery(),
+            BuildInvoiceCandidateQuery(visibility),
             from,
             to,
             search,
@@ -210,6 +215,7 @@ public class AccountsController : ControllerBase
 
         var paymentAggregateItems = await _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
             .Where(payment =>
                 (payment.InvoiceId.HasValue && canonicalIds.Contains(payment.InvoiceId.Value))
                 || (!payment.InvoiceId.HasValue
@@ -480,8 +486,15 @@ public class AccountsController : ControllerBase
         [FromQuery] string? clientRole = null,
         CancellationToken ct = default)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var query = _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
             .WithPaymentIncludes()
             .Include(payment => payment.InvoiceClientCases)
             .Where(payment => payment.Type == PaymentType.Expense)
@@ -616,7 +629,14 @@ public class AccountsController : ControllerBase
         [FromQuery] int take = 50,
         CancellationToken ct = default)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var query = _db.Payments.AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
             .Where(payment => payment.DocumentKind == DocumentKind.Invoice && payment.Account != null && payment.Account != string.Empty);
 
         if (clientId.HasValue)
@@ -679,9 +699,15 @@ public class AccountsController : ControllerBase
         return Ok(result);
     }
 
-    private IQueryable<Payment> BuildInvoiceCandidateQuery()
+    private IQueryable<Payment> BuildInvoiceCandidateQuery(DataVisibilityAccess? visibility = null)
     {
-        return _db.Payments.AsNoTracking()
+        var query = _db.Payments.AsNoTracking();
+        if (visibility is not null)
+        {
+            query = query.ApplyPaymentVisibility(visibility);
+        }
+
+        return query
             .Where(payment =>
                 (payment.InvoiceId != null && payment.Invoice != null)
                 || (payment.DocumentKind == DocumentKind.Invoice && payment.Account != null && payment.Account != string.Empty));

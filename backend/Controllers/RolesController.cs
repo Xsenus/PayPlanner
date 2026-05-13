@@ -313,7 +313,10 @@ public class RolesController : ControllerBase
                     CanEdit = sourcePermission.CanEdit,
                     CanDelete = sourcePermission.CanDelete,
                     CanExport = sourcePermission.CanExport,
-                    CanViewAnalytics = sourcePermission.CanViewAnalytics
+                    CanViewAnalytics = sourcePermission.CanViewAnalytics,
+                    ViewScope = RolePermissionCatalog.HasDataScope(section)
+                        ? DataVisibilityScope.Normalize(sourcePermission.ViewScope, DataVisibilityScope.Own)
+                        : DataVisibilityScope.All
                 });
                 continue;
             }
@@ -328,7 +331,8 @@ public class RolesController : ControllerBase
                 CanEdit = fallback.CanEdit,
                 CanDelete = fallback.CanDelete,
                 CanExport = fallback.CanExport,
-                CanViewAnalytics = fallback.CanViewAnalytics
+                CanViewAnalytics = fallback.CanViewAnalytics,
+                ViewScope = fallback.ViewScope
             });
         }
 

@@ -589,6 +589,7 @@ namespace PayPlanner.Api.Services
                         CanDelete = values.CanDelete,
                         CanExport = values.CanExport,
                         CanViewAnalytics = values.CanViewAnalytics,
+                        ViewScope = values.ViewScope,
                     });
                 }
             }

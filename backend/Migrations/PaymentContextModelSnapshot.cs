@@ -3849,6 +3849,13 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ViewScope")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("all");
+
                     b.HasKey("Id");
 
                     b.HasIndex("RoleId", "Section")
@@ -4859,6 +4866,10 @@ namespace PayPlanner.Api.Migrations
                     b.Property<bool>("IsEmployee")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Department")
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("LastName")
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
@@ -4935,6 +4946,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsEmployee")
                         .HasDatabaseName("idx_users_isemployee");
+
+                    b.HasIndex("Department")
+                        .HasDatabaseName("idx_users_department");
 
                     b.HasIndex("RoleId")
                         .HasDatabaseName("idx_users_role");

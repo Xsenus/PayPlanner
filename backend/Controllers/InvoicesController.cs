@@ -80,11 +80,12 @@ public class InvoicesController : ControllerBase
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
-        var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId);
-        if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
         {
             return Unauthorized();
         }
+        var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId, visibility);
 
         var normalizedWorkflowStatus = NormalizeInvoiceWorkflowStatusOrNull(workflowStatus);
         if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
@@ -110,7 +111,8 @@ public class InvoicesController : ControllerBase
                 normalizedWorkflowStatus,
                 clientRole,
                 includeMetadata: true,
-                ct);
+                ct,
+                visibility);
 
             statusItems = statusItems
                 .Where(item => item.Status == status.Value)
@@ -132,7 +134,7 @@ public class InvoicesController : ControllerBase
             return Ok(new { items = statusPageItems, total = statusTotal, page, pageSize });
         }
 
-        var query = BuildInvoiceQuery();
+        var query = BuildInvoiceQuery(visibility);
         query = ApplyFilters(
             query,
             from,
@@ -193,11 +195,12 @@ public class InvoicesController : ControllerBase
         [FromQuery] int? actId = null,
         [FromQuery] int? paymentId = null)
     {
-        var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId);
-        if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
         {
             return Unauthorized();
         }
+        var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId, visibility);
 
         var normalizedWorkflowStatus = NormalizeInvoiceWorkflowStatusOrNull(workflowStatus);
         if (!string.IsNullOrWhiteSpace(workflowStatus) && normalizedWorkflowStatus is null)
@@ -222,7 +225,8 @@ public class InvoicesController : ControllerBase
             normalizedWorkflowStatus,
             clientRole,
             includeMetadata: false,
-            ct);
+            ct,
+            visibility);
 
         if (status.HasValue)
         {
@@ -314,7 +318,13 @@ public class InvoicesController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<InvoiceDto>> GetById(int id, CancellationToken ct)
     {
-        var raw = await BuildInvoiceQuery()
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var raw = await BuildInvoiceQuery(visibility)
             .Where(x => x.Payment.Id == id)
             .Select(ProjectionRaw)
             .FirstOrDefaultAsync(ct);
@@ -2056,17 +2066,12 @@ public class InvoicesController : ControllerBase
             return BadRequest(new { message = "Не выбраны счета для удаления." });
         }
 
-        var paymentsQuery = BuildEditableInvoicePaymentsQuery();
-        var effectiveResponsibleId = ResolveVisibleResponsibleId(null);
-        if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
         {
             return Unauthorized();
         }
-
-        if (effectiveResponsibleId.HasValue)
-        {
-            paymentsQuery = paymentsQuery.Where(payment => payment.Responsibles.Any(row => row.UserId == effectiveResponsibleId.Value));
-        }
+        var paymentsQuery = BuildEditableInvoicePaymentsQuery(visibility);
 
         var payments = await paymentsQuery
             .Include(payment => payment.Invoice)
@@ -2186,17 +2191,12 @@ public class InvoicesController : ControllerBase
             return BadRequest(new { message = "Указанный ответственный не найден." });
         }
 
-        var paymentsQuery = BuildEditableInvoicePaymentsQuery();
-        var effectiveResponsibleId = ResolveVisibleResponsibleId(null);
-        if (!User.IsInRole("admin") && !effectiveResponsibleId.HasValue)
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
         {
             return Unauthorized();
         }
-
-        if (effectiveResponsibleId.HasValue)
-        {
-            paymentsQuery = paymentsQuery.Where(payment => payment.Responsibles.Any(row => row.UserId == effectiveResponsibleId.Value));
-        }
+        var paymentsQuery = BuildEditableInvoicePaymentsQuery(visibility);
 
         var payments = await paymentsQuery
             .Include(payment => payment.Invoice)
@@ -2406,9 +2406,9 @@ public class InvoicesController : ControllerBase
         return _invoiceDocumentPdfService.RenderAsync(documentHtml, ct);
     }
 
-    private IQueryable<InvoiceQueryItem> BuildInvoiceQuery()
+    private IQueryable<InvoiceQueryItem> BuildInvoiceQuery(DataVisibilityAccess? visibility = null)
     {
-        var payments = BuildVisibleInvoicePaymentsQuery(trackChanges: false);
+        var payments = BuildVisibleInvoicePaymentsQuery(trackChanges: false, visibility);
 
         return payments.Select(payment => new InvoiceQueryItem
         {
@@ -2422,18 +2422,23 @@ public class InvoicesController : ControllerBase
         });
     }
 
-    private IQueryable<Payment> BuildEditableInvoicePaymentsQuery()
+    private IQueryable<Payment> BuildEditableInvoicePaymentsQuery(DataVisibilityAccess? visibility = null)
     {
-        return BuildVisibleInvoicePaymentsQuery(trackChanges: true);
+        return BuildVisibleInvoicePaymentsQuery(trackChanges: true, visibility);
     }
 
-    private IQueryable<Payment> BuildVisibleInvoicePaymentsQuery(bool trackChanges)
+    private IQueryable<Payment> BuildVisibleInvoicePaymentsQuery(bool trackChanges, DataVisibilityAccess? visibility = null)
     {
         var payments = trackChanges
             ? _db.Payments
             : _db.Payments.AsNoTracking();
 
-        return payments.Where(payment =>
+        var visiblePayments = visibility is null
+            ? payments
+            : payments.ApplyPaymentVisibility(visibility);
+
+        return visiblePayments
+            .Where(payment =>
             (payment.InvoiceId.HasValue
                 && payment.Invoice != null
                 && payment.Id == _db.Payments
@@ -3470,9 +3475,10 @@ public class InvoicesController : ControllerBase
         string? workflowStatus,
         string? clientRole,
         bool includeMetadata,
-        CancellationToken ct)
+        CancellationToken ct,
+        DataVisibilityAccess? visibility = null)
     {
-        var query = BuildInvoiceQuery();
+        var query = BuildInvoiceQuery(visibility);
         query = ApplyFilters(query, from, to, null, clientId, legalEntityId, contractId, caseId, responsibleId, search, type, clientRole, clientIds);
         query = ApplyRelatedDocumentFilters(query, actId, paymentId);
         if (!string.IsNullOrWhiteSpace(workflowStatus))
@@ -5547,14 +5553,21 @@ public class InvoicesController : ControllerBase
             : "max-plus-one";
     }
 
-    private int? ResolveVisibleResponsibleId(int? requestedResponsibleId)
+    private static int? ResolveVisibleResponsibleId(int? requestedResponsibleId, DataVisibilityAccess visibility)
     {
-        if (User.IsInRole("admin"))
+        if (visibility.SeesAll)
         {
             return requestedResponsibleId;
         }
 
-        return GetUserId(User);
+        if (requestedResponsibleId.HasValue)
+        {
+            return visibility.CanSeeUser(requestedResponsibleId.Value)
+                ? requestedResponsibleId
+                : -1;
+        }
+
+        return null;
     }
 
     private static int? GetUserId(ClaimsPrincipal user)

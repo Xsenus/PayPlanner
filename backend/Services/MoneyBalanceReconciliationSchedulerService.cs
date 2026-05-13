@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models.Responses;
+using System.Security.Claims;
 
 namespace PayPlanner.Api.Services;
 
@@ -81,7 +82,13 @@ public sealed class MoneyBalanceReconciliationSchedulerService : BackgroundServi
 
         controller.ControllerContext = new ControllerContext
         {
-            HttpContext = new DefaultHttpContext(),
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.Role, "admin"),
+                ], "Scheduler")),
+            },
         };
 
         var action = await controller.RunBalanceReconciliation(

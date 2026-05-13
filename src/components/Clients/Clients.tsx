@@ -262,7 +262,7 @@ type ColumnDefinition = {
 const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { id: 'id', label: 'ID', defaultWidth: 80, defaultVisible: false },
   { id: 'name', label: 'Клиент', defaultWidth: 220, defaultVisible: true, filterable: true },
-  { id: 'responsible', label: 'Ответственный', defaultWidth: 180, defaultVisible: true },
+  { id: 'responsible', label: 'Ответственный', defaultWidth: 180, defaultVisible: true, filterable: true },
   { id: 'status', label: 'Статус', defaultWidth: 160, defaultVisible: true, filterable: true },
   { id: 'company', label: 'Компания', defaultWidth: 180, defaultVisible: true, filterable: true },
   { id: 'email', label: 'Email', defaultWidth: 200, defaultVisible: true, filterable: true },

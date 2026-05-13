@@ -1351,6 +1351,10 @@ public class PaymentContext : DbContext
             entity.Property(e => e.CanDelete).HasDefaultValue(false);
             entity.Property(e => e.CanExport).HasDefaultValue(false);
             entity.Property(e => e.CanViewAnalytics).HasDefaultValue(false);
+            entity.Property(e => e.ViewScope)
+                  .HasMaxLength(32)
+                  .HasDefaultValue(DataVisibilityScope.All)
+                  .IsRequired();
 
             entity.HasIndex(e => new { e.RoleId, e.Section })
                   .IsUnique()
@@ -1392,6 +1396,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Instagram).HasMaxLength(100);
             entity.Property(e => e.Messenger).HasMaxLength(100);
             entity.Property(e => e.Viber).HasMaxLength(100);
+            entity.Property(e => e.Department).HasMaxLength(120);
 
             // --- Даты как date ---
             entity.Property(e => e.DateOfBirth).HasColumnType("date");
@@ -1427,6 +1432,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.UpdatedAt).HasDatabaseName("idx_users_updated");
             entity.HasIndex(e => e.ApprovedAt).HasDatabaseName("idx_users_approvedAt");
             entity.HasIndex(e => e.IsEmployee).HasDatabaseName("idx_users_isemployee");
+            entity.HasIndex(e => e.Department).HasDatabaseName("idx_users_department");
             entity.HasIndex(e => new { e.EmploymentStartDate, e.EmploymentEndDate })
                   .HasDatabaseName("idx_users_employment_range");
 

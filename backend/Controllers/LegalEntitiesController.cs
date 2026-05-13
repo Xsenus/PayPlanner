@@ -48,17 +48,8 @@ public class LegalEntitiesController : ControllerBase
 
     private sealed record MainCompanySettingsState(IReadOnlyList<int> CompanyIds, int? DefaultCompanyId);
 
-    private async Task<(int? UserId, bool IsAdmin)> GetCurrentAccessAsync(CancellationToken ct)
-    {
-        var currentUserId = User.GetUserId();
-        if (!currentUserId.HasValue)
-        {
-            return (null, IsAdmin());
-        }
-
-        var isAdmin = IsAdmin() || await _db.IsUserAdminAsync(currentUserId.Value, ct);
-        return (currentUserId, isAdmin);
-    }
+    private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
 
     private async Task<MainCompanySettingsState> LoadMainCompanySettingsStateAsync(CancellationToken ct)
     {
@@ -246,7 +237,7 @@ public class LegalEntitiesController : ControllerBase
         }
 
         var access = await GetCurrentAccessAsync(ct);
-        query = query.ApplyLegalEntityVisibility(access.IsAdmin, access.UserId);
+        query = query.ApplyLegalEntityVisibility(access);
 
         return query;
     }
@@ -254,7 +245,7 @@ public class LegalEntitiesController : ControllerBase
     private async Task<IQueryable<LegalEntity>> ApplyResponsibleVisibilityAsync(IQueryable<LegalEntity> query, CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
-        return query.ApplyLegalEntityVisibility(access.IsAdmin, access.UserId);
+        return query.ApplyLegalEntityVisibility(access);
     }
 
     private async Task<bool> ResponsibleUserExistsAsync(int? responsibleUserId, CancellationToken ct)
@@ -907,7 +898,7 @@ public class LegalEntitiesController : ControllerBase
     public async Task<ActionResult<LegalEntityDetailDto>> Create([FromBody] LegalEntityRequest request, CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
@@ -931,7 +922,7 @@ public class LegalEntitiesController : ControllerBase
 
         var responsibleUserId = access.IsAdmin
             ? request.ResponsibleUserId
-            : access.UserId.Value;
+            : access.UserId;
 
         if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
         {
@@ -1045,7 +1036,7 @@ public class LegalEntitiesController : ControllerBase
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
@@ -1791,7 +1782,7 @@ public class LegalEntitiesController : ControllerBase
         }
 
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }

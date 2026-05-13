@@ -138,6 +138,38 @@ public class MoneyOperationsController : ControllerBase
         _pdfService = pdfService;
     }
 
+    private Task<DataVisibilityAccess?> ResolveMoneyVisibilityAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+
+    private static IQueryable<MoneyOperationQueryRow> ApplyMoneyOperationVisibility(
+        IQueryable<MoneyOperationQueryRow> query,
+        DataVisibilityAccess? visibility)
+    {
+        if (visibility is null)
+        {
+            return query.Where(_ => false);
+        }
+
+        if (visibility.SeesAll)
+        {
+            return query;
+        }
+
+        var visibleUserIds = visibility.VisibleUserIds.ToArray();
+        return query.Where(item =>
+            item.ResponsibleUserId.HasValue
+            && visibleUserIds.Contains(item.ResponsibleUserId.Value));
+    }
+
+    private async Task<bool> CanAccessCustomMoneyOperationAsync(
+        int id,
+        DataVisibilityAccess visibility,
+        CancellationToken ct)
+        => await ApplyMoneyOperationVisibility(
+                BuildMoneyOperationsQuery(null, null, null, null, null, null, null, null, null),
+                visibility)
+            .AnyAsync(item => item.Id == id && !item.IsReadonly, ct);
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] DateTime? from,
@@ -152,10 +184,19 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? search = null,
         CancellationToken ct = default)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var list = await SqliteRetryHelper.ExecuteAsync(
             async cancellationToken =>
             {
-                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
+                var query = ApplyMoneyOperationVisibility(
+                    BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search),
+                    visibility);
+                var rows = await query
                     .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
                     .OrderByDescending(item => item.Date)
                     .ThenByDescending(item => item.Id)
@@ -187,10 +228,17 @@ public class MoneyOperationsController : ControllerBase
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 5, 200);
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
 
         var response = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
-            var query = BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
+            var query = ApplyMoneyOperationVisibility(
+                    BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search),
+                    visibility)
                 .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value);
             var total = await query.CountAsync(cancellationToken);
             var itemRows = await query
@@ -218,7 +266,9 @@ public class MoneyOperationsController : ControllerBase
                 .FirstOrDefaultAsync(cancellationToken);
 
             var openingQuery = from.HasValue
-                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, direction, MoneyOperationAccountingType.Fact, moneyAccountId, accountName, categoryName, search)
+                ? ApplyMoneyOperationVisibility(
+                    BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, direction, MoneyOperationAccountingType.Fact, moneyAccountId, accountName, categoryName, search),
+                    visibility)
                 : null;
 
             var openingSummary = openingQuery is null
@@ -347,10 +397,18 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? search = null,
         CancellationToken ct = default)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var csv = await SqliteRetryHelper.ExecuteAsync(
             async cancellationToken =>
             {
-                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
+                var rows = await ApplyMoneyOperationVisibility(
+                        BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search),
+                        visibility)
                     .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
                     .OrderByDescending(item => item.Date)
                     .ThenByDescending(item => item.Id)
@@ -384,10 +442,18 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? search = null,
         CancellationToken ct = default)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var xml = await SqliteRetryHelper.ExecuteAsync(
             async cancellationToken =>
             {
-                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
+                var rows = await ApplyMoneyOperationVisibility(
+                        BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search),
+                        visibility)
                     .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
                     .OrderByDescending(item => item.Date)
                     .ThenByDescending(item => item.Id)
@@ -418,10 +484,18 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? search = null,
         CancellationToken ct = default)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var items = await SqliteRetryHelper.ExecuteAsync(
             async cancellationToken =>
             {
-                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
+                var rows = await ApplyMoneyOperationVisibility(
+                        BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search),
+                        visibility)
                     .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
                     .OrderByDescending(item => item.Date)
                     .ThenByDescending(item => item.Id)
@@ -452,10 +526,18 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? search = null,
         CancellationToken ct = default)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var items = await SqliteRetryHelper.ExecuteAsync(
             async cancellationToken =>
             {
-                var rows = await BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search)
+                var rows = await ApplyMoneyOperationVisibility(
+                        BuildMoneyOperationsQuery(from, to, source, direction, accountingType, moneyAccountId, accountName, categoryName, search),
+                        visibility)
                     .Where(item => !linkedInvoiceId.HasValue || item.LinkedInvoiceId == linkedInvoiceId.Value)
                     .OrderByDescending(item => item.Date)
                     .ThenByDescending(item => item.Id)
@@ -482,8 +564,16 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct = default)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var accounts = await SqliteRetryHelper.ExecuteAsync(
-            async cancellationToken => await BuildMoneyOperationsQuery(null, null, source, null, null, null, null, null, null)
+            async cancellationToken => await ApplyMoneyOperationVisibility(
+                    BuildMoneyOperationsQuery(null, null, source, null, null, null, null, null, null),
+                    visibility)
                 .Where(item => item.AccountName != null && item.AccountName != "")
                 .Select(item => item.AccountName!)
                 .Distinct()
@@ -503,10 +593,18 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct = default)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var summaries = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
             var openingQuery = from.HasValue
-                ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, null, null, null)
+                ? ApplyMoneyOperationVisibility(
+                    BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, null, null, null),
+                    visibility)
                     .Where(item => item.AccountName != null && item.AccountName != "")
                 : null;
 
@@ -534,7 +632,9 @@ public class MoneyOperationsController : ControllerBase
                 openingRows = openingSummaryRows.Select(MapAccountSummaryRow).ToList();
             }
 
-            var periodRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, null, null, null)
+            var periodRows = await ApplyMoneyOperationVisibility(
+                    BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, null, null, null),
+                    visibility)
                 .Where(item => item.AccountName != null && item.AccountName != "")
                 .GroupBy(item => new { item.Source, item.AccountName })
                 .Select(group => new MoneyOperationAccountSummaryQueryRow
@@ -600,8 +700,14 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? accountName,
         CancellationToken ct = default)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var balances = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildDailyBalanceRowsAsync(from, to, source, accountName, cancellationToken),
+            cancellationToken => BuildDailyBalanceRowsAsync(from, to, source, accountName, visibility, cancellationToken),
             _logger,
             ct);
 
@@ -660,9 +766,15 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? accountName,
         CancellationToken ct = default)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var result = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
-            var balances = await BuildDailyBalanceRowsAsync(from, to, source, accountName, cancellationToken);
+            var balances = await BuildDailyBalanceRowsAsync(from, to, source, accountName, visibility, cancellationToken);
             var keys = balances
                 .Select(item => new { item.Source, item.AccountName, Date = item.Date.Date })
                 .ToList();
@@ -750,10 +862,13 @@ public class MoneyOperationsController : ControllerBase
         DateTime? to,
         MoneyOperationSource? source,
         string? accountName,
+        DataVisibilityAccess visibility,
         CancellationToken cancellationToken)
     {
         var openingQuery = from.HasValue
-            ? BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null)
+            ? ApplyMoneyOperationVisibility(
+                BuildMoneyOperationsQuery(null, from.Value.Date.AddDays(-1), source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null),
+                visibility)
                 .Where(item => item.AccountName != null && item.AccountName != "")
             : null;
 
@@ -782,7 +897,9 @@ public class MoneyOperationsController : ControllerBase
                 .ToDictionary(row => (row.Source, row.AccountName), row => row.Balance);
         }
 
-        var movementRows = await BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null)
+        var movementRows = await ApplyMoneyOperationVisibility(
+                BuildMoneyOperationsQuery(from, to, source, null, MoneyOperationAccountingType.Fact, null, accountName, null, null),
+                visibility)
             .Where(item => item.AccountName != null && item.AccountName != "")
             .GroupBy(item => new { item.Source, item.AccountName, Date = item.Date.Date })
             .Select(group => new MoneyOperationDailyBalanceQueryRow
@@ -1376,6 +1493,16 @@ public class MoneyOperationsController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (!await CanAccessCustomMoneyOperationAsync(id, visibility, ct))
+        {
+            return NotFound();
+        }
+
         var item = await _db.MoneyOperations
             .AsNoTracking()
             .Include(operation => operation.MoneyAccount)
@@ -2170,6 +2297,16 @@ public class MoneyOperationsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] MoneyOperation model, CancellationToken ct = default)
     {
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (!await CanAccessCustomMoneyOperationAsync(id, visibility, ct))
+        {
+            return NotFound();
+        }
+
         var entity = await _db.MoneyOperations.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
@@ -2272,15 +2409,25 @@ public class MoneyOperationsController : ControllerBase
         }
         entity.UpdatedAt = DateTime.UtcNow;
 
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         await SyncCashOrderAsync(entity);
         return Ok(entity);
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var entity = await _db.MoneyOperations.FindAsync(id);
+        var visibility = await ResolveMoneyVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (!await CanAccessCustomMoneyOperationAsync(id, visibility, ct))
+        {
+            return NotFound();
+        }
+
+        var entity = await _db.MoneyOperations.FindAsync([id], ct);
         if (entity is null)
         {
             return NotFound();
@@ -2293,7 +2440,7 @@ public class MoneyOperationsController : ControllerBase
 
         var linkedOrders = await _db.CashOrders
             .Where(order => order.MoneyOperationId == entity.Id && order.Status != CashOrderStatus.Cancelled)
-            .ToListAsync();
+            .ToListAsync(ct);
         foreach (var order in linkedOrders)
         {
             order.Status = CashOrderStatus.Cancelled;
@@ -2301,7 +2448,7 @@ public class MoneyOperationsController : ControllerBase
         }
 
         _db.MoneyOperations.Remove(entity);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         return NoContent();
     }
 

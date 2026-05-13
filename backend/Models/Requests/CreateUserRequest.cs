@@ -8,6 +8,7 @@ public class CreateUserRequest
     public int RoleId { get; set; }
     public bool IsActive { get; set; } = true;
     public bool IsEmployee { get; set; } = false;
+    public string? Department { get; set; }
     public bool RequiresFinancialActionReason { get; set; } = false;
     public List<int>? CompanyIds { get; set; }
 }

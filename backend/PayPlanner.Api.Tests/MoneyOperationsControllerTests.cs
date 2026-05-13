@@ -98,7 +98,7 @@ public class MoneyOperationsControllerTests
         Assert.Null(updatedOperation.RecognitionDate);
         Assert.NotNull(updatedOperation.UpdatedAt);
 
-        var deleteAction = await controller.Delete(createdOperation.Id);
+        var deleteAction = await controller.Delete(createdOperation.Id, CancellationToken.None);
         Assert.IsType<NoContentResult>(deleteAction);
         Assert.False(await db.MoneyOperations.AnyAsync());
     }
@@ -134,7 +134,7 @@ public class MoneyOperationsControllerTests
         await db.SaveChangesAsync();
         var controller = CreateController(db);
 
-        var action = await controller.Delete(operation.Id);
+        var action = await controller.Delete(operation.Id, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(action);
         Assert.True(await db.MoneyOperations.AnyAsync(item => item.Id == operation.Id));
@@ -4676,6 +4676,7 @@ public class MoneyOperationsControllerTests
                     User = new ClaimsPrincipal(new ClaimsIdentity(
                     [
                         new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()),
+                        new Claim(ClaimTypes.Role, "admin"),
                     ], "TestAuth")),
                 },
             };

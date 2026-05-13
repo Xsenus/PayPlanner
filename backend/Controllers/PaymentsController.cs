@@ -37,6 +37,15 @@ public class PaymentsController : ControllerBase
         _formRequirements = formRequirements;
     }
 
+    private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+
+    private async Task<bool> CanAccessPaymentAsync(int id, DataVisibilityAccess visibility, CancellationToken ct)
+        => await _db.Payments
+            .AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
+            .AnyAsync(payment => payment.Id == id, ct);
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] DateTime? from,
@@ -48,8 +57,15 @@ public class PaymentsController : ControllerBase
         [FromQuery] string? clientRole = null,
         CancellationToken ct = default)
     {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var q = _db.Payments
             .AsQueryable()
+            .ApplyPaymentVisibility(visibility)
             .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
             .ApplyPaymentFilters(from, to, clientId, caseId, null, clientRole, legalEntityId);
 
@@ -62,7 +78,15 @@ public class PaymentsController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        var item = await ProjectPaymentsForRead(_db.Payments.Where(p => p.Id == id))
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var item = await ProjectPaymentsForRead(_db.Payments
+                .ApplyPaymentVisibility(visibility)
+                .Where(p => p.Id == id))
             .FirstOrDefaultAsync(ct);
         if (item is null)
         {
@@ -121,6 +145,16 @@ public class PaymentsController : ControllerBase
     {
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", model);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (!await CanAccessPaymentAsync(id, visibility, ct))
+        {
+            return NotFound();
+        }
 
         var e = await _db.Payments.FindAsync(id);
         if (e is null) return NotFound();
@@ -287,6 +321,16 @@ public class PaymentsController : ControllerBase
             return BadRequest("Unknown payment status.");
         }
 
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (!await CanAccessPaymentAsync(id, visibility, ct))
+        {
+            return NotFound();
+        }
+
         var payment = await _db.Payments.FindAsync(new object[] { id }, ct);
         if (payment is null) return NotFound();
         if (InvoiceManagedPaymentRules.IsInvoiceManagedPayment(payment))
@@ -363,6 +407,16 @@ public class PaymentsController : ControllerBase
     {
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", model);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
+
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (!await CanAccessPaymentAsync(id, visibility, ct))
+        {
+            return NotFound();
+        }
 
         var e = await _db.Payments.FindAsync(id);
         if (e is null) return NotFound();
@@ -543,9 +597,15 @@ public class PaymentsController : ControllerBase
         var now = DateTime.UtcNow;
         var today = now.Date;
         var sourceIdsWithRemainders = await GetPartialRemainderSourceIdsAsync(ct);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
 
         var query = _db.Payments
             .AsQueryable()
+            .ApplyPaymentVisibility(visibility)
             .WithPaymentIncludes()
             .ApplyPaymentFilters(from, to, clientId, caseId, null, clientRole, legalEntityId)
             .Where(payment =>
@@ -3011,6 +3071,16 @@ public class PaymentsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (!await CanAccessPaymentAsync(id, visibility, ct))
+        {
+            return NotFound();
+        }
+
         var payment = await _db.Payments
             .Include(item => item.Invoice)
             .FirstOrDefaultAsync(item => item.Id == id, ct);

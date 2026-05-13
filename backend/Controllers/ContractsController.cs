@@ -35,6 +35,22 @@ public class ContractsController : ControllerBase
         _formRequirements = formRequirements;
     }
 
+    private Task<DataVisibilityAccess?> ResolveContractsVisibilityAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
+
+    private async Task<Contract?> LoadEditableContractAsync(int id, CancellationToken ct)
+    {
+        var visibility = await ResolveContractsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return null;
+        }
+
+        return await _db.Contracts
+            .ApplyContractVisibility(visibility)
+            .FirstOrDefaultAsync(c => c.Id == id, ct);
+    }
+
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId,
         [FromQuery] string? search, [FromQuery] string? sortBy, [FromQuery] string? sortDir, [FromQuery] int page = 1,
@@ -43,15 +59,21 @@ public class ContractsController : ControllerBase
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
+        var visibility = await ResolveContractsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var normalizedStatus = NormalizeContractStatusOrNull(status);
         if (!string.IsNullOrWhiteSpace(status) && normalizedStatus is null)
         {
             return ValidationError(nameof(status), "Unknown contract status.");
         }
 
-        var query = ApplySort(ApplyFilters(BuildContractsListCountQuery(), from, to, clientId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir);
+        var query = ApplySort(ApplyFilters(BuildContractsListCountQuery(visibility), from, to, clientId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir);
         var total = await query.CountAsync(ct);
-        var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(), from, to, clientId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir)
+        var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(visibility), from, to, clientId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
@@ -62,7 +84,13 @@ public class ContractsController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ContractDto>> GetById(int id, CancellationToken ct)
     {
-        var contract = await BuildContractDetailQuery().FirstOrDefaultAsync(c => c.Id == id, ct);
+        var visibility = await ResolveContractsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var contract = await BuildContractDetailQuery(visibility).FirstOrDefaultAsync(c => c.Id == id, ct);
         var dto = contract is null ? null : MapToDto(contract);
         return dto is null ? NotFound() : Ok(dto);
     }
@@ -70,7 +98,7 @@ public class ContractsController : ControllerBase
     [HttpPost("{id:int}/send-to-signing")]
     public async Task<ActionResult<ContractDto>> SendToSigning(int id, CancellationToken ct)
     {
-        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
 
         contract.Status = ContractStatus.OnSigning;
@@ -85,7 +113,7 @@ public class ContractsController : ControllerBase
     [HttpPost("{id:int}/mark-concluded")]
     public async Task<ActionResult<ContractDto>> MarkConcluded(int id, CancellationToken ct)
     {
-        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
 
         var now = DateTime.UtcNow;
@@ -102,7 +130,7 @@ public class ContractsController : ControllerBase
     [HttpPost("{id:int}/mark-not-signed")]
     public async Task<ActionResult<ContractDto>> MarkNotSigned(int id, CancellationToken ct)
     {
-        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
 
         contract.Status = ContractStatus.NotSigned;
@@ -126,7 +154,7 @@ public class ContractsController : ControllerBase
             return ValidationError(nameof(request.Status), "Unknown contract status.");
         }
 
-        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
 
         var reason = Normalize(request.Reason);
@@ -221,7 +249,7 @@ public class ContractsController : ControllerBase
             return reasonError;
         }
 
-        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
         if (string.Equals(contract.Status, ContractStatus.Cancelled, StringComparison.OrdinalIgnoreCase))
         {
@@ -250,7 +278,7 @@ public class ContractsController : ControllerBase
         if (reason is null) return ValidationError(nameof(request.Reason), "Причина аннулирования обязательна.");
         ApplyAuditReason(reason);
 
-        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
         if (!string.Equals(contract.Status, ContractStatus.Draft, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.NotSigned, StringComparison.OrdinalIgnoreCase)
@@ -380,7 +408,14 @@ public class ContractsController : ControllerBase
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
 
+        var visibility = await ResolveContractsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var contract = await _db.Contracts
+            .ApplyContractVisibility(visibility)
             .Include(c => c.ClientContracts).Include(c => c.LegalEntityContracts)
             .Include(c => c.ContractActs).Include(c => c.ContractInvoices).Include(c => c.ContractPayments)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -427,7 +462,7 @@ public class ContractsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var contract = await _db.Contracts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
         _db.Contracts.Remove(contract);
         await _db.SaveChangesAsync(ct);
@@ -439,7 +474,11 @@ public class ContractsController : ControllerBase
         .Include(c => c.LegalEntityContracts).ThenInclude(link => link.LegalEntity)
         .Include(c => c.ContractActs).Include(c => c.ContractInvoices).Include(c => c.ContractPayments);
 
-    private IQueryable<Contract> BuildContractsListCountQuery() => _db.Contracts.AsNoTracking();
+    private IQueryable<Contract> BuildContractsListCountQuery(DataVisibilityAccess? visibility = null)
+    {
+        var query = _db.Contracts.AsNoTracking();
+        return visibility is null ? query : query.ApplyContractVisibility(visibility);
+    }
 
     private static readonly Expression<Func<Contract, ContractDto>> MapToDtoExpression = contract => new ContractDto
     {
@@ -497,14 +536,19 @@ public class ContractsController : ControllerBase
         PaymentIds = contract.ContractPayments.Select(x => x.PaymentId).ToList(),
     };
 
-    private IQueryable<Contract> BuildContractDetailQuery() => _db.Contracts
-        .AsSplitQuery()
-        .Include(c => c.ClientContracts).ThenInclude(link => link.Client)
-        .Include(c => c.LegalEntityContracts).ThenInclude(link => link.LegalEntity)
-        .Include(c => c.ContractActs).ThenInclude(link => link.Act)
-        .Include(c => c.ContractInvoices).ThenInclude(link => link.Invoice).ThenInclude(invoice => invoice!.Acts)
-        .Include(c => c.ContractPayments).ThenInclude(link => link.Payment)
-        .Include(c => c.Payments).ThenInclude(payment => payment.Acts);
+    private IQueryable<Contract> BuildContractDetailQuery(DataVisibilityAccess? visibility = null)
+    {
+        var query = _db.Contracts
+            .AsSplitQuery()
+            .Include(c => c.ClientContracts).ThenInclude(link => link.Client)
+            .Include(c => c.LegalEntityContracts).ThenInclude(link => link.LegalEntity)
+            .Include(c => c.ContractActs).ThenInclude(link => link.Act)
+            .Include(c => c.ContractInvoices).ThenInclude(link => link.Invoice).ThenInclude(invoice => invoice!.Acts)
+            .Include(c => c.ContractPayments).ThenInclude(link => link.Payment)
+            .Include(c => c.Payments).ThenInclude(payment => payment.Acts);
+
+        return visibility is null ? query : query.ApplyContractVisibility(visibility);
+    }
 
     private ContractDto MapToDto(Contract contract)
     {

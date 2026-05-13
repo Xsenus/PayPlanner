@@ -22,6 +22,10 @@ public class RolePermission
     public bool CanExport { get; set; }
     public bool CanViewAnalytics { get; set; }
 
+    [Required]
+    [MaxLength(32)]
+    public string ViewScope { get; set; } = DataVisibilityScope.Own;
+
     [ForeignKey(nameof(RoleId))]
     public Role? Role { get; set; }
 }

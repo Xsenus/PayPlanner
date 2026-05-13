@@ -306,6 +306,11 @@ public partial class AuthService
                 user.IsEmployee = request.IsEmployee.Value;
             }
 
+            if (request.Department is not null)
+            {
+                user.Department = NormalizeOptionalValue(request.Department);
+            }
+
             if (request.RequiresFinancialActionReason.HasValue)
             {
                 user.RequiresFinancialActionReason = request.RequiresFinancialActionReason.Value;
@@ -671,6 +676,11 @@ public partial class AuthService
         if (!targetUser.IsEmployee && sourceUser.IsEmployee)
         {
             targetUser.IsEmployee = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(targetUser.Department) && !string.IsNullOrWhiteSpace(sourceUser.Department))
+        {
+            targetUser.Department = sourceUser.Department;
         }
 
         if (!targetUser.EmploymentStartDate.HasValue && sourceUser.EmploymentStartDate.HasValue)

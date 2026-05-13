@@ -1,5 +1,10 @@
 import { apiService } from './api';
-import { defaultRolePermissions, type RolePermissions } from '../types/permissions';
+import {
+  defaultRolePermissions,
+  type DataVisibilityScope,
+  type MenuSectionPermissions,
+  type RolePermissions,
+} from '../types/permissions';
 
 const CHANGE_EVENT = 'pp.permissions.changed';
 
@@ -10,62 +15,38 @@ type LoadingCache = Map<number, Promise<RolePermissions>>;
 const cache: PermissionsCache = new Map();
 const loading: LoadingCache = new Map();
 
+function normalizeViewScope(value?: string | null): DataVisibilityScope {
+  return value === 'department' || value === 'all' ? value : 'own';
+}
+
+function normalizeSectionPermissions<T extends MenuSectionPermissions>(
+  defaults: T,
+  source?: Partial<T> | null,
+): T {
+  return {
+    ...defaults,
+    ...(source ?? {}),
+    viewScope: normalizeViewScope(source?.viewScope ?? defaults.viewScope),
+  };
+}
+
 function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePermissions {
   const source = perms ?? {};
 
   return {
-    calendar: {
-      ...defaultRolePermissions.calendar,
-      ...(source.calendar ?? {}),
-    },
-    tasks: {
-      ...defaultRolePermissions.tasks,
-      ...(source.tasks ?? {}),
-    },
-    reports: {
-      ...defaultRolePermissions.reports,
-      ...(source.reports ?? {}),
-    },
-    calculator: {
-      ...defaultRolePermissions.calculator,
-      ...(source.calculator ?? {}),
-    },
-    legalEntities: {
-      ...defaultRolePermissions.legalEntities,
-      ...(source.legalEntities ?? {}),
-    },
-    clients: {
-      ...defaultRolePermissions.clients,
-      ...(source.clients ?? {}),
-    },
-    accounts: {
-      ...defaultRolePermissions.accounts,
-      ...(source.accounts ?? {}),
-    },
-    acts: {
-      ...defaultRolePermissions.acts,
-      ...(source.acts ?? {}),
-    },
-    payments: {
-      ...defaultRolePermissions.payments,
-      ...(source.payments ?? {}),
-    },
-    contracts: {
-      ...defaultRolePermissions.contracts,
-      ...(source.contracts ?? {}),
-    },
-    dictionaries: {
-      ...defaultRolePermissions.dictionaries,
-      ...(source.dictionaries ?? {}),
-    },
-    roles: {
-      ...defaultRolePermissions.roles,
-      ...(source.roles ?? {}),
-    },
-    audit: {
-      ...defaultRolePermissions.audit,
-      ...(source.audit ?? {}),
-    },
+    calendar: normalizeSectionPermissions(defaultRolePermissions.calendar, source.calendar),
+    tasks: normalizeSectionPermissions(defaultRolePermissions.tasks, source.tasks),
+    reports: normalizeSectionPermissions(defaultRolePermissions.reports, source.reports),
+    calculator: normalizeSectionPermissions(defaultRolePermissions.calculator, source.calculator),
+    legalEntities: normalizeSectionPermissions(defaultRolePermissions.legalEntities, source.legalEntities),
+    clients: normalizeSectionPermissions(defaultRolePermissions.clients, source.clients),
+    accounts: normalizeSectionPermissions(defaultRolePermissions.accounts, source.accounts),
+    acts: normalizeSectionPermissions(defaultRolePermissions.acts, source.acts),
+    payments: normalizeSectionPermissions(defaultRolePermissions.payments, source.payments),
+    contracts: normalizeSectionPermissions(defaultRolePermissions.contracts, source.contracts),
+    dictionaries: normalizeSectionPermissions(defaultRolePermissions.dictionaries, source.dictionaries),
+    roles: normalizeSectionPermissions(defaultRolePermissions.roles, source.roles),
+    audit: normalizeSectionPermissions(defaultRolePermissions.audit, source.audit),
   };
 }
 

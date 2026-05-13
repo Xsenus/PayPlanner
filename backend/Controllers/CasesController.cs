@@ -2,7 +2,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -14,10 +16,23 @@ public class CasesController : ControllerBase
     private readonly PaymentContext _db;
     public CasesController(PaymentContext db) => _db = db;
 
+    private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int? clientId, [FromQuery] int? legalEntityId, CancellationToken ct)
     {
-        var q = _db.ClientCases.Include(c => c.Client).Include(c => c.LegalEntity).AsQueryable();
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var q = _db.ClientCases
+            .Include(c => c.Client)
+            .Include(c => c.LegalEntity)
+            .ApplyClientCaseVisibility(visibility)
+            .AsQueryable();
         if (clientId.HasValue) q = q.Where(c => c.ClientId == clientId.Value);
         if (legalEntityId.HasValue) q = q.Where(c => c.LegalEntityId == legalEntityId.Value);
         var items = await q.AsNoTracking()
@@ -31,10 +46,17 @@ public class CasesController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
         var entity = await _db.ClientCases
             .Include(c => c.Client)
             .Include(c => c.LegalEntity)
             .Include(c => c.Payments)
+            .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
 
@@ -54,7 +76,15 @@ public class CasesController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] ClientCase model, CancellationToken ct)
     {
-        var e = await _db.ClientCases.FindAsync([id], ct);
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var e = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (e is null) return NotFound();
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, ct);
         if (validation is not null) return validation;
@@ -70,18 +100,26 @@ public class CasesController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var e = await _db.ClientCases.FindAsync(id);
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var e = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (e is null) return NotFound();
 
-        var payments = await _db.Payments.Where(p => p.ClientCaseId == id).ToListAsync();
+        var payments = await _db.Payments.Where(p => p.ClientCaseId == id).ToListAsync(ct);
         foreach (var p in payments) p.ClientCaseId = null;
 
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
 
         _db.ClientCases.Remove(e);
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
         return NoContent();
     }
 

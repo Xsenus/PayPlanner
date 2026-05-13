@@ -32,6 +32,7 @@ type FormState = {
   messenger: string;
   viber: string;
   isEmployee: boolean;
+  department: string;
   requiresFinancialActionReason: boolean;
   employmentStartDate: string;
   employmentEndDate: string;
@@ -55,6 +56,7 @@ const EMPTY_FORM: FormState = {
   messenger: '',
   viber: '',
   isEmployee: false,
+  department: '',
   requiresFinancialActionReason: false,
   employmentStartDate: '',
   employmentEndDate: '',
@@ -124,6 +126,7 @@ function buildForm(user?: User | null): FormState {
     messenger: user.messenger ?? '',
     viber: user.viber ?? '',
     isEmployee: Boolean(user.isEmployee),
+    department: user.department ?? '',
     requiresFinancialActionReason: Boolean(user.requiresFinancialActionReason),
     employmentStartDate: toDateInputValue(user.employmentStartDate),
     employmentEndDate: toDateInputValue(user.employmentEndDate),
@@ -148,6 +151,7 @@ function buildUpdatePayload(form: FormState): UpdateUserDto {
     messenger: form.messenger.trim() || undefined,
     viber: form.viber.trim() || undefined,
     isEmployee: form.isEmployee,
+    department: form.department.trim() || undefined,
     requiresFinancialActionReason: form.requiresFinancialActionReason,
     employmentStartDate: form.employmentStartDate || undefined,
     employmentEndDate: form.employmentEndDate || undefined,
@@ -292,6 +296,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
           roleId: form.roleId,
           isActive: form.isActive,
           isEmployee: form.isEmployee,
+          department: form.department.trim() || undefined,
           requiresFinancialActionReason: form.requiresFinancialActionReason,
           companyIds: form.companyIds,
         });
@@ -424,6 +429,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                     <input type="checkbox" checked={form.isEmployee} onChange={(event) => handleEmployeeToggle(event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Учитывать как сотрудника
                   </label>
+                  <TextField label="Отдел" value={form.department} onChange={(value) => updateForm('department', value)} disabled={administrativeFieldsDisabled} />
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 md:col-span-2">
                     <input type="checkbox" checked={form.requiresFinancialActionReason} onChange={(event) => updateForm('requiresFinancialActionReason', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Требовать причину при действиях с финансовыми документами

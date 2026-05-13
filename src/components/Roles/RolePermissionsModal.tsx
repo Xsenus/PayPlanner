@@ -29,6 +29,7 @@ import {
 } from '../../services/permissionsService';
 import {
   MENU_PERMISSION_KEYS,
+  type DataVisibilityScope,
   type MenuPermissionKey,
   type MenuSectionKey,
   type RolePermissions,
@@ -169,6 +170,34 @@ const GROUPS: GroupConfig[] = [
     title: 'Администрирование прав',
     description: 'Просмотр ролей и делегирование управления правилами.',
     sections: ['roles', 'audit'],
+  },
+];
+
+const DATA_SCOPE_SECTIONS = new Set<MenuSectionKey>([
+  'tasks',
+  'legalEntities',
+  'clients',
+  'accounts',
+  'acts',
+  'payments',
+  'contracts',
+]);
+
+const DATA_SCOPE_OPTIONS: Array<{ value: DataVisibilityScope; label: string; description: string }> = [
+  {
+    value: 'own',
+    label: 'Только ответственный',
+    description: 'Пользователь видит записи, где он указан ответственным или участником документа.',
+  },
+  {
+    value: 'department',
+    label: 'Ответственный и отдел',
+    description: 'Пользователь видит свои записи и записи ответственных из своего отдела.',
+  },
+  {
+    value: 'all',
+    label: 'Все записи',
+    description: 'Раздел открыт без ограничения по ответственному.',
   },
 ];
 
@@ -333,6 +362,14 @@ function getTotalPermissionCount(sectionKey: MenuSectionKey) {
   return MENU_PERMISSION_KEYS.length;
 }
 
+function hasDataScope(sectionKey: MenuSectionKey) {
+  return DATA_SCOPE_SECTIONS.has(sectionKey);
+}
+
+function normalizeDataScope(value?: DataVisibilityScope | null): DataVisibilityScope {
+  return value === 'department' || value === 'all' ? value : 'own';
+}
+
 export function RolePermissionsModal({
   role,
   canEdit,
@@ -416,6 +453,17 @@ export function RolePermissionsModal({
     updateSection('calendar', (section) => ({
       ...section,
       canViewAnalytics: !section.canViewAnalytics,
+    }));
+  };
+
+  const setSectionViewScope = (sectionKey: MenuSectionKey, viewScope: DataVisibilityScope) => {
+    if (!hasDataScope(sectionKey)) {
+      return;
+    }
+
+    updateSection(sectionKey, (section) => ({
+      ...section,
+      viewScope,
     }));
   };
 
@@ -711,6 +759,9 @@ export function RolePermissionsModal({
                   const Icon = sectionConfig.icon;
                   const enabledPermissionCount = getEnabledPermissionCount(sectionKey, permissions);
                   const totalPermissionCount = getTotalPermissionCount(sectionKey);
+                  const sectionScope = normalizeDataScope(section.viewScope);
+                  const sectionScopeDescription =
+                    DATA_SCOPE_OPTIONS.find((option) => option.value === sectionScope)?.description ?? '';
 
                   return (
                     <section
@@ -790,6 +841,33 @@ export function RolePermissionsModal({
                               || !permissions.calendar.canView
                             }
                           />
+                        ) : null}
+
+                        {hasDataScope(sectionKey) ? (
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4 xl:col-span-2">
+                            <label className="block space-y-2">
+                              <span className="text-sm font-semibold text-slate-700">Область видимости данных</span>
+                              <select
+                                value={sectionScope}
+                                onChange={(event) =>
+                                  setSectionViewScope(sectionKey, event.target.value as DataVisibilityScope)
+                                }
+                                disabled={isReadOnly || saving || resetting || !section.canView}
+                                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                              >
+                                {DATA_SCOPE_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <div className="mt-2 text-sm leading-6 text-slate-500">
+                              {section.canView
+                                ? sectionScopeDescription
+                                : 'Сначала откройте просмотр раздела, затем выберите область видимости.'}
+                            </div>
+                          </div>
                         ) : null}
                       </div>
                     </section>

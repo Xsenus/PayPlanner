@@ -7,6 +7,7 @@ public class MenuSectionPermissionsDto
     public bool CanEdit { get; set; }
     public bool CanDelete { get; set; }
     public bool CanExport { get; set; }
+    public string ViewScope { get; set; } = DataVisibilityScope.All;
 }
 
 public class CalendarPermissionsDto : MenuSectionPermissionsDto

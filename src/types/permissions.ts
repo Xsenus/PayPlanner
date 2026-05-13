@@ -20,12 +20,15 @@ export type MenuPermissionKey =
   | 'canDelete'
   | 'canExport';
 
+export type DataVisibilityScope = 'own' | 'department' | 'all';
+
 export interface MenuSectionPermissions {
   canView: boolean;
   canCreate: boolean;
   canEdit: boolean;
   canDelete: boolean;
   canExport: boolean;
+  viewScope?: DataVisibilityScope;
 }
 
 export interface CalendarPermissions extends MenuSectionPermissions {
@@ -70,6 +73,7 @@ export const defaultMenuPermissions: MenuSectionPermissions = {
   canEdit: true,
   canDelete: true,
   canExport: true,
+  viewScope: 'all',
 };
 
 export const defaultRestrictedMenuPermissions: MenuSectionPermissions = {
@@ -78,6 +82,7 @@ export const defaultRestrictedMenuPermissions: MenuSectionPermissions = {
   canEdit: false,
   canDelete: false,
   canExport: false,
+  viewScope: 'own',
 };
 
 export const defaultRolePermissions: RolePermissions = {
