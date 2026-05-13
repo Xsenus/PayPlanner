@@ -15,6 +15,7 @@ type UseAccountsRegistryParams = {
   clientId?: number;
   legalEntityId?: number;
   clientIds?: string;
+  contractId?: number;
   clientRole?: ClientRole;
   payablesOnly?: boolean;
   sortBy?: AccountRegistrySortBy;
@@ -51,6 +52,7 @@ export function useAccountsRegistry(params: UseAccountsRegistryParams) {
       clientId: params.clientId,
       legalEntityId: params.legalEntityId,
       clientIds: params.clientIds,
+      contractId: params.contractId,
       clientRole: params.clientRole,
       payablesOnly: params.payablesOnly || undefined,
       sortBy: params.sortBy,
@@ -62,6 +64,7 @@ export function useAccountsRegistry(params: UseAccountsRegistryParams) {
       params.clientId,
       params.legalEntityId,
       params.clientIds,
+      params.contractId,
       params.clientRole,
       params.from,
       params.page,

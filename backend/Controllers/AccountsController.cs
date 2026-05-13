@@ -33,6 +33,7 @@ public class AccountsController : ControllerBase
         [FromQuery] int? legalEntityId = null,
         [FromQuery] string? clientIds = null,
         [FromQuery] string? clientRole = null,
+        [FromQuery] int? contractId = null,
         [FromQuery] bool payablesOnly = false,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
@@ -55,7 +56,8 @@ public class AccountsController : ControllerBase
             clientId,
             legalEntityId,
             clientIds,
-            clientRole);
+            clientRole,
+            contractId);
         var candidateItems = await candidateQuery
             .Select(payment => new AccountInvoiceCandidate
             {
@@ -685,7 +687,7 @@ public class AccountsController : ControllerBase
                 || (payment.DocumentKind == DocumentKind.Invoice && payment.Account != null && payment.Account != string.Empty));
     }
 
-    private static IQueryable<Payment> ApplyRegistryFilters(
+    private IQueryable<Payment> ApplyRegistryFilters(
         IQueryable<Payment> query,
         DateTime? from,
         DateTime? to,
@@ -694,7 +696,8 @@ public class AccountsController : ControllerBase
         int? clientId,
         int? legalEntityId,
         string? clientIds,
-        string? clientRole)
+        string? clientRole,
+        int? contractId)
     {
         if (type.HasValue)
         {
@@ -731,6 +734,13 @@ public class AccountsController : ControllerBase
                     payment.LegalEntityId == legalEntityId.Value ||
                     payment.ExpenseLegalEntityId == legalEntityId.Value),
             };
+        }
+
+        if (contractId.HasValue && contractId.Value > 0)
+        {
+            query = query.Where(payment =>
+                payment.ContractId == contractId.Value
+                || _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == payment.Id));
         }
 
         if (from.HasValue)

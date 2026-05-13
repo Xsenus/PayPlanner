@@ -80,6 +80,81 @@ public class AccountsControllerTests
     }
 
     [Fact]
+    public async Task GetRegistry_FiltersByContractId()
+    {
+        await using var db = await CreateContextAsync();
+
+        var targetContract = new Contract
+        {
+            Number = "CTR-100",
+            Date = new DateTime(2026, 4, 1),
+        };
+        var otherContract = new Contract
+        {
+            Number = "CTR-200",
+            Date = new DateTime(2026, 4, 2),
+        };
+        db.Contracts.AddRange(targetContract, otherContract);
+        await db.SaveChangesAsync();
+
+        var targetInvoice = new Invoice { Number = "INV-100", Date = new DateTime(2026, 4, 3) };
+        var linkedInvoice = new Invoice { Number = "INV-LINK", Date = new DateTime(2026, 4, 4) };
+        var otherInvoice = new Invoice { Number = "INV-200", Date = new DateTime(2026, 4, 5) };
+        db.Invoices.AddRange(targetInvoice, linkedInvoice, otherInvoice);
+        await db.SaveChangesAsync();
+
+        var targetPayment = CreatePayment(targetInvoice.Date, 10_000m, "Target contract invoice");
+        targetPayment.DocumentKind = DocumentKind.Invoice;
+        targetPayment.InvoiceId = targetInvoice.Id;
+        targetPayment.Account = targetInvoice.Number;
+        targetPayment.AccountDate = targetInvoice.Date;
+        targetPayment.ContractId = targetContract.Id;
+
+        var linkedPayment = CreatePayment(linkedInvoice.Date, 15_000m, "Linked contract invoice");
+        linkedPayment.DocumentKind = DocumentKind.Invoice;
+        linkedPayment.InvoiceId = linkedInvoice.Id;
+        linkedPayment.Account = linkedInvoice.Number;
+        linkedPayment.AccountDate = linkedInvoice.Date;
+
+        var otherPayment = CreatePayment(otherInvoice.Date, 20_000m, "Other contract invoice");
+        otherPayment.DocumentKind = DocumentKind.Invoice;
+        otherPayment.InvoiceId = otherInvoice.Id;
+        otherPayment.Account = otherInvoice.Number;
+        otherPayment.AccountDate = otherInvoice.Date;
+        otherPayment.ContractId = otherContract.Id;
+
+        db.Payments.AddRange(targetPayment, linkedPayment, otherPayment);
+        await db.SaveChangesAsync();
+
+        db.ContractInvoices.Add(new ContractInvoice { ContractId = targetContract.Id, InvoiceId = linkedPayment.Id });
+        await db.SaveChangesAsync();
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: null,
+            to: null,
+            status: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            contractId: targetContract.Id,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+
+        Assert.Equal(2, payload.Total);
+        Assert.Contains(payload.Items, row => row.Invoice?.Number == targetInvoice.Number);
+        Assert.Contains(payload.Items, row => row.Invoice?.Number == linkedInvoice.Number);
+        Assert.DoesNotContain(payload.Items, row => row.Invoice?.Number == otherInvoice.Number);
+        Assert.Equal(25_000m, payload.Summary.Total.Amount);
+    }
+
+    [Fact]
     public async Task GetRegistry_ReturnsOverdueStatus_WhenInstallmentInvoiceHasPaidProgress_AndOverdueTail()
     {
         await using var db = await CreateContextAsync();

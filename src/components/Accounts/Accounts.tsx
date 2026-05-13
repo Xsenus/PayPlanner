@@ -36,6 +36,7 @@ import type {
   ActResponsible,
   Client,
   ClientRole,
+  Contract,
   Invoice,
   InvoiceInput,
   InvoiceWorkflowStatus,
@@ -70,6 +71,7 @@ import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { TableSelectCheckbox } from '../ui/TableSelectCheckbox';
 import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
+import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 
 interface AccountsProps {
   defaultType?: PaymentKind;
@@ -121,6 +123,7 @@ type AccountsViewState = {
   statusFilter: 'all' | AccountStatus;
   typeFilter: FilterType;
   selectedCounterparty: CounterpartySelection | null;
+  contractId: number | null;
   clientRoleFilter: ClientRoleFilter;
   payablesOnly: boolean;
   search: string;
@@ -518,6 +521,9 @@ export function Accounts({
   ));
   const [selectedCounterparty, setSelectedCounterparty] = useState<CounterpartySelection | null>(() => savedViewState?.selectedCounterparty ?? null);
   const [counterpartyPickerOpen, setCounterpartyPickerOpen] = useState(false);
+  const [selectedContractId, setSelectedContractId] = useState<number | null>(() => savedViewState?.contractId ?? null);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [contractsLoading, setContractsLoading] = useState(false);
   const [clientRoleFilter, setClientRoleFilter] = useState<ClientRoleFilter>(() => savedViewState?.clientRoleFilter ?? 'all');
   const [payablesOnly, setPayablesOnly] = useState(() => savedViewState?.payablesOnly ?? false);
   const [payablesDashboardOpen, setPayablesDashboardOpen] = useState(false);
@@ -613,6 +619,7 @@ export function Accounts({
     type: typeFilter,
     clientId: selectedClientIdNumber,
     legalEntityId: selectedLegalEntityIdNumber,
+    contractId: selectedContractId ?? undefined,
     clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
     payablesOnly,
     sortBy: sortState.key,
@@ -635,6 +642,33 @@ export function Accounts({
     clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
     enabled: payablesOnly,
   });
+
+  useEffect(() => {
+    let active = true;
+
+    setContractsLoading(true);
+    void apiService
+      .getContracts({ sortBy: 'date', sortDir: 'desc', page: 1, pageSize: 200 })
+      .then((response) => {
+        if (active) {
+          setContracts(response.items ?? []);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setContracts([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setContractsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const payablesOverdueCount = useMemo(
     () => payablesDashboard?.dueBuckets.find((bucket) => bucket.key === 'overdue')?.count ?? 0,
@@ -667,6 +701,7 @@ export function Accounts({
     typeFilter,
     selectedClientIdNumber,
     selectedLegalEntityIdNumber,
+    selectedContractId,
     clientRoleFilter,
     payablesOnly,
     pageSize,
@@ -715,6 +750,7 @@ export function Accounts({
       statusFilter,
       typeFilter,
       selectedCounterparty: counterparty,
+      contractId: selectedContractId,
       clientRoleFilter,
       payablesOnly,
       search,
@@ -729,6 +765,7 @@ export function Accounts({
     payablesOnly,
     search,
     selectedCounterparty,
+    selectedContractId,
     sortState,
     statusFilter,
     typeFilter,
@@ -928,7 +965,39 @@ export function Accounts({
   const hasCustomSearch = search.trim().length > 0;
   const hasCustomTypeFilter = typeFilter !== baseTypeFilter;
   const hasCustomClientFilter = Boolean(selectedCounterparty);
+  const hasCustomContractFilter = selectedContractId !== null;
   const hasCustomClientRoleFilter = clientRoleFilter !== 'all';
+  const selectedContract = useMemo(
+    () => contracts.find((contract) => contract.id === selectedContractId) ?? null,
+    [contracts, selectedContractId],
+  );
+  const contractLookupOptions = useMemo<LookupSelectOption[]>(
+    () =>
+      contracts.map((contract) => {
+        const clientNames = contract.clients
+          ?.map((client) => client.name)
+          .filter(Boolean)
+          .join(', ');
+        const label = `№${contract.number}${contract.title ? ` · ${contract.title}` : ''}`;
+        const descriptionParts = [
+          contract.date ? `от ${formatDate(contract.date)}` : null,
+          clientNames || null,
+        ].filter((item): item is string => Boolean(item));
+
+        return {
+          value: String(contract.id),
+          label,
+          description: descriptionParts.join(' · ') || undefined,
+          keywords: [contract.number, contract.title ?? '', clientNames ?? ''],
+        };
+      }),
+    [contracts],
+  );
+  const selectedContractLabel = selectedContract
+    ? `№${selectedContract.number}${selectedContract.title ? ` · ${selectedContract.title}` : ''}`
+    : selectedContractId
+      ? `#${selectedContractId}`
+      : '';
   const activeFilterBadges = useMemo(() => {
     const badges: string[] = [];
 
@@ -944,6 +1013,9 @@ export function Accounts({
     if (hasCustomClientFilter) {
       const prefix = selectedCounterparty?.kind === 'legalEntity' ? 'Юрлицо' : 'Клиент';
       badges.push(`${prefix}: ${selectedCounterparty?.name ?? 'контрагент'}`);
+    }
+    if (hasCustomContractFilter) {
+      badges.push(`Договор: ${selectedContractLabel}`);
     }
     if (hasCustomClientRoleFilter) {
       badges.push(
@@ -964,12 +1036,14 @@ export function Accounts({
     hasCustomStatusFilter,
     hasCustomTypeFilter,
     hasCustomClientFilter,
+    hasCustomContractFilter,
     hasCustomClientRoleFilter,
     period,
     accountStatusLabels,
     clientRoleFilter,
     payablesOnly,
     selectedCounterparty,
+    selectedContractLabel,
     statusFilter,
     search,
     typeFilter,
@@ -1451,6 +1525,7 @@ export function Accounts({
     setStatusFilter('all');
     setTypeFilter(baseTypeFilter);
     setSelectedCounterparty(null);
+    setSelectedContractId(null);
     setClientRoleFilter('all');
     setPayablesOnly(false);
     setPayablesDashboardOpen(false);
@@ -2450,6 +2525,25 @@ export function Accounts({
                     <option value="expenseClient">Клиент расхода</option>
                   </select>
                 </label>
+                <div className="sm:col-span-2 lg:col-span-3">
+                  <LookupSelect
+                    label="Договор"
+                    value={selectedContractId ? String(selectedContractId) : ''}
+                    options={contractLookupOptions}
+                    onChange={(value) => {
+                      const nextId = Number(value);
+                      setSelectedContractId(value && !Number.isNaN(nextId) ? nextId : null);
+                    }}
+                    placeholder="Все договоры"
+                    title="Выбор договора"
+                    dictionaryLabel="Справочник"
+                    searchPlaceholder="Номер, название или клиент"
+                    emptyOptionLabel="Все договоры"
+                    emptyOptionDescription="Очистить фильтр по договору"
+                    helperText={contractsLoading ? 'Загрузка договоров...' : undefined}
+                    noOptionsText="Договоры не найдены"
+                  />
+                </div>
               </div>
 
               <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">

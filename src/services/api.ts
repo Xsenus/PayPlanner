@@ -1644,6 +1644,7 @@ export class ApiService {
     clientId?: number;
     legalEntityId?: number;
     clientIds?: string;
+    contractId?: number;
     clientRole?: ClientRole;
     payablesOnly?: boolean;
     sortBy?: 'date' | 'number' | 'amount' | 'counterparty' | 'dueDate' | 'responsible';

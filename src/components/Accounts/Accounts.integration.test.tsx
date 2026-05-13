@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Accounts } from './Accounts';
-import type { Act, AccountRegistryRow, AccountsSummary, Client, Invoice, Payment } from '../../types';
+import type { Act, AccountRegistryRow, AccountsSummary, Client, Contract, Invoice, Payment } from '../../types';
 import { clearInvoiceEditorDraft, peekInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 
 const {
@@ -11,6 +11,7 @@ const {
   getAccountsRegistryResultMock,
   getPayablesDashboardResultMock,
   getClientsMock,
+  getContractsMock,
   getInvoiceMock,
   invoiceModalPropsSpy,
   paymentModalPropsSpy,
@@ -28,6 +29,7 @@ const {
   getAccountsRegistryResultMock: vi.fn(),
   getPayablesDashboardResultMock: vi.fn(),
   getClientsMock: vi.fn(),
+  getContractsMock: vi.fn(),
   getInvoiceMock: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
   paymentModalPropsSpy: vi.fn(),
@@ -166,6 +168,28 @@ function createClient(): Client {
   };
 }
 
+function createContract(overrides: Partial<Contract> = {}): Contract {
+  return {
+    id: 77,
+    number: 'CTR-77',
+    title: 'Bankruptcy support',
+    date: '2026-04-01',
+    billingMode: 'Fixed',
+    status: 'Concluded',
+    isOpenEnded: true,
+    amount: 25_000,
+    createdAt: '2026-04-01T00:00:00Z',
+    invoiceAmountTotal: 15_000,
+    actAmountTotal: 0,
+    paymentAmountTotal: 0,
+    clients: [{ id: 55, name: 'Test Client' }],
+    invoiceIds: [528],
+    actIds: [],
+    paymentIds: [],
+    ...overrides,
+  } as Contract;
+}
+
 function createPersistedTableSettings(
   columns: Array<{ key: string; defaultWidth?: number; defaultVisible?: boolean }>,
   defaultPageSize: number,
@@ -280,6 +304,7 @@ vi.mock('../../services/api', () => ({
     createPayment: createPaymentMock,
     getInvoice: getInvoiceMock,
     getClients: getClientsMock,
+    getContracts: getContractsMock,
     getActResponsibles: getActResponsiblesMock,
     updateInvoiceManagedPayment: updateInvoiceManagedPaymentMock,
     updatePayment: updatePaymentMock,
@@ -491,6 +516,7 @@ describe('Accounts integration', () => {
     getAccountsRegistryResultMock.mockReset();
     getPayablesDashboardResultMock.mockReset();
     getClientsMock.mockReset();
+    getContractsMock.mockReset();
     getInvoiceMock.mockReset();
     invoiceModalPropsSpy.mockReset();
     paymentModalPropsSpy.mockReset();
@@ -546,6 +572,12 @@ describe('Accounts integration', () => {
     });
     getInvoiceMock.mockResolvedValue(createInvoice());
     getClientsMock.mockResolvedValue([createClient()]);
+    getContractsMock.mockResolvedValue({
+      items: [createContract()],
+      total: 1,
+      page: 1,
+      pageSize: 200,
+    });
     getActResponsiblesMock.mockResolvedValue([]);
     updateInvoiceManagedPaymentMock.mockResolvedValue(createSiblingPayment());
     updatePaymentMock.mockResolvedValue(createSiblingPayment());
@@ -603,6 +635,31 @@ describe('Accounts integration', () => {
         clientRole: 'expenseClient',
       });
     });
+  });
+
+  it('passes selected contract into the accounts registry query', async () => {
+    render(<Accounts />);
+
+    await waitFor(() => {
+      expect(getContractsMock).toHaveBeenCalledWith({
+        sortBy: 'date',
+        sortDir: 'desc',
+        page: 1,
+        pageSize: 200,
+      });
+    });
+
+    fireEvent.change(screen.getByLabelText('Договор'), {
+      target: { value: '77' },
+    });
+
+    await waitFor(() => {
+      const lastCall = getAccountsRegistryResultMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toMatchObject({
+        contractId: 77,
+      });
+    });
+    expect(screen.getByText('Договор: №CTR-77 · Bankruptcy support')).toBeTruthy();
   });
 
   it('passes the payables mode into the accounts registry query', async () => {
