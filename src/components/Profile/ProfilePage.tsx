@@ -7,12 +7,21 @@ import {
   type UpdateProfileDto,
   type User,
 } from '../../services/authService';
+import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import {
+  DEFAULT_TASK_NOTIFICATION_DEFAULTS,
+  parseTaskNotificationDefaults,
+  serializeTaskNotificationDefaults,
+  TASK_NOTIFICATION_DEFAULTS_SETTING_KEY,
+  type TaskNotificationDefaults,
+} from '../../utils/taskNotificationDefaults';
 import { ProfilePhotoCropModal } from './ProfilePhotoCropModal';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import { TaskNotificationDefaultsPanel } from '../Tasks/TaskNotificationDefaultsPanel';
 
 type ProviderId = 'google' | 'vk' | 'yandex' | 'telegram';
 
@@ -158,9 +167,11 @@ export function ProfilePage() {
   const [profile, setProfile] = useState<User | null>(null);
   const [publicSettings, setPublicSettings] = useState<AuthProviderPublicSettings>(EMPTY_PUBLIC_SETTINGS);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [passwordForm, setPasswordForm] = useState<PasswordFormState>(EMPTY_PASSWORD_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingTaskNotificationDefaults, setSavingTaskNotificationDefaults] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [linkingProvider, setLinkingProvider] = useState<ProviderId | null>(null);
@@ -179,14 +190,16 @@ export function ProfilePage() {
   }, []);
 
   const loadProfile = useCallback(async () => {
-    const [nextProfile, nextProviders] = await Promise.all([
+    const [nextProfile, nextProviders, nextTaskNotificationDefaults] = await Promise.all([
       authService.getProfile(),
       authService.getAuthProviders(),
+      apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
     ]);
 
     setProfile(nextProfile);
     setForm(buildFormState(nextProfile));
     setPublicSettings(nextProviders);
+    setTaskNotificationDefaults(parseTaskNotificationDefaults(nextTaskNotificationDefaults?.value));
     return nextProfile;
   }, []);
 
@@ -331,6 +344,21 @@ export function ProfilePage() {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить профиль.'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTaskNotificationDefaultsSave = async () => {
+    setSavingTaskNotificationDefaults(true);
+    try {
+      await apiService.upsertUserSetting(
+        TASK_NOTIFICATION_DEFAULTS_SETTING_KEY,
+        serializeTaskNotificationDefaults(taskNotificationDefaults),
+      );
+      toast.success('Настройки напоминаний задач сохранены.');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить настройки напоминаний задач.'));
+    } finally {
+      setSavingTaskNotificationDefaults(false);
     }
   };
 
@@ -679,6 +707,33 @@ export function ProfilePage() {
           </div>
 
           <div className="space-y-6">
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold text-slate-900">Напоминания задач</div>
+                  <div className="mt-1 text-sm leading-6 text-slate-600">
+                    Эти значения автоматически подставляются при создании новой задачи в журнале.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleTaskNotificationDefaultsSave()}
+                  disabled={savingTaskNotificationDefaults}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {savingTaskNotificationDefaults ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Сохранить
+                </button>
+              </div>
+              <div className="mt-5">
+                <TaskNotificationDefaultsPanel
+                  value={taskNotificationDefaults}
+                  onChange={setTaskNotificationDefaults}
+                  disabled={savingTaskNotificationDefaults}
+                />
+              </div>
+            </div>
+
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">

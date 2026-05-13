@@ -54,6 +54,13 @@ import {
   type TaskJournalType,
   type TaskJournalUpsertPayload,
 } from '../../utils/taskJournalStore';
+import {
+  DEFAULT_TASK_NOTIFICATION_DEFAULTS,
+  parseTaskNotificationDefaults,
+  TASK_NOTIFICATION_DEFAULTS_SETTING_KEY,
+  TASK_REMINDER_DEFAULT_OPTIONS,
+  type TaskNotificationDefaults,
+} from '../../utils/taskNotificationDefaults';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
@@ -111,13 +118,7 @@ const PRIORITY_OPTIONS: Array<{ value: TaskJournalPriority; label: string }> = [
   { value: 'urgent', label: 'Срочно' },
 ];
 
-const REMINDER_OPTIONS: Array<{ value: TaskJournalReminder; label: string }> = [
-  { value: 'before1d', label: 'За день' },
-  { value: 'before1h', label: 'За час' },
-  { value: 'before15m', label: 'За 15 минут' },
-  { value: 'atDue', label: 'В срок' },
-  { value: 'dailyOverdue', label: 'Каждый день просрочки' },
-];
+const REMINDER_OPTIONS: Array<{ value: TaskJournalReminder; label: string }> = TASK_REMINDER_DEFAULT_OPTIONS;
 
 const CHANNEL_OPTIONS: Array<{ value: TaskJournalChannel; label: string; icon: typeof Bell }> = [
   { value: 'inApp', label: 'В системе', icon: Bell },
@@ -226,9 +227,17 @@ function writeTaskJournalFilterPreferences(userId: number | null, preferences: T
   }
 }
 
-const emptyForm = (assigneeName: string, assigneeUserId?: number | null): TaskForm => {
+const emptyForm = (
+  assigneeName: string,
+  assigneeUserId?: number | null,
+  notificationDefaults: TaskNotificationDefaults = DEFAULT_TASK_NOTIFICATION_DEFAULTS,
+): TaskForm => {
   const dueAt = new Date();
   dueAt.setHours(dueAt.getHours() + 2);
+  const defaults = {
+    reminders: [...notificationDefaults.reminders],
+    channels: [...notificationDefaults.channels],
+  };
 
   return {
     clientId: null,
@@ -245,8 +254,8 @@ const emptyForm = (assigneeName: string, assigneeUserId?: number | null): TaskFo
     priority: 'normal',
     status: 'new',
     result: '',
-    reminders: ['before1h', 'atDue'],
-    channels: ['inApp'],
+    reminders: defaults.reminders,
+    channels: defaults.channels,
     tags: [],
     participants: assigneeName
       ? [{
@@ -840,6 +849,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const initialPreferences = initialPreferencesRef.current;
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
   const [taskSettings, setTaskSettings] = useState<TaskJournalSettingsDto>(DEFAULT_TASK_JOURNAL_SETTINGS);
+  const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [automationCandidates, setAutomationCandidates] = useState<TaskJournalCaseAutomationCandidate[]>([]);
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
@@ -944,16 +954,18 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const refreshTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const [taskItems, assigneeResponse, automationResponse, settingsResponse] = await Promise.all([
+      const [taskItems, assigneeResponse, automationResponse, settingsResponse, notificationDefaultsResponse] = await Promise.all([
         loadAllTaskJournalItems(),
         apiService.getTaskJournalAssignees(),
         apiService.getTaskJournalCaseAutomationCandidates({ inactiveDays: 14, limit: 20 }),
         apiService.getTaskJournalSettings(),
+        apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
       ]);
       setTasks(taskItems);
       setAssignees(assigneeResponse);
       setAutomationCandidates(automationResponse);
       setTaskSettings(settingsResponse);
+      setTaskNotificationDefaults(parseTaskNotificationDefaults(notificationDefaultsResponse?.value));
     } catch {
       toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');
     } finally {
@@ -1822,6 +1834,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           currentUserId={currentUserId}
           currentUserName={currentUserName}
           taskSettings={taskSettings}
+          notificationDefaults={taskNotificationDefaults}
           onClose={closeTaskModal}
           onSave={handleSave}
           onResultSave={handleResultSave}
@@ -3011,6 +3024,7 @@ function TaskModal({
   currentUserId,
   currentUserName,
   taskSettings,
+  notificationDefaults,
   onClose,
   onSave,
   onResultSave,
@@ -3026,6 +3040,7 @@ function TaskModal({
   currentUserId: number | null;
   currentUserName: string;
   taskSettings: TaskJournalSettingsDto;
+  notificationDefaults: TaskNotificationDefaults;
   onClose: () => void;
   onSave: (form: TaskForm, taskId?: number) => void | Promise<void>;
   onResultSave: (task: TaskJournalItem, status: TaskJournalStatus, result: string) => void | Promise<void>;
@@ -3068,7 +3083,7 @@ function TaskModal({
       };
       return { ...rest, dueAt: toLocalInputValue(rest.dueAt) };
     }
-    const next = emptyForm(currentUserName, currentUserId);
+    const next = emptyForm(currentUserName, currentUserId, notificationDefaults);
     return state?.dueAt ? { ...next, dueAt: toLocalInputValue(state.dueAt) } : next;
   });
   const [tagText, setTagText] = useState(() => form.tags.join(', '));

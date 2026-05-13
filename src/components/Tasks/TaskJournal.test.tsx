@@ -10,6 +10,7 @@ const apiMock = vi.hoisted(() => ({
   getTaskJournalItems: vi.fn(),
   getTaskJournalAssignees: vi.fn(),
   getTaskJournalSettings: vi.fn(),
+  getUserSetting: vi.fn(),
   updateTaskJournalSettings: vi.fn(),
   getTaskJournalCaseAutomationCandidates: vi.fn(),
   createTaskJournalCaseAutomationTask: vi.fn(),
@@ -198,6 +199,7 @@ describe('TaskJournal', () => {
     legalEntitiesState.legalEntities = [
       { id: 20, shortName: 'ООО Ромашка', inn: '5400000000', email: 'office@example.com' } as LegalEntitySummary,
     ];
+    apiMock.getUserSetting.mockRejectedValue(new Error('not found'));
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([]);
     apiMock.createTaskJournalCaseAutomationTask.mockResolvedValue(createTask({
       type: 'control',
@@ -425,6 +427,33 @@ describe('TaskJournal', () => {
       clientId: 10,
       clientCaseId: 100,
       title: 'Подготовить документы',
+    }));
+  });
+
+  it('uses user notification defaults when a new task is created', async () => {
+    apiMock.getUserSetting.mockResolvedValue({
+      key: 'tasks.notificationDefaults.v1',
+      value: JSON.stringify({
+        reminders: ['before1d', 'before15m', 'dailyOverdue'],
+        channels: ['inApp', 'email', 'telegram'],
+      }),
+      updatedAt: todayAt(8),
+    });
+
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
+    fireEvent.change(screen.getByPlaceholderText('Что нужно сделать'), { target: { value: 'Созвониться с клиентом' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      reminders: ['before1d', 'before15m', 'dailyOverdue'],
+      channels: ['inApp', 'email', 'telegram'],
     }));
   });
 

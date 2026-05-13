@@ -9,8 +9,16 @@ import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
+import {
+  DEFAULT_TASK_NOTIFICATION_DEFAULTS,
+  parseTaskNotificationDefaults,
+  serializeTaskNotificationDefaults,
+  TASK_NOTIFICATION_DEFAULTS_SETTING_KEY,
+  type TaskNotificationDefaults,
+} from '../../utils/taskNotificationDefaults';
+import { TaskNotificationDefaultsPanel } from '../Tasks/TaskNotificationDefaultsPanel';
 
-type UserDetailSection = 'main' | 'contacts' | 'employment' | 'access';
+type UserDetailSection = 'main' | 'contacts' | 'employment' | 'notifications' | 'access';
 
 type UserDetailPageProps = {
   userId: number | null;
@@ -72,6 +80,7 @@ const SECTION_LABELS: Array<{ id: UserDetailSection; label: string; description:
   { id: 'main', label: 'Основное', description: 'Имя, email и базовая информация профиля.' },
   { id: 'contacts', label: 'Контакты', description: 'Телефон, мессенджеры и внешние ссылки.' },
   { id: 'employment', label: 'Работа в системе', description: 'Роль, активность и доступ к компаниям.' },
+  { id: 'notifications', label: 'Напоминания задач', description: 'Значения по умолчанию для новых задач пользователя.' },
   { id: 'access', label: 'Способы входа', description: 'Привязанные внешние способы авторизации.' },
 ];
 
@@ -199,23 +208,27 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   const [user, setUser] = useState<User | null>(null);
   const [mainCompanySettings, setMainCompanySettings] = useState<MainCompanySettingsDto | null>(null);
   const [departments, setDepartments] = useState<BaseDictItem[]>([]);
+  const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [selectedCompanyToAddId, setSelectedCompanyToAddId] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingTaskNotificationDefaults, setSavingTaskNotificationDefaults] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
   const loadData = useCallback(async () => {
-    const [nextRoles, nextUser, nextMainCompanySettings, nextDepartments] = await Promise.all([
+    const [nextRoles, nextUser, nextMainCompanySettings, nextDepartments, nextTaskNotificationDefaults] = await Promise.all([
       authService.getRoles(),
       isCreateMode ? Promise.resolve<User | null>(null) : authService.getUser(userId),
       apiService.getMainCompanySettings(),
       apiService.getDict('departments'),
+      isCreateMode ? Promise.resolve(null) : apiService.getUserSettingForUser(userId, TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
     ]);
 
     setRoles(nextRoles);
     setUser(nextUser);
     setMainCompanySettings(nextMainCompanySettings);
     setDepartments(nextDepartments);
+    setTaskNotificationDefaults(parseTaskNotificationDefaults(nextTaskNotificationDefaults?.value));
 
     const nextForm = buildForm(nextUser);
     if (!nextForm.departmentId && nextForm.department) {
@@ -350,6 +363,27 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
       toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить карточку пользователя.'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTaskNotificationDefaultsSave = async () => {
+    if (isCreateMode || !userId) {
+      toast.error('Сначала сохраните пользователя.');
+      return;
+    }
+
+    setSavingTaskNotificationDefaults(true);
+    try {
+      await apiService.upsertUserSettingForUser(
+        userId,
+        TASK_NOTIFICATION_DEFAULTS_SETTING_KEY,
+        serializeTaskNotificationDefaults(taskNotificationDefaults),
+      );
+      toast.success('Настройки напоминаний задач сохранены.');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить настройки напоминаний задач.'));
+    } finally {
+      setSavingTaskNotificationDefaults(false);
     }
   };
 
@@ -538,6 +572,41 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                     </div>
                   )}
                 </div>
+              </div>
+            ) : null}
+
+            {activeSection === 'notifications' ? (
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">Напоминания задач по умолчанию</div>
+                    <div className="mt-1 text-sm leading-6 text-slate-600">
+                      Эти настройки будут подставляться в новые задачи, которые создаёт этот пользователь.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleTaskNotificationDefaultsSave()}
+                    disabled={isCreateMode || savingTaskNotificationDefaults}
+                    className="inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {savingTaskNotificationDefaults ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Сохранить
+                  </button>
+                </div>
+                {isCreateMode ? (
+                  <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                    Настройки напоминаний можно задать после создания пользователя.
+                  </div>
+                ) : (
+                  <div className="mt-5">
+                    <TaskNotificationDefaultsPanel
+                      value={taskNotificationDefaults}
+                      onChange={setTaskNotificationDefaults}
+                      disabled={savingTaskNotificationDefaults}
+                    />
+                  </div>
+                )}
               </div>
             ) : null}
 

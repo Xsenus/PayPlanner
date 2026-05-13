@@ -24,13 +24,7 @@ public class UserSettingsController : ControllerBase
         var userId = GetUserId(User);
         if (userId is null) return Unauthorized();
 
-        var setting = await _db.UserSettings
-            .AsNoTracking()
-            .FirstOrDefaultAsync(s => s.UserId == userId.Value && s.Key == key);
-
-        if (setting is null) return NotFound();
-
-        return Ok(Map(setting));
+        return await GetForUser(userId.Value, key);
     }
 
     [HttpPut("{key}")]
@@ -39,15 +33,38 @@ public class UserSettingsController : ControllerBase
         var userId = GetUserId(User);
         if (userId is null) return Unauthorized();
 
+        return await UpsertForUser(userId.Value, key, request);
+    }
+
+    [HttpGet("users/{userId:int}/{key}")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<UserSettingDto>> GetForUser(int userId, string key)
+    {
+        var setting = await _db.UserSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.UserId == userId && s.Key == key);
+
+        if (setting is null) return NotFound();
+
+        return Ok(Map(setting));
+    }
+
+    [HttpPut("users/{userId:int}/{key}")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<UserSettingDto>> UpsertForUser(int userId, string key, [FromBody] UpsertUserSettingRequest request)
+    {
+        var exists = await _db.Users.AsNoTracking().AnyAsync(user => user.Id == userId);
+        if (!exists) return NotFound();
+
         var now = DateTime.UtcNow;
         var setting = await _db.UserSettings
-            .FirstOrDefaultAsync(s => s.UserId == userId.Value && s.Key == key);
+            .FirstOrDefaultAsync(s => s.UserId == userId && s.Key == key);
 
         if (setting is null)
         {
             setting = new UserSetting
             {
-                UserId = userId.Value,
+                UserId = userId,
                 Key = key,
                 Value = request.Value,
                 CreatedAt = now,

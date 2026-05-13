@@ -1157,6 +1157,17 @@ export class ApiService {
     });
   }
 
+  async getUserSettingForUser(userId: number, key: string) {
+    return this.request<UserSettingDto>(`/user-settings/users/${userId}/${encodeURIComponent(key)}`);
+  }
+
+  async upsertUserSettingForUser(userId: number, key: string, value: string) {
+    return this.request<UserSettingDto>(`/user-settings/users/${userId}/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    });
+  }
+
   // ===== Notifications =====
   async getNotificationSettings() {
     return this.request<NotificationSettingsDto>('/notifications/settings');
