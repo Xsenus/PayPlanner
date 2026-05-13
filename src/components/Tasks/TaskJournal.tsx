@@ -68,8 +68,10 @@ type PeriodMode = 'day' | 'week' | 'month';
 type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
 type ModalState = { mode: 'create' | 'edit' | 'view'; task?: TaskJournalItem; dueAt?: string } | null;
+type TaskJournalMode = 'journal' | 'approvals';
 type TaskJournalProps = {
   initialView?: ViewMode;
+  mode?: TaskJournalMode;
   routeTaskId?: number | null;
   onRouteTaskChange?: (taskId: number | null) => void;
 };
@@ -150,17 +152,24 @@ const PARTICIPANT_ROLE_LABELS: Record<TaskJournalParticipantRole, string> = {
   observer: 'Наблюдатели',
 };
 
-function getTaskJournalFilterStorageKey(userId: number | null) {
-  return `${TASK_JOURNAL_FILTERS_STORAGE_PREFIX}.${userId ? `user:${userId}` : 'guest'}`;
+function getTaskJournalFilterStorageKey(userId: number | null, mode: TaskJournalMode = 'journal') {
+  const ownerKey = userId ? `user:${userId}` : 'guest';
+  return mode === 'journal'
+    ? `${TASK_JOURNAL_FILTERS_STORAGE_PREFIX}.${ownerKey}`
+    : `${TASK_JOURNAL_FILTERS_STORAGE_PREFIX}.${mode}.${ownerKey}`;
 }
 
-function getDefaultQuickFilter(userId: number | null): QuickFilter {
+function getDefaultQuickFilter(userId: number | null, mode: TaskJournalMode = 'journal'): QuickFilter {
+  if (mode === 'approvals') {
+    return 'all';
+  }
+
   return userId ? 'assignedToMe' : 'all';
 }
 
-function createDefaultFilterPreferences(userId: number | null): TaskJournalFilterPreferences {
+function createDefaultFilterPreferences(userId: number | null, mode: TaskJournalMode = 'journal'): TaskJournalFilterPreferences {
   return {
-    quickFilter: getDefaultQuickFilter(userId),
+    quickFilter: getDefaultQuickFilter(userId, mode),
     metricFilter: 'none',
     search: '',
     dateFrom: '',
@@ -224,14 +233,14 @@ function getTaskDateRangeBounds(dateFrom: string, dateTo: string) {
   return { from, to };
 }
 
-function readTaskJournalFilterPreferences(userId: number | null): TaskJournalFilterPreferences {
-  const defaults = createDefaultFilterPreferences(userId);
+function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJournalMode = 'journal'): TaskJournalFilterPreferences {
+  const defaults = createDefaultFilterPreferences(userId, mode);
   if (typeof window === 'undefined') {
     return defaults;
   }
 
   try {
-    const raw = window.localStorage.getItem(getTaskJournalFilterStorageKey(userId));
+    const raw = window.localStorage.getItem(getTaskJournalFilterStorageKey(userId, mode));
     if (!raw) {
       return defaults;
     }
@@ -253,13 +262,13 @@ function readTaskJournalFilterPreferences(userId: number | null): TaskJournalFil
   }
 }
 
-function writeTaskJournalFilterPreferences(userId: number | null, preferences: TaskJournalFilterPreferences) {
+function writeTaskJournalFilterPreferences(userId: number | null, preferences: TaskJournalFilterPreferences, mode: TaskJournalMode = 'journal') {
   if (typeof window === 'undefined') {
     return;
   }
 
   try {
-    window.localStorage.setItem(getTaskJournalFilterStorageKey(userId), JSON.stringify(preferences));
+    window.localStorage.setItem(getTaskJournalFilterStorageKey(userId, mode), JSON.stringify(preferences));
   } catch {
     // Если браузер запретил localStorage, журнал продолжит работать без сохранения фильтров.
   }
@@ -574,6 +583,29 @@ function hasPendingApprovers(task: TaskJournalItem) {
   return getTaskParticipants(task, 'approver').some((participant) => participant.approvalStatus !== 'approved');
 }
 
+function getOrderedApprovers(task: TaskJournalItem) {
+  return getTaskParticipants(task, 'approver')
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+}
+
+function getCurrentPendingApprover(task: TaskJournalItem) {
+  return getOrderedApprovers(task).find((participant) => participant.approvalStatus !== 'approved') ?? null;
+}
+
+function isTaskInApprovalsScope(task: TaskJournalItem, userId: number | null, isAdminUser: boolean) {
+  if (task.status !== 'onApproval' && task.status !== 'overdueApproval') {
+    return false;
+  }
+
+  if (isAdminUser) {
+    return true;
+  }
+
+  const currentApprover = getCurrentPendingApprover(task);
+  return Boolean(userId && currentApprover?.userId === userId);
+}
+
 function isTaskExecutorForUser(task: TaskJournalItem, userId: number | null) {
   if (!userId) return false;
   return task.assigneeUserId === userId ||
@@ -874,7 +906,7 @@ const TIMELINE_DAY_MIN_WIDTH = 180;
 const TIMELINE_TASK_MIN_READABLE_WIDTH = 116;
 const TIMELINE_TASK_LANE_GAP = 8;
 
-export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteTaskChange }: TaskJournalProps) {
+export function TaskJournal({ initialView = 'list', mode = 'journal', routeTaskId = null, onRouteTaskChange }: TaskJournalProps) {
   const { user, isAdmin } = useAuth();
   const toast = useToast();
   const { confirm } = useDialog();
@@ -883,9 +915,10 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
   const isAdminUser = isAdmin();
+  const isApprovalsMode = mode === 'approvals';
   const initialPreferencesRef = useRef<TaskJournalFilterPreferences | null>(null);
   if (initialPreferencesRef.current === null) {
-    initialPreferencesRef.current = readTaskJournalFilterPreferences(currentUserId);
+    initialPreferencesRef.current = readTaskJournalFilterPreferences(currentUserId, mode);
   }
 
   const initialPreferences = initialPreferencesRef.current;
@@ -897,7 +930,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId));
+  const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialPreferences.quickFilter);
   const [metricFilter, setMetricFilter] = useState<MetricFilter>(initialPreferences.metricFilter);
   const [search, setSearch] = useState(initialPreferences.search);
@@ -923,12 +956,12 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   }, [initialView]);
 
   useEffect(() => {
-    const nextOwnerKey = getTaskJournalFilterStorageKey(currentUserId);
+    const nextOwnerKey = getTaskJournalFilterStorageKey(currentUserId, mode);
     if (nextOwnerKey === filterOwnerKey) {
       return;
     }
 
-    const nextPreferences = readTaskJournalFilterPreferences(currentUserId);
+    const nextPreferences = readTaskJournalFilterPreferences(currentUserId, mode);
     skipNextFilterSaveRef.current = true;
     setFilterOwnerKey(nextOwnerKey);
     setQuickFilter(nextPreferences.quickFilter);
@@ -940,7 +973,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     setAssigneeFilter(nextPreferences.assigneeFilter);
     setTypeFilter(nextPreferences.typeFilter);
     setPeriodMode(nextPreferences.periodMode);
-  }, [currentUserId, filterOwnerKey]);
+  }, [currentUserId, filterOwnerKey, mode]);
 
   useEffect(() => {
     if (skipNextFilterSaveRef.current) {
@@ -958,8 +991,8 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
       assigneeFilter,
       typeFilter,
       periodMode,
-    });
-  }, [assigneeFilter, currentUserId, dateFromFilter, dateToFilter, metricFilter, periodMode, quickFilter, search, statusFilter, typeFilter]);
+    }, mode);
+  }, [assigneeFilter, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, quickFilter, search, statusFilter, typeFilter]);
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
@@ -984,11 +1017,15 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
   }, [onRouteTaskChange]);
 
   const openTaskCreateForDate = useCallback((date: Date) => {
+    if (isApprovalsMode) {
+      return;
+    }
+
     setCalendarSelectedDate(date);
     setModal({ mode: 'create', dueAt: buildDefaultDueAtForDate(date) });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
-  }, [onRouteTaskChange]);
+  }, [isApprovalsMode, onRouteTaskChange]);
 
   const closeTaskModal = useCallback(() => {
     setModal(null);
@@ -1161,6 +1198,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
 
     return tasks.filter((task) => {
       const due = new Date(task.dueAt);
+      const approvalScopeOk = !isApprovalsMode || isTaskInApprovalsScope(task, currentUserId, isAdminUser);
       const quickOk = matchesQuickFilter(task, quickFilter, currentUserId, currentUserName);
       const assigneeOk =
         assigneeFilter === 'all' ||
@@ -1185,9 +1223,9 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
         task.tags.join(' '),
       ].some((value) => value.toLowerCase().includes(q));
 
-      return quickOk && assigneeOk && typeOk && dateOk && searchOk;
+      return approvalScopeOk && quickOk && assigneeOk && typeOk && dateOk && searchOk;
     });
-  }, [assigneeFilter, currentUserId, currentUserName, dateRangeBounds, quickFilter, search, tasks, typeFilter]);
+  }, [assigneeFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, quickFilter, search, tasks, typeFilter]);
 
   const filteredTasks = useMemo(() => {
     const nowDate = new Date();
@@ -1586,6 +1624,11 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
     }
   };
 
+  const pageTitle = isApprovalsMode ? 'Согласования' : 'Журнал задач';
+  const pageDescription = isApprovalsMode
+    ? 'Задачи, которые находятся на согласовании и требуют решения текущего согласующего. Они остаются в общем журнале задач.'
+    : 'Задачи по контрагентам, делам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.';
+
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-[1720px] p-4 sm:p-6 lg:p-8">
@@ -1593,9 +1636,9 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Рабочий контроль</div>
-              <h1 className="mt-2 text-3xl font-semibold text-slate-900">Журнал задач</h1>
+              <h1 className="mt-2 text-3xl font-semibold text-slate-900">{pageTitle}</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                Задачи по контрагентам, делам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.
+                {pageDescription}
               </p>
             </div>
 
@@ -1616,14 +1659,16 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
                 <CalendarDays className="h-4 w-4" />
                 ICS
               </button>
-              <button
-                type="button"
-                onClick={openTaskCreate}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
-              >
-                <Plus className="h-4 w-4" />
-                Добавить задачу
-              </button>
+              {!isApprovalsMode ? (
+                <button
+                  type="button"
+                  onClick={openTaskCreate}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                >
+                  <Plus className="h-4 w-4" />
+                  Добавить задачу
+                </button>
+              ) : null}
             </div>
           </div>
         </section>
@@ -1823,7 +1868,7 @@ export function TaskJournal({ initialView = 'list', routeTaskId = null, onRouteT
           </div>
         </section>
 
-        {automationCandidates.length > 0 ? (
+        {!isApprovalsMode && automationCandidates.length > 0 ? (
           <TaskAutomationPanel
             candidates={automationCandidates}
             creatingCaseId={creatingAutomationCaseId}

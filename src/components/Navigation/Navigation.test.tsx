@@ -42,6 +42,7 @@ describe('Navigation links', () => {
     renderNavigation();
 
     expect(findLinkByHref(getTabHref('calendar'))).toBeTruthy();
+    expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('tasksCalendar'))).toBeTruthy();
     expect(screen.getByRole('link', { name: /Клиенты/i }).getAttribute('href')).toBe(getTabHref('clients'));
     expect(findLinkByHref(getTabHref('accountsIncome'))).toBeTruthy();
@@ -56,6 +57,16 @@ describe('Navigation links', () => {
     fireEvent.click(link!);
 
     expect(onTabChange).toHaveBeenCalledWith('tasksCalendar');
+  });
+
+  it('opens the approvals submenu inside the single page app', () => {
+    const onTabChange = renderNavigation();
+    const link = findLinkByHref(getTabHref('tasksApprovals'));
+
+    expect(link).toBeTruthy();
+    fireEvent.click(link!);
+
+    expect(onTabChange).toHaveBeenCalledWith('tasksApprovals');
   });
 
   it('keeps normal left clicks inside the single page app', () => {

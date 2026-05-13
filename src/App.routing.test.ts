@@ -19,6 +19,7 @@ import {
   isClientsListPath,
   isContractsListPath,
   isPaymentsListPath,
+  isTasksApprovalsPath,
   isTasksCalendarPath,
   isTasksListPath,
 } from './appRouting';
@@ -83,6 +84,13 @@ describe('App task routing helpers', () => {
 
     expect(isTasksCalendarPath()).toBe(true);
     expect(getInitialTab()).toBe('tasksCalendar');
+  });
+
+  it('detects the task approvals pathname', () => {
+    window.history.replaceState({}, '', '/tasks/approvals');
+
+    expect(isTasksApprovalsPath()).toBe(true);
+    expect(getInitialTab()).toBe('tasksApprovals');
   });
 });
 
@@ -158,6 +166,7 @@ describe('App sidebar routing helpers', () => {
   it('builds real href values for menu tabs', () => {
     expect(getTabHref('calendar')).toBe('/?ppTab=calendar');
     expect(getTabHref('tasks')).toBe('/tasks');
+    expect(getTabHref('tasksApprovals')).toBe('/tasks/approvals');
     expect(getTabHref('tasksCalendar')).toBe('/tasks/calendar');
     expect(getTabHref('clients')).toBe('/clients');
     expect(getTabHref('accountsIncome')).toBe('/invoices?ppTab=accountsIncome');

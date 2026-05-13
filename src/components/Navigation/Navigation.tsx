@@ -131,6 +131,11 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         icon: ListTodo,
         children: [
           {
+            id: 'tasksApprovals' as Tab,
+            label: 'Согласования',
+            icon: FileCheck2,
+          },
+          {
             id: 'tasksCalendar' as Tab,
             label: 'Календарь',
             icon: CalendarDays,

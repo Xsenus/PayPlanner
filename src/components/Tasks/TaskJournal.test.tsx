@@ -158,7 +158,13 @@ function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
 
 async function renderJournal(
   tasks: TaskJournalItem[] = [createTask()],
-  options: { initialView?: 'list' | 'board' | 'calendar' | 'timeline'; assignees?: TaskJournalAssignee[]; withRoute?: boolean } = {},
+  options: {
+    initialView?: 'list' | 'board' | 'calendar' | 'timeline';
+    mode?: 'journal' | 'approvals';
+    assignees?: TaskJournalAssignee[];
+    withRoute?: boolean;
+    waitForTitle?: string;
+  } = {},
 ) {
   apiMock.getTaskJournalItems.mockResolvedValue({
     items: tasks,
@@ -176,11 +182,11 @@ async function renderJournal(
 
   function RoutedJournal() {
     const [routeTaskId, setRouteTaskId] = useState<number | null>(null);
-    return <TaskJournal initialView={options.initialView} routeTaskId={routeTaskId} onRouteTaskChange={setRouteTaskId} />;
+    return <TaskJournal initialView={options.initialView} mode={options.mode} routeTaskId={routeTaskId} onRouteTaskChange={setRouteTaskId} />;
   }
 
-  render(options.withRoute ? <RoutedJournal /> : <TaskJournal initialView={options.initialView} />);
-  await screen.findAllByText(tasks[0]?.title ?? 'Тестовая задача');
+  render(options.withRoute ? <RoutedJournal /> : <TaskJournal initialView={options.initialView} mode={options.mode} />);
+  await screen.findAllByText(options.waitForTitle ?? tasks[0]?.title ?? 'Тестовая задача');
 }
 
 describe('TaskJournal', () => {
@@ -264,6 +270,46 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Наименование задачи')).toBeTruthy();
     expect(screen.getByText('Иванов Иван Иванович')).toBeTruthy();
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
+  });
+
+  it('shows only tasks that reached the current approver in approvals mode', async () => {
+    authState.isAdmin = false;
+
+    const approvalTask = createTask({
+      id: 201,
+      title: 'Согласовать проект',
+      status: 'onApproval',
+      assigneeUserId: 8,
+      participants: [
+        { userId: 7, role: 'approver', displayName: 'Администратор', sortOrder: 0, approvalStatus: 'pending' },
+      ],
+    });
+    const laterApprovalTask = createTask({
+      id: 202,
+      title: 'Ждет предыдущего согласующего',
+      status: 'onApproval',
+      assigneeUserId: 8,
+      participants: [
+        { userId: 9, role: 'approver', displayName: 'Первый согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        { userId: 7, role: 'approver', displayName: 'Администратор', sortOrder: 1, approvalStatus: 'pending' },
+      ],
+    });
+    const regularTask = createTask({
+      id: 203,
+      title: 'Обычная задача',
+      status: 'new',
+      assigneeUserId: 7,
+    });
+
+    await renderJournal([approvalTask, laterApprovalTask, regularTask], {
+      mode: 'approvals',
+      waitForTitle: approvalTask.title,
+    });
+
+    expect(screen.getByRole('heading', { name: 'Согласования' })).toBeTruthy();
+    expect(screen.getByText(approvalTask.title)).toBeTruthy();
+    expect(screen.queryByText(laterApprovalTask.title)).toBeNull();
+    expect(screen.queryByText(regularTask.title)).toBeNull();
   });
 
   it('opens with current user quick filter and remembers switching to all tasks', async () => {

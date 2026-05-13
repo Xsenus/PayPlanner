@@ -1,6 +1,7 @@
 export type Tab =
   | 'calendar'
   | 'tasks'
+  | 'tasksApprovals'
   | 'tasksCalendar'
   | 'reports'
   | 'calculator'
