@@ -98,6 +98,7 @@ import { ObjectAuditModal } from "../ui/ObjectAuditModal";
 import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from "../../utils/invoicePayments";
 import { useClientStatuses } from "../../hooks/useClientStatuses";
 import { ClientStatusBadge } from "./ClientStatusBadge";
+import { ClientReconciliationAct } from "./ClientReconciliationAct";
 import { DatePeriodPicker } from "../DateRange/DatePeriodPicker";
 import { loadClientInvoiceRelatedPayments } from "../../utils/clientInvoiceRelatedPayments";
 import { refreshClientInvoiceModalData as refreshClientInvoiceModalDataHelper } from "../../utils/clientInvoiceModalData";
@@ -428,11 +429,11 @@ const SECTION_META: Record<
     icon: FileSignature,
   },
   settlement: {
-    label: "Расчёт дела",
-    actionLabel: "Расчёт дела",
-    placeholderTitle: "Расчёт дела",
+    label: "Акт сверки",
+    actionLabel: "Акт сверки",
+    placeholderTitle: "Акт сверки",
     placeholderDescription:
-      "Инструменты расчёта будут добавлены на следующем этапе.",
+      "Сверка взаиморасчётов по счетам, актам и оплатам клиента.",
     icon: Calculator,
   },
 };
@@ -1340,7 +1341,7 @@ export function ClientDetail({
   );
   const [activeSection, setActiveSection] = useState<ClientDetailSection>(
     () => {
-      if (initialSection && initialSection !== "settlement") {
+      if (initialSection) {
         try {
           if (sectionPermissions(initialSection).canView) {
             return initialSection;
@@ -1351,7 +1352,6 @@ export function ClientDetail({
       }
 
       const firstAllowed = SECTION_ORDER.find((section) => {
-        if (section === "settlement") return false;
         try {
           return sectionPermissions(section).canView;
         } catch {
@@ -1359,7 +1359,7 @@ export function ClientDetail({
         }
       });
       const savedSection = savedViewState?.activeSection;
-      if (savedSection && savedSection !== "settlement") {
+      if (savedSection) {
         try {
           if (sectionPermissions(savedSection).canView) {
             return savedSection;
@@ -3062,20 +3062,15 @@ export function ClientDetail({
   const visibleSections = useMemo(
     () =>
       SECTION_ORDER.filter(
-        (section) =>
-          section !== "settlement" && sectionPermissions(section).canView,
+        (section) => sectionPermissions(section).canView,
       ),
     [sectionPermissions],
   );
 
   useEffect(() => {
-    if (
-      activeSection === "settlement" ||
-      !sectionPermissions(activeSection).canView
-    ) {
+    if (!sectionPermissions(activeSection).canView) {
       const fallback = SECTION_ORDER.find(
-        (section) =>
-          section !== "settlement" && sectionPermissions(section).canView,
+        (section) => sectionPermissions(section).canView,
       );
       if (fallback) setActiveSection(fallback);
     }
@@ -10126,6 +10121,12 @@ export function ClientDetail({
                     </>
                   )}
                 </>
+              ) : activeSection === "settlement" ? (
+                <ClientReconciliationAct
+                  clientId={clientId}
+                  client={clientData}
+                  clientName={clientName}
+                />
               ) : (
                 (() => {
                   const meta = SECTION_META[activeSection];
