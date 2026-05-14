@@ -420,6 +420,24 @@ describe('TaskJournal', () => {
     });
   });
 
+  it('keeps date filters in a separate responsive row from view controls', async () => {
+    await renderJournal();
+
+    const mainFilterRow = screen.getByTestId('task-main-filter-row');
+    const dateAndViewRow = screen.getByTestId('task-date-and-view-row');
+    const dateFilterRow = screen.getByTestId('task-date-filter-row');
+    const viewControls = screen.getByTestId('task-view-controls');
+    const dateFrom = screen.getByTestId('task-date-from-filter');
+    const dateTo = screen.getByTestId('task-date-to-filter');
+
+    expect(mainFilterRow.contains(dateFrom)).toBe(false);
+    expect(dateFilterRow.contains(dateFrom)).toBe(true);
+    expect(dateFilterRow.contains(dateTo)).toBe(true);
+    expect(dateAndViewRow.contains(viewControls)).toBe(true);
+    expect(dateFilterRow.contains(viewControls)).toBe(false);
+    expect(dateAndViewRow.className).toContain('flex-col');
+  });
+
   it('filters tasks authored by the current user from the quick controls', async () => {
     await renderJournal([
       createTask(),
@@ -553,6 +571,24 @@ describe('TaskJournal', () => {
     expect(within(panel).getByText('Busy slot')).toBeTruthy();
     expect(within(panel).queryByText('Other day task')).toBeNull();
     expect(within(panel).getByText(/Пересечения: 1/)).toBeTruthy();
+  });
+
+  it('stacks description and result fields vertically in the task form', async () => {
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+
+    const textFields = screen.getByTestId('task-text-fields');
+    const description = screen.getByTestId('task-description-field');
+    const result = screen.getByTestId('task-result-field');
+
+    expect(textFields.contains(description)).toBe(true);
+    expect(textFields.contains(result)).toBe(true);
+    expect(textFields.className).toContain('grid');
+    expect(textFields.className).not.toContain('lg:grid-cols-2');
+    expect(description.className).toContain('resize-y');
+    expect(result.className).toContain('resize-y');
   });
 
   it('saves selected client and case from the task form', async () => {

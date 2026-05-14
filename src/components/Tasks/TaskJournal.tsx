@@ -1785,8 +1785,11 @@ export function TaskJournal({ initialView = 'list', mode = 'journal', routeTaskI
           ) : null}
         </section>
 
-        <section className="mb-6 grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_repeat(3,minmax(160px,220px))_repeat(2,minmax(150px,180px))]">
+        <section className="mb-6 space-y-3" data-testid="task-filters-panel">
+          <div
+            className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_repeat(3,minmax(160px,220px))]"
+            data-testid="task-main-filter-row"
+          >
             <label className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
@@ -1833,8 +1836,11 @@ export function TaskJournal({ initialView = 'list', mode = 'journal', routeTaskI
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
+          </div>
 
-            <label className="relative block">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between" data-testid="task-date-and-view-row">
+            <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[380px] xl:shrink-0" data-testid="task-date-filter-row">
+              <label className="relative block">
               <span className="pointer-events-none absolute left-3 top-1 text-[10px] font-semibold text-slate-400">Дата с</span>
               <input
                 type="date"
@@ -1844,9 +1850,9 @@ export function TaskJournal({ initialView = 'list', mode = 'journal', routeTaskI
                 data-testid="task-date-from-filter"
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 pt-4 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
-            </label>
+              </label>
 
-            <label className="relative block">
+              <label className="relative block">
               <span className="pointer-events-none absolute left-3 top-1 text-[10px] font-semibold text-slate-400">Дата по</span>
               <input
                 type="date"
@@ -1856,10 +1862,10 @@ export function TaskJournal({ initialView = 'list', mode = 'journal', routeTaskI
                 data-testid="task-date-to-filter"
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 pt-4 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
-            </label>
-          </div>
+              </label>
+            </div>
 
-          <div className="flex flex-wrap justify-end gap-2">
+            <div className="flex min-w-0 flex-wrap justify-start gap-2 xl:justify-end" data-testid="task-view-controls">
             {viewMode !== 'timeline' ? (
               <div className="flex rounded-xl bg-slate-100 p-1">
                 {(['day', 'week', 'month'] as PeriodMode[]).map((mode) => (
@@ -1908,6 +1914,7 @@ export function TaskJournal({ initialView = 'list', mode = 'journal', routeTaskI
                 <CalendarClock className="h-4 w-4" />
                 Нагрузка
               </button>
+            </div>
             </div>
           </div>
         </section>
@@ -4223,12 +4230,12 @@ function TaskModal({
             ) : null}
           </section>
 
-          <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <div className="mt-5 grid gap-5" data-testid="task-text-fields">
             <Field label="Описание">
-              <textarea value={form.description} onChange={(event) => update('description', event.target.value)} disabled={isReadOnly} className="form-textarea" rows={5} placeholder="Контекст, телефоны, комментарии, откуда пришла задача" />
+              <textarea value={form.description} onChange={(event) => update('description', event.target.value)} disabled={isReadOnly} data-testid="task-description-field" className="form-textarea min-h-[140px] resize-y" rows={6} placeholder="Контекст, телефоны, комментарии, откуда пришла задача" />
             </Field>
             <Field label="Результат">
-              <textarea value={form.result} onChange={(event) => update('result', event.target.value)} className="form-textarea" rows={5} placeholder="Итог выполнения или причина ожидания" />
+              <textarea value={form.result} onChange={(event) => update('result', event.target.value)} data-testid="task-result-field" className="form-textarea min-h-[120px] resize-y" rows={5} placeholder="Итог выполнения или причина ожидания" />
             </Field>
           </div>
 
