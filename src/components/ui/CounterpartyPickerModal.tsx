@@ -38,13 +38,79 @@ type CounterpartyPickerModalProps = {
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 const DEFAULT_SCOPES: CounterpartyKind[] = ['client', 'legalEntity'];
 const EMPTY_SELECTIONS: CounterpartySelection[] = [];
+const SUPPLIER_STATUS_KEYS = new Set(['supplier', 'creditor']);
 
 function selectionKey(selection: Pick<CounterpartySelection, 'kind' | 'id'>): string {
   return `${selection.kind}:${selection.id}`;
 }
 
+function normalizeSearchText(value: string | null | undefined): string {
+  return (value ?? '').trim().toLocaleLowerCase('ru-RU');
+}
+
 function getLegalEntityDisplayName(entity: LegalEntitySummary): string {
   return entity.shortName?.trim() || entity.fullName?.trim() || `Юрлицо #${entity.id}`;
+}
+
+function isSupplierLike(systemKey: string | null | undefined): boolean {
+  return SUPPLIER_STATUS_KEYS.has(normalizeSearchText(systemKey));
+}
+
+function matchesClientRole(client: Client, role: CounterpartyRole | undefined): boolean {
+  if (!role) return true;
+  const supplierLike = isSupplierLike(client.clientStatus?.systemKey);
+  if (role === 'supplier') return Boolean(client.isClientAndSupplier) || supplierLike;
+  return Boolean(client.isClientAndSupplier) || !supplierLike;
+}
+
+function matchesLegalEntityRole(entity: LegalEntitySummary, role: CounterpartyRole | undefined): boolean {
+  if (!role) return true;
+  const supplierLike = isSupplierLike(entity.clientStatus?.systemKey);
+  if (role === 'supplier') return Boolean(entity.isClientAndSupplier) || supplierLike;
+  return Boolean(entity.isClientAndSupplier) || !supplierLike;
+}
+
+function matchesClientSearch(client: Client, query: string): boolean {
+  const term = normalizeSearchText(query);
+  if (!term) return true;
+
+  return [
+    client.name,
+    client.email,
+    client.phone,
+    client.company,
+    client.address,
+    client.notes,
+    client.clientStatus?.name,
+    client.legalEntity?.shortName,
+    client.legalEntity?.fullName,
+    client.legalEntity?.inn,
+    client.legalEntity?.kpp,
+    client.legalEntity?.ogrn,
+  ].some((value) => normalizeSearchText(value).includes(term));
+}
+
+function matchesLegalEntitySearch(entity: LegalEntitySummary, query: string): boolean {
+  const term = normalizeSearchText(query);
+  if (!term) return true;
+
+  return [
+    entity.shortName,
+    entity.fullName,
+    entity.inn,
+    entity.kpp,
+    entity.ogrn,
+    entity.address,
+    entity.phone,
+    entity.email,
+    entity.clientStatus?.name,
+  ].some((value) => normalizeSearchText(value).includes(term));
+}
+
+function slicePage<T>(source: T[], page: number, pageSize: number): T[] {
+  const safePageSize = Math.max(1, pageSize);
+  const start = (Math.max(1, page) - 1) * safePageSize;
+  return source.slice(start, start + safePageSize);
 }
 
 function mapClient(client: Client): CounterpartySelection {
@@ -127,30 +193,27 @@ export function CounterpartyPickerModal({
       setError(null);
       try {
         if (scope === 'client') {
-          const response = await apiService.getClientsV2({
-            search: debouncedQuery || undefined,
-            isActive: true,
-            sortBy: 'name',
-            sortDir: 'asc',
-            page,
-            pageSize,
-            ...(counterpartyRole ? { counterpartyRole } : {}),
-          });
+          const filteredClients = (await apiService.getClients())
+            .filter((client) => client.isActive !== false)
+            .filter((client) => matchesClientRole(client, counterpartyRole))
+            .filter((client) => matchesClientSearch(client, debouncedQuery))
+            .sort((left, right) => normalizeSearchText(left.name).localeCompare(normalizeSearchText(right.name), 'ru'));
           if (cancelled) return;
-          setItems((response.items ?? []).map(mapClient));
-          setTotal(response.total ?? 0);
+          setItems(slicePage(filteredClients, page, pageSize).map(mapClient));
+          setTotal(filteredClients.length);
           return;
         }
 
-        const response = await apiService.getLegalEntitiesPaged({
+        const filteredLegalEntities = (await apiService.getLegalEntities({
           search: debouncedQuery || undefined,
-          page,
-          pageSize,
           ...(counterpartyRole ? { counterpartyRole } : {}),
-        });
+        }))
+          .filter((entity) => matchesLegalEntityRole(entity, counterpartyRole))
+          .filter((entity) => matchesLegalEntitySearch(entity, debouncedQuery))
+          .sort((left, right) => normalizeSearchText(getLegalEntityDisplayName(left)).localeCompare(normalizeSearchText(getLegalEntityDisplayName(right)), 'ru'));
         if (cancelled) return;
-        setItems((response.items ?? []).map(mapLegalEntity));
-        setTotal(response.total ?? 0);
+        setItems(slicePage(filteredLegalEntities, page, pageSize).map(mapLegalEntity));
+        setTotal(filteredLegalEntities.length);
       } catch (loadError) {
         if (cancelled) return;
         setItems([]);
