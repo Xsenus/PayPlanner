@@ -277,11 +277,16 @@ namespace PayPlanner.Api.Extensions
             {
                 "supplier" => q.Where(c =>
                     c.IsClientAndSupplier ||
-                    (c.ClientStatus != null && ClientStatusSystemKeys.IsSupplierLike(c.ClientStatus.SystemKey))),
+                    (c.ClientStatus != null &&
+                     c.ClientStatus.SystemKey != null &&
+                     (c.ClientStatus.SystemKey.ToLower() == ClientStatusSystemKeys.Supplier ||
+                      c.ClientStatus.SystemKey.ToLower() == ClientStatusSystemKeys.Creditor))),
                 "client" => q.Where(c =>
                     c.IsClientAndSupplier ||
                     c.ClientStatus == null ||
-                    !ClientStatusSystemKeys.IsSupplierLike(c.ClientStatus.SystemKey)),
+                    c.ClientStatus.SystemKey == null ||
+                    (c.ClientStatus.SystemKey.ToLower() != ClientStatusSystemKeys.Supplier &&
+                     c.ClientStatus.SystemKey.ToLower() != ClientStatusSystemKeys.Creditor)),
                 _ => q,
             };
         }
@@ -293,11 +298,16 @@ namespace PayPlanner.Api.Extensions
             {
                 "supplier" => q.Where(e =>
                     e.IsClientAndSupplier ||
-                    (e.ClientStatus != null && ClientStatusSystemKeys.IsSupplierLike(e.ClientStatus.SystemKey))),
+                    (e.ClientStatus != null &&
+                     e.ClientStatus.SystemKey != null &&
+                     (e.ClientStatus.SystemKey.ToLower() == ClientStatusSystemKeys.Supplier ||
+                      e.ClientStatus.SystemKey.ToLower() == ClientStatusSystemKeys.Creditor))),
                 "client" => q.Where(e =>
                     e.IsClientAndSupplier ||
                     e.ClientStatus == null ||
-                    !ClientStatusSystemKeys.IsSupplierLike(e.ClientStatus.SystemKey)),
+                    e.ClientStatus.SystemKey == null ||
+                    (e.ClientStatus.SystemKey.ToLower() != ClientStatusSystemKeys.Supplier &&
+                     e.ClientStatus.SystemKey.ToLower() != ClientStatusSystemKeys.Creditor)),
                 _ => q,
             };
         }

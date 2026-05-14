@@ -82,6 +82,44 @@ public class LegalEntitiesControllerTests
     }
 
     [Fact]
+    public async Task GetAllAndPaged_WithCounterpartyRole_FilterLegalEntities()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var clientStatusId = await CreateClientStatusAsync(db, "Клиент", ClientStatusSystemKeys.Client);
+        var supplierStatusId = await CreateClientStatusAsync(db, "Поставщик", ClientStatusSystemKeys.Supplier);
+        var creditorStatusId = await CreateClientStatusAsync(db, "Кредитор", ClientStatusSystemKeys.Creditor);
+        var clientId = await CreateLegalEntityAsync(db, "ООО Клиент", clientStatusId: clientStatusId);
+        var mixedId = await CreateLegalEntityAsync(db, "ООО Клиент и поставщик", clientStatusId: supplierStatusId, isClientAndSupplier: true);
+        var supplierId = await CreateLegalEntityAsync(db, "ООО Поставщик", clientStatusId: supplierStatusId);
+        var creditorId = await CreateLegalEntityAsync(db, "ООО Кредитор", clientStatusId: creditorStatusId);
+        var controller = CreateController(db, userId);
+
+        var clientAction = await controller.GetAll(null, CancellationToken.None, "client");
+        var clientOk = Assert.IsType<OkObjectResult>(clientAction.Result);
+        var clientItems = Assert.IsAssignableFrom<IEnumerable<LegalEntityListItemDto>>(clientOk.Value).ToList();
+
+        Assert.Contains(clientItems, item => item.Id == clientId);
+        Assert.Contains(clientItems, item => item.Id == mixedId);
+        Assert.DoesNotContain(clientItems, item => item.Id == supplierId);
+        Assert.DoesNotContain(clientItems, item => item.Id == creditorId);
+
+        var supplierAction = await controller.GetPaged(
+            search: null,
+            page: 1,
+            pageSize: 25,
+            ct: CancellationToken.None,
+            counterpartyRole: "supplier");
+        var supplierOk = Assert.IsType<OkObjectResult>(supplierAction.Result);
+        var page = Assert.IsType<PagedResponse<LegalEntityListItemDto>>(supplierOk.Value);
+
+        Assert.Contains(page.Items, item => item.Id == mixedId);
+        Assert.Contains(page.Items, item => item.Id == supplierId);
+        Assert.Contains(page.Items, item => item.Id == creditorId);
+        Assert.DoesNotContain(page.Items, item => item.Id == clientId);
+    }
+
+    [Fact]
     public async Task Create_ForRegularUser_AssignsCurrentUserAsResponsible()
     {
         await using var db = await CreateContextAsync();
@@ -912,13 +950,20 @@ public class LegalEntitiesControllerTests
         return client.Id;
     }
 
-    private static async Task<int> CreateLegalEntityAsync(PaymentContext db, string shortName, int? responsibleUserId = null)
+    private static async Task<int> CreateLegalEntityAsync(
+        PaymentContext db,
+        string shortName,
+        int? responsibleUserId = null,
+        int? clientStatusId = null,
+        bool isClientAndSupplier = false)
     {
         var entity = new LegalEntity
         {
             ShortName = shortName,
             FullName = shortName,
             ResponsibleUserId = responsibleUserId,
+            ClientStatusId = clientStatusId,
+            IsClientAndSupplier = isClientAndSupplier,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -926,6 +971,20 @@ public class LegalEntitiesControllerTests
         db.LegalEntities.Add(entity);
         await db.SaveChangesAsync();
         return entity.Id;
+    }
+
+    private static async Task<int> CreateClientStatusAsync(PaymentContext db, string name, string systemKey)
+    {
+        var status = new ClientStatusEntity
+        {
+            Name = name,
+            SystemKey = systemKey,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.ClientStatuses.Add(status);
+        await db.SaveChangesAsync();
+        return status.Id;
     }
 
     private static async Task<int> CreateUserAsync(PaymentContext db)
