@@ -78,12 +78,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 return TaskJournalAutomationSchedulerResult.Disabled;
             }
 
-            var assignee = await ResolveAutomationUserAsync(context, settings.DefaultAssigneeUserId, cancellationToken);
-            if (assignee is null)
-            {
-                _logger.LogWarning("Task journal automation skipped: no active approved user was found for automatic control tasks.");
-                return new TaskJournalAutomationSchedulerResult(0, 0, true, "Не найден активный пользователь для автоконтроля задач.");
-            }
+            var defaultAssignee = await ResolveConfiguredAutomationUserAsync(context, settings.DefaultAssigneeUserId, cancellationToken);
 
             var now = DateTime.UtcNow;
             var cutoff = now.AddDays(-settings.InactiveDays);
@@ -101,6 +96,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                         task.ClientCaseId == clientCase.Id &&
                         ActiveTaskStatuses.Contains(task.Status)),
                     LastTaskAt = context.TaskJournalItems
+                        .IgnoreQueryFilters()
                         .Where(task => task.ClientCaseId == clientCase.Id)
                         .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
                 })
@@ -131,6 +127,12 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                         ActiveTaskStatuses.Contains(task.Status),
                         cancellationToken);
                 if (stillHasActiveTask)
+                {
+                    continue;
+                }
+
+                var assignee = await ResolveAutomationAssigneeAsync(context, candidate.Case, defaultAssignee, cancellationToken);
+                if (assignee is null)
                 {
                     continue;
                 }
@@ -172,31 +174,52 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             GetNullableInteger(values, DefaultAssigneeSettingKey, "TaskJournal:Automation:DefaultAssigneeUserId"));
     }
 
-    private async Task<User?> ResolveAutomationUserAsync(PaymentContext context, int? configuredUserId, CancellationToken cancellationToken)
+    private async Task<User?> ResolveConfiguredAutomationUserAsync(
+        PaymentContext context,
+        int? configuredUserId,
+        CancellationToken cancellationToken)
     {
-        if (configuredUserId.HasValue)
+        if (!configuredUserId.HasValue)
         {
-            var configured = await context.Users
-                .AsNoTracking()
-                .FirstOrDefaultAsync(user =>
-                    user.Id == configuredUserId.Value &&
-                    user.IsActive &&
-                    user.IsApproved,
-                    cancellationToken);
-            if (configured is not null)
-            {
-                return configured;
-            }
+            return null;
         }
 
         return await context.Users
             .AsNoTracking()
-            .Include(user => user.Role)
-            .Where(user => user.IsActive && user.IsApproved)
-            .OrderByDescending(user => user.Role != null && user.Role.Name == "admin")
-            .ThenBy(user => user.FullName)
-            .ThenBy(user => user.Email)
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(user =>
+                user.Id == configuredUserId.Value &&
+                user.IsActive &&
+                user.IsApproved,
+                cancellationToken);
+    }
+
+    private static int? ResolveCaseResponsibleUserId(ClientCase clientCase)
+        => clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
+
+    private static async Task<User?> ResolveAutomationAssigneeAsync(
+        PaymentContext context,
+        ClientCase clientCase,
+        User? fallbackAssignee,
+        CancellationToken cancellationToken)
+    {
+        var responsibleUserId = ResolveCaseResponsibleUserId(clientCase);
+        if (!responsibleUserId.HasValue)
+        {
+            return fallbackAssignee;
+        }
+
+        if (fallbackAssignee?.Id == responsibleUserId.Value)
+        {
+            return fallbackAssignee;
+        }
+
+        return await context.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(user =>
+                user.Id == responsibleUserId.Value &&
+                user.IsActive &&
+                user.IsApproved,
+                cancellationToken);
     }
 
     private static TaskJournalItem BuildAutomationTask(

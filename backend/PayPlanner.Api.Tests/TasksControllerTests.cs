@@ -492,6 +492,29 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateAutomationTaskForCase_AssignsResponsibleUserOfCaseOwner()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var responsible = await CreateAdminUserAsync(db, "responsible@example.com", "Ответственный");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = responsible.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+
+        Assert.Equal(responsible.Id, dto.AssigneeUserId);
+        Assert.Equal(responsible.FullName, dto.AssigneeName);
+        Assert.Equal(author.Id, dto.AuthorUserId);
+        Assert.Contains(dto.Participants, item => item.Role == "assignee" && item.UserId == responsible.Id);
+    }
+
+    [Fact]
     public async Task CreateAutomationTaskForCase_DoesNotCreateDuplicateWhenActiveTaskExists()
     {
         await using var db = await CreateContextAsync();
@@ -537,6 +560,7 @@ public class TasksControllerTests
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = author.Id;
         var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
         clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
         await db.SaveChangesAsync();
@@ -568,11 +592,77 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_PrefersCaseResponsibleOverDefaultAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var defaultAssignee = await CreateAdminUserAsync(db, "gordik@example.com", "Гордик Сергей");
+        var responsible = await CreateAdminUserAsync(db, "responsible@example.com", "Ответственный");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = responsible.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+            ["TaskJournal:Automation:DefaultAssigneeUserId"] = defaultAssignee.Id.ToString(),
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Equal(1, result.CreatedCount);
+            Assert.Null(result.Error);
+        }
+
+        var task = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal(responsible.Id, task.AssigneeUserId);
+        Assert.Equal(responsible.FullName, task.AssigneeName);
+    }
+
+    [Fact]
+    public async Task TaskJournalAutomationScheduler_DoesNotRecreateRecentlyDeletedControlTask()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        var task = await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: clientCase.Id, createdAt: DateTime.UtcNow.AddDays(-20));
+        task.TagsJson = "[\"автоконтроль\"]";
+        db.TaskJournalItems.Remove(task);
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.True(result.Enabled);
+            Assert.Null(result.Error);
+            Assert.Equal(0, result.CreatedCount);
+        }
+
+        Assert.Equal(0, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+        Assert.Equal(1, await db.TaskJournalItems.IgnoreQueryFilters().CountAsync(item => item.ClientCaseId == clientCase.Id));
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_SkipsFreshAndAlreadyControlledCases()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = author.Id;
         var oldCase = await CreateCaseAsync(db, client.Id, "СТАРОЕ ДЕЛО");
         var freshCase = await CreateCaseAsync(db, client.Id, "НОВОЕ ДЕЛО");
         var activeCase = await CreateCaseAsync(db, client.Id, "АКТИВНОЕ ДЕЛО");

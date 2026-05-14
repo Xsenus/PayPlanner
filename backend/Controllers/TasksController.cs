@@ -405,6 +405,7 @@ public class TasksController : ControllerBase
                     task.ClientCaseId == clientCase.Id &&
                     (task.Status == "done" || task.Status == "cancelled")),
                 LastTaskAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
                     .Where(task => task.ClientCaseId == clientCase.Id)
                     .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
             })
@@ -490,18 +491,12 @@ public class TasksController : ControllerBase
         }
 
         var lastTaskAt = await _db.TaskJournalItems
+            .IgnoreQueryFilters()
             .Where(task => task.ClientCaseId == clientCase.Id)
             .MaxAsync(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt), ct);
         var lastActivity = lastTaskAt ?? clientCase.CreatedAt;
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
-        var assignee = new TaskParticipantDraft(
-            access.UserId,
-            access.DisplayName,
-            string.Empty,
-            "assignee",
-            0,
-            "pending",
-            null);
+        var assignee = await ResolveAutomationAssigneeAsync(clientCase, access, ct);
         var binding = BuildCaseBinding(clientCase);
         if (binding.Error is not null)
         {
@@ -516,8 +511,8 @@ public class TasksController : ControllerBase
             ObjectName = BuildObjectName(binding.OwnerName, clientCase.Title),
             Title = "Проверить движение по делу",
             Description = "Автоконтроль: по делу нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.",
-            AssigneeUserId = access.UserId,
-            AssigneeName = access.DisplayName,
+            AssigneeUserId = assignee.UserId,
+            AssigneeName = assignee.DisplayName,
             AuthorUserId = access.UserId,
             AuthorName = access.DisplayName,
             DueAt = DateTime.UtcNow.Date.AddDays(1).AddHours(9),
@@ -571,6 +566,7 @@ public class TasksController : ControllerBase
                     task.ClientCaseId == clientCase.Id &&
                     ActiveTaskStatuses.Contains(task.Status)),
                 LastTaskAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
                     .Where(task => task.ClientCaseId == clientCase.Id)
                     .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
             })
@@ -594,7 +590,8 @@ public class TasksController : ControllerBase
                 continue;
             }
 
-            var entity = BuildAutomationTaskEntity(item.Case, binding, access, item.LastTaskAt);
+            var assignee = await ResolveAutomationAssigneeAsync(item.Case, access, ct);
+            var entity = BuildAutomationTaskEntity(item.Case, binding, access, assignee, item.LastTaskAt);
             AddTaskHistory(entity, access, "Задача создана автоматически из массового автоконтроля дел.");
             _db.TaskJournalItems.Add(entity);
             created.Add((entity, binding));
@@ -1908,22 +1905,51 @@ public class TasksController : ControllerBase
             .Replace("\n", "\\n", StringComparison.Ordinal)
             .Replace("\r", "\\n", StringComparison.Ordinal);
 
-    private static TaskJournalItem BuildAutomationTaskEntity(
+    private async Task<TaskParticipantDraft> ResolveAutomationAssigneeAsync(
         ClientCase clientCase,
-        TaskClientBinding binding,
-        TaskAccess access,
-        DateTime? lastTaskAt)
+        TaskAccess fallbackAccess,
+        CancellationToken ct)
     {
-        var lastActivity = lastTaskAt ?? clientCase.CreatedAt;
-        var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
-        var assignee = new TaskParticipantDraft(
-            access.UserId,
-            access.DisplayName,
+        var responsibleUserId = clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
+        if (responsibleUserId.HasValue)
+        {
+            var responsible = await _db.Users
+                .AsNoTracking()
+                .Where(user => user.Id == responsibleUserId.Value && user.IsActive && user.IsApproved)
+                .Select(user => new { user.Id, user.FullName, user.Email })
+                .FirstOrDefaultAsync(ct);
+            if (responsible is not null)
+            {
+                return new TaskParticipantDraft(
+                    responsible.Id,
+                    BuildUserDisplayName(responsible.FullName, responsible.Email),
+                    responsible.Email,
+                    "assignee",
+                    0,
+                    "pending",
+                    null);
+            }
+        }
+
+        return new TaskParticipantDraft(
+            fallbackAccess.UserId,
+            fallbackAccess.DisplayName,
             string.Empty,
             "assignee",
             0,
             "pending",
             null);
+    }
+
+    private static TaskJournalItem BuildAutomationTaskEntity(
+        ClientCase clientCase,
+        TaskClientBinding binding,
+        TaskAccess access,
+        TaskParticipantDraft assignee,
+        DateTime? lastTaskAt)
+    {
+        var lastActivity = lastTaskAt ?? clientCase.CreatedAt;
+        var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
 
         return new TaskJournalItem
         {
@@ -1933,8 +1959,8 @@ public class TasksController : ControllerBase
             ObjectName = BuildObjectName(binding.OwnerName, clientCase.Title),
             Title = "Проверить движение по делу",
             Description = "Автоконтроль: по делу нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.",
-            AssigneeUserId = access.UserId,
-            AssigneeName = access.DisplayName,
+            AssigneeUserId = assignee.UserId,
+            AssigneeName = assignee.DisplayName,
             AuthorUserId = access.UserId,
             AuthorName = access.DisplayName,
             DueAt = DateTime.UtcNow.Date.AddDays(1).AddHours(9),
