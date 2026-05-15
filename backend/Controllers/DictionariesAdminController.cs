@@ -11,6 +11,11 @@ namespace PayPlanner.Api.Controllers;
 [Authorize(Policy = "Admin")]
 public class DictionariesAdminController : ControllerBase
 {
+    private const int ServiceNameMaxLength = 1000;
+    private const int ServiceDescriptionMaxLength = 2000;
+    private const string DefaultServiceUnit = "шт";
+    private const string DefaultServiceColorHex = "#0EA5E9";
+
     private readonly PaymentContext _db;
     public DictionariesAdminController(PaymentContext db) => _db = db;
 
@@ -34,6 +39,64 @@ public class DictionariesAdminController : ControllerBase
             {
                 return item;
             }
+        }
+
+        return null;
+    }
+
+    private static string NormalizeString(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+
+    private static bool IsHexColor(string value)
+        => value.Length == 7
+           && value[0] == '#'
+           && value.Skip(1).All(Uri.IsHexDigit);
+
+    private async Task<IActionResult?> NormalizeAndValidateServiceAsync(ServiceDictionaryItem service)
+    {
+        service.Name = NormalizeString(service.Name);
+        service.Description = NormalizeString(service.Description);
+        service.Unit = NormalizeString(service.Unit);
+        service.ColorHex = NormalizeString(service.ColorHex);
+
+        if (service.Name.Length == 0)
+        {
+            return BadRequest("Название услуги обязательно.");
+        }
+
+        if (service.Name.Length > ServiceNameMaxLength)
+        {
+            return BadRequest($"Название услуги не должно быть длиннее {ServiceNameMaxLength} символов.");
+        }
+
+        if (service.Description.Length > ServiceDescriptionMaxLength)
+        {
+            return BadRequest($"Описание услуги не должно быть длиннее {ServiceDescriptionMaxLength} символов.");
+        }
+
+        if (service.Unit.Length == 0)
+        {
+            service.Unit = DefaultServiceUnit;
+        }
+
+        if (service.ColorHex.Length == 0)
+        {
+            service.ColorHex = DefaultServiceColorHex;
+        }
+
+        if (!IsHexColor(service.ColorHex))
+        {
+            return BadRequest("Цвет услуги должен быть в формате #RRGGBB.");
+        }
+
+        if (service.DefaultPrice < 0)
+        {
+            service.DefaultPrice = 0;
+        }
+
+        if (service.CategoryId.HasValue && !await _db.ServiceCategories.AsNoTracking().AnyAsync(c => c.Id == service.CategoryId.Value))
+        {
+            return BadRequest($"Категория услуги с ID {service.CategoryId.Value} не найдена.");
         }
 
         return null;
@@ -438,10 +501,9 @@ public class DictionariesAdminController : ControllerBase
     [HttpPost("services")]
     public async Task<IActionResult> CreateService([FromBody] ServiceDictionaryItem m)
     {
-        if (m.CategoryId.HasValue && !await _db.ServiceCategories.AsNoTracking().AnyAsync(c => c.Id == m.CategoryId.Value))
-        {
-            return BadRequest($"Unknown serviceCategoryId {m.CategoryId.Value}");
-        }
+        var validation = await NormalizeAndValidateServiceAsync(m);
+        if (validation is not null) return validation;
+
         _db.Services.Add(m);
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/services/{m.Id}", m);
@@ -451,10 +513,9 @@ public class DictionariesAdminController : ControllerBase
     {
         var e = await _db.Services.FindAsync(id);
         if (e is null) return NotFound();
-        if (m.CategoryId.HasValue && !await _db.ServiceCategories.AsNoTracking().AnyAsync(c => c.Id == m.CategoryId.Value))
-        {
-            return BadRequest($"Unknown serviceCategoryId {m.CategoryId.Value}");
-        }
+        var validation = await NormalizeAndValidateServiceAsync(m);
+        if (validation is not null) return validation;
+
         e.Name = m.Name;
         e.Description = m.Description;
         e.Unit = m.Unit;

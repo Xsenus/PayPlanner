@@ -146,6 +146,8 @@ function defaultColor(kind: VisibleKind): string {
 
 
 const isValidHexColor = (v: string) => /^#[0-9A-Fa-f]{6}$/.test(v);
+const SERVICE_NAME_MAX_LENGTH = 1000;
+const SERVICE_DESCRIPTION_MAX_LENGTH = 2000;
 
 function prettyErrorMessage(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e);
@@ -334,6 +336,12 @@ export const Dictionaries = () => {
   ) {
     if (!canEdit) return;
     if (!item.name.trim()) return setError('Название не должно быть пустым');
+    if (supportsServiceCategory(kind) && item.name.trim().length > SERVICE_NAME_MAX_LENGTH) {
+      return setError(`Название услуги не должно быть длиннее ${SERVICE_NAME_MAX_LENGTH} символов`);
+    }
+    if (supportsServiceCategory(kind) && (item.description ?? '').trim().length > SERVICE_DESCRIPTION_MAX_LENGTH) {
+      return setError(`Описание услуги не должно быть длиннее ${SERVICE_DESCRIPTION_MAX_LENGTH} символов`);
+    }
     if (item.colorHex && !isValidHexColor(item.colorHex))
       return setError('Цвет должен быть в формате #RRGGBB');
 
@@ -381,6 +389,12 @@ export const Dictionaries = () => {
   async function saveEdit(kind: VisibleKind, idx: number, item: FullDictItem) {
     if (!canEdit) return;
     if (!item.name.trim()) return setError('Название не должно быть пустым');
+    if (supportsServiceCategory(kind) && item.name.trim().length > SERVICE_NAME_MAX_LENGTH) {
+      return setError(`Название услуги не должно быть длиннее ${SERVICE_NAME_MAX_LENGTH} символов`);
+    }
+    if (supportsServiceCategory(kind) && (item.description ?? '').trim().length > SERVICE_DESCRIPTION_MAX_LENGTH) {
+      return setError(`Описание услуги не должно быть длиннее ${SERVICE_DESCRIPTION_MAX_LENGTH} символов`);
+    }
     if (item.colorHex && !isValidHexColor(item.colorHex))
       return setError('Цвет должен быть в формате #RRGGBB');
 
@@ -468,6 +482,7 @@ export const Dictionaries = () => {
               type="text"
               placeholder="Например: Консультация"
               value={local.name}
+              maxLength={supportsServiceCategory(kind) ? SERVICE_NAME_MAX_LENGTH : undefined}
               onChange={(e) => set({ name: e.target.value })}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
             />
@@ -611,6 +626,7 @@ export const Dictionaries = () => {
               placeholder="Короткое пояснение..."
               rows={2}
               value={local.description}
+              maxLength={supportsServiceCategory(kind) ? SERVICE_DESCRIPTION_MAX_LENGTH : undefined}
               onChange={(e) => set({ description: e.target.value })}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900 resize-none"
             />
@@ -636,6 +652,7 @@ export const Dictionaries = () => {
             <input
               type="text"
               value={local.name}
+              maxLength={supportsServiceCategory(kind) ? SERVICE_NAME_MAX_LENGTH : undefined}
               onChange={(e) => set({ name: e.target.value })}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
             />
@@ -776,6 +793,7 @@ export const Dictionaries = () => {
             <textarea
               rows={2}
               value={local.description}
+              maxLength={supportsServiceCategory(kind) ? SERVICE_DESCRIPTION_MAX_LENGTH : undefined}
               onChange={(e) => set({ description: e.target.value })}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900 resize-none"
             />

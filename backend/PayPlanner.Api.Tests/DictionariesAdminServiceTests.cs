@@ -15,12 +15,17 @@ public class DictionariesAdminServiceTests
     {
         using var db = CreateContext();
 
-        var maxLength = db.Model
+        var nameMaxLength = db.Model
             .FindEntityType(typeof(ServiceDictionaryItem))!
             .FindProperty(nameof(ServiceDictionaryItem.Name))!
             .GetMaxLength();
+        var descriptionMaxLength = db.Model
+            .FindEntityType(typeof(ServiceDictionaryItem))!
+            .FindProperty(nameof(ServiceDictionaryItem.Description))!
+            .GetMaxLength();
 
-        Assert.Equal(300, maxLength);
+        Assert.Equal(1000, nameMaxLength);
+        Assert.Equal(2000, descriptionMaxLength);
     }
 
     [Fact]
@@ -37,16 +42,16 @@ public class DictionariesAdminServiceTests
         db.ServiceCategories.Add(category);
         await db.SaveChangesAsync();
 
-        var longName = "GR/ Receiving and filing a document in court or other state municipal administrative authorities and public offices";
+        var longName = "ГР/ получение/подача документа в суд либо в иные Государственные, Муниципальные, Административные органы власти";
         Assert.True(longName.Length > 100);
 
         var controller = new DictionariesAdminController(db);
         var result = await controller.CreateService(new ServiceDictionaryItem
         {
-            Name = longName,
-            Description = string.Empty,
-            Unit = "service",
-            DefaultPrice = 1000m,
+            Name = $"  {longName}  ",
+            Description = "  Документы для суда и государственных органов.  ",
+            Unit = string.Empty,
+            DefaultPrice = -1000m,
             ColorHex = "#0EA5E9",
             IsActive = true,
             CategoryId = category.Id,
@@ -57,8 +62,31 @@ public class DictionariesAdminServiceTests
         db.ChangeTracker.Clear();
         var saved = await db.Services.AsNoTracking().SingleAsync();
         Assert.Equal(longName, saved.Name);
-        Assert.Equal(1000m, saved.DefaultPrice);
+        Assert.Equal("Документы для суда и государственных органов.", saved.Description);
+        Assert.Equal("шт", saved.Unit);
+        Assert.Equal(0m, saved.DefaultPrice);
         Assert.Equal(category.Id, saved.CategoryId);
+    }
+
+    [Fact]
+    public async Task CreateService_ReturnsBadRequest_WhenTitleIsTooLong()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = new DictionariesAdminController(db);
+
+        var result = await controller.CreateService(new ServiceDictionaryItem
+        {
+            Name = new string('а', 1001),
+            Description = string.Empty,
+            Unit = "шт",
+            DefaultPrice = 1000m,
+            ColorHex = "#0EA5E9",
+            IsActive = true,
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("Название услуги не должно быть длиннее 1000 символов.", badRequest.Value);
+        Assert.Empty(await db.Services.AsNoTracking().ToListAsync());
     }
 
     private static PaymentContext CreateContext()
