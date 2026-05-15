@@ -1254,7 +1254,7 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<ServiceDictionaryItem>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(300).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.ColorHex).HasMaxLength(7);
 
