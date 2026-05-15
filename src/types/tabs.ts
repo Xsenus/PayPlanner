@@ -1,5 +1,6 @@
 export type Tab =
   | 'calendar'
+  | 'notifications'
   | 'tasks'
   | 'tasksApprovals'
   | 'tasksCalendar'

@@ -18,6 +18,7 @@ import {
   isActsListPath,
   isClientsListPath,
   isContractsListPath,
+  isNotificationsPath,
   isPaymentsListPath,
   isTasksApprovalsPath,
   isTasksCalendarPath,
@@ -165,6 +166,7 @@ describe('App sidebar routing helpers', () => {
 
   it('builds real href values for menu tabs', () => {
     expect(getTabHref('calendar')).toBe('/?ppTab=calendar');
+    expect(getTabHref('notifications')).toBe('/notifications');
     expect(getTabHref('tasks')).toBe('/tasks');
     expect(getTabHref('tasksApprovals')).toBe('/tasks/approvals');
     expect(getTabHref('tasksCalendar')).toBe('/tasks/calendar');
@@ -188,6 +190,13 @@ describe('App sidebar routing helpers', () => {
 
     window.history.replaceState({}, '', '/?ppTab=contactsLegal');
     expect(getInitialTab()).toBe('contactsLegal');
+  });
+
+  it('detects the notifications pathname', () => {
+    window.history.replaceState({}, '', '/notifications');
+
+    expect(isNotificationsPath()).toBe(true);
+    expect(getInitialTab()).toBe('notifications');
   });
 });
 

@@ -8,8 +8,9 @@ namespace PayPlanner.Api.Services.Notifications;
 public sealed class TaskJournalReminderNotificationService : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly HashSet<string> DeliveryChannels = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> ReminderChannels = new(StringComparer.OrdinalIgnoreCase)
     {
+        NotificationChannels.InApp,
         NotificationChannels.Email,
         NotificationChannels.Telegram
     };
@@ -77,7 +78,7 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
             foreach (var task in tasks)
             {
                 var channels = DeserializeList(task.ChannelsJson);
-                if (!channels.Any(channel => DeliveryChannels.Contains(channel)))
+                if (!channels.Any(channel => ReminderChannels.Contains(channel)))
                 {
                     continue;
                 }

@@ -7,9 +7,11 @@ namespace PayPlanner.Api.Services.Notifications;
 
 public static class NotificationChannels
 {
+    public const string InApp = "inApp";
     public const string Email = "email";
     public const string Telegram = "telegram";
-    public static readonly IReadOnlyList<string> All = [Email, Telegram];
+    public static readonly IReadOnlyList<string> All = [InApp, Email, Telegram];
+    public static readonly IReadOnlyList<string> External = [Email, Telegram];
 }
 
 public static class NotificationDeliveryStatus
@@ -53,6 +55,34 @@ public sealed record NotificationPurposeDefinition(
     string Key,
     string Label,
     string Description);
+
+public static class UserNotificationTypes
+{
+    public const string TaskReminder = "taskReminder";
+    public const string TaskChanged = "taskChanged";
+    public const string TaskComment = "taskComment";
+    public const string TaskCompleted = "taskCompleted";
+
+    public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
+    [
+        new(TaskReminder, "Напоминание по задаче", "Сроки, просрочки и плановые напоминания по задачам.", "amber"),
+        new(TaskChanged, "Изменение задачи", "Изменения статусов, сроков, исполнителей и других полей задачи.", "blue"),
+        new(TaskComment, "Комментарий по задаче", "Новые комментарии и сообщения по задаче.", "emerald"),
+        new(TaskCompleted, "Задача выполнена", "Уведомление постановщику о завершении задачи.", "blue")
+    ];
+
+    public static bool IsKnown(string? value)
+        => All.Any(item => string.Equals(item.Key, value, StringComparison.OrdinalIgnoreCase));
+
+    public static UserNotificationTypeDefinition? Find(string? value)
+        => All.FirstOrDefault(item => string.Equals(item.Key, value, StringComparison.OrdinalIgnoreCase));
+}
+
+public sealed record UserNotificationTypeDefinition(
+    string Key,
+    string Label,
+    string Description,
+    string Tone);
 
 public sealed record EmailSendSettings(
     bool Enabled,

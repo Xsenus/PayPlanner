@@ -42,6 +42,7 @@ describe('Navigation links', () => {
     renderNavigation();
 
     expect(findLinkByHref(getTabHref('calendar'))).toBeTruthy();
+    expect(findLinkByHref(getTabHref('notifications'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('tasksCalendar'))).toBeTruthy();
     expect(screen.getByRole('link', { name: /Клиенты/i }).getAttribute('href')).toBe(getTabHref('clients'));

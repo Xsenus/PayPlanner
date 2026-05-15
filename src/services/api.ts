@@ -181,6 +181,39 @@ export interface NotificationSettingsDto {
   purposes: NotificationPurposeDto[];
 }
 
+export interface UserNotificationDto {
+  id: number;
+  type: string;
+  typeLabel: string;
+  eventKey: string;
+  title: string;
+  bodyPreview: string;
+  tone: 'rose' | 'amber' | 'blue' | 'emerald' | string;
+  objectType: string;
+  objectId?: number | null;
+  taskId?: number | null;
+  isRead: boolean;
+  readAt?: string | null;
+  isArchived: boolean;
+  archivedAt?: string | null;
+  createdAt: string;
+}
+
+export interface UserNotificationTypeDto {
+  key: string;
+  label: string;
+  description: string;
+  tone: string;
+}
+
+export interface UserNotificationsQuery {
+  status?: 'active' | 'unread' | 'read' | 'archived' | 'all' | string;
+  type?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 export interface UpsertNotificationSenderRequest {
   channel: NotificationChannel;
   name: string;
@@ -1886,6 +1919,49 @@ export class ApiService {
 
   async getTaskJournalNotifications() {
     return this.request<TaskJournalNotification[]>('/tasks/notifications');
+  }
+
+  async getUserNotificationTypes() {
+    return this.request<UserNotificationTypeDto[]>('/notifications/inbox/types');
+  }
+
+  async getUserNotifications(params?: UserNotificationsQuery) {
+    const q = buildQuery({
+      status: params?.status ?? 'active',
+      type: params?.type,
+      search: params?.search,
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 25,
+    });
+    return this.request<PagedResult<UserNotificationDto>>(`/notifications/inbox${q}`);
+  }
+
+  async getUnreadUserNotificationCount() {
+    return this.request<number>('/notifications/inbox/unread-count');
+  }
+
+  async markUserNotificationRead(id: number) {
+    return this.request<UserNotificationDto>(`/notifications/inbox/${id}/read`, {
+      method: 'PATCH',
+    });
+  }
+
+  async markUserNotificationUnread(id: number) {
+    return this.request<UserNotificationDto>(`/notifications/inbox/${id}/unread`, {
+      method: 'PATCH',
+    });
+  }
+
+  async archiveUserNotification(id: number) {
+    return this.request<UserNotificationDto>(`/notifications/inbox/${id}/archive`, {
+      method: 'PATCH',
+    });
+  }
+
+  async deleteUserNotification(id: number) {
+    return this.request<void>(`/notifications/inbox/${id}`, {
+      method: 'DELETE',
+    });
   }
 
   async getTaskJournalItem(id: number) {

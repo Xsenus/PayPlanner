@@ -53,6 +53,7 @@ type InvoiceReturnContext =
 
 const Calendar = lazy(() => import('./components/Calendar/Calendar').then((module) => ({ default: module.Calendar })));
 const TaskJournal = lazy(() => import('./components/Tasks/TaskJournal').then((module) => ({ default: module.TaskJournal })));
+const NotificationCenter = lazy(() => import('./components/Notifications/NotificationCenter').then((module) => ({ default: module.NotificationCenter })));
 const Reports = lazy(() => import('./components/Reports/Reports').then((module) => ({ default: module.Reports })));
 const Calculator = lazy(() => import('./components/Calculator/Calculator').then((module) => ({ default: module.Calculator })));
 const Clients = lazy(() => import('./components/Clients/Clients').then((module) => ({ default: module.Clients })));
@@ -96,6 +97,7 @@ function AppContent() {
 
   const tabNames: Record<string, string> = useMemo(
     () => ({
+      notifications: 'Центр уведомлений',
       calendar: 'Календарь',
       tasks: 'Журнал задач',
       tasksApprovals: 'Согласования задач',
@@ -169,6 +171,7 @@ function AppContent() {
   const accessibleMenuTabs = useMemo(
     () =>
       [
+        { tab: 'notifications' as Tab, allowed: true },
         { tab: 'calendar' as Tab, allowed: permissions.calendar.canView },
         { tab: 'tasks' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksApprovals' as Tab, allowed: permissions.tasks.canView },
@@ -211,6 +214,8 @@ function AppContent() {
   const canViewTab = useCallback(
     (tab: Tab) => {
       switch (tab) {
+        case 'notifications':
+          return true;
         case 'calendar':
           return permissions.calendar.canView;
         case 'tasks':
@@ -562,6 +567,10 @@ function AppContent() {
     setActiveTab('profile');
   }, []);
 
+  const handleOpenNotifications = useCallback(() => {
+    setActiveTab('notifications');
+  }, []);
+
   const handleCreateUser = useCallback(() => {
     setSelectedUserId(null);
     setActiveTab('userDetail');
@@ -634,6 +643,8 @@ function AppContent() {
     const url = new URL(window.location.href);
     if (activeTab === 'clients') {
       url.pathname = '/clients';
+    } else if (activeTab === 'notifications') {
+      url.pathname = '/notifications';
     } else if (activeTab === 'tasks') {
       url.pathname = selectedTaskId ? `/tasks/${selectedTaskId}` : '/tasks';
     } else if (activeTab === 'tasksApprovals') {
@@ -657,6 +668,8 @@ function AppContent() {
     } else if (activeTab === 'contractDetail') {
       url.pathname = selectedContractId ? `/contracts/${selectedContractId}` : '/contracts';
     } else if (/^\/clients(?:\/\d+)?\/?$/i.test(url.pathname)) {
+      url.pathname = '/';
+    } else if (/^\/notifications\/?$/i.test(url.pathname)) {
       url.pathname = '/';
     } else if (/^\/tasks(?:\/(?:\d+|calendar|approvals))?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
@@ -841,6 +854,9 @@ function AppContent() {
         return permissions.calendar.canView
           ? <Calendar onOpenClient={handleOpenCalendarClient} />
           : renderNoAccess('Раздел календаря недоступен для вашей роли.');
+
+      case 'notifications':
+        return <NotificationCenter onOpenTask={openTaskDetail} />;
 
       case 'tasks':
         return permissions.tasks.canView
@@ -1429,7 +1445,7 @@ function AppContent() {
             title={tabNames[activeTab] ?? ''}
             onSignOut={signOut}
             onOpenProfile={handleOpenProfile}
-            onOpenTask={openTaskDetail}
+            onOpenNotifications={handleOpenNotifications}
           />
           <main className="flex-1">
             <RouteErrorBoundary

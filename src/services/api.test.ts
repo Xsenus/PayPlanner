@@ -55,6 +55,34 @@ describe('apiService auth handling', () => {
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer main-token');
   });
 
+  it('loads the notification inbox with filters', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      items: [],
+      total: 0,
+      page: 2,
+      pageSize: 10,
+    }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.getUserNotifications({
+      status: 'unread',
+      type: 'taskChanged',
+      search: 'договор',
+      page: 2,
+      pageSize: 10,
+    });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/notifications/inbox?');
+    expect(String(url)).toContain('status=unread');
+    expect(String(url)).toContain('type=taskChanged');
+    expect(String(url)).toContain('search=');
+    expect(String(url)).toContain('page=2');
+    expect(String(url)).toContain('pageSize=10');
+  });
+
   it('emits a session-expired event when the API returns 401', async () => {
     const listener = vi.fn();
     window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);

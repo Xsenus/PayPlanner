@@ -325,13 +325,8 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<NotificationDelivery>();
         }
 
-        var channels = DeserializeList(task.ChannelsJson)
-            .Where(channel => channel is NotificationChannels.Email or NotificationChannels.Telegram)
-            .ToList();
-        if (channels.Count == 0)
-        {
-            return Array.Empty<NotificationDelivery>();
-        }
+        var inAppEnabled = HasTaskChannel(task, NotificationChannels.InApp);
+        var channels = ResolveTaskMessageChannels(task);
 
         var eventKey = reminderKey == "dailyOverdue"
             ? $"task:{task.Id}:reminder:{reminderKey}:{nowUtc:yyyyMMdd}"
@@ -341,6 +336,25 @@ public sealed class NotificationService : INotificationService
             BuildTaskReminderSubject(task, reminderKey, nowUtc),
             BuildTaskReminderBody(task, reminderKey, nowUtc),
             Purpose: NotificationPurposes.TaskReminder);
+
+        if (inAppEnabled)
+        {
+            await CreateUserNotificationAsync(
+                task.AssigneeUserId.Value,
+                UserNotificationTypes.TaskReminder,
+                eventKey,
+                message.Subject,
+                message.Body,
+                IsReminderOverdue(task, reminderKey, nowUtc) ? "rose" : "amber",
+                task,
+                new { reminderKey, dueAt = task.DueAt },
+                cancellationToken);
+        }
+
+        if (channels.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
 
         return await SendToUserAsync(task.AssigneeUserId.Value, message, channels, eventKey, cancellationToken);
     }
@@ -358,6 +372,20 @@ public sealed class NotificationService : INotificationService
             $"Задача выполнена: {task.Title}",
             BuildTaskCompletedBody(task),
             Purpose: NotificationPurposes.TaskReminder);
+
+        if (HasTaskChannel(task, NotificationChannels.InApp))
+        {
+            await CreateUserNotificationAsync(
+                task.AuthorUserId.Value,
+                UserNotificationTypes.TaskCompleted,
+                $"task:{task.Id}:completed",
+                message.Subject,
+                message.Body,
+                "blue",
+                task,
+                new { status = task.Status },
+                cancellationToken);
+        }
 
         return await SendToUserAsync(
             task.AuthorUserId.Value,
@@ -377,7 +405,7 @@ public sealed class NotificationService : INotificationService
     {
         var channels = ResolveTaskMessageChannels(task);
         var recipients = ResolveTaskNotificationUserIds(task, actorUserId);
-        if (channels.Count == 0 || recipients.Count == 0)
+        if (recipients.Count == 0)
         {
             return Array.Empty<NotificationDelivery>();
         }
@@ -390,7 +418,24 @@ public sealed class NotificationService : INotificationService
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
-            deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskChanged,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "blue",
+                    task,
+                    new { actorUserId, actorName, changeLabels },
+                    cancellationToken);
+            }
+
+            if (channels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+            }
         }
 
         return deliveries;
@@ -404,7 +449,7 @@ public sealed class NotificationService : INotificationService
         var channels = ResolveTaskMessageChannels(task);
         var actorUserId = comment.AuthorUserId ?? 0;
         var recipients = ResolveTaskNotificationUserIds(task, actorUserId);
-        if (channels.Count == 0 || recipients.Count == 0)
+        if (recipients.Count == 0)
         {
             return Array.Empty<NotificationDelivery>();
         }
@@ -417,7 +462,24 @@ public sealed class NotificationService : INotificationService
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
-            deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskComment,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "emerald",
+                    task,
+                    new { commentId = comment.Id, comment.AuthorUserId, comment.AuthorName },
+                    cancellationToken);
+            }
+
+            if (channels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+            }
         }
 
         return deliveries;
@@ -584,6 +646,58 @@ public sealed class NotificationService : INotificationService
                     ? delivery.RecipientUserId == recipientUserId
                     : delivery.RecipientAddress == recipientAddress),
                 cancellationToken);
+    }
+
+    private async Task CreateUserNotificationAsync(
+        int recipientUserId,
+        string type,
+        string eventKey,
+        string title,
+        string body,
+        string tone,
+        TaskJournalItem task,
+        object? metadata,
+        CancellationToken cancellationToken)
+    {
+        if (recipientUserId <= 0 || string.IsNullOrWhiteSpace(eventKey))
+        {
+            return;
+        }
+
+        var alreadyExists = await _context.UserNotifications
+            .AsNoTracking()
+            .AnyAsync(item =>
+                item.RecipientUserId == recipientUserId
+                && item.EventKey == eventKey,
+                cancellationToken);
+        if (alreadyExists)
+        {
+            return;
+        }
+
+        var recipientExists = await _context.Users
+            .AsNoTracking()
+            .AnyAsync(user => user.Id == recipientUserId, cancellationToken);
+        if (!recipientExists)
+        {
+            return;
+        }
+
+        _context.UserNotifications.Add(new UserNotification
+        {
+            RecipientUserId = recipientUserId,
+            Type = type,
+            EventKey = eventKey,
+            Title = Truncate(title.Trim(), 300),
+            BodyPreview = Truncate(body.Trim(), 1000),
+            Tone = string.IsNullOrWhiteSpace(tone) ? "blue" : tone.Trim(),
+            ObjectType = "task",
+            ObjectId = task.Id,
+            TaskJournalItemId = task.Id,
+            MetadataJson = metadata is null ? "{}" : JsonSerializer.Serialize(metadata, JsonOptions),
+            CreatedAt = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<IReadOnlyList<NotificationSenderTarget>> ResolveSenderTargetsAsync(
@@ -1198,6 +1312,17 @@ public sealed class NotificationService : INotificationService
             string.Empty,
             comment.Text.Trim()
         });
+    }
+
+    private static bool HasTaskChannel(TaskJournalItem task, string channel)
+        => DeserializeList(task.ChannelsJson).Contains(channel, StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsReminderOverdue(TaskJournalItem task, string reminderKey, DateTime nowUtc)
+    {
+        var dueAt = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc);
+        return string.Equals(reminderKey, "dailyOverdue", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(reminderKey, "atDue", StringComparison.OrdinalIgnoreCase)
+            || nowUtc >= dueAt;
     }
 
     private static IReadOnlyList<string> ResolveTaskMessageChannels(TaskJournalItem task)

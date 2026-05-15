@@ -46,6 +46,33 @@ public class NotificationDeliveryDto
     public DateTime? SentAt { get; set; }
 }
 
+public class UserNotificationDto
+{
+    public int Id { get; set; }
+    public string Type { get; set; } = string.Empty;
+    public string TypeLabel { get; set; } = string.Empty;
+    public string EventKey { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string BodyPreview { get; set; } = string.Empty;
+    public string Tone { get; set; } = "blue";
+    public string ObjectType { get; set; } = string.Empty;
+    public int? ObjectId { get; set; }
+    public int? TaskId { get; set; }
+    public bool IsRead { get; set; }
+    public DateTime? ReadAt { get; set; }
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class UserNotificationTypeDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Tone { get; set; } = "blue";
+}
+
 public class SendNotificationTestResponseDto
 {
     public bool Success { get; set; }

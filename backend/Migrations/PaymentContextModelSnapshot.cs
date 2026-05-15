@@ -5215,6 +5215,95 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("UserExternalIdentities");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.UserNotification", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ArchivedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BodyPreview")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventKey")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MetadataJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ObjectId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ObjectType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RecipientUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TaskJournalItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Tone")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskJournalItemId");
+
+                    b.HasIndex("RecipientUserId", "EventKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserNotifications_User_EventKey");
+
+                    b.HasIndex("RecipientUserId", "IsRead", "DeletedAt")
+                        .HasDatabaseName("IX_UserNotifications_User_Read_Deleted");
+
+                    b.HasIndex("RecipientUserId", "Type", "DeletedAt")
+                        .HasDatabaseName("IX_UserNotifications_User_Type_Deleted");
+
+                    b.HasIndex("RecipientUserId", "IsArchived", "DeletedAt", "CreatedAt")
+                        .HasDatabaseName("IX_UserNotifications_User_Archived_Deleted_Created");
+
+                    b.ToTable("UserNotifications");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>
                 {
                     b.Property<int>("Id")
@@ -6038,6 +6127,24 @@ namespace PayPlanner.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.UserNotification", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "RecipientUser")
+                        .WithMany()
+                        .HasForeignKey("RecipientUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("RecipientUser");
+
+                    b.Navigation("TaskJournalItem");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>

@@ -79,6 +79,57 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskChangedAsync_CreatesInAppNotificationWithoutExternalChannels()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "author@example.com");
+        var assignee = new User
+        {
+            Email = "assignee-in-app@example.com",
+            FullName = "assignee-in-app@example.com",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Подготовить заявление",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(3),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "inProgress"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskChangedAsync(
+            task,
+            ["Статус"],
+            author.FullName,
+            author.Id);
+
+        Assert.Empty(deliveries);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(assignee.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskChanged, notification.Type);
+        Assert.Equal(task.Id, notification.TaskJournalItemId);
+        Assert.False(notification.IsRead);
+        Assert.False(notification.IsArchived);
+    }
+
+    [Fact]
     public async Task SendToUserAsync_SendsThroughAllMatchingSendersForPurpose()
     {
         await using var db = await CreateContextAsync();

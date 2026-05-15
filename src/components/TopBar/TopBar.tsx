@@ -5,20 +5,14 @@ import { useTabNavigation } from '../../contexts/TabContext';
 import { useDialog } from '../../hooks/useDialog';
 import { apiService } from '../../services/api';
 import { setStoredCompanyProfileCompanyId, setStoredCompanyProfileMode } from '../../utils/companyProfileBridge';
-import {
-  TASK_JOURNAL_EVENT,
-  type TaskJournalNotification,
-} from '../../utils/taskJournalStore';
+import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 
 type TopBarProps = {
   title: string;
   onSignOut: () => Promise<void>;
   onOpenProfile: () => void;
-  onOpenTask: (taskId: number) => void;
+  onOpenNotifications: () => void;
 };
-
-const TASK_NOTIFICATION_SEEN_KEY_PREFIX = 'pp.task_notifications.seen.v1';
-const NOTIFICATION_BADGE_HIDE_MS = 220;
 
 const getInitials = (fullName?: string | null) =>
   (fullName ?? 'U')
@@ -29,195 +23,43 @@ const getInitials = (fullName?: string | null) =>
     .join('')
     .toUpperCase();
 
-const readSeenNotificationIds = (storageKey: string) => {
-  if (typeof window === 'undefined') {
-    return new Set<string>();
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(storageKey);
-    if (!rawValue) {
-      return new Set<string>();
-    }
-
-    const parsed = JSON.parse(rawValue);
-    return new Set(
-      Array.isArray(parsed)
-        ? parsed.filter((value): value is string => typeof value === 'string' && value.length > 0)
-        : [],
-    );
-  } catch {
-    return new Set<string>();
-  }
-};
-
-export default function TopBar({ title, onSignOut, onOpenProfile, onOpenTask }: TopBarProps) {
+export default function TopBar({ title, onSignOut, onOpenProfile, onOpenNotifications }: TopBarProps) {
   const { user, isAdmin } = useAuth();
   const { setActiveTab } = useTabNavigation();
   const { confirm } = useDialog();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [taskNotifications, setTaskNotifications] = useState<TaskJournalNotification[]>([]);
-  const [notificationsLoaded, setNotificationsLoaded] = useState(false);
-  const [seenNotificationIds, setSeenNotificationIds] = useState<Set<string>>(() => new Set());
-  const [visibleBadgeCount, setVisibleBadgeCount] = useState(0);
-  const [badgeHiding, setBadgeHiding] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
-  const notificationsRef = useRef<HTMLDivElement | null>(null);
 
   const initials = useMemo(() => getInitials(user?.fullName), [user?.fullName]);
-  const notificationSeenStorageKey = useMemo(() => {
-    const subject = user?.id ? `user:${user.id}` : user?.email ? `email:${user.email}` : 'anonymous';
-    return `${TASK_NOTIFICATION_SEEN_KEY_PREFIX}:${subject}`;
-  }, [user?.email, user?.id]);
 
-  const persistSeenNotificationIds = useCallback(
-    (ids: Set<string>) => {
-      if (typeof window === 'undefined') {
-        return;
-      }
-
-      try {
-        window.localStorage.setItem(notificationSeenStorageKey, JSON.stringify(Array.from(ids).slice(-200)));
-      } catch {
-        // ignore storage issues
-      }
-    },
-    [notificationSeenStorageKey],
-  );
-
-  const markNotificationsSeen = useCallback(
-    (notifications: TaskJournalNotification[]) => {
-      if (notifications.length === 0) {
-        return;
-      }
-
-      setSeenNotificationIds((previous) => {
-        const next = new Set(previous);
-        let changed = false;
-
-        notifications.forEach((notification) => {
-          if (!next.has(notification.id)) {
-            next.add(notification.id);
-            changed = true;
-          }
-        });
-
-        if (!changed) {
-          return previous;
-        }
-
-        persistSeenNotificationIds(next);
-        return next;
-      });
-    },
-    [persistSeenNotificationIds],
-  );
-
-  const unreadNotificationCount = useMemo(
-    () => taskNotifications.reduce((count, notification) => count + (seenNotificationIds.has(notification.id) ? 0 : 1), 0),
-    [seenNotificationIds, taskNotifications],
-  );
+  const refreshUnreadCount = useCallback(() => {
+    apiService.getUnreadUserNotificationCount()
+      .then((count) => setUnreadCount(count))
+      .catch(() => setUnreadCount(0));
+  }, []);
 
   useEffect(() => {
     setAvatarLoadFailed(false);
   }, [user?.photoUrl]);
 
   useEffect(() => {
-    setSeenNotificationIds(readSeenNotificationIds(notificationSeenStorageKey));
-  }, [notificationSeenStorageKey]);
+    refreshUnreadCount();
+    const timer = window.setInterval(refreshUnreadCount, 60_000);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, refreshUnreadCount);
 
-  useEffect(() => {
-    let alive = true;
-    const refresh = () => {
-      apiService.getTaskJournalNotifications()
-        .then((items) => {
-          if (alive) {
-            setTaskNotifications(items);
-            setNotificationsLoaded(true);
-          }
-        })
-        .catch(() => {
-          if (alive) {
-            setTaskNotifications([]);
-            setNotificationsLoaded(true);
-          }
-        });
-    };
-    refresh();
-    const timer = window.setInterval(refresh, 60_000);
-    window.addEventListener(TASK_JOURNAL_EVENT, refresh);
     return () => {
-      alive = false;
       window.clearInterval(timer);
-      window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, refreshUnreadCount);
     };
-  }, []);
-
-  useEffect(() => {
-    if (!notificationsLoaded) {
-      return;
-    }
-
-    const currentIds = new Set(taskNotifications.map((notification) => notification.id));
-
-    setSeenNotificationIds((previous) => {
-      let changed = false;
-      const next = new Set<string>();
-
-      previous.forEach((id) => {
-        if (currentIds.has(id)) {
-          next.add(id);
-        } else {
-          changed = true;
-        }
-      });
-
-      if (!changed) {
-        return previous;
-      }
-
-      persistSeenNotificationIds(next);
-      return next;
-    });
-  }, [notificationsLoaded, persistSeenNotificationIds, taskNotifications]);
-
-  useEffect(() => {
-    if (notificationsOpen) {
-      markNotificationsSeen(taskNotifications);
-    }
-  }, [markNotificationsSeen, notificationsOpen, taskNotifications]);
-
-  useEffect(() => {
-    if (unreadNotificationCount > 0) {
-      setVisibleBadgeCount(unreadNotificationCount);
-      setBadgeHiding(false);
-      return;
-    }
-
-    if (visibleBadgeCount === 0) {
-      setBadgeHiding(false);
-      return;
-    }
-
-    setBadgeHiding(true);
-    const timer = window.setTimeout(() => {
-      setVisibleBadgeCount(0);
-      setBadgeHiding(false);
-    }, NOTIFICATION_BADGE_HIDE_MS);
-
-    return () => window.clearTimeout(timer);
-  }, [unreadNotificationCount, visibleBadgeCount]);
+  }, [refreshUnreadCount]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
       if (userMenuRef.current && !userMenuRef.current.contains(target)) {
         setUserMenuOpen(false);
-      }
-      if (notificationsRef.current && !notificationsRef.current.contains(target)) {
-        setNotificationsOpen(false);
       }
     };
 
@@ -240,86 +82,26 @@ export default function TopBar({ title, onSignOut, onOpenProfile, onOpenTask }: 
     }
   };
 
-  const handleToggleNotifications = () => {
-    const nextOpen = !notificationsOpen;
-    setNotificationsOpen(nextOpen);
-
-    if (nextOpen) {
-      markNotificationsSeen(taskNotifications);
-    }
-  };
-
-  const handleNotificationClick = (notification: TaskJournalNotification) => {
-    markNotificationsSeen([notification]);
-    setNotificationsOpen(false);
-    onOpenTask(notification.taskId);
-  };
-
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
       <div className="flex h-16 items-center justify-between px-6">
         <div className="text-sm font-semibold text-slate-700">{title}</div>
 
         <div className="flex items-center gap-3">
-          <div className="relative" ref={notificationsRef}>
-            <button
-              type="button"
-              onClick={handleToggleNotifications}
-              className="relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700"
-              aria-label="Уведомления"
-            >
-              <Bell className="h-5 w-5" />
-              {visibleBadgeCount > 0 ? (
-                <span
-                  className={`absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[11px] font-semibold text-white transition-all duration-200 ${
-                    badgeHiding ? 'scale-75 opacity-0' : 'scale-100 opacity-100'
-                  }`}
-                >
-                  {visibleBadgeCount > 9 ? '9+' : visibleBadgeCount}
-                </span>
-              ) : null}
-            </button>
-
-            {notificationsOpen ? (
-              <div className="absolute right-0 mt-4 w-[min(92vw,24rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
-                <div className="border-b border-slate-100 px-4 py-3">
-                  <div className="text-sm font-semibold text-slate-900">Уведомления</div>
-                  <div className="mt-1 text-xs text-slate-500">Сроки, напоминания и выполненные задачи</div>
-                </div>
-
-                {taskNotifications.length > 0 ? (
-                  <div className="max-h-96 overflow-y-auto py-2">
-                    {taskNotifications.slice(0, 6).map((notification) => (
-                      <button
-                        key={notification.id}
-                        type="button"
-                        onClick={() => handleNotificationClick(notification)}
-                        className="block w-full px-4 py-3 text-left transition-colors hover:bg-slate-50"
-                      >
-                        <div className="flex items-start gap-3">
-                          <span
-                            className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
-                              notification.tone === 'rose'
-                                ? 'bg-rose-500'
-                                : notification.tone === 'amber'
-                                  ? 'bg-amber-500'
-                                  : 'bg-blue-500'
-                            }`}
-                          />
-                          <span className="min-w-0">
-                            <span className="block text-sm font-semibold text-slate-900">{notification.title}</span>
-                            <span className="mt-1 block text-sm leading-5 text-slate-600">{notification.description}</span>
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="px-4 py-5 text-sm text-slate-500">Новых уведомлений пока нет</div>
-                )}
-              </div>
+          <button
+            type="button"
+            onClick={onOpenNotifications}
+            className="relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700"
+            aria-label="Уведомления"
+            title="Центр уведомлений"
+          >
+            <Bell className="h-5 w-5" />
+            {unreadCount > 0 ? (
+              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[11px] font-semibold text-white">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
             ) : null}
-          </div>
+          </button>
 
           <div className="relative" ref={userMenuRef}>
             <button

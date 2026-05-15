@@ -5347,6 +5347,97 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("UserExternalIdentities");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.UserNotification", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("ArchivedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("BodyPreview")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("EventKey")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MetadataJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("ObjectId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ObjectType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("RecipientUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("TaskJournalItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Tone")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskJournalItemId");
+
+                    b.HasIndex("RecipientUserId", "EventKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserNotifications_User_EventKey");
+
+                    b.HasIndex("RecipientUserId", "IsRead", "DeletedAt")
+                        .HasDatabaseName("IX_UserNotifications_User_Read_Deleted");
+
+                    b.HasIndex("RecipientUserId", "Type", "DeletedAt")
+                        .HasDatabaseName("IX_UserNotifications_User_Type_Deleted");
+
+                    b.HasIndex("RecipientUserId", "IsArchived", "DeletedAt", "CreatedAt")
+                        .HasDatabaseName("IX_UserNotifications_User_Archived_Deleted_Created");
+
+                    b.ToTable("UserNotifications");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>
                 {
                     b.Property<int>("Id")
@@ -6172,6 +6263,24 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.UserNotification", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "RecipientUser")
+                        .WithMany()
+                        .HasForeignKey("RecipientUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("RecipientUser");
+
+                    b.Navigation("TaskJournalItem");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>

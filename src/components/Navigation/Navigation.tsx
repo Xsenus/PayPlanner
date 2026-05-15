@@ -25,6 +25,7 @@ import {
   CircleDollarSign,
   Phone,
   History,
+  Bell,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -123,6 +124,12 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     if (permissions.calendar.canView) {
       items.push({ id: 'calendar', tab: 'calendar' as Tab, label: t('calendar') ?? 'Календарь', icon: Calendar });
     }
+    items.push({
+      id: 'notifications',
+      tab: 'notifications' as Tab,
+      label: 'Уведомления',
+      icon: Bell,
+    });
     if (permissions.tasks.canView) {
       items.push({
         id: 'tasks',

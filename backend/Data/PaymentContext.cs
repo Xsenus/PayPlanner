@@ -1865,6 +1865,39 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_NotificationDeliveries_Status");
         });
 
+        modelBuilder.Entity<UserNotification>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Type).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.EventKey).HasMaxLength(240).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(300).IsRequired();
+            entity.Property(e => e.BodyPreview).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.Tone).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.ObjectType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.MetadataJson).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.RecipientUser)
+                .WithMany()
+                .HasForeignKey(e => e.RecipientUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany()
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => new { e.RecipientUserId, e.IsArchived, e.DeletedAt, e.CreatedAt })
+                .HasDatabaseName("IX_UserNotifications_User_Archived_Deleted_Created");
+            entity.HasIndex(e => new { e.RecipientUserId, e.IsRead, e.DeletedAt })
+                .HasDatabaseName("IX_UserNotifications_User_Read_Deleted");
+            entity.HasIndex(e => new { e.RecipientUserId, e.Type, e.DeletedAt })
+                .HasDatabaseName("IX_UserNotifications_User_Type_Deleted");
+            entity.HasIndex(e => new { e.RecipientUserId, e.EventKey })
+                .IsUnique()
+                .HasDatabaseName("IX_UserNotifications_User_EventKey");
+        });
+
         modelBuilder.Entity<NotificationSender>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -2504,6 +2537,7 @@ public class PaymentContext : DbContext
     public DbSet<TaskJournalComment> TaskJournalComments { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<NotificationDelivery> NotificationDeliveries { get; set; }
+    public DbSet<UserNotification> UserNotifications { get; set; }
     public DbSet<NotificationSender> NotificationSenders { get; set; }
     public DbSet<NotificationBotSubscription> NotificationBotSubscriptions { get; set; }
 
