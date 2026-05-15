@@ -74,6 +74,8 @@ type TaskJournalProps = {
   mode?: TaskJournalMode;
   routeTaskId?: number | null;
   onRouteTaskChange?: (taskId: number | null) => void;
+  onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
+  onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
 };
 
 type TaskForm = TaskJournalUpsertPayload & { dueAt: string };
@@ -950,7 +952,14 @@ const TIMELINE_DAY_MIN_WIDTH = 180;
 const TIMELINE_TASK_MIN_READABLE_WIDTH = 116;
 const TIMELINE_TASK_LANE_GAP = 8;
 
-export function TaskJournal({ initialView = 'list', mode = 'journal', routeTaskId = null, onRouteTaskChange }: TaskJournalProps) {
+export function TaskJournal({
+  initialView = 'list',
+  mode = 'journal',
+  routeTaskId = null,
+  onRouteTaskChange,
+  onOpenClient,
+  onOpenLegalEntity,
+}: TaskJournalProps) {
   const { user, isAdmin } = useAuth();
   const toast = useToast();
   const { confirm } = useDialog();
@@ -1941,6 +1950,8 @@ export function TaskJournal({ initialView = 'list', mode = 'journal', routeTaskI
             currentUserId={currentUserId}
             isAdminUser={isAdminUser}
             taskSettings={taskSettings}
+            onOpenClient={onOpenClient}
+            onOpenLegalEntity={onOpenLegalEntity}
             onEdit={openTaskEditor}
             onDelete={handleDelete}
             onStatusChange={setTaskStatus}
@@ -2151,6 +2162,8 @@ function TaskTable({
   currentUserId,
   isAdminUser,
   taskSettings,
+  onOpenClient,
+  onOpenLegalEntity,
   onEdit,
   onDelete,
   onStatusChange,
@@ -2161,6 +2174,8 @@ function TaskTable({
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
+  onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
+  onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
   onEdit: (task: TaskJournalItem) => void;
   onDelete: (task: TaskJournalItem) => void;
   onStatusChange: (task: TaskJournalItem, status: TaskJournalStatus) => void;
@@ -2197,6 +2212,20 @@ function TaskTable({
               const taskApprovers = getTaskParticipants(task, 'approver');
               const taskObservers = getTaskParticipants(task, 'observer');
               const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
+              const counterpartyName = getTaskClientName(task);
+              const canOpenCounterparty = Boolean(
+                (task.clientId && onOpenClient) || (task.legalEntityId && onOpenLegalEntity),
+              );
+              const openCounterparty = () => {
+                if (task.clientId && onOpenClient) {
+                  void onOpenClient(task.clientId, task.clientCaseId ?? null);
+                  return;
+                }
+
+                if (task.legalEntityId && onOpenLegalEntity) {
+                  void onOpenLegalEntity(task.legalEntityId);
+                }
+              };
 
               return (
                 <tr
@@ -2206,7 +2235,18 @@ function TaskTable({
                   }`}
                 >
                   <td className="max-w-[280px] px-4 py-4">
-                    <div className="font-semibold text-slate-900">{getTaskClientName(task)}</div>
+                    {canOpenCounterparty ? (
+                      <button
+                        type="button"
+                        onClick={openCounterparty}
+                        className="block max-w-full text-left font-semibold text-blue-700 underline-offset-2 transition hover:text-blue-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                        title="Открыть карточку контрагента"
+                      >
+                        {counterpartyName}
+                      </button>
+                    ) : (
+                      <div className="font-semibold text-slate-900">{counterpartyName}</div>
+                    )}
                     {getTaskCaseTitle(task) ? (
                       <div className="mt-1 text-sm text-slate-500">{getTaskCaseTitle(task)}</div>
                     ) : null}

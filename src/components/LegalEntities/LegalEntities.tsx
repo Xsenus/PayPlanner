@@ -52,6 +52,8 @@ const LEGAL_ENTITY_COLUMNS = [
 type LegalEntityColumnKey = (typeof LEGAL_ENTITY_COLUMNS)[number]['key'];
 
 interface LegalEntitiesProps {
+  initialLegalEntityId?: number | null;
+  onInitialLegalEntityHandled?: () => void;
   onOpenCase?: (caseId: number, clientId?: number | null, legalEntityId?: number | null) => void;
   onOpenContract?: (contractId: number) => void;
   onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
@@ -97,6 +99,8 @@ function normalizeRelatedPaymentKind(value?: string | null): PaymentKind | undef
 }
 
 export function LegalEntities({
+  initialLegalEntityId = null,
+  onInitialLegalEntityHandled,
   onOpenCase,
   onOpenContract,
   onOpenInvoice,
@@ -222,7 +226,7 @@ export function LegalEntities({
     [fetchLegalEntities, page],
   );
 
-  const openDetailPage = async (id: number, allowEditing: boolean) => {
+  const openDetailPage = useCallback(async (id: number, allowEditing: boolean) => {
     try {
       setModalBusy(true);
       const detail = await apiService.getLegalEntity(id);
@@ -236,7 +240,16 @@ export function LegalEntities({
     } finally {
       setModalBusy(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    if (!initialLegalEntityId || !(initialLegalEntityId > 0)) {
+      return;
+    }
+
+    onInitialLegalEntityHandled?.();
+    void openDetailPage(initialLegalEntityId, canEdit);
+  }, [canEdit, initialLegalEntityId, onInitialLegalEntityHandled, openDetailPage]);
 
   const handleCreate = () => {
     if (!canCreate) return;

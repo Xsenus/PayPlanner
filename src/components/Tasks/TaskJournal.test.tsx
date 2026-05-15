@@ -169,6 +169,8 @@ async function renderJournal(
     assignees?: TaskJournalAssignee[];
     withRoute?: boolean;
     waitForTitle?: string;
+    onOpenClient?: (clientId: number, caseId?: number | null) => void;
+    onOpenLegalEntity?: (legalEntityId: number) => void;
   } = {},
 ) {
   apiMock.getTaskJournalItems.mockResolvedValue({
@@ -187,10 +189,28 @@ async function renderJournal(
 
   function RoutedJournal() {
     const [routeTaskId, setRouteTaskId] = useState<number | null>(null);
-    return <TaskJournal initialView={options.initialView} mode={options.mode} routeTaskId={routeTaskId} onRouteTaskChange={setRouteTaskId} />;
+    return (
+      <TaskJournal
+        initialView={options.initialView}
+        mode={options.mode}
+        routeTaskId={routeTaskId}
+        onRouteTaskChange={setRouteTaskId}
+        onOpenClient={options.onOpenClient}
+        onOpenLegalEntity={options.onOpenLegalEntity}
+      />
+    );
   }
 
-  render(options.withRoute ? <RoutedJournal /> : <TaskJournal initialView={options.initialView} mode={options.mode} />);
+  render(options.withRoute ? (
+    <RoutedJournal />
+  ) : (
+    <TaskJournal
+      initialView={options.initialView}
+      mode={options.mode}
+      onOpenClient={options.onOpenClient}
+      onOpenLegalEntity={options.onOpenLegalEntity}
+    />
+  ));
   await screen.findAllByText(options.waitForTitle ?? tasks[0]?.title ?? 'Тестовая задача');
 }
 
@@ -275,6 +295,39 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Наименование задачи')).toBeTruthy();
     expect(screen.getByText('Иванов Иван Иванович')).toBeTruthy();
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
+  });
+
+  it('opens client card from the counterparty link in the journal', async () => {
+    const onOpenClient = vi.fn();
+    const task = createTask({
+      clientId: 42,
+      clientCaseId: 314,
+      clientName: 'Solomanin Oleg',
+      objectName: 'Solomanin Oleg - Bankruptcy',
+    });
+
+    await renderJournal([task], { onOpenClient });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Solomanin Oleg' }));
+
+    expect(onOpenClient).toHaveBeenCalledWith(42, 314);
+  });
+
+  it('opens legal entity card from the counterparty link in the journal', async () => {
+    const onOpenLegalEntity = vi.fn();
+    const task = createTask({
+      clientId: null,
+      clientName: '',
+      legalEntityId: 20,
+      legalEntityName: 'OOO Romashka',
+      objectName: 'OOO Romashka',
+    });
+
+    await renderJournal([task], { onOpenLegalEntity });
+
+    fireEvent.click(screen.getByRole('button', { name: 'OOO Romashka' }));
+
+    expect(onOpenLegalEntity).toHaveBeenCalledWith(20);
   });
 
   it('shows only tasks that reached the current approver in approvals mode', async () => {

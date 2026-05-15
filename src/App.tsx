@@ -13,10 +13,12 @@ import { useAuth } from './contexts/AuthContext';
 import { useRolePermissions } from './hooks/useRolePermissions';
 import { TabProvider } from './contexts/TabContext';
 import { useActivityLogger } from './hooks/useActivityLogger';
+import { useToast } from './hooks/useToast';
 import { DialogProvider } from './contexts/DialogContext';
 import { ToastProvider } from './contexts/ToastContext';
 import type { User as AppUser } from './services/authService';
-import { type ContactScope } from './services/api';
+import { apiService, type ContactScope } from './services/api';
+import { extractDisplayErrorMessage } from './utils/errorUtils';
 import {
   getInitialActId,
   getInitialActReturnTab,
@@ -86,6 +88,7 @@ function AppContent() {
   const { user, loading, signOut } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const logActivity = useActivityLogger();
+  const toast = useToast();
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
   const canManageRoles = isAdminRole || permissions.roles.canView;
   const canViewAudit = isAdminRole || permissions.audit.canView;
@@ -145,6 +148,7 @@ function AppContent() {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(getInitialPaymentId);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(getInitialTaskId);
+  const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(null);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [initialClientSection, setInitialClientSection] = useState<'accounts' | 'acts' | undefined>(undefined);
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -316,6 +320,56 @@ function AppContent() {
       handleOpenClient(clientId, caseId, { returnTo: { tab: 'calendar' } });
     },
     [handleOpenClient],
+  );
+
+  const getTaskReturnTab = useCallback(
+    (): Tab => (activeTab === 'tasksApprovals' || activeTab === 'tasksCalendar' ? activeTab : 'tasks'),
+    [activeTab],
+  );
+
+  const handleOpenTaskClient = useCallback(
+    async (clientId: number, caseId?: number | null) => {
+      if (!permissions.clients.canView) {
+        toast.error('Доступ к карточке клиента запрещен.');
+        return;
+      }
+
+      try {
+        await apiService.getClient(clientId);
+        handleOpenClient(clientId, caseId ?? undefined, { returnTo: { tab: getTaskReturnTab() } });
+      } catch (err) {
+        toast.error(extractDisplayErrorMessage(err, 'Доступ к карточке клиента запрещен или карточка недоступна.'));
+      }
+    },
+    [getTaskReturnTab, handleOpenClient, permissions.clients.canView, toast],
+  );
+
+  const handleOpenTaskLegalEntity = useCallback(
+    async (legalEntityId: number) => {
+      if (!permissions.legalEntities.canView) {
+        toast.error('Доступ к карточке юридического лица запрещен.');
+        return;
+      }
+
+      try {
+        await apiService.getLegalEntity(legalEntityId);
+        setSelectedLegalEntityId(legalEntityId);
+        setActiveTab('legalEntities');
+
+        void logActivity({
+          category: 'legalEntities',
+          action: 'open_legal_entity',
+          section: 'legalEntities',
+          objectType: 'LegalEntity',
+          objectId: String(legalEntityId),
+          description: `Открыта карточка юридического лица ${legalEntityId} из журнала задач`,
+          status: 'Info',
+        });
+      } catch (err) {
+        toast.error(extractDisplayErrorMessage(err, 'Доступ к карточке юридического лица запрещен или карточка недоступна.'));
+      }
+    },
+    [logActivity, permissions.legalEntities.canView, toast],
   );
 
   const handleRouteInvoiceChange = useCallback((invoiceId: number | null) => {
@@ -790,17 +844,40 @@ function AppContent() {
 
       case 'tasks':
         return permissions.tasks.canView
-          ? <TaskJournal key="tasks-list" routeTaskId={selectedTaskId} onRouteTaskChange={setSelectedTaskId} />
+          ? (
+              <TaskJournal
+                key="tasks-list"
+                routeTaskId={selectedTaskId}
+                onRouteTaskChange={setSelectedTaskId}
+                onOpenClient={handleOpenTaskClient}
+                onOpenLegalEntity={handleOpenTaskLegalEntity}
+              />
+            )
           : renderNoAccess('Журнал задач недоступен для вашей роли.');
 
       case 'tasksApprovals':
         return permissions.tasks.canView
-          ? <TaskJournal key="tasks-approvals" mode="approvals" />
+          ? (
+              <TaskJournal
+                key="tasks-approvals"
+                mode="approvals"
+                onOpenClient={handleOpenTaskClient}
+                onOpenLegalEntity={handleOpenTaskLegalEntity}
+              />
+            )
           : renderNoAccess('Согласования задач недоступны для вашей роли.');
 
       case 'tasksCalendar':
         return permissions.tasks.canView
-          ? <TaskJournal key="tasks-calendar" initialView="calendar" onRouteTaskChange={setSelectedTaskId} />
+          ? (
+              <TaskJournal
+                key="tasks-calendar"
+                initialView="calendar"
+                onRouteTaskChange={setSelectedTaskId}
+                onOpenClient={handleOpenTaskClient}
+                onOpenLegalEntity={handleOpenTaskLegalEntity}
+              />
+            )
           : renderNoAccess('Журнал задач недоступен для вашей роли.');
 
       case 'reports':
@@ -817,6 +894,8 @@ function AppContent() {
         return permissions.legalEntities.canView
           ? (
               <LegalEntities
+                initialLegalEntityId={selectedLegalEntityId}
+                onInitialLegalEntityHandled={() => setSelectedLegalEntityId(null)}
                 onOpenCase={openRelatedCase}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'legalEntities' })}
                 onOpenInvoice={(id, type) =>
