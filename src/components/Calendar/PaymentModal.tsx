@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Trash2, Info, History, Search, UserRoundSearch, Ban, WalletCards } from 'lucide-react';
+import { X, Trash2, Info, History, Search, UserRoundSearch, Ban, WalletCards, Printer } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useDictionaries } from '../../hooks/useDictionaries';
@@ -56,9 +56,70 @@ function isCashPaymentSourceName(name?: string | null): boolean {
   return Boolean(name && /кас|налич|cash/i.test(name));
 }
 
+function isBankPaymentSourceName(name?: string | null): boolean {
+  return Boolean(name && /банк|банков|безнал|перевод|плат[её]жн|payment|bank/i.test(name));
+}
+
 function isCashOrderNumberForType(value: string, type: CashOrderType): boolean {
   const prefix = type === 'Incoming' ? 'ПКО' : 'РКО';
   return value.trim().toLocaleUpperCase('ru-RU').startsWith(prefix);
+}
+
+function resolvePaymentPrintTitle(type: PaymentKind, sourceName?: string | null, documentNumber?: string | null): string {
+  const normalizedNumber = (documentNumber ?? '').trim().toLocaleUpperCase('ru-RU');
+
+  if (isCashPaymentSourceName(sourceName) || normalizedNumber.startsWith('ПКО') || normalizedNumber.startsWith('РКО')) {
+    return type === 'Expense' ? 'Расходный кассовый ордер' : 'Приходный кассовый ордер';
+  }
+
+  if (
+    isBankPaymentSourceName(sourceName)
+    || normalizedNumber.startsWith('П/П')
+    || normalizedNumber.startsWith('ПП')
+  ) {
+    return 'Платежное поручение';
+  }
+
+  return 'Платежный ордер';
+}
+
+function escapeHtml(value: string | number | null | undefined): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatPrintMoney(value: number): string {
+  return new Intl.NumberFormat('ru-RU', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function formatPrintDate(value?: string | null): string {
+  return value ? toRuDate(value) || value : '—';
+}
+
+function openPaymentPrintWindow(html: string): void {
+  const printWindow = window.open('', '_blank', 'width=980,height=900');
+  if (!printWindow) {
+    throw new Error('Браузер заблокировал окно печати. Разрешите всплывающие окна и повторите.');
+  }
+
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  window.setTimeout(() => {
+    try {
+      printWindow.focus();
+      printWindow.print();
+    } catch (error) {
+      console.error('payment print failed', error);
+    }
+  }, 250);
 }
 
 function parseDecimal(value: string): number {
@@ -1614,6 +1675,118 @@ export function PaymentModal({
   const canDelete = !!payment && !!onDelete && !isRepresentativeInvoicePayment && !isProtectedTransferredRemainder && !isProtectedRemainderSource;
   const canCancelPayment = !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
   const canMovePayment = !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
+  const canPrintPayment = !!payment;
+  const paymentPrintTitle = resolvePaymentPrintTitle(
+    formData.type,
+    selectedPaymentSource?.name,
+    formData.paymentOrderNumber,
+  );
+
+  const buildPaymentPrintHtml = () => {
+    const documentNumber = formData.paymentOrderNumber.trim() || (payment ? `#${payment.id}` : 'Без номера');
+    const documentDate =
+      formData.paymentDocumentDate ||
+      formData.paidDate ||
+      formData.lastPaymentDate ||
+      formData.date;
+    const selectedCase = cases.find((item) => String(item.id) === formData.clientCaseId) ?? fallbackCase;
+    const selectedDealType = dealTypes.find((item) => String(item.id) === formData.dealTypeId) ?? null;
+    const selectedIncomeType = incomeTypes.find((item) => String(item.id) === formData.incomeTypeId) ?? null;
+    const selectedService = services.find((item) => String(item.id) === formData.serviceId) ?? null;
+    const counterpartyName = formData.type === 'Expense'
+      ? selectedExpenseClient?.name
+        || (selectedExpenseLegalEntity ? getLegalEntityDisplayName(selectedExpenseLegalEntity) : '')
+        || selectedClient?.name
+        || (selectedLegalEntity ? getLegalEntityDisplayName(selectedLegalEntity) : '')
+      : selectedClient?.name
+        || (selectedLegalEntity ? getLegalEntityDisplayName(selectedLegalEntity) : '')
+        || selectedExpenseClient?.name
+        || (selectedExpenseLegalEntity ? getLegalEntityDisplayName(selectedExpenseLegalEntity) : '');
+    const amount = parseDecimal(formData.isPaid && formData.paidAmount ? formData.paidAmount : formData.amount);
+    const invoiceLabel = formData.account.trim()
+      ? `Счет № ${formData.account.trim()}${formData.accountDate ? ` от ${formatPrintDate(formData.accountDate)}` : ''}`
+      : '—';
+    const rows = [
+      ['Операция', formData.type === 'Expense' ? 'Расход' : 'Приход'],
+      ['Источник платежа', selectedPaymentSource?.name || '—'],
+      ['Контрагент', counterpartyName || '—'],
+      ['Дело', selectedCase?.title || '—'],
+      ['Счет', invoiceLabel],
+      ['Тип сделки', selectedDealType?.name || '—'],
+      ['Тип дохода', selectedIncomeType?.name || '—'],
+      ['Тип услуги', selectedService?.name || '—'],
+      ['Описание', formData.description || '—'],
+      ['Комментарий', formData.notes || '—'],
+    ];
+    const rowHtml = rows
+      .map(([label, value]) => `
+        <tr>
+          <th>${escapeHtml(label)}</th>
+          <td>${escapeHtml(value)}</td>
+        </tr>`)
+      .join('');
+
+    return `<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(paymentPrintTitle)} ${escapeHtml(documentNumber)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f8fafc; color: #0f172a; font-family: Arial, sans-serif; }
+    .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 22mm; background: #fff; }
+    .top { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid #0f172a; padding-bottom: 14px; }
+    .label { color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 6px 0 0; font-size: 24px; line-height: 1.2; }
+    .number { min-width: 210px; text-align: right; font-size: 15px; line-height: 1.7; }
+    .amount { margin: 24px 0; border: 1px solid #cbd5e1; padding: 16px; }
+    .amount strong { display: block; margin-top: 4px; font-size: 28px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+    th, td { border: 1px solid #cbd5e1; padding: 9px 10px; vertical-align: top; }
+    th { width: 34%; background: #f8fafc; text-align: left; color: #475569; }
+    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; margin-top: 42px; }
+    .signature { border-top: 1px solid #0f172a; padding-top: 8px; color: #475569; font-size: 12px; }
+    @media print {
+      body { background: #fff; }
+      .page { width: auto; min-height: auto; margin: 0; padding: 12mm; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="top">
+      <div>
+        <div class="label">Печатная форма платежа</div>
+        <h1>${escapeHtml(paymentPrintTitle)}</h1>
+      </div>
+      <div class="number">
+        <div><strong>№ ${escapeHtml(documentNumber)}</strong></div>
+        <div>от ${escapeHtml(formatPrintDate(documentDate))}</div>
+      </div>
+    </section>
+    <section class="amount">
+      <div class="label">Сумма документа</div>
+      <strong>${escapeHtml(formatPrintMoney(amount))} ₽</strong>
+    </section>
+    <table>
+      <tbody>${rowHtml}</tbody>
+    </table>
+    <section class="signatures">
+      <div class="signature">Ответственный</div>
+      <div class="signature">Кассир / бухгалтер</div>
+    </section>
+  </main>
+</body>
+</html>`;
+  };
+
+  const handlePrintPayment = () => {
+    try {
+      openPaymentPrintWindow(buildPaymentPrintHtml());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось открыть печать платежа.', 'Платежи');
+    }
+  };
 
   const buildActionPaymentPayload = (
     overrides: { date?: string; plannedDate?: string } = {},
@@ -2889,6 +3062,17 @@ export function PaymentModal({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center">
                   <div className="flex flex-wrap items-center gap-2">
+                  {canPrintPayment && (
+                    <button
+                      type="button"
+                      onClick={handlePrintPayment}
+                      disabled={loading}
+                      title={`Печать: ${paymentPrintTitle}`}
+                      className="inline-flex min-w-40 items-center justify-center gap-2 rounded-lg bg-slate-50 px-4 py-2 font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-60">
+                      <Printer className="h-4 w-4" />
+                      Печать
+                    </button>
+                  )}
                   {canMovePayment && (
                     <button
                       type="button"

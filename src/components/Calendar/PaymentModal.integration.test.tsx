@@ -223,6 +223,16 @@ async function selectPickerOption(name: string): Promise<void> {
   throw new Error(`Не найден вариант выбора ${name}`);
 }
 
+function getLastPrintHtml(): string {
+  const openMock = vi.mocked(window.open);
+  const lastCall = openMock.mock.results[openMock.mock.results.length - 1];
+  const printWindow = lastCall?.value as Window | null | undefined;
+  expect(printWindow).toBeTruthy();
+  const writeMock = vi.mocked(printWindow!.document.write);
+  expect(writeMock).toHaveBeenCalled();
+  return String(writeMock.mock.calls[0]?.[0] ?? '');
+}
+
 describe('PaymentModal integration', () => {
   beforeEach(() => {
     confirmMock.mockReset();
@@ -675,6 +685,113 @@ describe('PaymentModal integration', () => {
         type: 'Income',
       }),
     );
+  });
+
+  it('prints an incoming cash payment as a cash receipt order', async () => {
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        payment={{
+          id: 993,
+          date: '2026-05-15',
+          plannedDate: '2026-05-15',
+          amount: 7_000,
+          paidAmount: 7_000,
+          outstandingAmount: 0,
+          hasPartialPayment: false,
+          status: 'Completed',
+          description: 'Рассрочка по счету №52 · платеж 1/20',
+          isPaid: true,
+          paidDate: '2026-05-15',
+          lastPaymentDate: '2026-05-15',
+          notes: '',
+          clientId: 77,
+          clientCaseId: 501,
+          paymentSourceId: 6,
+          paymentOrderNumber: 'ПКО-2026-0002',
+          paymentDocumentDate: '2026-05-15',
+          type: 'Income',
+          account: '52',
+          accountDate: '2026-05-05',
+          documentKind: 'Payment',
+          createdAt: '2026-05-15T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Income Case 501',
+            status: 'Open',
+            clientId: 77,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
+
+    const html = getLastPrintHtml();
+    expect(html).toContain('Приходный кассовый ордер');
+    expect(html).toContain('ПКО-2026-0002');
+    expect(html).toContain('Рассрочка по счету №52');
+  });
+
+  it('prints a bank payment as a payment order', async () => {
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        payment={{
+          id: 994,
+          date: '2026-04-10',
+          plannedDate: '2026-04-10',
+          amount: 7_500,
+          paidAmount: 7_500,
+          outstandingAmount: 0,
+          hasPartialPayment: false,
+          status: 'Completed',
+          description: 'Оплата подрядчику',
+          isPaid: true,
+          paidDate: '2026-04-10',
+          lastPaymentDate: '2026-04-10',
+          notes: '',
+          clientId: 77,
+          expenseClientId: 88,
+          clientCaseId: 501,
+          paymentSourceId: 5,
+          paymentOrderNumber: 'ПП-778',
+          paymentDocumentDate: '2026-04-09',
+          type: 'Expense',
+          account: '',
+          accountDate: '',
+          documentKind: 'Payment',
+          createdAt: '2026-04-10T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Expense Case 501',
+            status: 'Open',
+            clientId: 88,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
+
+    const html = getLastPrintHtml();
+    expect(html).toContain('Платежное поручение');
+    expect(html).toContain('ПП-778');
+    expect(html).toContain('Расход');
   });
 
   it('submits the full overpaid amount and shows balance warning', async () => {
