@@ -317,6 +317,45 @@ public class AccountsControllerTests
     }
 
     [Fact]
+    public async Task GetRegistry_IgnoresCancelledLegacyInvoiceRows_WhenCalculatingDebt()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateLegacyInvoiceWithCancelledNoiseAsync(db);
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: null,
+            to: null,
+            status: null,
+            search: "Noise Client",
+            type: PaymentType.Income,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+
+        Assert.Equal("8", row.AccountNumber);
+        Assert.Equal("paid", row.Status);
+        Assert.False(row.IsOverdue);
+        Assert.Equal(25_000m, row.TotalAmount);
+        Assert.NotNull(row.Invoice);
+        Assert.Equal(25_000m, row.Invoice!.Amount);
+        Assert.Equal(25_000m, row.Invoice.PaidAmount);
+        Assert.Equal(0m, row.Invoice.OutstandingAmount);
+        Assert.Equal(PaymentStatus.Completed, row.Invoice.Status);
+        Assert.Equal(25_000m, payload.Summary.Total.Amount);
+        Assert.Equal(25_000m, payload.Summary.Paid.Amount);
+        Assert.Equal(0m, payload.Summary.Pending.Amount);
+        Assert.Equal(8, row.Payments.Count);
+    }
+
+    [Fact]
     public async Task GetRegistry_UsesInvoiceNumberAsTieBreaker_WhenDatesMatch()
     {
         await using var db = await CreateContextAsync();
@@ -896,6 +935,59 @@ public class AccountsControllerTests
         thirdInstallment.CounterpartyName = client.Name;
 
         db.Payments.AddRange(representativePayment, firstInstallment, secondInstallment, thirdInstallment);
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CreateLegacyInvoiceWithCancelledNoiseAsync(PaymentContext db)
+    {
+        var client = new Client
+        {
+            Name = "Noise Client",
+        };
+
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Noise Case",
+        };
+
+        var invoice = new Invoice
+        {
+            Number = "8",
+            Date = new DateTime(2026, 2, 2),
+        };
+
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        Payment CreateInvoiceRow(decimal amount, PaymentStatus status, int sequence)
+        {
+            var payment = CreateLinkedPayment(invoice, new DateTime(2026, 2, 5), amount, status);
+            payment.DocumentKind = DocumentKind.Invoice;
+            payment.Client = client;
+            payment.ClientCase = clientCase;
+            payment.CounterpartyName = client.Name;
+            payment.Description = $"Legacy row {sequence}";
+            if (status == PaymentStatus.Completed)
+            {
+                payment.PaidAmount = amount;
+                payment.PaidDate = payment.Date;
+                payment.LastPaymentDate = payment.Date;
+                payment.IsPaid = true;
+            }
+
+            return payment;
+        }
+
+        db.Payments.AddRange(
+            CreateInvoiceRow(25_000m, PaymentStatus.Cancelled, 1),
+            CreateInvoiceRow(15_000m, PaymentStatus.Completed, 2),
+            CreateInvoiceRow(10_000m, PaymentStatus.Completed, 3),
+            CreateInvoiceRow(0.10m, PaymentStatus.Cancelled, 4),
+            CreateInvoiceRow(1m, PaymentStatus.Cancelled, 5),
+            CreateInvoiceRow(100m, PaymentStatus.Cancelled, 6),
+            CreateInvoiceRow(25_000m, PaymentStatus.Cancelled, 7),
+            CreateInvoiceRow(25_000m, PaymentStatus.Cancelled, 8));
         await db.SaveChangesAsync();
     }
 

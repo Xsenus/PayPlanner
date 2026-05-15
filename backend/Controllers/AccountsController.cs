@@ -170,6 +170,8 @@ public class AccountsController : ControllerBase
 
                 var editorPaymentId = group
                     .OrderByDescending(item => item.DocumentKind == DocumentKind.Invoice)
+                    .ThenBy(item => item.Status == PaymentStatus.Cancelled)
+                    .ThenByDescending(item => item.Amount)
                     .ThenBy(item => item.Id)
                     .Select(item => item.Id)
                     .FirstOrDefault();
@@ -1047,7 +1049,7 @@ public class AccountsController : ControllerBase
             Number = representative.Number,
             Date = representative.Date,
             DueDate = group.DueDate ?? representative.DueDate,
-            Amount = representative.Amount,
+            Amount = group.TotalAmount,
             PaidAmount = group.PaidAmount,
             OutstandingAmount = group.OutstandingAmount,
             Type = representative.Type,
@@ -1369,24 +1371,28 @@ public class AccountsController : ControllerBase
             .OrderBy(payment => EffectivePlannedDate(payment) ?? DateTime.MaxValue)
             .ThenBy(payment => payment.Id)
             .ToList();
+        var activeOrdered = ordered
+            .Where(payment => payment.Status != PaymentStatus.Cancelled)
+            .ToList();
+        var statusCandidates = activeOrdered.Count > 0 ? activeOrdered : ordered;
 
-        if (IsConvertedLegacyInstallmentAggregate(ordered, representativePaymentId, representativeAmount))
+        if (IsConvertedLegacyInstallmentAggregate(statusCandidates, representativePaymentId, representativeAmount))
         {
-            return ordered;
+            return statusCandidates;
         }
 
-        if (ShouldHideRepresentativeInvoice(ordered, representativePaymentId, representativeAmount))
+        if (ShouldHideRepresentativeInvoice(statusCandidates, representativePaymentId, representativeAmount))
         {
-            return ordered
+            return statusCandidates
                 .Where(payment => payment.Id != representativePaymentId)
                 .ToList();
         }
 
-        var linkedPayments = ordered
+        var linkedPayments = statusCandidates
             .Where(payment => payment.DocumentKind != DocumentKind.Invoice)
             .ToList();
 
-        return linkedPayments.Count > 0 ? linkedPayments : ordered;
+        return linkedPayments.Count > 0 ? linkedPayments : statusCandidates;
     }
 
     private static bool ShouldHideRepresentativeInvoice(

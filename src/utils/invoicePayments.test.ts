@@ -380,4 +380,39 @@ describe('invoicePayments utilities', () => {
 
     expect(result.map((payment) => payment.id)).toEqual([548, 549, 550]);
   });
+
+  it('ignores cancelled invoice rows when choosing status sources', () => {
+    const paidFirst = createPayment({
+      id: 440,
+      documentKind: 'Invoice',
+      invoiceId: 81,
+      amount: 15_000,
+      status: 'Completed',
+      paidAmount: 15_000,
+    });
+    const paidSecond = createPayment({
+      id: 1843,
+      documentKind: 'Invoice',
+      invoiceId: 81,
+      amount: 10_000,
+      status: 'Completed',
+      paidAmount: 10_000,
+    });
+    const cancelledRows = [
+      createPayment({ id: 439, documentKind: 'Invoice', invoiceId: 81, amount: 25_000, status: 'Cancelled' }),
+      createPayment({ id: 1926, documentKind: 'Invoice', invoiceId: 81, amount: 0.10, status: 'Cancelled' }),
+      createPayment({ id: 1927, documentKind: 'Invoice', invoiceId: 81, amount: 1, status: 'Cancelled' }),
+      createPayment({ id: 1928, documentKind: 'Invoice', invoiceId: 81, amount: 100, status: 'Cancelled' }),
+      createPayment({ id: 1929, documentKind: 'Invoice', invoiceId: 81, amount: 25_000, status: 'Cancelled' }),
+      createPayment({ id: 1930, documentKind: 'Invoice', invoiceId: 81, amount: 25_000, status: 'Cancelled' }),
+    ];
+
+    const result = getStatusSourcePaymentsForInvoice([
+      ...cancelledRows,
+      paidFirst,
+      paidSecond,
+    ]);
+
+    expect(result.map((payment) => payment.id)).toEqual([440, 1843]);
+  });
 });

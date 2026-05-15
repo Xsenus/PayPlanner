@@ -192,19 +192,23 @@ public static class InvoicePaymentStateService
             .OrderBy(EffectivePlannedDate)
             .ThenBy(payment => payment.Id)
             .ToList();
+        var activeOrdered = ordered
+            .Where(payment => payment.Status != PaymentStatus.Cancelled)
+            .ToList();
+        var statusCandidates = activeOrdered.Count > 0 ? activeOrdered : ordered;
 
-        if (InvoiceManagedPaymentRules.ShouldHideRepresentativeInvoice(ordered))
+        if (InvoiceManagedPaymentRules.ShouldHideRepresentativeInvoice(statusCandidates))
         {
-            return ordered
+            return statusCandidates
                 .Where(payment => payment.Id != representativePaymentId)
                 .ToList();
         }
 
-        var linkedPayments = ordered
+        var linkedPayments = statusCandidates
             .Where(payment => payment.DocumentKind != DocumentKind.Invoice)
             .ToList();
 
-        return linkedPayments.Count > 0 ? linkedPayments : ordered;
+        return linkedPayments.Count > 0 ? linkedPayments : statusCandidates;
     }
 
     public static PaymentStatus DeriveInvoiceStatus(
@@ -345,8 +349,15 @@ public static class InvoicePaymentStateService
 
     private static Payment? SelectRepresentativeInvoice(IEnumerable<Payment> payments)
     {
-        return payments
+        var invoiceRows = payments
             .Where(payment => payment.DocumentKind == DocumentKind.Invoice)
+            .ToList();
+        var activeInvoiceRows = invoiceRows
+            .Where(payment => payment.Status != PaymentStatus.Cancelled)
+            .ToList();
+        var candidates = activeInvoiceRows.Count > 0 ? activeInvoiceRows : invoiceRows;
+
+        return candidates
             .OrderByDescending(payment => payment.Amount)
             .ThenBy(payment => payment.Id)
             .FirstOrDefault();

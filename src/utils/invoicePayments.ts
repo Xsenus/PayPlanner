@@ -311,21 +311,23 @@ function isConvertedLegacyInstallmentAggregate(payments: Payment[]): boolean {
 }
 
 export function getStatusSourcePaymentsForInvoice(payments: Payment[]): Payment[] {
-  const representativeInvoice = getRepresentativeInvoicePayment(payments);
-  if (representativeInvoice && isConvertedLegacyInstallmentAggregate(payments)) {
-    return payments;
+  const activePayments = payments.filter((payment) => payment.status !== 'Cancelled');
+  const statusCandidates = activePayments.length > 0 ? activePayments : payments;
+  const representativeInvoice = getRepresentativeInvoicePayment(statusCandidates);
+  if (representativeInvoice && isConvertedLegacyInstallmentAggregate(statusCandidates)) {
+    return statusCandidates;
   }
 
-  if (representativeInvoice && isLegacyBrokenInstallmentAggregate(payments)) {
-    return payments.filter((payment) => payment.id !== representativeInvoice.id);
+  if (representativeInvoice && isLegacyBrokenInstallmentAggregate(statusCandidates)) {
+    return statusCandidates.filter((payment) => payment.id !== representativeInvoice.id);
   }
 
-  if (!representativeInvoice && isLegacyInstallmentChildrenSet(payments)) {
-    return payments;
+  if (!representativeInvoice && isLegacyInstallmentChildrenSet(statusCandidates)) {
+    return statusCandidates;
   }
 
-  const linkedPayments = payments.filter((payment) => payment.documentKind !== 'Invoice');
-  return linkedPayments.length > 0 ? linkedPayments : payments;
+  const linkedPayments = statusCandidates.filter((payment) => payment.documentKind !== 'Invoice');
+  return linkedPayments.length > 0 ? linkedPayments : statusCandidates;
 }
 
 export function filterRepresentativeInvoiceWhenInstallmentsExist(payments: Payment[]): Payment[] {
