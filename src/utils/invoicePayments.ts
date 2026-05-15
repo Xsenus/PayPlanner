@@ -314,12 +314,18 @@ export function getStatusSourcePaymentsForInvoice(payments: Payment[]): Payment[
   const activePayments = payments.filter((payment) => payment.status !== 'Cancelled');
   const statusCandidates = activePayments.length > 0 ? activePayments : payments;
   const representativeInvoice = getRepresentativeInvoicePayment(statusCandidates);
+  const representativePaymentId = representativeInvoice?.id ?? 0;
+  const representativeAmount = representativeInvoice?.amount ?? 0;
   if (representativeInvoice && isConvertedLegacyInstallmentAggregate(statusCandidates)) {
-    return statusCandidates;
+    return keepOnlySettlingPaymentsWhenInvoiceIsCovered(statusCandidates, representativePaymentId, representativeAmount);
   }
 
   if (representativeInvoice && isLegacyBrokenInstallmentAggregate(statusCandidates)) {
-    return statusCandidates.filter((payment) => payment.id !== representativeInvoice.id);
+    return keepOnlySettlingPaymentsWhenInvoiceIsCovered(
+      statusCandidates.filter((payment) => payment.id !== representativeInvoice.id),
+      representativePaymentId,
+      representativeAmount,
+    );
   }
 
   if (!representativeInvoice && isLegacyInstallmentChildrenSet(statusCandidates)) {
@@ -327,7 +333,47 @@ export function getStatusSourcePaymentsForInvoice(payments: Payment[]): Payment[
   }
 
   const linkedPayments = statusCandidates.filter((payment) => payment.documentKind !== 'Invoice');
-  return linkedPayments.length > 0 ? linkedPayments : statusCandidates;
+  return keepOnlySettlingPaymentsWhenInvoiceIsCovered(
+    linkedPayments.length > 0 ? linkedPayments : statusCandidates,
+    representativePaymentId,
+    representativeAmount,
+  );
+}
+
+function resolvePaidAmount(payment: Payment): number {
+  const amount = Math.max(payment.amount ?? 0, 0);
+  const paidAmount = Math.max(payment.paidAmount ?? 0, 0);
+  if (paidAmount > 0) {
+    return amount > 0 ? Math.min(paidAmount, amount) : paidAmount;
+  }
+
+  return payment.status === 'Completed' ? amount : 0;
+}
+
+function keepOnlySettlingPaymentsWhenInvoiceIsCovered(
+  sourcePayments: Payment[],
+  representativePaymentId: number,
+  representativeAmount: number,
+): Payment[] {
+  const normalizedRepresentativeAmount = Math.max(representativeAmount ?? 0, 0);
+  if (sourcePayments.length === 0 || normalizedRepresentativeAmount <= 0.01) {
+    return sourcePayments;
+  }
+
+  const paidNonRepresentativePayments = sourcePayments.filter(
+    (payment) => payment.id !== representativePaymentId && resolvePaidAmount(payment) > 0.01,
+  );
+  const paidByNonRepresentative = paidNonRepresentativePayments.reduce(
+    (sum, payment) => sum + resolvePaidAmount(payment),
+    0,
+  );
+  if (paidByNonRepresentative + 0.01 >= normalizedRepresentativeAmount) {
+    return paidNonRepresentativePayments;
+  }
+
+  const paidPayments = sourcePayments.filter((payment) => resolvePaidAmount(payment) > 0.01);
+  const paidTotal = paidPayments.reduce((sum, payment) => sum + resolvePaidAmount(payment), 0);
+  return paidTotal + 0.01 >= normalizedRepresentativeAmount ? paidPayments : sourcePayments;
 }
 
 export function filterRepresentativeInvoiceWhenInstallmentsExist(payments: Payment[]): Payment[] {

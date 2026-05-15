@@ -199,16 +199,22 @@ public static class InvoicePaymentStateService
 
         if (InvoiceManagedPaymentRules.ShouldHideRepresentativeInvoice(statusCandidates))
         {
-            return statusCandidates
-                .Where(payment => payment.Id != representativePaymentId)
-                .ToList();
+            return KeepOnlySettlingPaymentsWhenInvoiceIsCovered(
+                statusCandidates
+                    .Where(payment => payment.Id != representativePaymentId)
+                    .ToList(),
+                representativePaymentId,
+                representativeAmount);
         }
 
         var linkedPayments = statusCandidates
             .Where(payment => payment.DocumentKind != DocumentKind.Invoice)
             .ToList();
 
-        return linkedPayments.Count > 0 ? linkedPayments : statusCandidates;
+        return KeepOnlySettlingPaymentsWhenInvoiceIsCovered(
+            linkedPayments.Count > 0 ? linkedPayments : statusCandidates,
+            representativePaymentId,
+            representativeAmount);
     }
 
     public static PaymentStatus DeriveInvoiceStatus(
@@ -361,6 +367,33 @@ public static class InvoicePaymentStateService
             .OrderByDescending(payment => payment.Amount)
             .ThenBy(payment => payment.Id)
             .FirstOrDefault();
+    }
+
+    private static List<Payment> KeepOnlySettlingPaymentsWhenInvoiceIsCovered(
+        List<Payment> sourcePayments,
+        int representativePaymentId,
+        decimal representativeAmount)
+    {
+        var normalizedRepresentativeAmount = NormalizeMoneyAmount(representativeAmount);
+        if (sourcePayments.Count == 0 || normalizedRepresentativeAmount <= AmountEpsilon)
+        {
+            return sourcePayments;
+        }
+
+        var paidNonRepresentativePayments = sourcePayments
+            .Where(payment => payment.Id != representativePaymentId && ResolvePaidAmount(payment) > AmountEpsilon)
+            .ToList();
+        if (paidNonRepresentativePayments.Sum(ResolvePaidAmount) + AmountEpsilon >= normalizedRepresentativeAmount)
+        {
+            return paidNonRepresentativePayments;
+        }
+
+        var paidPayments = sourcePayments
+            .Where(payment => ResolvePaidAmount(payment) > AmountEpsilon)
+            .ToList();
+        return paidPayments.Sum(ResolvePaidAmount) + AmountEpsilon >= normalizedRepresentativeAmount
+            ? paidPayments
+            : sourcePayments;
     }
 
     private static string ResolveWorkflowStatus(

@@ -118,6 +118,7 @@ vi.mock('../../services/api', () => ({
     getCases: vi.fn().mockResolvedValue([]),
     getClientsV2: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 }),
     getActs: vi.fn().mockResolvedValue({ items: [] }),
+    getLegalEntities: vi.fn().mockResolvedValue([]),
     getLegalEntitiesPaged: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 }),
     getNextInvoiceNumber: vi.fn().mockResolvedValue('24'),
     getPayment: vi.fn(),
@@ -311,6 +312,8 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.getContract).mockReset();
     vi.mocked(apiService.getLegalEntitiesPaged).mockReset();
     vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
+    vi.mocked(apiService.getLegalEntities).mockReset();
+    vi.mocked(apiService.getLegalEntities).mockResolvedValue([]);
     vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue({ items: [], totalCount: 0, summary: {} });
@@ -378,6 +381,7 @@ describe('InvoiceModal integration', () => {
     } as LegalEntitySummary;
     const onClientCreated = vi.fn();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(apiService.getLegalEntities).mockResolvedValue([legalEntity]);
     vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [legalEntity], total: 1 });
 
     const invoice = {

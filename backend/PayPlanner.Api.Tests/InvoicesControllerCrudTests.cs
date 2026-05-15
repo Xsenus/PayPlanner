@@ -1789,6 +1789,111 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Update_DoesNotDuplicateMigratedInvoice_WhenPaidRowsCoverCorrectedAmount()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Земцов Виктор Александрович");
+        var caseId = await CreateClientCaseAsync(db, clientId, "ЗЕМЦОВ - АДМИНИСТРАТИВНОЕ ПРАВОНАРУШЕНИЕ");
+        var invoice = new Invoice
+        {
+            Number = "8",
+            Date = new DateTime(2026, 2, 2),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var representative = new Payment
+        {
+            Invoice = invoice,
+            Account = "8",
+            AccountDate = new DateTime(2026, 2, 2),
+            Date = new DateTime(2026, 2, 5),
+            PlannedDate = new DateTime(2026, 2, 5),
+            Amount = 100_101.10m,
+            PaidAmount = 25_000m,
+            Status = PaymentStatus.Overdue,
+            Type = PaymentType.Income,
+            ClientId = clientId,
+            ClientCaseId = caseId,
+            Description = "Migrated invoice with duplicated rows",
+            DocumentKind = DocumentKind.Invoice,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        db.Payments.Add(representative);
+        await db.SaveChangesAsync();
+
+        db.Payments.AddRange(
+            CreateMigratedInvoiceRow(representative, 25_000m, PaymentStatus.Overdue),
+            CreateMigratedInvoiceRow(representative, 15_000m, PaymentStatus.Completed, paidAmount: 15_000m),
+            CreateMigratedInvoiceRow(representative, 10_000m, PaymentStatus.Completed, paidAmount: 10_000m),
+            CreateMigratedInvoiceRow(representative, 0.10m, PaymentStatus.Cancelled),
+            CreateMigratedInvoiceRow(representative, 1m, PaymentStatus.Cancelled),
+            CreateMigratedInvoiceRow(representative, 100m, PaymentStatus.Cancelled),
+            CreateMigratedInvoiceRow(representative, 25_000m, PaymentStatus.Cancelled),
+            CreateMigratedInvoiceRow(representative, 25_000m, PaymentStatus.Overdue));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var initialPaymentCount = await db.Payments.CountAsync(payment => payment.InvoiceId == representative.InvoiceId);
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var updateRequest = CreateRequest("8", clientId, new DateTime(2026, 2, 2), 25_000m);
+        updateRequest.ClientCaseIds = [caseId];
+        updateRequest.Status = PaymentStatus.Completed;
+        updateRequest.PaidDate = new DateTime(2026, 2, 5);
+        updateRequest.DueDate = new DateTime(2026, 2, 5);
+        updateRequest.Description = "Corrected invoice total";
+
+        var updateAction = await controller.Update(representative.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var updatedDto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(representative.Id, updatedDto.Id);
+        Assert.Equal(25_000m, updatedDto.Amount);
+        Assert.Equal(25_000m, updatedDto.PaidAmount);
+        Assert.Equal(0m, updatedDto.OutstandingAmount);
+        Assert.Equal(PaymentStatus.Completed, updatedDto.Status);
+
+        db.ChangeTracker.Clear();
+
+        var updatedPayments = await db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.InvoiceId == representative.InvoiceId)
+            .OrderBy(payment => payment.Id)
+            .ToListAsync();
+        Assert.Equal(initialPaymentCount, updatedPayments.Count);
+        Assert.Equal(DocumentKind.Invoice, updatedPayments.Single(payment => payment.Id == representative.Id).DocumentKind);
+
+        var getResult = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: clientId,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: "8",
+            type: PaymentType.Income,
+            sortBy: null,
+            sortDir: null,
+            clientRole: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            workflowStatus: null);
+
+        var getOk = Assert.IsType<OkObjectResult>(getResult);
+        var items = GetAnonymousProperty<List<InvoiceDto>>(getOk.Value, "items");
+        var listedInvoice = Assert.Single(items, item => item.Id == representative.Id);
+        Assert.Equal(25_000m, listedInvoice.Amount);
+        Assert.Equal(25_000m, listedInvoice.PaidAmount);
+        Assert.Equal(0m, listedInvoice.OutstandingAmount);
+        Assert.Equal(PaymentStatus.Completed, listedInvoice.Status);
+    }
+
+    [Fact]
     public async Task Update_ClearsClientCaseLinks_WhenCasesRemoved()
     {
         await using var db = await CreateContextAsync();
@@ -2335,6 +2440,34 @@ public class InvoicesControllerCrudTests
             Type = PaymentType.Income,
             Status = PaymentStatus.Pending,
             ClientId = clientId,
+        };
+    }
+
+    private static Payment CreateMigratedInvoiceRow(
+        Payment representative,
+        decimal amount,
+        PaymentStatus status,
+        decimal paidAmount = 0m)
+    {
+        return new Payment
+        {
+            InvoiceId = representative.InvoiceId,
+            Account = representative.Account,
+            AccountDate = representative.AccountDate,
+            Date = representative.Date,
+            PlannedDate = representative.PlannedDate,
+            Amount = amount,
+            PaidAmount = paidAmount,
+            Status = status,
+            Type = representative.Type,
+            ClientId = representative.ClientId,
+            ClientCaseId = representative.ClientCaseId,
+            Description = "Migrated linked invoice row",
+            DocumentKind = DocumentKind.Invoice,
+            IsPaid = status == PaymentStatus.Completed,
+            PaidDate = status == PaymentStatus.Completed ? representative.Date : null,
+            LastPaymentDate = status == PaymentStatus.Completed ? representative.Date : null,
+            CreatedAt = DateTime.UtcNow,
         };
     }
 

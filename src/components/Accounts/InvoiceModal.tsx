@@ -768,16 +768,20 @@ function buildInvoiceStatusSnapshot(
     : status === 'Completed'
       ? totalAmount
       : fallbackPaidAmountValue;
-  const rawOutstandingAmount = sourcePayments.reduce((sum, payment) => sum + resolveOutstandingAmount(payment), 0);
-  const outstandingAmount = sourcePayments.length > 0
-    ? rawOutstandingAmount > 0
-      ? rawOutstandingAmount
-      : Math.max(totalAmount - paidAmount, 0)
-    : status === 'Completed' || status === 'Cancelled'
+  const sourceOutstandingAmount = sourcePayments.reduce((sum, payment) => sum + resolveOutstandingAmount(payment), 0);
+  const hasCancelledRelatedPayments = payments.some((payment) => payment.status === 'Cancelled');
+  const amountBasedOutstandingAmount = Math.max(totalAmount - paidAmount, 0);
+  const outstandingAmount = status === 'Completed' || status === 'Cancelled'
+    ? 0
+    : hasCancelledRelatedPayments && sourceOutstandingAmount <= 0
       ? 0
-      : fallbackOutstandingAmountValue > 0
-        ? fallbackOutstandingAmountValue
-      : Math.max(totalAmount - paidAmount, 0);
+      : sourceOutstandingAmount > 0
+        ? sourceOutstandingAmount
+      : sourcePayments.length > 0
+        ? amountBasedOutstandingAmount
+        : fallbackOutstandingAmountValue > 0
+          ? fallbackOutstandingAmountValue
+          : amountBasedOutstandingAmount;
 
   let reason = 'Связанные платежи по счету еще не созданы.';
   if (status === 'Completed') {

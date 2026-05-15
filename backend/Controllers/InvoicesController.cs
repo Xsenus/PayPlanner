@@ -1297,12 +1297,26 @@ public class InvoicesController : ControllerBase
             {
                 Id = candidate.Id,
                 DocumentKind = candidate.DocumentKind,
+                Amount = candidate.Amount,
+                PaidAmount = candidate.PaidAmount,
+                Status = candidate.Status,
+                IsPaid = candidate.IsPaid,
+                Date = candidate.Date,
+                PlannedDate = candidate.PlannedDate,
+                PaidDate = candidate.PaidDate,
+                LastPaymentDate = candidate.LastPaymentDate,
                 SystemNotes = candidate.SystemNotes,
                 InvoiceWorkflowStatus = candidate.InvoiceWorkflowStatus,
             })
             .ToListAsync(ct);
 
         if (siblingPayments.Count == 0 || siblingPayments.Any(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment))
+        {
+            return false;
+        }
+
+        if (IsRepresentativeOfLegacyInvoiceRows(payment, siblingPayments)
+            || IsProtectedStateCoveredByRelatedPayments(payment, siblingPayments, request.Amount))
         {
             return false;
         }
@@ -1338,6 +1352,53 @@ public class InvoicesController : ControllerBase
         }
 
         return ShouldReplaceInstallmentPlan(request);
+    }
+
+    private static bool IsRepresentativeOfLegacyInvoiceRows(Payment payment, IReadOnlyCollection<Payment> siblingPayments)
+    {
+        var invoiceRows = siblingPayments
+            .Where(candidate => candidate.DocumentKind == DocumentKind.Invoice)
+            .Append(payment)
+            .ToList();
+        if (invoiceRows.Count < 2)
+        {
+            return false;
+        }
+
+        var activeInvoiceRows = invoiceRows
+            .Where(candidate => candidate.Status != PaymentStatus.Cancelled)
+            .ToList();
+        var candidates = activeInvoiceRows.Count > 0 ? activeInvoiceRows : invoiceRows;
+        var representative = candidates
+            .OrderByDescending(candidate => candidate.Amount)
+            .ThenBy(candidate => candidate.Id)
+            .FirstOrDefault();
+        return representative?.Id == payment.Id;
+    }
+
+    private static bool IsProtectedStateCoveredByRelatedPayments(
+        Payment payment,
+        IReadOnlyCollection<Payment> siblingPayments,
+        decimal requestedAmount)
+    {
+        var statusSources = InvoicePaymentStateService.SelectStatusSourcePayments(
+            siblingPayments.Append(payment).ToList(),
+            payment.Id,
+            requestedAmount);
+        var paidByRelatedPayments = NormalizeMoneyAmount(statusSources
+            .Where(source => source.Id != payment.Id)
+            .Sum(InvoicePaymentStateService.ResolvePaidAmount));
+        if (paidByRelatedPayments <= 0m)
+        {
+            return false;
+        }
+
+        var requiredPaidAmount = payment.PaidAmount > 0m
+            ? Math.Min(payment.PaidAmount, requestedAmount)
+            : requestedAmount;
+        requiredPaidAmount = NormalizeMoneyAmount(requiredPaidAmount);
+
+        return requiredPaidAmount > 0m && paidByRelatedPayments + 0.01m >= requiredPaidAmount;
     }
 
     private async Task<Payment> ForkProtectedRepresentativeInvoicePaymentAsync(Payment payment, CancellationToken ct)
@@ -3643,10 +3704,11 @@ public class InvoicesController : ControllerBase
                 .ToList();
 
             var statusSourcePayments = InvoicePaymentStateService.SelectStatusSourcePayments(relatedPayments, item.Id, item.Amount);
+            var sourceOutstandingAmount = 0m;
             if (statusSourcePayments.Count > 0)
             {
                 item.PaidAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(InvoicePaymentStateService.ResolvePaidAmount));
-                item.OutstandingAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(InvoicePaymentStateService.ResolveOutstandingAmount));
+                sourceOutstandingAmount = NormalizeMoneyAmount(statusSourcePayments.Sum(InvoicePaymentStateService.ResolveOutstandingAmount));
                 item.DueDate = statusSourcePayments
                     .Select(InvoicePaymentStateService.EffectivePlannedDate)
                     .Max();
@@ -3668,7 +3730,43 @@ public class InvoicesController : ControllerBase
                 item.DueDate,
                 now);
             item.IsPaid = item.Status == PaymentStatus.Completed;
+            if (statusSourcePayments.Count > 0)
+            {
+                item.OutstandingAmount = ResolveEffectiveInvoiceOutstandingAmount(
+                    item.Amount,
+                    item.PaidAmount,
+                    item.Status,
+                    sourceOutstandingAmount,
+                    relatedPayments.Any(payment => payment.Status == PaymentStatus.Cancelled));
+            }
         }
+    }
+
+    private static decimal ResolveEffectiveInvoiceOutstandingAmount(
+        decimal invoiceAmount,
+        decimal paidAmount,
+        PaymentStatus status,
+        decimal sourceOutstandingAmount,
+        bool hasCancelledRelatedPayments)
+    {
+        if (status is PaymentStatus.Completed or PaymentStatus.Cancelled)
+        {
+            return 0m;
+        }
+
+        if (hasCancelledRelatedPayments && sourceOutstandingAmount <= 0m)
+        {
+            return 0m;
+        }
+
+        if (sourceOutstandingAmount > 0m)
+        {
+            return NormalizeMoneyAmount(sourceOutstandingAmount);
+        }
+
+        return NormalizeMoneyAmount(Math.Max(
+            NormalizeMoneyAmount(invoiceAmount) - NormalizeMoneyAmount(paidAmount),
+            0m));
     }
 
     private async Task<List<InvoiceLineItemDto>> LoadInvoiceLineItemsAsync(int paymentId, string? systemNotes, CancellationToken ct)

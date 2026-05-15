@@ -415,4 +415,63 @@ describe('invoicePayments utilities', () => {
 
     expect(result.map((payment) => payment.id)).toEqual([440, 1843]);
   });
+
+  it('ignores unpaid duplicate rows when paid invoice rows cover the corrected invoice amount', () => {
+    const representativeInvoice = createPayment({
+      id: 8,
+      documentKind: 'Invoice',
+      invoiceId: 81,
+      amount: 25_000,
+      status: 'Completed',
+      paidAmount: 25_000,
+    });
+    const overdueDuplicate = createPayment({
+      id: 439,
+      documentKind: 'Invoice',
+      invoiceId: 81,
+      amount: 25_000,
+      status: 'Overdue',
+    });
+    const paidFirst = createPayment({
+      id: 440,
+      documentKind: 'Invoice',
+      invoiceId: 81,
+      amount: 15_000,
+      status: 'Completed',
+      paidAmount: 15_000,
+    });
+    const paidSecond = createPayment({
+      id: 1843,
+      documentKind: 'Invoice',
+      invoiceId: 81,
+      amount: 10_000,
+      status: 'Completed',
+      paidAmount: 10_000,
+    });
+    const cancelledDuplicate = createPayment({
+      id: 1929,
+      documentKind: 'Invoice',
+      invoiceId: 81,
+      amount: 25_000,
+      status: 'Cancelled',
+    });
+    const secondOverdueDuplicate = createPayment({
+      id: 1930,
+      documentKind: 'Invoice',
+      invoiceId: 81,
+      amount: 25_000,
+      status: 'Overdue',
+    });
+
+    const result = getStatusSourcePaymentsForInvoice([
+      representativeInvoice,
+      overdueDuplicate,
+      paidFirst,
+      paidSecond,
+      cancelledDuplicate,
+      secondOverdueDuplicate,
+    ]);
+
+    expect(result.map((payment) => payment.id)).toEqual([440, 1843]);
+  });
 });
