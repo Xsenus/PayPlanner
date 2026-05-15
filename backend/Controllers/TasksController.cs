@@ -24,7 +24,7 @@ public class TasksController : ControllerBase
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
-        "new", "inProgress", "waiting", "onApproval", "revision", "overdueApproval", "done", "cancelled"
+        "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval", "done", "cancelled"
     };
     private static readonly HashSet<string> AllowedPriorities = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -56,7 +56,7 @@ public class TasksController : ControllerBase
     };
     private static readonly string[] ActiveTaskStatuses =
     [
-        "new", "inProgress", "waiting", "onApproval", "revision", "overdueApproval"
+        "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
     ];
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
@@ -1347,13 +1347,14 @@ public class TasksController : ControllerBase
         participant.RespondedAt = DateTime.UtcNow;
         participant.UpdatedAt = DateTime.UtcNow;
 
+        var previousStatus = entity.Status;
         if (string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase))
         {
             entity.Status = "revision";
         }
         else if (approvers.All(item => string.Equals(item.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)))
         {
-            entity.Status = "inProgress";
+            entity.Status = "approved";
         }
         else if (!string.Equals(entity.Status, "overdueApproval", StringComparison.OrdinalIgnoreCase))
         {
@@ -1366,9 +1367,12 @@ public class TasksController : ControllerBase
             access,
             BuildApprovalHistoryText(decision, participant.DisplayName, resolution));
         await _db.SaveChangesAsync(ct);
+        var changeLabels = !string.Equals(previousStatus, entity.Status, StringComparison.OrdinalIgnoreCase)
+            ? new[] { "Согласование", "Статус" }
+            : new[] { "Согласование" };
         await _notificationService.NotifyTaskChangedAsync(
             entity,
-            ["Согласование"],
+            changeLabels,
             access.DisplayName,
             access.UserId,
             resolution,
@@ -1803,7 +1807,7 @@ public class TasksController : ControllerBase
             PlannedDurationMinutes = entity.PlannedDurationMinutes,
             Type = entity.Type,
             Priority = entity.Priority,
-            Status = entity.Status,
+            Status = ResolveTaskStatus(entity),
             Result = entity.Result ?? string.Empty,
             Reminders = DeserializeList(entity.RemindersJson),
             Channels = DeserializeList(entity.ChannelsJson),
@@ -1828,6 +1832,23 @@ public class TasksController : ControllerBase
             CreatedAt = ToIso(entity.CreatedAt),
             UpdatedAt = entity.UpdatedAt.HasValue ? ToIso(entity.UpdatedAt.Value) : null,
         };
+
+    private static string ResolveTaskStatus(TaskJournalItem entity)
+    {
+        if (string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entity.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return entity.Status;
+        }
+
+        var approvers = entity.Participants
+            .Where(participant => string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var allApproved = approvers.Count > 0
+            && approvers.All(participant => string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase));
+
+        return allApproved ? "approved" : entity.Status;
+    }
 
     private static string ToIso(DateTime value)
         => DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("O");
@@ -2089,6 +2110,18 @@ public class TasksController : ControllerBase
             && approverCount == 0)
         {
             return "Для отправки задачи на согласование добавьте хотя бы одного согласующего.";
+        }
+
+        if (string.Equals(status, "approved", StringComparison.OrdinalIgnoreCase)
+            && approverCount == 0)
+        {
+            return "Для статуса \"Согласовано\" добавьте хотя бы одного согласующего.";
+        }
+
+        if (string.Equals(status, "approved", StringComparison.OrdinalIgnoreCase)
+            && !allApproversApproved)
+        {
+            return "Статус \"Согласовано\" доступен только после согласования всеми согласующими.";
         }
 
         return null;
@@ -2424,6 +2457,7 @@ public class TasksController : ControllerBase
             "inProgress" => "В работе",
             "waiting" => "Ожидает",
             "onApproval" => "На согласовании",
+            "approved" => "Согласовано",
             "revision" => "На доработке",
             "overdueApproval" => "Просрочено на согласовании",
             "done" => "Готово",

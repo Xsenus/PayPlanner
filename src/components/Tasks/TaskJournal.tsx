@@ -102,6 +102,7 @@ const STATUS_OPTIONS: Array<{ value: TaskJournalStatus; label: string }> = [
   { value: 'inProgress', label: 'В работе' },
   { value: 'waiting', label: 'Ожидает' },
   { value: 'onApproval', label: 'На согласовании' },
+  { value: 'approved', label: 'Согласовано' },
   { value: 'revision', label: 'На доработке' },
   { value: 'overdueApproval', label: 'Просрочено на согласовании' },
   { value: 'done', label: 'Готово' },
@@ -606,6 +607,22 @@ function getCurrentPendingApprover(task: TaskJournalItem) {
   return getOrderedApprovers(task).find((participant) => participant.approvalStatus !== 'approved') ?? null;
 }
 
+function getApprovalSummary(task: TaskJournalItem) {
+  const approvers = getOrderedApprovers(task);
+  if (approvers.length === 0) {
+    return null;
+  }
+
+  const allNames = approvers.map(getParticipantDisplayName).filter(Boolean).join(', ');
+  const currentApprover = getCurrentPendingApprover(task);
+  if (!currentApprover) {
+    return `Согласовано: ${allNames}`;
+  }
+
+  const currentName = getParticipantDisplayName(currentApprover);
+  return `Согласует: ${currentName || allNames}`;
+}
+
 function isTaskInApprovalsScope(task: TaskJournalItem, userId: number | null, isAdminUser: boolean) {
   if (task.status !== 'onApproval' && task.status !== 'overdueApproval') {
     return false;
@@ -696,6 +713,8 @@ function statusClass(status: TaskJournalStatus) {
       return 'bg-amber-50 text-amber-700';
     case 'onApproval':
       return 'bg-violet-50 text-violet-700';
+    case 'approved':
+      return 'bg-emerald-50 text-emerald-700';
     case 'revision':
       return 'bg-orange-50 text-orange-700';
     case 'overdueApproval':
@@ -777,7 +796,7 @@ function getTimelineTaskTone(task: TaskJournalItem, currentUserId: number | null
     };
   }
 
-  if (task.status === 'onApproval' || task.status === 'revision') {
+  if (task.status === 'onApproval' || task.status === 'approved' || task.status === 'revision') {
     return {
       label: 'Согласование/доработка',
       className: 'border-violet-600 bg-violet-600 text-white',
@@ -2209,7 +2228,7 @@ function TaskTable({
               const isOverdue = isTaskJournalActive(task.status) && new Date(task.dueAt).getTime() < Date.now();
               const isHighlighted = highlightedTaskId === task.id;
               const taskAssignees = getTaskParticipants(task, 'assignee');
-              const taskApprovers = getTaskParticipants(task, 'approver');
+              const approvalSummary = getApprovalSummary(task);
               const taskObservers = getTaskParticipants(task, 'observer');
               const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
               const counterpartyName = getTaskClientName(task);
@@ -2267,9 +2286,9 @@ function TaskTable({
                     <div className="font-semibold text-slate-700">
                       {taskAssignees.map(getParticipantDisplayName).filter(Boolean).join(', ') || task.assigneeName}
                     </div>
-                    {taskApprovers.length > 0 ? (
+                    {approvalSummary ? (
                       <div className="mt-2 text-xs text-violet-600">
-                        Согласуют: {taskApprovers.map(getParticipantDisplayName).filter(Boolean).join(', ')}
+                        {approvalSummary}
                       </div>
                     ) : null}
                     {taskObservers.length > 0 ? (

@@ -247,7 +247,7 @@ describe('TaskJournal', () => {
     apiMock.createTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalStatus.mockResolvedValue(createTask({ status: 'done', result: 'Готово' }));
-    apiMock.updateTaskJournalApproval.mockResolvedValue(createTask({ status: 'inProgress' }));
+    apiMock.updateTaskJournalApproval.mockResolvedValue(createTask({ status: 'approved' }));
     apiMock.getTaskJournalComments.mockResolvedValue([]);
     apiMock.createTaskJournalComment.mockResolvedValue({
       id: 501,
@@ -368,6 +368,21 @@ describe('TaskJournal', () => {
     expect(screen.getByText(approvalTask.title)).toBeTruthy();
     expect(screen.queryByText(laterApprovalTask.title)).toBeNull();
     expect(screen.queryByText(regularTask.title)).toBeNull();
+  });
+
+  it('shows agreed tasks as approved for the executor after approval', async () => {
+    await renderJournal([
+      createTask({
+        status: 'approved',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+          { userId: 8, role: 'approver', displayName: 'Согласующий', approvalStatus: 'approved' },
+        ],
+      }),
+    ]);
+
+    expect(screen.getByText('Согласовано: Согласующий')).toBeTruthy();
+    expect(screen.getByDisplayValue('Согласовано')).toBeTruthy();
   });
 
   it('opens with current user quick filter and remembers switching to all tasks', async () => {

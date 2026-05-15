@@ -3,6 +3,7 @@ export type TaskJournalStatus =
   | 'inProgress'
   | 'waiting'
   | 'onApproval'
+  | 'approved'
   | 'revision'
   | 'overdueApproval'
   | 'done'
