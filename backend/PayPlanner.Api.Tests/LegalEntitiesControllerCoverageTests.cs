@@ -440,6 +440,75 @@ public class LegalEntitiesControllerCoverageTests
     }
 
     [Fact]
+    public async Task GetPaged_DeduplicatesRelatedInvoices_WithSameVisibleNumber()
+    {
+        await using var db = await CreateContextAsync();
+        var legalEntityId = await CreateLegalEntityAsync(db, "Zemtsov Legal", inn: "7700000999");
+        var invoice = new Invoice
+        {
+            Number = "8",
+            Date = new DateTime(2026, 2, 2),
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var canonicalInvoiceRow = new Payment
+        {
+            LegalEntityId = legalEntityId,
+            InvoiceId = invoice.Id,
+            DocumentKind = DocumentKind.Invoice,
+            Account = "8",
+            AccountDate = invoice.Date,
+            Date = new DateTime(2026, 2, 5),
+            PlannedDate = new DateTime(2026, 2, 5),
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 25000m,
+        };
+
+        db.Payments.AddRange(
+            canonicalInvoiceRow,
+            new Payment
+            {
+                LegalEntityId = legalEntityId,
+                DocumentKind = DocumentKind.Invoice,
+                Account = "8",
+                AccountDate = invoice.Date,
+                Date = new DateTime(2026, 2, 5),
+                PlannedDate = new DateTime(2026, 2, 5),
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Cancelled,
+                Amount = 100m,
+            },
+            new Payment
+            {
+                LegalEntityId = legalEntityId,
+                DocumentKind = DocumentKind.Invoice,
+                LegacyAccountNumber = "8",
+                LegacyAccountDate = invoice.Date,
+                Date = new DateTime(2026, 2, 5),
+                PlannedDate = new DateTime(2026, 2, 5),
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Cancelled,
+                Amount = 25000m,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+
+        var action = await controller.GetPaged(search: "Zemtsov", page: 1, pageSize: 25, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<PagedResponse<LegalEntityListItemDto>>(ok.Value);
+        var item = Assert.Single(page.Items);
+        var relatedInvoice = Assert.Single(item.RelatedInvoices);
+
+        Assert.Equal(1, item.InvoicesCount);
+        Assert.Equal(canonicalInvoiceRow.Id, relatedInvoice.Id);
+        Assert.Contains("8", relatedInvoice.Label);
+    }
+
+    [Fact]
     public async Task GetCaseFinanceSummaries_ReturnsDirectLegalEntityCaseTotals()
     {
         await using var db = await CreateContextAsync();

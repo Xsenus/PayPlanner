@@ -46,6 +46,32 @@ public class LegalEntitiesController : ControllerBase
     private bool IsAdmin()
         => User.IsInRole("admin");
 
+    private static string BuildRelatedInvoiceKey(
+        int? invoiceEntityId,
+        string? invoiceNumber,
+        DateTime? invoiceDate,
+        int ownerId,
+        PaymentType type,
+        int fallbackPaymentId)
+    {
+        var normalizedNumber = NormalizeInvoiceNumber(invoiceNumber);
+        if (normalizedNumber is not null)
+        {
+            var year = (invoiceDate ?? DateTime.MinValue).Year;
+            return $"number:{normalizedNumber}::{year}::owner:{ownerId}::type:{type}";
+        }
+
+        if (invoiceEntityId.HasValue && invoiceEntityId.Value > 0)
+        {
+            return $"entity:{invoiceEntityId.Value}";
+        }
+
+        return $"payment:{fallbackPaymentId}";
+    }
+
+    private static string? NormalizeInvoiceNumber(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
+
     private sealed record MainCompanySettingsState(IReadOnlyList<int> CompanyIds, int? DefaultCompanyId);
 
     private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
@@ -1486,52 +1512,79 @@ public class LegalEntitiesController : ControllerBase
                 .Select(payment => new
                 {
                     payment.Id,
+                    payment.InvoiceId,
+                    InvoiceNumber = payment.Invoice != null ? payment.Invoice.Number : null,
+                    InvoiceDate = payment.Invoice != null ? (DateTime?)payment.Invoice.Date : null,
                     payment.LegalEntityId,
                     payment.ExpenseLegalEntityId,
                     payment.Account,
+                    payment.AccountDate,
                     payment.LegacyAccountNumber,
+                    payment.LegacyAccountDate,
                     payment.Date,
                     payment.Amount,
                     payment.Type,
+                    payment.Status,
                 })
                 .ToListAsync(ct);
 
-            void AddInvoiceLink(int legalEntityId, RelatedDocumentLink link)
+            var seenInvoiceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            void AddInvoiceLink(int legalEntityId, RelatedDocumentLink link, string invoiceKey)
             {
+                if (!seenInvoiceKeys.Add($"{legalEntityId}:{invoiceKey}"))
+                {
+                    return;
+                }
+
                 if (!invoiceLinksByLegalEntity.TryGetValue(legalEntityId, out var links))
                 {
                     links = new List<RelatedDocumentLink>();
                     invoiceLinksByLegalEntity[legalEntityId] = links;
                 }
 
+                invoicesCountByLegalEntity[legalEntityId] = invoicesCountByLegalEntity.GetValueOrDefault(legalEntityId) + 1;
                 links.Add(link);
             }
 
-            foreach (var row in invoiceRows)
+            foreach (var row in invoiceRows
+                .OrderByDescending(row => row.InvoiceId.HasValue && row.InvoiceId.Value > 0)
+                .ThenBy(row => row.Status == PaymentStatus.Cancelled)
+                .ThenByDescending(row => row.Amount)
+                .ThenByDescending(row => row.InvoiceDate ?? row.AccountDate ?? row.LegacyAccountDate ?? row.Date)
+                .ThenBy(row => row.Id))
             {
-                var number = !string.IsNullOrWhiteSpace(row.Account) ? row.Account : row.LegacyAccountNumber;
-                var link = new RelatedDocumentLink
+                var number = !string.IsNullOrWhiteSpace(row.InvoiceNumber)
+                    ? row.InvoiceNumber
+                    : !string.IsNullOrWhiteSpace(row.Account)
+                        ? row.Account
+                        : row.LegacyAccountNumber;
+                var invoiceDate = row.InvoiceDate ?? row.AccountDate ?? row.LegacyAccountDate ?? row.Date;
+                RelatedDocumentLink CreateInvoiceLink(int legalEntityId) => new()
                 {
                     Id = row.Id,
                     Label = !string.IsNullOrWhiteSpace(number) ? $"№{number}" : $"Счет #{row.Id}",
-                    LegalEntityId = row.LegalEntityId ?? row.ExpenseLegalEntityId,
-                    Date = row.Date,
+                    LegalEntityId = legalEntityId,
+                    Date = invoiceDate,
                     Amount = row.Amount,
                     Type = row.Type.ToString(),
                 };
 
                 if (row.LegalEntityId.HasValue && itemIds.Contains(row.LegalEntityId.Value))
                 {
-                    invoicesCountByLegalEntity[row.LegalEntityId.Value] = invoicesCountByLegalEntity.GetValueOrDefault(row.LegalEntityId.Value) + 1;
-                    AddInvoiceLink(row.LegalEntityId.Value, link);
+                    AddInvoiceLink(
+                        row.LegalEntityId.Value,
+                        CreateInvoiceLink(row.LegalEntityId.Value),
+                        BuildRelatedInvoiceKey(row.InvoiceId, number, invoiceDate, row.LegalEntityId.Value, row.Type, row.Id));
                 }
 
                 if (row.ExpenseLegalEntityId.HasValue
                     && itemIds.Contains(row.ExpenseLegalEntityId.Value)
                     && row.ExpenseLegalEntityId != row.LegalEntityId)
                 {
-                    invoicesCountByLegalEntity[row.ExpenseLegalEntityId.Value] = invoicesCountByLegalEntity.GetValueOrDefault(row.ExpenseLegalEntityId.Value) + 1;
-                    AddInvoiceLink(row.ExpenseLegalEntityId.Value, link);
+                    AddInvoiceLink(
+                        row.ExpenseLegalEntityId.Value,
+                        CreateInvoiceLink(row.ExpenseLegalEntityId.Value),
+                        BuildRelatedInvoiceKey(row.InvoiceId, number, invoiceDate, row.ExpenseLegalEntityId.Value, row.Type, row.Id));
                 }
             }
 

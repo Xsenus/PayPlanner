@@ -149,6 +149,105 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task V2Get_DeduplicatesRelatedInvoices_WithSameVisibleNumber()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, "admin");
+
+        var client = new Client
+        {
+            Name = "Zemtsov Test",
+            IsActive = true,
+            ResponsibleUserId = userId,
+        };
+        var invoice = new Invoice
+        {
+            Number = "8",
+            Date = new DateTime(2026, 2, 2),
+        };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var canonicalInvoiceRow = new Payment
+        {
+            ClientId = client.Id,
+            InvoiceId = invoice.Id,
+            DocumentKind = DocumentKind.Invoice,
+            Account = "8",
+            AccountDate = invoice.Date,
+            Date = new DateTime(2026, 2, 5),
+            PlannedDate = new DateTime(2026, 2, 5),
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 25000m,
+        };
+
+        db.Payments.AddRange(
+            canonicalInvoiceRow,
+            new Payment
+            {
+                ClientId = client.Id,
+                DocumentKind = DocumentKind.Invoice,
+                Account = "8",
+                AccountDate = invoice.Date,
+                Date = new DateTime(2026, 2, 5),
+                PlannedDate = new DateTime(2026, 2, 5),
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Cancelled,
+                Amount = 100m,
+            },
+            new Payment
+            {
+                ClientId = client.Id,
+                DocumentKind = DocumentKind.Invoice,
+                LegacyAccountNumber = "8",
+                LegacyAccountDate = invoice.Date,
+                Date = new DateTime(2026, 2, 5),
+                PlannedDate = new DateTime(2026, 2, 5),
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Cancelled,
+                Amount = 25000m,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateV2Controller(db, userId);
+
+        var action = await controller.Get(
+            search: "Zemtsov",
+            isActive: null,
+            id: null,
+            name: null,
+            email: null,
+            phone: null,
+            company: null,
+            address: null,
+            notes: null,
+            legalEntityId: null,
+            legalEntityShortName: null,
+            legalEntityFullName: null,
+            legalEntityInn: null,
+            legalEntityOgrn: null,
+            legalEntityKpp: null,
+            clientStatusId: null,
+            clientStatus: null,
+            sortBy: "name",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 25,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var items = Assert.IsAssignableFrom<IEnumerable<Client>>(ok.Value!.GetType().GetProperty("items")!.GetValue(ok.Value)).ToList();
+        var item = Assert.Single(items);
+        var relatedInvoice = Assert.Single(item.RelatedInvoices);
+
+        Assert.Equal(1, item.InvoicesCount);
+        Assert.Equal(canonicalInvoiceRow.Id, relatedInvoice.Id);
+        Assert.Contains("8", relatedInvoice.Label);
+    }
+
+    [Fact]
     public async Task Create_RoundTripsStructuredAddressEntries_WithFullAddress()
     {
         await using var db = await CreateContextAsync();

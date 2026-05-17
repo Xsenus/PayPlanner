@@ -44,6 +44,32 @@ public class ClientsV2Controller : ControllerBase
         }
     }
 
+    private static string BuildRelatedInvoiceKey(
+        int? invoiceEntityId,
+        string? invoiceNumber,
+        DateTime? invoiceDate,
+        int ownerId,
+        PaymentType type,
+        int fallbackPaymentId)
+    {
+        var normalizedNumber = NormalizeInvoiceNumber(invoiceNumber);
+        if (normalizedNumber is not null)
+        {
+            var year = (invoiceDate ?? DateTime.MinValue).Year;
+            return $"number:{normalizedNumber}::{year}::owner:{ownerId}::type:{type}";
+        }
+
+        if (invoiceEntityId.HasValue && invoiceEntityId.Value > 0)
+        {
+            return $"entity:{invoiceEntityId.Value}";
+        }
+
+        return $"payment:{fallbackPaymentId}";
+    }
+
+    private static string? NormalizeInvoiceNumber(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
+
     private async Task<bool> ResponsibleUserExistsAsync(int? responsibleUserId, CancellationToken ct)
     {
         if (!responsibleUserId.HasValue) return true;
@@ -324,52 +350,79 @@ public class ClientsV2Controller : ControllerBase
                 .Select(p => new
                 {
                     p.Id,
+                    p.InvoiceId,
+                    InvoiceNumber = p.Invoice != null ? p.Invoice.Number : null,
+                    InvoiceDate = p.Invoice != null ? (DateTime?)p.Invoice.Date : null,
                     p.ClientId,
                     p.ExpenseClientId,
                     p.Account,
+                    p.AccountDate,
                     p.LegacyAccountNumber,
+                    p.LegacyAccountDate,
                     p.Date,
                     p.Amount,
                     p.Type,
+                    p.Status,
                 })
                 .ToListAsync(ct);
 
             var invoicesCountByClient = new Dictionary<int, int>();
             var invoiceLinksByClient = new Dictionary<int, List<RelatedDocumentLink>>();
-            void AddInvoiceLink(int clientId, RelatedDocumentLink link)
+            var seenInvoiceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            void AddInvoiceLink(int clientId, RelatedDocumentLink link, string invoiceKey)
             {
+                if (!seenInvoiceKeys.Add($"{clientId}:{invoiceKey}"))
+                {
+                    return;
+                }
+
                 if (!invoiceLinksByClient.TryGetValue(clientId, out var links))
                 {
                     links = new List<RelatedDocumentLink>();
                     invoiceLinksByClient[clientId] = links;
                 }
 
+                invoicesCountByClient[clientId] = invoicesCountByClient.GetValueOrDefault(clientId) + 1;
                 links.Add(link);
             }
 
-            foreach (var row in invoiceRows)
+            foreach (var row in invoiceRows
+                .OrderByDescending(row => row.InvoiceId.HasValue && row.InvoiceId.Value > 0)
+                .ThenBy(row => row.Status == PaymentStatus.Cancelled)
+                .ThenByDescending(row => row.Amount)
+                .ThenByDescending(row => row.InvoiceDate ?? row.AccountDate ?? row.LegacyAccountDate ?? row.Date)
+                .ThenBy(row => row.Id))
             {
-                var number = !string.IsNullOrWhiteSpace(row.Account) ? row.Account : row.LegacyAccountNumber;
-                var link = new RelatedDocumentLink
+                var number = !string.IsNullOrWhiteSpace(row.InvoiceNumber)
+                    ? row.InvoiceNumber
+                    : !string.IsNullOrWhiteSpace(row.Account)
+                        ? row.Account
+                        : row.LegacyAccountNumber;
+                var invoiceDate = row.InvoiceDate ?? row.AccountDate ?? row.LegacyAccountDate ?? row.Date;
+                RelatedDocumentLink CreateInvoiceLink(int clientId) => new()
                 {
                     Id = row.Id,
                     Label = !string.IsNullOrWhiteSpace(number) ? $"№{number}" : $"Счет #{row.Id}",
-                    ClientId = row.ClientId ?? row.ExpenseClientId,
-                    Date = row.Date,
+                    ClientId = clientId,
+                    Date = invoiceDate,
                     Amount = row.Amount,
                     Type = row.Type.ToString(),
                 };
 
                 if (row.ClientId.HasValue && itemIds.Contains(row.ClientId.Value))
                 {
-                    invoicesCountByClient[row.ClientId.Value] = invoicesCountByClient.GetValueOrDefault(row.ClientId.Value) + 1;
-                    AddInvoiceLink(row.ClientId.Value, link);
+                    AddInvoiceLink(
+                        row.ClientId.Value,
+                        CreateInvoiceLink(row.ClientId.Value),
+                        BuildRelatedInvoiceKey(row.InvoiceId, number, invoiceDate, row.ClientId.Value, row.Type, row.Id));
                 }
 
                 if (row.ExpenseClientId.HasValue && itemIds.Contains(row.ExpenseClientId.Value) && row.ExpenseClientId != row.ClientId)
                 {
-                    invoicesCountByClient[row.ExpenseClientId.Value] = invoicesCountByClient.GetValueOrDefault(row.ExpenseClientId.Value) + 1;
-                    AddInvoiceLink(row.ExpenseClientId.Value, link);
+                    AddInvoiceLink(
+                        row.ExpenseClientId.Value,
+                        CreateInvoiceLink(row.ExpenseClientId.Value),
+                        BuildRelatedInvoiceKey(row.InvoiceId, number, invoiceDate, row.ExpenseClientId.Value, row.Type, row.Id));
                 }
             }
 
