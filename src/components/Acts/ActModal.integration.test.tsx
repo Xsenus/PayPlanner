@@ -4,11 +4,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActModal } from './ActModal';
 import type { Act, ActResponsible, Client, Invoice } from '../../types';
 
-const { getActMock, getInvoiceMock, getInvoicesMock, getClientsV2Mock, getLegalEntitiesPagedMock } = vi.hoisted(() => ({
+const {
+  getActMock,
+  getInvoiceMock,
+  getInvoicesMock,
+  getClientsMock,
+  getClientsV2Mock,
+  getLegalEntitiesMock,
+  getLegalEntitiesPagedMock,
+} = vi.hoisted(() => ({
   getActMock: vi.fn(),
   getInvoiceMock: vi.fn(),
   getInvoicesMock: vi.fn(),
+  getClientsMock: vi.fn(),
   getClientsV2Mock: vi.fn(),
+  getLegalEntitiesMock: vi.fn(),
   getLegalEntitiesPagedMock: vi.fn(),
 }));
 
@@ -52,9 +62,11 @@ vi.mock('../../hooks/useLegalEntities', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getAct: getActMock,
+    getClients: getClientsMock,
     getClientsV2: getClientsV2Mock,
     getInvoice: getInvoiceMock,
     getInvoices: getInvoicesMock,
+    getLegalEntities: getLegalEntitiesMock,
     getLegalEntitiesPaged: getLegalEntitiesPagedMock,
   },
 }));
@@ -85,10 +97,18 @@ function createResponsible(id: number, fullName: string): ActResponsible {
 }
 
 function getPickerOptionAction(label: HTMLElement): HTMLButtonElement {
+  const option = label.closest('[data-counterparty-option]');
+  if (option instanceof HTMLElement) {
+    const actions = within(option).queryAllByRole('button');
+    if (actions.length > 0) {
+      return actions[0] as HTMLButtonElement;
+    }
+  }
+
   let current: HTMLElement | null = label;
 
   while (current && current !== document.body) {
-    const actions = within(current).queryAllByRole('button', { name: 'Выбрать' });
+    const actions = within(current).queryAllByRole('button');
     if (actions.length === 1) {
       return actions[0] as HTMLButtonElement;
     }
@@ -99,57 +119,60 @@ function getPickerOptionAction(label: HTMLElement): HTMLButtonElement {
 }
 
 async function selectPickerOption(name: string): Promise<void> {
-  const labels = await screen.findAllByText(name);
-  for (const label of labels.reverse()) {
-    try {
-      fireEvent.click(getPickerOptionAction(label));
-      return;
-    } catch {
-      // Some names can also exist in hidden selects outside the picker.
+  const option = await waitFor(() => {
+    const found = Array.from(document.querySelectorAll('[data-counterparty-option]'))
+      .find((element) => element.textContent?.includes(name));
+    if (!(found instanceof HTMLElement)) {
+      throw new Error(`Не найден вариант выбора ${name}`);
     }
-  }
+    return found;
+  });
 
-  throw new Error(`Не найден вариант выбора ${name}`);
+  fireEvent.click(getPickerOptionAction(option));
 }
 
 describe('ActModal integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getActMock.mockResolvedValue(null);
+    const clientLookups = [
+      createClient(1, 'Базовый клиент'),
+      createClient(2, 'ООО Поставщик'),
+      createClient(7, 'Иван Иванов'),
+      createClient(9, 'Другой поставщик'),
+    ];
+    getClientsMock.mockResolvedValue(clientLookups);
     getClientsV2Mock.mockResolvedValue({
-      items: [
-        createClient(1, 'Базовый клиент'),
-        createClient(2, 'ООО Поставщик'),
-        createClient(7, 'Иван Иванов'),
-        createClient(9, 'Другой поставщик'),
-      ],
+      items: clientLookups,
       total: 4,
       page: 1,
       pageSize: 25,
     });
     getInvoiceMock.mockResolvedValue(null);
     getInvoicesMock.mockResolvedValue({ items: [] });
+    const legalEntityLookups = [
+      {
+        id: 301,
+        shortName: 'ООО Юрклиент',
+        fullName: 'Общество с ограниченной ответственностью Юрклиент',
+        inn: '5400000001',
+        kpp: '540001001',
+        clients: [],
+        clientsCount: 0,
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+      {
+        id: 302,
+        shortName: 'ООО Поставщик ЮЛ',
+        inn: '5400000002',
+        clients: [],
+        clientsCount: 0,
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+    ];
+    getLegalEntitiesMock.mockResolvedValue(legalEntityLookups);
     getLegalEntitiesPagedMock.mockResolvedValue({
-      items: [
-        {
-          id: 301,
-          shortName: 'ООО Юрклиент',
-          fullName: 'Общество с ограниченной ответственностью Юрклиент',
-          inn: '5400000001',
-          kpp: '540001001',
-          clients: [],
-          clientsCount: 0,
-          createdAt: '2026-04-01T00:00:00Z',
-        },
-        {
-          id: 302,
-          shortName: 'ООО Поставщик ЮЛ',
-          inn: '5400000002',
-          clients: [],
-          clientsCount: 0,
-          createdAt: '2026-04-01T00:00:00Z',
-        },
-      ],
+      items: legalEntityLookups,
       total: 2,
       page: 1,
       pageSize: 25,

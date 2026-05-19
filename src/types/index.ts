@@ -495,6 +495,58 @@ export interface ClientCase {
   id: number;
   clientId?: number | null;
   legalEntityId?: number | null;
+  client?: Client | null;
+  legalEntity?: LegalEntitySummary | null;
+  caseNumber?: string | null;
+  caseType?: string | null;
+  stage?: string | null;
+  responsibleUserId?: number | null;
+  responsibleUserName?: string | null;
+  responsibleUser?: { id: number; fullName?: string | null; email?: string | null } | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  feeAmount?: number;
+  priority?: string | null;
+  courtName?: string | null;
+  courtCaseNumber?: string | null;
+  courtUrl?: string | null;
+  nextHearingAt?: string | null;
+  claimant?: string | null;
+  defendant?: string | null;
+  thirdParties?: string | null;
+  representatives?: string | null;
+  judgeName?: string | null;
+  courtroom?: string | null;
+  courtSecretaryContacts?: string | null;
+  claimFiledAt?: string | null;
+  courtDecisionAt?: string | null;
+  appealDeadlineAt?: string | null;
+  cassationDeadlineAt?: string | null;
+  motionDeadlineAt?: string | null;
+  objectionDeadlineAt?: string | null;
+  documentsSummary?: string | null;
+  eventHistory?: string | null;
+  strategy?: string | null;
+  incomeTotal?: number;
+  incomePaid?: number;
+  incomeOutstanding?: number;
+  incomeCount?: number;
+  expenseTotal?: number;
+  expensePaid?: number;
+  expenseOutstanding?: number;
+  expenseCount?: number;
+  openTaskCount?: number;
+  completedTaskCount?: number;
+  overdueTaskCount?: number;
+  taskProgressPercent?: number;
+  lastTaskAt?: string | null;
+  lastViewedAt?: string | null;
+  lastViewedByUserId?: number | null;
+  lastViewedByUserName?: string | null;
+  activityConfirmedAt?: string | null;
+  activityConfirmedByUserId?: number | null;
+  activityConfirmedByUserName?: string | null;
+  inactivityRemindersEnabled?: boolean;
   title: string;
   description?: string;
   status: string;
@@ -508,6 +560,211 @@ export interface ClientCase {
   auditDeletedAt?: string | null;
   auditDeletedByUserId?: number | null;
   auditDeletedByUserName?: string | null;
+}
+
+export interface ClientCaseActivity {
+  lastViewedAt?: string | null;
+  lastViewedByUserId?: number | null;
+  lastViewedByUserName?: string | null;
+  activityConfirmedAt?: string | null;
+  activityConfirmedByUserId?: number | null;
+  activityConfirmedByUserName?: string | null;
+  inactivityRemindersEnabled: boolean;
+  eventHistory?: string | null;
+}
+
+export interface ClientCaseTimelineEntry {
+  id: number;
+  clientCaseId: number;
+  occurredAt?: string | null;
+  text: string;
+}
+
+export interface ClientCaseConversationEntry {
+  id: number;
+  clientCaseId: number;
+  occurredAt?: string | null;
+  text: string;
+  authorName?: string | null;
+  kind: 'message' | 'comment' | string;
+}
+
+export interface ClientCaseSummary {
+  id: number;
+  title: string;
+  caseNumber: string;
+  status: string;
+  statusLabel: string;
+  priority: string;
+  priorityLabel: string;
+  stage: string;
+  ownerName: string;
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  startDate?: string | null;
+  dueDate?: string | null;
+  nextHearingAt?: string | null;
+  openTaskCount: number;
+  overdueTaskCount: number;
+  completedTaskCount: number;
+  taskProgressPercent: number;
+  feeAmount?: number | null;
+  paidAmount: number;
+  debtAmount: number;
+  lastTaskAt?: string | null;
+  lastViewedAt?: string | null;
+}
+
+export interface ClientCaseFinanceDetail {
+  caseId: number;
+  caseTitle: string;
+  ownerName: string;
+  totals: ClientCaseFinanceTotals;
+  invoices: ClientCaseFinanceInvoice[];
+  payments: ClientCaseFinancePayment[];
+  contracts: ClientCaseFinanceContract[];
+}
+
+export interface ClientCaseFinanceTotals {
+  feeAmount: number;
+  incomeTotal: number;
+  incomePaid: number;
+  incomeOutstanding: number;
+  incomeCount: number;
+  expenseTotal: number;
+  expensePaid: number;
+  expenseOutstanding: number;
+  expenseCount: number;
+  plannedMargin: number;
+  paidMargin: number;
+  outstandingBalance: number;
+}
+
+export interface ClientCaseFinanceInvoice {
+  id: number;
+  number: string;
+  date?: string | null;
+  amount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  status: PaymentStatus | string;
+  workflowStatus: InvoiceWorkflowStatus | string;
+  contractId?: number | null;
+  contractNumber?: string | null;
+}
+
+export interface ClientCaseFinancePayment {
+  id: number;
+  documentKind: DocumentKind | string;
+  type: PaymentKind | string;
+  amount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  status: PaymentStatus | string;
+  date: string;
+  plannedDate: string;
+  paidDate?: string | null;
+  invoiceId?: number | null;
+  invoiceNumber?: string | null;
+  invoiceDate?: string | null;
+  contractId?: number | null;
+  contractNumber?: string | null;
+  paymentSourceName?: string | null;
+  paymentOrderNumber?: string | null;
+  paymentDocumentDate?: string | null;
+  description?: string | null;
+}
+
+export interface ClientCaseFinanceContract {
+  id: number;
+  number: string;
+  title?: string | null;
+  date: string;
+  amount?: number | null;
+  status: ContractStatus | string;
+}
+
+export interface ClientCaseCourtSyncRun {
+  clientCaseId: number;
+  status: 'manual-check-recorded' | 'binding-required' | string;
+  hasCourtBinding: boolean;
+  message: string;
+  checkedAt: string;
+  checkedByUserId?: number | null;
+  checkedByUserName?: string | null;
+  courtName?: string | null;
+  courtCaseNumber?: string | null;
+  courtUrl?: string | null;
+}
+
+export interface ClientCaseCourtSyncLog {
+  id: number;
+  clientCaseId: number;
+  status: 'manual-check-recorded' | 'binding-required' | 'history' | string;
+  message: string;
+  occurredAt?: string | null;
+  actorName?: string | null;
+}
+
+export type ClientCaseRelatedPartySourceType = 'client' | 'externalContact' | 'legalEntity';
+
+export interface ClientCaseRelatedParty {
+  id: number;
+  clientCaseId: number;
+  sourceType: ClientCaseRelatedPartySourceType;
+  sourceId?: number | null;
+  clientId?: number | null;
+  externalContactId?: number | null;
+  legalEntityId?: number | null;
+  displayName: string;
+  role?: string | null;
+  organizationName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+}
+
+export interface ClientCaseDocument {
+  id: number;
+  clientCaseId: number;
+  documentKey: string;
+  templateKey?: string | null;
+  templateLabel?: string | null;
+  sourceTaskId?: number | null;
+  sourceEventId?: number | null;
+  version: number;
+  documentType: string;
+  status: string;
+  originalFileName: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedByUserId?: number | null;
+  uploadedByName: string;
+  uploadedAt: string;
+  isLatestVersion: boolean;
+}
+
+export interface ClientCaseDocumentTemplate {
+  key: string;
+  label: string;
+  documentType: string;
+  heading: string;
+  description?: string | null;
+  content?: string | null;
+  version?: number;
+  isActive?: boolean;
+  updatedAt?: string | null;
+}
+
+export interface RenderedCaseDocumentTemplate {
+  templateKey: string;
+  templateLabel: string;
+  documentType: string;
+  fileName: string;
+  html: string;
 }
 
 export interface InvoiceClientCaseLink {
@@ -879,6 +1136,72 @@ export interface ProjectReport {
   expenseTotal: number;
   netTotal: number;
   projects: ProjectReportItem[];
+}
+
+export interface LegalWorkCaseStatusItem {
+  status: string;
+  statusLabel: string;
+  count: number;
+  feeTotal: number;
+  overdueDeadlines: number;
+}
+
+export interface LegalWorkCaseTypeItem {
+  caseType: string;
+  count: number;
+  feeTotal: number;
+  activeTasks: number;
+}
+
+export interface LegalWorkResponsibleItem {
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  activeCases: number;
+  closedCases: number;
+  lostCases: number;
+  openTasks: number;
+  overdueTasks: number;
+  onApprovalTasks: number;
+  overdueDeadlines: number;
+  feeTotal: number;
+  paidTotal: number;
+  outstandingTotal: number;
+}
+
+export interface LegalWorkDeadlineItem {
+  caseId: number;
+  caseNumber: string;
+  caseTitle: string;
+  clientName: string;
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  deadlineType: string;
+  deadlineLabel: string;
+  dueAt: string;
+  daysOffset: number;
+}
+
+export interface LegalWorkReport {
+  from: string;
+  to: string;
+  totalCases: number;
+  activeCases: number;
+  closedCases: number;
+  lostCases: number;
+  onHoldCases: number;
+  overdueDeadlineCount: number;
+  upcomingDeadlineCount: number;
+  openTaskCount: number;
+  overdueTaskCount: number;
+  onApprovalTaskCount: number;
+  feeTotal: number;
+  paidTotal: number;
+  outstandingTotal: number;
+  casesByStatus: LegalWorkCaseStatusItem[];
+  casesByType: LegalWorkCaseTypeItem[];
+  responsibles: LegalWorkResponsibleItem[];
+  overdueDeadlines: LegalWorkDeadlineItem[];
+  upcomingDeadlines: LegalWorkDeadlineItem[];
 }
 
 export interface DirectionReportItem {

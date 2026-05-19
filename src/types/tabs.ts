@@ -7,6 +7,8 @@ export type Tab =
   | 'reports'
   | 'calculator'
   | 'legalEntities'
+  | 'cases'
+  | 'caseDetail'
   | 'clients'
   | 'contacts'
   | 'contactsClients'

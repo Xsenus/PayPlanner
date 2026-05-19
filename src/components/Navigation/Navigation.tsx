@@ -26,6 +26,7 @@ import {
   Phone,
   History,
   Bell,
+  Briefcase,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -166,6 +167,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
     }
     if (permissions.clients.canView) {
       items.push({ id: 'clients', tab: 'clients' as Tab, label: t('clients') ?? 'Клиенты', icon: Users });
+      items.push({ id: 'cases', tab: 'cases' as Tab, label: 'Дела', icon: Briefcase });
     }
     if (permissions.clients.canView || permissions.legalEntities.canView) {
       const contactChildren: SidebarChild[] = [

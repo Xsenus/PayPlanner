@@ -10,7 +10,7 @@ export type TaskJournalStatus =
   | 'cancelled';
 export type TaskJournalPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type TaskJournalType = 'task' | 'budget' | 'contact' | 'document' | 'reminder' | 'control';
-export type TaskJournalReminder = 'atDue' | 'before15m' | 'before1h' | 'before1d' | 'dailyOverdue';
+export type TaskJournalReminder = 'atDue' | 'before15m' | 'before1h' | 'before1d' | 'before3d' | 'before7d' | 'dailyOverdue';
 export type TaskJournalChannel = 'inApp' | 'email' | 'telegram';
 export type TaskJournalParticipantRole = 'assignee' | 'observer' | 'approver';
 export type TaskJournalApprovalStatus = 'pending' | 'approved' | 'revisionRequested';
@@ -125,6 +125,20 @@ export type TaskJournalUpsertPayload = Omit<TaskJournalItem, 'id' | 'createdAt' 
   changeComment?: string | null;
   isInternal?: boolean;
 };
+
+export interface TaskJournalBulkUpdatePayload {
+  ids: number[];
+  assigneeUserId?: number;
+  priority?: TaskJournalPriority;
+  status?: TaskJournalStatus;
+  dueAt?: string;
+}
+
+export interface TaskJournalBulkUpdateResult {
+  requested: number;
+  updated: number;
+  skipped: number;
+}
 
 const STORAGE_KEY = 'pp.task_journal.items.v1';
 export const TASK_JOURNAL_EVENT = 'pp.task_journal.changed';

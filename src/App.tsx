@@ -7,7 +7,7 @@ import { AwaitingApproval } from './components/Auth/AwaitingApproval';
 import TopBar from './components/TopBar/TopBar';
 import { RouteErrorBoundary } from './components/ui/RouteErrorBoundary';
 import { DoubleHorizontalScrollbars } from './components/ui/DoubleHorizontalScrollbars';
-import type { Act, ActInput, Invoice, Payment } from './types';
+import type { Act, ActInput, ClientCase, Invoice, Payment, PaymentKind } from './types';
 import type { Tab } from './types/tabs';
 import { useAuth } from './contexts/AuthContext';
 import { useRolePermissions } from './hooks/useRolePermissions';
@@ -19,9 +19,11 @@ import { ToastProvider } from './contexts/ToastContext';
 import type { User as AppUser } from './services/authService';
 import { apiService, type ContactScope } from './services/api';
 import { extractDisplayErrorMessage } from './utils/errorUtils';
+import type { InvoiceEditorDraftState } from './utils/invoiceEditorBridge';
 import {
   getInitialActId,
   getInitialActReturnTab,
+  getPathCaseId,
   getInitialClientId,
   getInitialContractId,
   getInitialContractReturnTab,
@@ -50,6 +52,83 @@ type InvoiceReturnContext =
   | { tab: 'clientDetail'; clientId: number; section?: 'accounts' | 'acts' }
   | { tab: 'actDetail'; actId: number }
   | { tab: 'contractDetail'; contractId: number };
+type CaseInvoiceCreateDraft = { key: number; draft: InvoiceEditorDraftState };
+type CasePaymentCreateDraft = {
+  key: number;
+  type: PaymentKind;
+  clientId?: number | null;
+  legalEntityId?: number | null;
+  clientCaseId: number;
+  casesPrefetch: ClientCase[];
+};
+
+function todayInputDate(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildCaseInvoiceCreateDraft(caseItem: ClientCase, type: PaymentKind): InvoiceEditorDraftState {
+  const isExpense = type === 'Expense';
+  const amount = caseItem.feeAmount && caseItem.feeAmount > 0 ? caseItem.feeAmount.toFixed(2) : '';
+  const ownerName = caseItem.client?.name
+    || caseItem.legalEntity?.shortName
+    || caseItem.legalEntity?.fullName
+    || caseItem.title;
+  const lineName = caseItem.title ? `Услуги по делу ${caseItem.title}` : 'Услуги по делу';
+
+  return {
+    mode: 'create',
+    presentation: 'modal',
+    pageViewMode: false,
+    form: {
+      number: '',
+      date: todayInputDate(),
+      dueDate: '',
+      amount,
+      type,
+      status: 'Pending',
+      clientId: !isExpense && caseItem.clientId ? String(caseItem.clientId) : '',
+      legalEntityId: !isExpense && caseItem.legalEntityId ? String(caseItem.legalEntityId) : '',
+      expenseClientId: isExpense && caseItem.clientId ? String(caseItem.clientId) : '',
+      expenseLegalEntityId: isExpense && caseItem.legalEntityId ? String(caseItem.legalEntityId) : '',
+      contractId: '',
+      clientCaseReference: caseItem.title ? `Дело: ${caseItem.title}` : '',
+      description: ownerName ? `Счет по делу ${ownerName}` : '',
+      isNotForAccounting: false,
+      actReference: '',
+      paidDate: '',
+      responsibleIds: caseItem.responsibleUserId ? [String(caseItem.responsibleUserId)] : [],
+    },
+    lineItems: amount
+      ? [{
+          id: `case-${caseItem.id}-service`,
+          name: lineName,
+          quantity: '1',
+          unit: 'шт',
+          price: amount,
+          serviceCategoryId: '',
+          serviceId: '',
+        }]
+      : [],
+    selectedActs: [],
+    selectedClientCaseIds: [caseItem.id],
+    installmentPlan: null,
+  };
+}
+
+function buildCasePaymentCreateDraft(caseItem: ClientCase, type: PaymentKind): CasePaymentCreateDraft {
+  return {
+    key: Date.now(),
+    type,
+    clientId: caseItem.clientId ?? null,
+    legalEntityId: caseItem.legalEntityId ?? null,
+    clientCaseId: caseItem.id,
+    casesPrefetch: [caseItem],
+  };
+}
 
 const Calendar = lazy(() => import('./components/Calendar/Calendar').then((module) => ({ default: module.Calendar })));
 const TaskJournal = lazy(() => import('./components/Tasks/TaskJournal').then((module) => ({ default: module.TaskJournal })));
@@ -57,6 +136,8 @@ const NotificationCenter = lazy(() => import('./components/Notifications/Notific
 const Reports = lazy(() => import('./components/Reports/Reports').then((module) => ({ default: module.Reports })));
 const Calculator = lazy(() => import('./components/Calculator/Calculator').then((module) => ({ default: module.Calculator })));
 const Clients = lazy(() => import('./components/Clients/Clients').then((module) => ({ default: module.Clients })));
+const CasesRegistry = lazy(() => import('./components/Cases/CasesRegistry').then((module) => ({ default: module.CasesRegistry })));
+const CaseDetailPage = lazy(() => import('./components/Cases/CaseDetailPage').then((module) => ({ default: module.CaseDetailPage })));
 const Contacts = lazy(() => import('./components/Contacts/UnifiedContacts').then((module) => ({ default: module.UnifiedContacts })));
 const PhoneContacts = lazy(() => import('./components/Contacts/Contacts').then((module) => ({ default: module.Contacts })));
 const LegalEntities = lazy(() => import('./components/LegalEntities/LegalEntities').then((module) => ({ default: module.LegalEntities })));
@@ -105,6 +186,8 @@ function AppContent() {
       reports: 'Отчеты',
       calculator: 'Калькулятор',
       legalEntities: 'Юр. лица',
+      cases: 'Дела',
+      caseDetail: 'Карточка дела',
       clients: 'Клиенты',
       contacts: 'Контакты',
       contactsClients: 'Контакты: физические лица',
@@ -151,8 +234,9 @@ function AppContent() {
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(getInitialPaymentId);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(getInitialTaskId);
   const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(null);
+  const [selectedCaseId, setSelectedCaseId] = useState<number | null>(getPathCaseId);
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
-  const [initialClientSection, setInitialClientSection] = useState<'accounts' | 'acts' | undefined>(undefined);
+  const [initialClientSection, setInitialClientSection] = useState<'payments' | 'accounts' | 'acts' | undefined>(undefined);
   const [authView, setAuthView] = useState<AuthView>('login');
   const [selectedContractId, setSelectedContractId] = useState<number | null>(getInitialContractId);
   const [selectedActId, setSelectedActId] = useState<number | null>(getInitialActId);
@@ -161,6 +245,8 @@ function AppContent() {
   const [actCreateInitialValues, setActCreateInitialValues] = useState<(Partial<ActInput> & { amount?: number | null }) | null>(null);
   const [actCreateInvoiceSeed, setActCreateInvoiceSeed] = useState<Invoice | null>(null);
   const [invoiceReturnContext, setInvoiceReturnContext] = useState<InvoiceReturnContext | null>(null);
+  const [caseInvoiceCreateDraft, setCaseInvoiceCreateDraft] = useState<CaseInvoiceCreateDraft | null>(null);
+  const [casePaymentCreateDraft, setCasePaymentCreateDraft] = useState<CasePaymentCreateDraft | null>(null);
   const [contractReturnTab, setContractReturnTab] = useState<Tab | null>(getInitialContractReturnTab);
   const [clientReturnTab, setClientReturnTab] = useState<{
     tab: Tab;
@@ -179,6 +265,7 @@ function AppContent() {
         { tab: 'reports' as Tab, allowed: permissions.reports.canView },
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
+        { tab: 'cases' as Tab, allowed: permissions.clients.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'contacts' as Tab, allowed: permissions.clients.canView || permissions.legalEntities.canView },
         { tab: 'contactsClients' as Tab, allowed: permissions.clients.canView },
@@ -228,6 +315,9 @@ function AppContent() {
           return permissions.calculator.canView;
         case 'legalEntities':
           return permissions.legalEntities.canView;
+        case 'cases':
+        case 'caseDetail':
+          return permissions.clients.canView;
         case 'clients':
         case 'contacts':
           return permissions.clients.canView || permissions.legalEntities.canView;
@@ -291,13 +381,13 @@ function AppContent() {
     (
       clientId: number,
       caseId?: number,
-      options?: { returnTo?: { tab: Tab; contractId?: number | null; actId?: number | null } },
+      options?: { returnTo?: { tab: Tab; contractId?: number | null; actId?: number | null }; section?: 'payments' | 'accounts' | 'acts' },
     ) => {
       if (!permissions.clients.canView) {
         return;
       }
 
-      setInitialClientSection(undefined);
+      setInitialClientSection(options?.section);
       setInvoiceReturnContext(null);
       setClientReturnTab(options?.returnTo ?? { tab: 'clients' });
       setSelectedClientId(clientId);
@@ -470,13 +560,17 @@ function AppContent() {
 
   const openRelatedCase = useCallback(
     (caseId: number, clientId?: number | null) => {
-      if (!clientId) {
+      if (caseId > 0 && permissions.clients.canView) {
+        setSelectedCaseId(caseId);
+        setActiveTab('caseDetail');
         return;
       }
 
-      handleOpenClient(clientId, caseId);
+      if (clientId) {
+        handleOpenClient(clientId, caseId);
+      }
     },
-    [handleOpenClient],
+    [handleOpenClient, permissions.clients.canView],
   );
 
   const openTaskDetail = useCallback(
@@ -643,6 +737,10 @@ function AppContent() {
     const url = new URL(window.location.href);
     if (activeTab === 'clients') {
       url.pathname = '/clients';
+    } else if (activeTab === 'cases') {
+      url.pathname = '/cases';
+    } else if (activeTab === 'caseDetail') {
+      url.pathname = selectedCaseId ? `/cases/${selectedCaseId}` : '/cases';
     } else if (activeTab === 'notifications') {
       url.pathname = '/notifications';
     } else if (activeTab === 'tasks') {
@@ -668,6 +766,8 @@ function AppContent() {
     } else if (activeTab === 'contractDetail') {
       url.pathname = selectedContractId ? `/contracts/${selectedContractId}` : '/contracts';
     } else if (/^\/clients(?:\/\d+)?\/?$/i.test(url.pathname)) {
+      url.pathname = '/';
+    } else if (/^\/cases(?:\/\d+)?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
     } else if (/^\/notifications\/?$/i.test(url.pathname)) {
       url.pathname = '/';
@@ -716,6 +816,7 @@ function AppContent() {
     actReturnTab,
     contractReturnTab,
     selectedActId,
+    selectedCaseId,
     selectedClientId,
     selectedContractId,
     selectedInvoiceId,
@@ -738,6 +839,11 @@ function AppContent() {
       return;
     }
 
+    if (activeTab === 'caseDetail' && !selectedCaseId) {
+      setActiveTab('cases');
+      return;
+    }
+
     if (canViewTab(activeTab)) {
       return;
     }
@@ -752,7 +858,7 @@ function AppContent() {
 
     const fallback = accessibleMenuTabs[0] ?? 'profile';
     setActiveTab(fallback);
-  }, [activeTab, accessibleMenuTabs, canViewTab, selectedClientId]);
+  }, [activeTab, accessibleMenuTabs, canViewTab, selectedCaseId, selectedClientId]);
 
   useEffect(() => {
     if (!user) {
@@ -923,6 +1029,112 @@ function AppContent() {
             )
           : renderNoAccess('Раздел юридических лиц недоступен для вашей роли.');
 
+      case 'cases':
+        return permissions.clients.canView
+          ? (
+              <CasesRegistry
+                allowCreate={permissions.clients.canCreate}
+                onOpenCase={(caseId) => {
+                  setSelectedCaseId(caseId);
+                  setActiveTab('caseDetail');
+                }}
+                onOpenClient={(clientId, caseId) =>
+                  handleOpenClient(clientId, caseId, { returnTo: { tab: 'cases' } })
+                }
+                onOpenLegalEntity={(legalEntityId) => {
+                  if (!permissions.legalEntities.canView) {
+                    toast.error('Доступ к карточке юридического лица запрещен.');
+                    return;
+                  }
+
+                  setSelectedLegalEntityId(legalEntityId);
+                  setActiveTab('legalEntities');
+                }}
+                onOpenCaseFinance={(caseItem) => {
+                  if (caseItem.clientId) {
+                    handleOpenClient(caseItem.clientId, caseItem.id, { returnTo: { tab: 'cases' }, section: 'payments' });
+                    return;
+                  }
+
+                  if (caseItem.legalEntityId) {
+                    if (!permissions.legalEntities.canView) {
+                      toast.error('Доступ к карточке юридического лица запрещен.');
+                      return;
+                    }
+
+                    setSelectedLegalEntityId(caseItem.legalEntityId);
+                    setActiveTab('legalEntities');
+                  }
+                }}
+              />
+            )
+          : renderNoAccess('Реестр дел недоступен для вашей роли.');
+
+      case 'caseDetail':
+        if (!permissions.clients.canView) {
+          return renderNoAccess('Карточка дела недоступна для вашей роли.');
+        }
+
+        if (!selectedCaseId) {
+          return (
+            <CasesRegistry
+              allowCreate={permissions.clients.canCreate}
+              onOpenCase={(caseId) => {
+                setSelectedCaseId(caseId);
+                setActiveTab('caseDetail');
+              }}
+            />
+          );
+        }
+
+        return (
+          <CaseDetailPage
+            caseId={selectedCaseId}
+            onBack={() => {
+              setSelectedCaseId(null);
+              setActiveTab('cases');
+            }}
+            onOpenClient={(clientId, caseId) =>
+              handleOpenClient(clientId, caseId, { returnTo: { tab: 'caseDetail' } })
+            }
+            onOpenLegalEntity={(legalEntityId) => {
+              if (!permissions.legalEntities.canView) {
+                toast.error('Доступ к карточке юридического лица запрещен.');
+                return;
+              }
+
+              setSelectedLegalEntityId(legalEntityId);
+              setActiveTab('legalEntities');
+            }}
+            onOpenFinance={(caseItem) => {
+              if (caseItem.clientId) {
+                handleOpenClient(caseItem.clientId, caseItem.id, { returnTo: { tab: 'caseDetail' }, section: 'payments' });
+              }
+            }}
+            onCreateInvoice={(caseItem) => {
+              if (!permissions.accounts.canCreate) {
+                toast.error('Недостаточно прав для создания счета.');
+                return;
+              }
+              setSelectedInvoiceId(null);
+              setCaseInvoiceCreateDraft({
+                key: Date.now(),
+                draft: buildCaseInvoiceCreateDraft(caseItem, 'Income'),
+              });
+              setActiveTab('accountsIncome');
+            }}
+            onCreatePayment={(caseItem) => {
+              if (!permissions.payments.canCreate) {
+                toast.error('Недостаточно прав для создания платежа.');
+                return;
+              }
+              setSelectedPaymentId(null);
+              setCasePaymentCreateDraft(buildCasePaymentCreateDraft(caseItem, 'Income'));
+              setActiveTab('paymentsIncome');
+            }}
+          />
+        );
+
       case 'clients':
         return permissions.clients.canView
           ? (
@@ -1032,6 +1244,10 @@ function AppContent() {
             clientId={selectedClientId}
             initialCaseId={initialCaseId}
             initialSection={initialClientSection}
+            onOpenCasePage={(caseId) => {
+              setSelectedCaseId(caseId);
+              setActiveTab('caseDetail');
+            }}
             onOpenInvoicePage={(invoiceId) =>
               openInvoicePage(invoiceId, {
                 returnTo: { tab: 'clientDetail', clientId: selectedClientId, section: 'accounts' },
@@ -1088,6 +1304,10 @@ function AppContent() {
                 routeInvoiceId={selectedInvoiceId}
                 onRouteInvoiceChange={handleRouteInvoiceChange}
                 onRouteInvoicePageBack={handleBackToClientFromInvoicePage}
+                initialCreateDraft={caseInvoiceCreateDraft}
+                onInitialCreateDraftHandled={(key) => {
+                  setCaseInvoiceCreateDraft((current) => (current?.key === key ? null : current));
+                }}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accounts' } })}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'accounts' })}
                 onOpenPayment={openPaymentDetail}
@@ -1112,6 +1332,10 @@ function AppContent() {
                 onRouteInvoicePageBack={handleBackToClientFromInvoicePage}
                 defaultType="Income"
                 lockType
+                initialCreateDraft={caseInvoiceCreateDraft}
+                onInitialCreateDraftHandled={(key) => {
+                  setCaseInvoiceCreateDraft((current) => (current?.key === key ? null : current));
+                }}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsIncome' } })}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'accountsIncome' })}
                 onOpenPayment={openPaymentDetail}
@@ -1138,6 +1362,10 @@ function AppContent() {
                 onRouteInvoicePageBack={handleBackToClientFromInvoicePage}
                 defaultType="Expense"
                 lockType
+                initialCreateDraft={caseInvoiceCreateDraft}
+                onInitialCreateDraftHandled={(key) => {
+                  setCaseInvoiceCreateDraft((current) => (current?.key === key ? null : current));
+                }}
                 onOpenClient={(id) => handleOpenClient(id, undefined, { returnTo: { tab: 'accountsExpense' } })}
                 onOpenContract={(id) => openContractDetail(id, { returnTo: 'accountsExpense' })}
                 onOpenPayment={openPaymentDetail}
@@ -1246,6 +1474,10 @@ function AppContent() {
                 onRoutePaymentChange={setSelectedPaymentId}
                 defaultType="Income"
                 lockType
+                initialCreatePayment={casePaymentCreateDraft}
+                onInitialCreatePaymentHandled={(key) => {
+                  setCasePaymentCreateDraft((current) => (current?.key === key ? null : current));
+                }}
                 titleKey="paymentsIncomeTitle"
                 subtitleKey="paymentsIncomeSubtitle"
                 lockedTypeMessageKey="paymentsTypeLockedIncome"
@@ -1264,6 +1496,10 @@ function AppContent() {
                 onRoutePaymentChange={setSelectedPaymentId}
                 defaultType="Expense"
                 lockType
+                initialCreatePayment={casePaymentCreateDraft}
+                onInitialCreatePaymentHandled={(key) => {
+                  setCasePaymentCreateDraft((current) => (current?.key === key ? null : current));
+                }}
                 titleKey="paymentsExpenseTitle"
                 subtitleKey="paymentsExpenseSubtitle"
                 lockedTypeMessageKey="paymentsTypeLockedExpense"
@@ -1278,6 +1514,10 @@ function AppContent() {
                 onOpenClient={handleOpenClient}
                 routePaymentId={selectedPaymentId}
                 onRoutePaymentChange={setSelectedPaymentId}
+                initialCreatePayment={casePaymentCreateDraft}
+                onInitialCreatePaymentHandled={(key) => {
+                  setCasePaymentCreateDraft((current) => (current?.key === key ? null : current));
+                }}
               />
             )
           : renderNoAccess('Журнал платежей недоступен для вашей роли.');

@@ -1,0 +1,1018 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { apiService } from '../../services/api';
+import type { ClientCase } from '../../types';
+import type { TaskJournalItem } from '../../utils/taskJournalStore';
+import { CaseDetailPage } from './CaseDetailPage';
+
+vi.mock('../../services/api', () => ({
+  apiService: {
+    getCaseV2: vi.fn(),
+    getActResponsibles: vi.fn(),
+    getTaskJournalItems: vi.fn(),
+    getCaseRelatedParties: vi.fn(),
+    getClients: vi.fn(),
+    getLegalEntitiesPaged: vi.fn(),
+    getContacts: vi.fn(),
+    getCaseDocuments: vi.fn(),
+    getCaseDocumentTemplates: vi.fn(),
+    getCaseDocumentTypes: vi.fn(),
+    getDocumentStatuses: vi.fn(),
+    createTaskJournalCaseAutomationTask: vi.fn(),
+    bulkUpdateCases: vi.fn(),
+    generateCaseDocumentTemplate: vi.fn(),
+    uploadCaseDocument: vi.fn(),
+    downloadCaseDocument: vi.fn(),
+    updateCaseDocument: vi.fn(),
+    deleteCaseDocument: vi.fn(),
+    addCaseHistoryEntry: vi.fn(),
+    getCaseConversation: vi.fn(),
+    addCaseConversationEntry: vi.fn(),
+    runCaseCourtSync: vi.fn(),
+    getCaseCourtSyncLogs: vi.fn(),
+    getCaseTimeline: vi.fn(),
+    getCaseFinance: vi.fn(),
+    addCaseRelatedParty: vi.fn(),
+    deleteCaseRelatedParty: vi.fn(),
+  },
+}));
+
+function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
+  return {
+    id: 15,
+    clientId: 12,
+    legalEntityId: null,
+    client: {
+      id: 12,
+      name: 'Земцов Виктор Александрович',
+      email: '',
+      phone: '',
+      company: '',
+      address: '',
+      notes: '',
+      createdAt: '2026-05-01T00:00:00Z',
+      isActive: true,
+    },
+    caseNumber: '2026-015',
+    title: 'ЗЕМЦОВ - банкротство',
+    description: 'Подготовка дела',
+    status: 'Open',
+    priority: 'high',
+    caseType: 'Банкротство',
+    stage: 'Судебное производство',
+    responsibleUserName: 'Кожеваткин Андрей Владимирович',
+    responsibleUserId: 7,
+    dueDate: '2026-06-15',
+    nextHearingAt: '2026-05-20T09:30:00Z',
+    courtName: 'Арбитражный суд Самарской области',
+    courtCaseNumber: 'А55-12345/2026',
+    courtUrl: 'https://kad.arbitr.ru/card',
+    appealDeadlineAt: '2026-07-01',
+    feeAmount: 150000,
+    incomeTotal: 50000,
+    incomePaid: 35000,
+    incomeOutstanding: 15000,
+    incomeCount: 2,
+    expenseTotal: 10000,
+    expensePaid: 5000,
+    expenseOutstanding: 5000,
+    openTaskCount: 1,
+    completedTaskCount: 1,
+    overdueTaskCount: 1,
+    taskProgressPercent: 50,
+    claimant: 'Истец',
+    defendant: 'Ответчик',
+    strategy: 'План действий',
+    documentsSummary: 'Есть заявление',
+    eventHistory: 'Создано дело\nМассовое изменение',
+    createdAt: '2026-05-01T10:00:00Z',
+    ...overrides,
+  } as ClientCase;
+}
+
+function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
+  return {
+    id: 101,
+    clientId: 12,
+    clientCaseId: 15,
+    objectName: 'ЗЕМЦОВ - банкротство',
+    title: 'Проверить движение по делу',
+    description: '',
+    assigneeName: 'Кожеваткин Андрей Владимирович',
+    authorName: 'Администратор',
+    dueAt: '2026-05-20T10:00:00Z',
+    plannedDurationMinutes: 60,
+    type: 'control',
+    priority: 'high',
+    status: 'inProgress',
+    result: '',
+    reminders: [],
+    channels: [],
+    tags: [],
+    createdAt: '2026-05-10T10:00:00Z',
+    updatedAt: '2026-05-10T10:00:00Z',
+    ...overrides,
+  };
+}
+
+describe('CaseDetailPage', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    vi.mocked(apiService.getCaseV2).mockReset();
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase());
+    vi.mocked(apiService.getActResponsibles).mockReset();
+    vi.mocked(apiService.getActResponsibles).mockResolvedValue([
+      { id: 7, fullName: 'Кожеваткин Андрей Владимирович' },
+      { id: 8, fullName: 'Диденко Анна Владимировна' },
+    ]);
+    vi.mocked(apiService.getTaskJournalItems).mockReset();
+    vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [createTask()], total: 1, page: 1, pageSize: 50 });
+    vi.mocked(apiService.getCaseRelatedParties).mockReset();
+    vi.mocked(apiService.getCaseRelatedParties).mockResolvedValue([
+      {
+        id: 1,
+        clientCaseId: 15,
+        sourceType: 'client',
+        sourceId: 12,
+        clientId: 12,
+        displayName: 'Земцов Виктор Александрович',
+        role: 'Должник',
+        phone: '+79991234567',
+        email: 'zemtsov@example.test',
+        notes: 'Представитель по доверенности',
+        createdAt: '2026-05-01T10:00:00Z',
+      },
+    ]);
+    vi.mocked(apiService.getClients).mockReset();
+    vi.mocked(apiService.getClients).mockResolvedValue([
+      createCase().client!,
+      {
+        id: 30,
+        name: 'Иванов Иван Иванович',
+        email: 'ivanov@example.test',
+        phone: '+79990000000',
+        company: '',
+        address: '',
+        notes: '',
+        createdAt: '2026-05-01T00:00:00Z',
+        isActive: true,
+      },
+    ]);
+    vi.mocked(apiService.getLegalEntitiesPaged).mockReset();
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({
+      items: [
+        {
+          id: 25,
+          shortName: 'ООО "Процесс"',
+          fullName: 'Общество с ограниченной ответственностью "Процесс"',
+          inn: '6310000000',
+          phone: '+79991112233',
+          email: 'office@example.test',
+          clientIds: [],
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 200,
+    });
+    vi.mocked(apiService.getContacts).mockReset();
+    vi.mocked(apiService.getContacts).mockResolvedValue([
+      {
+        sourceType: 'external',
+        category: 'external',
+        sourceId: 44,
+        fullName: 'Петров Петр Петрович',
+        organizationName: 'ООО "Процесс"',
+        phone: '+79992223344',
+        email: 'petrov@example.test',
+        phones: ['+79992223344'],
+        emails: ['petrov@example.test'],
+        isActive: true,
+        syncToPhonebook: false,
+      },
+    ]);
+    vi.mocked(apiService.getCaseDocuments).mockReset();
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      {
+        id: 7,
+        clientCaseId: 15,
+        documentKey: 'claim',
+        version: 1,
+        documentType: 'Заявление',
+        status: 'Готово',
+        originalFileName: 'Заявление.docx',
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        sizeBytes: 1024,
+        uploadedByName: 'Администратор',
+        uploadedAt: '2026-05-02T10:00:00Z',
+        isLatestVersion: true,
+      },
+    ]);
+    vi.mocked(apiService.getCaseDocumentTemplates).mockReset();
+    vi.mocked(apiService.getCaseDocumentTemplates).mockResolvedValue([
+      { key: 'case-summary', label: 'Справка по делу', documentType: 'Карточка дела', heading: 'Справка по делу' },
+      { key: 'claim', label: 'Исковое заявление', documentType: 'Иск', heading: 'Исковое заявление' },
+      { key: 'motion', label: 'Ходатайство', documentType: 'Ходатайство', heading: 'Ходатайство' },
+    ]);
+    vi.mocked(apiService.getCaseDocumentTypes).mockReset();
+    vi.mocked(apiService.getCaseDocumentTypes).mockResolvedValue(['Акт сверки', 'Иск', 'Ходатайство']);
+    vi.mocked(apiService.getDocumentStatuses).mockReset();
+    vi.mocked(apiService.getDocumentStatuses).mockResolvedValue([
+      {
+        id: 1,
+        code: 'Draft',
+        name: 'Подготовлен',
+        description: '',
+        colorHex: '#94A3B8',
+        isActive: true,
+        useForInvoices: true,
+        useForActs: true,
+        useForContracts: true,
+        sortOrder: 10,
+        createdAt: '2026-05-01T00:00:00Z',
+      },
+      {
+        id: 2,
+        code: 'Signed',
+        name: 'Подписан',
+        description: '',
+        colorHex: '#10B981',
+        isActive: true,
+        useForInvoices: true,
+        useForActs: true,
+        useForContracts: true,
+        sortOrder: 20,
+        createdAt: '2026-05-01T00:00:00Z',
+      },
+    ]);
+    vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockReset();
+    vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockResolvedValue(createTask());
+    vi.mocked(apiService.bulkUpdateCases).mockReset();
+    vi.mocked(apiService.bulkUpdateCases).mockResolvedValue({ requested: 1, updated: 1 });
+    vi.mocked(apiService.generateCaseDocumentTemplate).mockReset();
+    vi.mocked(apiService.generateCaseDocumentTemplate).mockResolvedValue({
+      id: 8,
+      clientCaseId: 15,
+      documentKey: 'case-summary',
+      version: 2,
+      documentType: 'Карточка дела',
+      status: 'Подготовлен',
+      originalFileName: 'Карточка дела 2026-015.html',
+      contentType: 'text/html',
+      sizeBytes: 2048,
+      uploadedByName: 'Администратор',
+      uploadedAt: '2026-05-03T10:00:00Z',
+      isLatestVersion: true,
+    });
+    vi.mocked(apiService.uploadCaseDocument).mockReset();
+    vi.mocked(apiService.uploadCaseDocument).mockResolvedValue({
+      id: 9,
+      clientCaseId: 15,
+      documentKey: 'claim-upload',
+      version: 1,
+      documentType: 'Иск',
+      status: 'Подготовлен',
+      originalFileName: 'claim.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 512,
+      uploadedByName: 'Администратор',
+      uploadedAt: '2026-05-05T10:00:00Z',
+      isLatestVersion: true,
+    });
+    vi.mocked(apiService.downloadCaseDocument).mockReset();
+    vi.mocked(apiService.downloadCaseDocument).mockResolvedValue({
+      blob: new Blob(['claim'], { type: 'application/pdf' }),
+      fileName: 'Исковое заявление.pdf',
+    });
+    vi.mocked(apiService.updateCaseDocument).mockReset();
+    vi.mocked(apiService.updateCaseDocument).mockResolvedValue({
+      id: 7,
+      clientCaseId: 15,
+      documentKey: 'claim',
+      version: 1,
+      documentType: 'Заявление',
+      status: 'Подписан',
+      originalFileName: 'Заявление.docx',
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      sizeBytes: 1024,
+      uploadedByName: 'Администратор',
+      uploadedAt: '2026-05-02T10:00:00Z',
+      isLatestVersion: true,
+    });
+    vi.mocked(apiService.deleteCaseDocument).mockReset();
+    vi.mocked(apiService.deleteCaseDocument).mockResolvedValue(undefined);
+    vi.mocked(apiService.addCaseHistoryEntry).mockReset();
+    vi.mocked(apiService.addCaseHistoryEntry).mockResolvedValue({
+      lastViewedAt: '2026-05-01T10:00:00Z',
+      lastViewedByUserId: 7,
+      lastViewedByUserName: 'Кожеваткин Андрей Владимирович',
+      activityConfirmedAt: '2026-05-02T10:00:00Z',
+      activityConfirmedByUserId: 7,
+      activityConfirmedByUserName: 'Кожеваткин Андрей Владимирович',
+      inactivityRemindersEnabled: true,
+      eventHistory: 'Комментарий по делу: Проверить срок. Автор: Кожеваткин Андрей Владимирович.',
+    });
+    vi.mocked(apiService.getCaseConversation).mockReset();
+    vi.mocked(apiService.getCaseConversation).mockResolvedValue([
+      {
+        id: 1,
+        clientCaseId: 15,
+        occurredAt: '2026-05-18T10:30:00Z',
+        text: 'Проверить документы перед заседанием.',
+        authorName: 'Администратор',
+        kind: 'comment',
+      },
+    ]);
+    vi.mocked(apiService.addCaseConversationEntry).mockReset();
+    vi.mocked(apiService.addCaseConversationEntry).mockResolvedValue([
+      {
+        id: 2,
+        clientCaseId: 15,
+        occurredAt: '2026-05-18T11:00:00Z',
+        text: 'Коллеги, срок подачи уточнен.',
+        authorName: 'Кожеваткин Андрей Владимирович',
+        kind: 'message',
+      },
+      {
+        id: 1,
+        clientCaseId: 15,
+        occurredAt: '2026-05-18T10:30:00Z',
+        text: 'Проверить документы перед заседанием.',
+        authorName: 'Администратор',
+        kind: 'comment',
+      },
+    ]);
+    vi.mocked(apiService.runCaseCourtSync).mockReset();
+    vi.mocked(apiService.runCaseCourtSync).mockResolvedValue({
+      clientCaseId: 15,
+      status: 'manual-check-recorded',
+      hasCourtBinding: true,
+      message: 'Ручная проверка судебного источника зафиксирована.',
+      checkedAt: '2026-05-18T10:00:00Z',
+      checkedByUserId: 7,
+      checkedByUserName: 'Кожеваткин Андрей Владимирович',
+      courtName: 'Арбитражный суд Самарской области',
+      courtCaseNumber: 'А55-12345/2026',
+      courtUrl: 'https://kad.arbitr.ru/card',
+    });
+    vi.mocked(apiService.getCaseCourtSyncLogs).mockReset();
+    vi.mocked(apiService.getCaseCourtSyncLogs).mockResolvedValue([
+      {
+        id: 1,
+        clientCaseId: 15,
+        status: 'manual-check-recorded',
+        message: 'Ручная проверка судебного источника зафиксирована.',
+        occurredAt: '2026-05-18T10:30:00Z',
+        actorName: 'Администратор',
+      },
+    ]);
+    vi.mocked(apiService.getCaseTimeline).mockReset();
+    vi.mocked(apiService.getCaseTimeline).mockResolvedValue([
+      {
+        id: 1,
+        clientCaseId: 15,
+        occurredAt: '2026-05-18T11:15:00Z',
+        text: 'Комментарий по делу: Проверить срок.',
+      },
+      {
+        id: 2,
+        clientCaseId: 15,
+        occurredAt: '2026-05-18T10:30:00Z',
+        text: 'Создано дело.',
+      },
+      {
+        id: 3,
+        clientCaseId: 15,
+        occurredAt: null,
+        text: 'Массовое изменение',
+      },
+    ]);
+    vi.mocked(apiService.getCaseFinance).mockReset();
+    vi.mocked(apiService.getCaseFinance).mockResolvedValue({
+      caseId: 15,
+      caseTitle: 'ЗЕМЦОВ - банкротство',
+      ownerName: 'Земцов Виктор Александрович',
+      totals: {
+        feeAmount: 150000,
+        incomeTotal: 50000,
+        incomePaid: 35000,
+        incomeOutstanding: 15000,
+        incomeCount: 2,
+        expenseTotal: 10000,
+        expensePaid: 5000,
+        expenseOutstanding: 5000,
+        expenseCount: 1,
+        plannedMargin: 40000,
+        paidMargin: 30000,
+        outstandingBalance: 115000,
+      },
+      invoices: [
+        {
+          id: 8,
+          number: '8',
+          date: '2026-05-01',
+          amount: 50000,
+          paidAmount: 35000,
+          outstandingAmount: 15000,
+          status: 'Pending',
+          workflowStatus: 'RequiresClientSignature',
+          contractId: 77,
+          contractNumber: '1-2026',
+        },
+      ],
+      payments: [
+        {
+          id: 101,
+          documentKind: 'Payment',
+          type: 'Income',
+          amount: 35000,
+          paidAmount: 35000,
+          outstandingAmount: 0,
+          status: 'Completed',
+          date: '2026-05-10',
+          plannedDate: '2026-05-10',
+          paidDate: '2026-05-10',
+          invoiceNumber: '8',
+          paymentSourceName: 'Касса',
+          description: 'Оплата по счету №8',
+        },
+      ],
+      contracts: [
+        {
+          id: 77,
+          number: '1-2026',
+          title: 'Банкротство',
+          date: '2026-05-01',
+          amount: 150000,
+          status: 'Concluded',
+        },
+      ],
+    });
+    vi.mocked(apiService.addCaseRelatedParty).mockReset();
+    vi.mocked(apiService.addCaseRelatedParty).mockResolvedValue({
+      id: 2,
+      clientCaseId: 15,
+      sourceType: 'legalEntity',
+      sourceId: 25,
+      legalEntityId: 25,
+      displayName: 'ООО "Процесс"',
+      role: 'Третье лицо',
+      createdAt: '2026-05-04T10:00:00Z',
+    });
+    vi.mocked(apiService.deleteCaseRelatedParty).mockReset();
+    vi.mocked(apiService.deleteCaseRelatedParty).mockResolvedValue(undefined);
+  });
+
+  it('loads case summary, tasks, documents and history', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    expect(screen.getByText('2026-015')).toBeTruthy();
+    expect(screen.getAllByText('Земцов Виктор Александрович').length).toBeGreaterThan(0);
+    expect(screen.getByText(/35\s*000\s*₽ \/ 15\s*000\s*₽/u)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    expect(await screen.findByText('Проверить движение по делу')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    expect(await screen.findByText('Заявление.docx')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'История' }));
+    expect(await screen.findByText('Массовое изменение')).toBeTruthy();
+  });
+
+  it('shows inactivity and court sync indicators in the summary panel', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      lastTaskAt: new Date().toISOString(),
+      eventHistory: '18.05.2026 10:30: Ручная проверка судебного источника зафиксирована.',
+    }));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('Сегодня')).toBeTruthy();
+    expect(screen.getByText('Проверен вручную')).toBeTruthy();
+  });
+
+  it('loads linked finance documents for the finance tab', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    const financeTab = screen.getAllByRole('button', { name: 'Финансы' }).at(-1);
+    expect(financeTab).toBeTruthy();
+    fireEvent.click(financeTab!);
+
+    await waitFor(() => {
+      expect(apiService.getCaseFinance).toHaveBeenCalledWith(15);
+    });
+    expect(await screen.findByText('Договор №1-2026')).toBeTruthy();
+    expect(screen.getByText('Счет №8')).toBeTruthy();
+    expect(screen.getAllByText('Оплата по счету №8').length).toBeGreaterThan(0);
+    expect(screen.getByText(/115\s*000\s*₽/u)).toBeTruthy();
+  });
+
+  it('starts invoice and payment creation from the finance tab', async () => {
+    const onCreateInvoice = vi.fn();
+    const onCreatePayment = vi.fn();
+    render(
+      <CaseDetailPage
+        caseId={15}
+        onBack={vi.fn()}
+        onCreateInvoice={onCreateInvoice}
+        onCreatePayment={onCreatePayment}
+      />,
+    );
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    const financeTab = screen.getAllByRole('button', { name: 'Финансы' }).at(-1);
+    expect(financeTab).toBeTruthy();
+    fireEvent.click(financeTab!);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Новый счет' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Новый платеж' }));
+
+    expect(onCreateInvoice).toHaveBeenCalledWith(expect.objectContaining({ id: 15 }));
+    expect(onCreatePayment).toHaveBeenCalledWith(expect.objectContaining({ id: 15 }));
+  });
+
+  it('shows the client summary sidebar with masked contacts and quick actions', async () => {
+    const baseCase = createCase();
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      client: {
+        ...baseCase.client!,
+        phone: '89332428978',
+        email: 'zemcov@example.com',
+        company: 'ООО "Земцов"',
+      },
+    }));
+    const onOpenClient = vi.fn();
+    const onCreateInvoice = vi.fn();
+    const onCreatePayment = vi.fn();
+
+    render(
+      <CaseDetailPage
+        caseId={15}
+        onBack={vi.fn()}
+        onOpenClient={onOpenClient}
+        onCreateInvoice={onCreateInvoice}
+        onCreatePayment={onCreatePayment}
+      />,
+    );
+
+    expect(await screen.findByText('Клиент по делу')).toBeTruthy();
+    expect(screen.queryByText('89332428978')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Показать' }));
+    expect(screen.getByText('89332428978')).toBeTruthy();
+    expect(screen.getByText('zemcov@example.com')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Карточка клиента' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Счет' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Платеж' }));
+
+    expect(onOpenClient).toHaveBeenCalledWith(12, 15);
+    expect(onCreateInvoice).toHaveBeenCalledWith(expect.objectContaining({ id: 15 }));
+    expect(onCreatePayment).toHaveBeenCalledWith(expect.objectContaining({ id: 15 }));
+  });
+
+  it('creates an automation task from the case card', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: /Создать задачу/u }));
+
+    await waitFor(() => {
+      expect(apiService.createTaskJournalCaseAutomationTask).toHaveBeenCalledWith(15);
+      expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('filters case tasks and creates a task from the tasks tab', async () => {
+    vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({
+      items: [
+        createTask({ id: 101, title: 'Будущая задача', status: 'inProgress', dueAt: '2100-01-01T10:00:00Z' }),
+        createTask({ id: 102, title: 'Просроченная задача', status: 'inProgress', dueAt: '2020-01-01T10:00:00Z' }),
+        createTask({ id: 103, title: 'Закрытая задача', status: 'done', dueAt: '2026-05-01T10:00:00Z' }),
+      ],
+      total: 3,
+      page: 1,
+      pageSize: 50,
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    expect(await screen.findByText('Будущая задача')).toBeTruthy();
+    expect(screen.getByText('Просроченная задача')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Просроченные/u }));
+    expect(screen.queryByText('Будущая задача')).toBeNull();
+    expect(screen.getByText('Просроченная задача')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Закрытые/u }));
+    expect(screen.getByText('Закрытая задача')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Создать$/u }));
+    await waitFor(() => {
+      expect(apiService.createTaskJournalCaseAutomationTask).toHaveBeenCalledWith(15);
+    });
+  });
+
+  it('restores the last opened tab and task filter for the case card', async () => {
+    vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({
+      items: [
+        createTask({ id: 101, title: 'Будущая задача', status: 'inProgress', dueAt: '2100-01-01T10:00:00Z' }),
+        createTask({ id: 102, title: 'Просроченная задача', status: 'inProgress', dueAt: '2020-01-01T10:00:00Z' }),
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 50,
+    });
+
+    const firstRender = render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    expect(await screen.findByText('Будущая задача')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Просроченные/u }));
+    expect(screen.queryByText('Будущая задача')).toBeNull();
+    expect(screen.getByText('Просроченная задача')).toBeTruthy();
+    firstRender.unmount();
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText('Просроченная задача')).toBeTruthy();
+    expect(screen.queryByText('Будущая задача')).toBeNull();
+  });
+
+  it('shows and adds internal case conversation messages', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Переписка' }));
+
+    expect(await screen.findByText('Проверить документы перед заседанием.')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Сообщение во внутреннюю переписку дела'), {
+      target: { value: 'Коллеги, срок подачи уточнен.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Отправить/u }));
+
+    await waitFor(() => {
+      expect(apiService.addCaseConversationEntry).toHaveBeenCalledWith(15, {
+        text: 'Коллеги, срок подачи уточнен.',
+      });
+    });
+    expect(await screen.findByText('Коллеги, срок подачи уточнен.')).toBeTruthy();
+    expect(screen.getByText('Сообщение добавлено в переписку по делу.')).toBeTruthy();
+  });
+
+  it('updates status, stage, priority and responsible from the case card header', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.change(screen.getByLabelText('Статус дела'), { target: { value: 'OnHold' } });
+    fireEvent.change(screen.getByLabelText('Стадия дела'), { target: { value: 'Апелляция' } });
+    fireEvent.change(screen.getByLabelText('Приоритет дела'), { target: { value: 'urgent' } });
+    fireEvent.change(screen.getByLabelText('Ответственный по делу'), { target: { value: '8' } });
+    fireEvent.click(screen.getByRole('button', { name: /Сохранить/u }));
+
+    await waitFor(() => {
+      expect(apiService.bulkUpdateCases).toHaveBeenCalledWith({
+        ids: [15],
+        status: 'OnHold',
+        priority: 'urgent',
+        stage: 'Апелляция',
+        responsibleUserId: 8,
+      });
+      expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('archives the case through the header action', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: /Архив/u }));
+
+    await waitFor(() => {
+      expect(apiService.bulkUpdateCases).toHaveBeenCalledWith({ ids: [15], status: 'Closed' });
+    });
+  });
+
+  it('generates a case document template from the case card', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: /^Документ$/u }));
+
+    await waitFor(() => {
+      expect(apiService.generateCaseDocumentTemplate).toHaveBeenCalledWith(15, {
+        templateKey: 'case-summary',
+        documentType: 'Карточка дела',
+        status: 'Подготовлен',
+      });
+      expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('generates a selected document template from the documents tab', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    fireEvent.change(await screen.findByLabelText('Шаблон документа дела'), { target: { value: 'claim' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Сформировать$/u }));
+
+    await waitFor(() => {
+      expect(apiService.generateCaseDocumentTemplate).toHaveBeenCalledWith(15, {
+        templateKey: 'claim',
+        documentType: 'Иск',
+        status: 'Подготовлен',
+      });
+    });
+  });
+
+  it('filters case documents by search, type, status and latest version', async () => {
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      {
+        id: 7,
+        clientCaseId: 15,
+        documentKey: 'claim',
+        version: 1,
+        documentType: 'Заявление',
+        status: 'Черновик',
+        originalFileName: 'Иск v1.docx',
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        sizeBytes: 1024,
+        uploadedByName: 'Администратор',
+        uploadedAt: '2026-05-02T10:00:00Z',
+        isLatestVersion: false,
+      },
+      {
+        id: 8,
+        clientCaseId: 15,
+        documentKey: 'claim',
+        version: 2,
+        documentType: 'Заявление',
+        status: 'Подписан',
+        originalFileName: 'Иск v2.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 2048,
+        uploadedByName: 'Юрист',
+        uploadedAt: '2026-05-03T10:00:00Z',
+        isLatestVersion: true,
+      },
+      {
+        id: 9,
+        clientCaseId: 15,
+        documentKey: 'evidence',
+        version: 1,
+        documentType: 'Доказательство',
+        status: 'Готово',
+        originalFileName: 'Фото.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 4096,
+        uploadedByName: 'Администратор',
+        uploadedAt: '2026-05-04T10:00:00Z',
+        isLatestVersion: true,
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    expect(await screen.findByText('Иск v1.docx')).toBeTruthy();
+    expect(screen.getByText('Иск v2.pdf')).toBeTruthy();
+    expect(screen.getByText('Фото.jpg')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('Только актуальные версии'));
+    expect(screen.queryByText('Иск v1.docx')).toBeNull();
+    expect(screen.getByText('Иск v2.pdf')).toBeTruthy();
+    expect(screen.getByText('Фото.jpg')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Фильтр документов по типу'), { target: { value: 'Заявление' } });
+    expect(screen.getByText('Иск v2.pdf')).toBeTruthy();
+    expect(screen.queryByText('Фото.jpg')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Фильтр документов по статусу'), { target: { value: 'Подписан' } });
+    expect(screen.getByText('Иск v2.pdf')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Поиск документов дела'), { target: { value: 'фото' } });
+    expect(screen.queryByText('Иск v2.pdf')).toBeNull();
+    expect(screen.getByText('По текущим фильтрам документов нет.')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Фильтр документов по типу'), { target: { value: 'all' } });
+    fireEvent.change(screen.getByLabelText('Фильтр документов по статусу'), { target: { value: 'all' } });
+    expect(screen.getByText('Фото.jpg')).toBeTruthy();
+  });
+
+  it('uploads a document file from the documents tab', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+
+    const file = new File(['claim'], 'claim.pdf', { type: 'application/pdf' });
+    fireEvent.change(await screen.findByLabelText('Файл документа'), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText('Тип документа'), { target: { value: 'Иск' } });
+    fireEvent.change(screen.getByLabelText('Статус документа'), { target: { value: 'Подготовлен' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Загрузить$/u }));
+
+    await waitFor(() => {
+      expect(apiService.uploadCaseDocument).toHaveBeenCalledWith(15, file, {
+        documentType: 'Иск',
+        status: 'Подготовлен',
+      });
+      expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('downloads a case document from the documents tab', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:case-document');
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Скачать документ Заявление.docx' }));
+
+    await waitFor(() => {
+      expect(apiService.downloadCaseDocument).toHaveBeenCalledWith(15, 7);
+      expect(createObjectUrl).toHaveBeenCalledTimes(1);
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(revokeObjectUrl).toHaveBeenCalledWith('blob:case-document');
+      expect(screen.getByText('Документ «Заявление.docx» подготовлен к скачиванию.')).toBeTruthy();
+    });
+  });
+
+  it('opens a case document preview from the documents tab', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:case-document-preview');
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Предпросмотр документа Заявление.docx' }));
+
+    expect(await screen.findByText('Предпросмотр документа')).toBeTruthy();
+    expect(screen.getByTitle('Предпросмотр Исковое заявление.pdf')).toBeTruthy();
+    expect(apiService.downloadCaseDocument).toHaveBeenCalledWith(15, 7);
+    expect(createObjectUrl).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть предпросмотр' }));
+
+    await waitFor(() => {
+      expect(revokeObjectUrl).toHaveBeenCalledWith('blob:case-document-preview');
+    });
+  });
+
+  it('updates and deletes a case document from the documents tab', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    fireEvent.change(await screen.findByLabelText('Статус документа Заявление.docx'), { target: { value: 'Подписан' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить документ Заявление.docx' }));
+
+    await waitFor(() => {
+      expect(apiService.updateCaseDocument).toHaveBeenCalledWith(15, 7, {
+        documentType: 'Заявление',
+        status: 'Подписан',
+      });
+      expect(screen.getByText('Документ «Заявление.docx» обновлен.')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить документ Заявление.docx' }));
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalledWith('Удалить документ «Заявление.docx»?');
+      expect(apiService.deleteCaseDocument).toHaveBeenCalledWith(15, 7);
+      expect(screen.getByText('Документ «Заявление.docx» удален.')).toBeTruthy();
+    });
+  });
+
+  it('adds a related participant from the participants tab', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Участники' }));
+    fireEvent.change(screen.getByLabelText('Тип участника'), { target: { value: 'legalEntity' } });
+    await waitFor(() => {
+      expect((screen.getByLabelText('Участник дела') as HTMLSelectElement).options.length).toBeGreaterThan(1);
+    });
+    fireEvent.change(screen.getByLabelText('Участник дела'), { target: { value: '25' } });
+    fireEvent.change(screen.getByLabelText('Роль участника'), { target: { value: 'Третье лицо' } });
+    fireEvent.change(screen.getByLabelText('Основание связи участника'), { target: { value: 'Контрагент по делу' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Добавить$/u }));
+
+    await waitFor(() => {
+      expect(apiService.addCaseRelatedParty).toHaveBeenCalledWith(15, {
+        sourceType: 'legalEntity',
+        sourceId: 25,
+        role: 'Третье лицо',
+        notes: 'Контрагент по делу',
+      });
+      expect(apiService.getCaseRelatedParties).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('opens a related participant from the participants tab', async () => {
+    const onOpenClient = vi.fn();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} onOpenClient={onOpenClient} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Участники' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Открыть участника Земцов Виктор Александрович' }));
+
+    expect(onOpenClient).toHaveBeenCalledWith(12, 15);
+    expect(screen.getByText('Физическое лицо')).toBeTruthy();
+    expect(screen.getByText('Представитель по доверенности')).toBeTruthy();
+    expect(screen.queryByText(/\+79991234567/u)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Показать контакты' }));
+    expect(screen.getByText(/\+79991234567/u)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' }));
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalledWith('Удалить связь с участником «Земцов Виктор Александрович»?');
+      expect(apiService.deleteCaseRelatedParty).toHaveBeenCalledWith(15, 1);
+    });
+  });
+
+  it('runs a manual court source check from the case card', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить суд по делу' }));
+
+    await waitFor(() => {
+      expect(apiService.runCaseCourtSync).toHaveBeenCalledWith(15);
+      expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByText('Ручная проверка судебного источника зафиксирована.')).toBeTruthy();
+  });
+
+  it('adds a user comment to the case history tab', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'История' }));
+    expect(await screen.findByText('Комментарий по делу: Проверить срок.')).toBeTruthy();
+    expect(apiService.getCaseTimeline).toHaveBeenCalledWith(15);
+    fireEvent.change(screen.getByLabelText('Комментарий по истории дела'), { target: { value: 'Проверить срок апелляции' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Добавить комментарий' }));
+
+    await waitFor(() => {
+      expect(apiService.addCaseHistoryEntry).toHaveBeenCalledWith(15, { text: 'Проверить срок апелляции' });
+      expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('Комментарий добавлен в историю дела.')).toBeTruthy();
+    });
+  });
+
+  it('shows the court tab with source and procedural deadlines', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+
+    expect(screen.getByText('Судебный блок')).toBeTruthy();
+    expect(screen.getAllByText('Арбитражный суд Самарской области').length).toBeGreaterThan(0);
+    expect(screen.getByText('https://kad.arbitr.ru/card')).toBeTruthy();
+    expect(screen.getByText('Апелляция')).toBeTruthy();
+    expect(screen.getByText('01.07.2026')).toBeTruthy();
+    expect(await screen.findByText('Журнал судебных проверок')).toBeTruthy();
+    expect(screen.getByText('Проверка записана')).toBeTruthy();
+    expect(screen.getByText('Инициатор: Администратор')).toBeTruthy();
+    expect(apiService.getCaseCourtSyncLogs).toHaveBeenCalledWith(15);
+
+    fireEvent.click(screen.getByRole('button', { name: /Проверить источник/u }));
+    await waitFor(() => {
+      expect(apiService.runCaseCourtSync).toHaveBeenCalledWith(15);
+    });
+  });
+
+  it('copies a direct case link', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Ссылка' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('http://localhost:3000/cases/15');
+    });
+    expect(screen.getByRole('button', { name: 'Ссылка скопирована' })).toBeTruthy();
+  });
+});

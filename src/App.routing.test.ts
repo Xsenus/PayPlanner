@@ -10,12 +10,14 @@ import {
   getInitialTaskId,
   getTabHref,
   getPathActId,
+  getPathCaseId,
   getPathClientId,
   getPathContractId,
   getPathPaymentId,
   getPathTaskId,
   isActCreatePath,
   isActsListPath,
+  isCasesListPath,
   isClientsListPath,
   isContractsListPath,
   isNotificationsPath,
@@ -150,6 +152,20 @@ describe('App client routing helpers', () => {
     expect(getInitialTab()).toBe('clients');
   });
 
+  it('detects the cases registry pathname', () => {
+    window.history.replaceState({}, '', '/cases');
+
+    expect(isCasesListPath()).toBe(true);
+    expect(getInitialTab()).toBe('cases');
+  });
+
+  it('parses a case id from the pathname', () => {
+    window.history.replaceState({}, '', '/cases/15');
+
+    expect(getPathCaseId()).toBe(15);
+    expect(getInitialTab()).toBe('caseDetail');
+  });
+
   it('does not restore clientDetail from storage without a client id', () => {
     window.localStorage.setItem('pp.last_active_tab', 'clientDetail');
     window.history.replaceState({}, '', '/');
@@ -171,6 +187,7 @@ describe('App sidebar routing helpers', () => {
     expect(getTabHref('tasksApprovals')).toBe('/tasks/approvals');
     expect(getTabHref('tasksCalendar')).toBe('/tasks/calendar');
     expect(getTabHref('clients')).toBe('/clients');
+    expect(getTabHref('cases')).toBe('/cases');
     expect(getTabHref('accountsIncome')).toBe('/invoices?ppTab=accountsIncome');
     expect(getTabHref('paymentsExpense')).toBe('/payments?ppTab=paymentsExpense');
     expect(getTabHref('actsIncome')).toBe('/acts?ppTab=actsIncome');

@@ -28,6 +28,7 @@ import { useCashReport } from '../../hooks/useCashReport';
 import { useMoneyCategoryReport } from '../../hooks/useMoneyCategoryReport';
 import { useCounterpartyReport } from '../../hooks/useCounterpartyReport';
 import { useProjectReport } from '../../hooks/useProjectReport';
+import { useLegalWorkReport } from '../../hooks/useLegalWorkReport';
 import { useDirectionReport } from '../../hooks/useDirectionReport';
 import { useSalesPointReport } from '../../hooks/useSalesPointReport';
 import { useVatReport } from '../../hooks/useVatReport';
@@ -49,7 +50,7 @@ import { useBankStatementImportReport } from '../../hooks/useBankStatementImport
 import { useSpreadsheetImportReport } from '../../hooks/useSpreadsheetImportReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -130,6 +131,68 @@ function formatDate(value: string) {
     day: '2-digit',
     month: 'short',
   }).format(new Date(value));
+}
+
+function csvCell(value: unknown) {
+  const text = value === null || value === undefined ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename: string, rows: unknown[][]) {
+  const csv = rows.map((row) => row.map(csvCell).join(';')).join('\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportLegalWorkReport(report: LegalWorkReport) {
+  const rows: unknown[][] = [
+    ['Раздел', 'Наименование', 'Ответственный', 'Дата/период', 'Дела', 'Задачи', 'Сроки', 'Сумма', 'Примечание'],
+    ['Сводка', 'Всего дел', '', `${report.from} - ${report.to}`, report.totalCases, '', '', report.feeTotal, `Оплачено: ${report.paidTotal}; остаток: ${report.outstandingTotal}`],
+    ['Сводка', 'Дел в работе', '', `${report.from} - ${report.to}`, report.activeCases, report.openTaskCount, report.overdueDeadlineCount, report.outstandingTotal, `Просрочено задач: ${report.overdueTaskCount}; на согласовании: ${report.onApprovalTaskCount}`],
+  ];
+
+  report.responsibles.forEach((item) => {
+    rows.push([
+      'Ответственный',
+      item.responsibleName,
+      item.responsibleName,
+      `${report.from} - ${report.to}`,
+      item.activeCases,
+      item.openTasks,
+      item.overdueDeadlines,
+      item.outstandingTotal,
+      `Закрыто: ${item.closedCases}; проиграно: ${item.lostCases}; оплачено: ${item.paidTotal}`,
+    ]);
+  });
+
+  report.casesByStatus.forEach((item) => {
+    rows.push(['Статусы дел', item.statusLabel, '', `${report.from} - ${report.to}`, item.count, '', item.overdueDeadlines, item.feeTotal, item.status]);
+  });
+
+  report.casesByType.forEach((item) => {
+    rows.push(['Типы дел', item.caseType, '', `${report.from} - ${report.to}`, item.count, item.activeTasks, '', item.feeTotal, '']);
+  });
+
+  [...report.overdueDeadlines, ...report.upcomingDeadlines].forEach((item) => {
+    rows.push([
+      item.daysOffset < 0 ? 'Просроченный срок' : 'Ближайший срок',
+      `${item.clientName} · ${item.caseTitle || item.caseNumber}`,
+      item.responsibleName,
+      item.dueAt,
+      '',
+      '',
+      item.deadlineLabel,
+      '',
+      formatDeadlineOffset(item.daysOffset),
+    ]);
+  });
+
+  downloadCsv('legal-work-report.csv', rows);
 }
 
 function sourceLabel(source: MoneyOperationSource) {
@@ -1079,6 +1142,191 @@ function ProjectReportSection({
                 Нет операций по проектам за период.
               </div>
             )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function formatDeadlineOffset(days: number) {
+  if (days < 0) {
+    return `${Math.abs(days)} дн. просрочено`;
+  }
+
+  if (days === 0) {
+    return 'сегодня';
+  }
+
+  return `через ${days} дн.`;
+}
+
+function LegalWorkReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: LegalWorkReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const responsibleRows = (report?.responsibles ?? []).slice(0, 8);
+  const overdueRows = report?.overdueDeadlines ?? [];
+  const upcomingRows = report?.upcomingDeadlines ?? [];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">
+            <FolderKanban className="h-3.5 w-3.5" />
+            Юридическая работа
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по делам, срокам и загрузке</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Сводка по текущим делам, процессуальным срокам, задачам и финансовому остатку с учетом прав видимости пользователя.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по юридической работе...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по юридической работе</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+              <MetricCard
+                title="Дел в работе"
+                value={String(report.activeCases)}
+                icon={FolderKanban}
+                tone="rate"
+                subtitle={`Всего: ${report.totalCases}, закрыто: ${report.closedCases}, проиграно: ${report.lostCases}`}
+              />
+            <MetricCard
+              title="Просрочено сроков"
+              value={String(report.overdueDeadlineCount)}
+              icon={AlertTriangle}
+              tone="expense"
+              subtitle={`Ближайших сроков: ${report.upcomingDeadlineCount}`}
+            />
+            <MetricCard
+              title="Открыто задач"
+              value={String(report.openTaskCount)}
+              icon={Clock3}
+              tone="income"
+              subtitle={`На согласовании: ${report.onApprovalTaskCount}, просрочено: ${report.overdueTaskCount}`}
+            />
+            <MetricCard
+              title="Остаток по гонорарам"
+              value={formatCurrency(report.outstandingTotal)}
+              icon={Wallet}
+              tone="profit"
+              subtitle={`Оплачено: ${formatCurrency(report.paidTotal)}`}
+            />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+            <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-lg font-semibold text-slate-950">Загрузка ответственных</h3>
+                <span className="text-xs text-slate-500">{responsibleRows.length} сотрудников</span>
+              </div>
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">Ответственный</th>
+                      <th className="px-3 py-2 font-semibold">Дела</th>
+                      <th className="px-3 py-2 font-semibold">Задачи</th>
+                      <th className="px-3 py-2 font-semibold">Сроки</th>
+                      <th className="px-3 py-2 text-right font-semibold">Остаток</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {responsibleRows.length > 0 ? responsibleRows.map((row) => (
+                      <tr key={`${row.responsibleUserId ?? 'none'}-${row.responsibleName}`} className="align-top">
+                        <td className="px-3 py-3 font-medium text-slate-900">{row.responsibleName}</td>
+                        <td className="px-3 py-3 text-slate-600">{row.activeCases} активных</td>
+                        <td className="px-3 py-3 text-slate-600">
+                          {row.openTasks} открытых
+                          {row.overdueTasks > 0 ? <span className="ml-1 text-rose-600">· {row.overdueTasks} проср.</span> : null}
+                        </td>
+                        <td className="px-3 py-3 text-slate-600">{row.overdueDeadlines} проср.</td>
+                        <td className="px-3 py-3 text-right font-semibold text-slate-900">{formatCurrency(row.outstandingTotal)}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-8 text-center text-slate-500">Ответственные не найдены.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-3xl border border-rose-100 bg-rose-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">Просроченные сроки</h3>
+                <div className="mt-4 space-y-3">
+                  {overdueRows.length > 0 ? overdueRows.slice(0, 5).map((row) => (
+                    <div key={`${row.caseId}-${row.deadlineType}-${row.dueAt}`} className="rounded-2xl bg-white p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-slate-950">{row.deadlineLabel}</div>
+                          <div className="mt-1 text-sm text-slate-500">{row.clientName} · {row.caseTitle || row.caseNumber}</div>
+                        </div>
+                        <span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                          {formatDeadlineOffset(row.daysOffset)}
+                        </span>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-rose-200 bg-white/60 p-5 text-center text-sm text-rose-700">
+                      Просроченных сроков нет.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-amber-100 bg-amber-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">Ближайшие 7 дней</h3>
+                <div className="mt-4 space-y-3">
+                  {upcomingRows.length > 0 ? upcomingRows.slice(0, 5).map((row) => (
+                    <div key={`${row.caseId}-${row.deadlineType}-${row.dueAt}`} className="rounded-2xl bg-white p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-slate-950">{row.deadlineLabel}</div>
+                          <div className="mt-1 text-sm text-slate-500">{formatDate(row.dueAt)} · {row.responsibleName}</div>
+                        </div>
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                          {formatDeadlineOffset(row.daysOffset)}
+                        </span>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-amber-200 bg-white/60 p-5 text-center text-sm text-amber-700">
+                      Ближайших сроков нет.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -3552,6 +3800,12 @@ export function Reports() {
     reload: reloadProjectReport,
   } = useProjectReport(cashFlowDates);
   const {
+    report: legalWorkReport,
+    loading: legalWorkReportLoading,
+    error: legalWorkReportError,
+    reload: reloadLegalWorkReport,
+  } = useLegalWorkReport(cashFlowDates);
+  const {
     report: directionReport,
     loading: directionReportLoading,
     error: directionReportError,
@@ -4019,6 +4273,13 @@ export function Reports() {
               loading={projectReportLoading}
               error={projectReportError}
               onReload={reloadProjectReport}
+            />
+
+            <LegalWorkReportSection
+              report={legalWorkReport}
+              loading={legalWorkReportLoading}
+              error={legalWorkReportError}
+              onReload={reloadLegalWorkReport}
             />
 
             <DirectionReportSection

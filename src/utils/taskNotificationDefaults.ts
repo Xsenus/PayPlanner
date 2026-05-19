@@ -3,6 +3,8 @@ import type { TaskJournalChannel, TaskJournalReminder } from './taskJournalStore
 export const TASK_NOTIFICATION_DEFAULTS_SETTING_KEY = 'tasks.notificationDefaults.v1';
 
 export const TASK_REMINDER_DEFAULT_OPTIONS: Array<{ value: TaskJournalReminder; label: string }> = [
+  { value: 'before7d', label: 'За 7 дней' },
+  { value: 'before3d', label: 'За 3 дня' },
   { value: 'before1d', label: 'За день' },
   { value: 'before1h', label: 'За час' },
   { value: 'before15m', label: 'За 15 минут' },

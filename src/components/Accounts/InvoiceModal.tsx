@@ -465,6 +465,7 @@ function clientCaseStatusLabel(statusRaw?: string | null): string {
   if (normalized.includes('open')) return 'Открыто';
   if (normalized.includes('onhold') || normalized.includes('hold')) return 'Приостановлено';
   if (normalized.includes('closed')) return 'Закрыто';
+  if (normalized.includes('lost') || normalized.includes('проигр')) return 'Проиграно';
   if (normalized.includes('в работе') || normalized.includes('актив')) return 'Открыто';
   if (normalized.includes('ожид')) return 'Приостановлено';
   if (normalized.includes('закры')) return 'Закрыто';
@@ -2274,6 +2275,32 @@ export function InvoiceModal({
       title: patch.title?.trim() ?? '',
       description: patch.description?.trim(),
       status: patch.status ?? 'Open',
+      caseNumber: patch.caseNumber?.trim() ?? '',
+      caseType: patch.caseType?.trim() ?? '',
+      stage: patch.stage?.trim() ?? '',
+      responsibleUserId: patch.responsibleUserId ?? null,
+      startDate: patch.startDate ?? null,
+      dueDate: patch.dueDate ?? null,
+      feeAmount: patch.feeAmount ?? 0,
+      priority: patch.priority ?? 'normal',
+      courtName: patch.courtName?.trim() ?? '',
+      courtCaseNumber: patch.courtCaseNumber?.trim() ?? '',
+      courtUrl: patch.courtUrl?.trim() ?? '',
+      nextHearingAt: patch.nextHearingAt ?? null,
+      claimant: patch.claimant?.trim() ?? '',
+      defendant: patch.defendant?.trim() ?? '',
+      thirdParties: patch.thirdParties?.trim() ?? '',
+      representatives: patch.representatives?.trim() ?? '',
+      judgeName: patch.judgeName?.trim() ?? '',
+      courtroom: patch.courtroom?.trim() ?? '',
+      courtSecretaryContacts: patch.courtSecretaryContacts?.trim() ?? '',
+      claimFiledAt: patch.claimFiledAt ?? null,
+      appealDeadlineAt: patch.appealDeadlineAt ?? null,
+      motionDeadlineAt: patch.motionDeadlineAt ?? null,
+      objectionDeadlineAt: patch.objectionDeadlineAt ?? null,
+      documentsSummary: patch.documentsSummary?.trim() ?? '',
+      eventHistory: patch.eventHistory?.trim() ?? '',
+      strategy: patch.strategy?.trim() ?? '',
     });
 
     setClientCaseOptions((prev) => {
@@ -5521,6 +5548,7 @@ export function InvoiceModal({
         caseData={createCaseStub}
         onSave={handleCreateClientCase}
         overlayClassName="z-[2300]"
+        responsibles={responsibles}
       />
 
       {createActOpen && !onCreateActPage && (

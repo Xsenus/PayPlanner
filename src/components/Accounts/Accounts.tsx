@@ -80,6 +80,8 @@ interface AccountsProps {
   routeInvoiceId?: number | null;
   onRouteInvoiceChange?: (invoiceId: number | null) => void;
   onRouteInvoicePageBack?: () => void;
+  initialCreateDraft?: { key: number; draft: InvoiceEditorDraftState } | null;
+  onInitialCreateDraftHandled?: (key: number) => void;
   onOpenClient?: (clientId: number) => void;
   onOpenContract?: (contractId: number) => void;
   onOpenPayment?: (payment: Payment) => void;
@@ -486,6 +488,8 @@ export function Accounts({
   routeInvoiceId,
   onRouteInvoiceChange,
   onRouteInvoicePageBack,
+  initialCreateDraft,
+  onInitialCreateDraftHandled,
   onOpenClient,
   onOpenContract,
   onOpenPayment,
@@ -1145,6 +1149,12 @@ export function Accounts({
     setModalError(null);
     setModalOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (!initialCreateDraft || !canCreate) return;
+    openCreateModal(initialCreateDraft.draft);
+    onInitialCreateDraftHandled?.(initialCreateDraft.key);
+  }, [canCreate, initialCreateDraft, onInitialCreateDraftHandled, openCreateModal]);
 
   const openEditPage = useCallback((invoiceId: number, draft: InvoiceEditorDraftState | null = null) => {
     clearInvoiceEditorDraft();

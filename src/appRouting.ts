@@ -11,6 +11,8 @@ const ALL_TABS: Tab[] = [
   'reports',
   'calculator',
   'legalEntities',
+  'cases',
+  'caseDetail',
   'clients',
   'contacts',
   'contactsClients',
@@ -164,6 +166,28 @@ export function isClientsListPath(): boolean {
   return /^\/clients\/?$/i.test(window.location.pathname);
 }
 
+export function isCasesListPath(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return /^\/cases\/?$/i.test(window.location.pathname);
+}
+
+export function getPathCaseId(): number | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const match = window.location.pathname.match(/^\/cases\/(\d+)\/?$/i);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number(match[1]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function getPathContractId(): number | null {
   if (typeof window === 'undefined') {
     return null;
@@ -250,6 +274,14 @@ export function getInitialTab(): Tab {
 
   if (isClientsListPath()) {
     return 'clients';
+  }
+
+  if (getPathCaseId()) {
+    return 'caseDetail';
+  }
+
+  if (isCasesListPath()) {
+    return 'cases';
   }
 
   if (isNotificationsPath()) {
@@ -339,6 +371,10 @@ export function getTabHref(tab: Tab): string {
 
   if (tab === 'clients') {
     return '/clients';
+  }
+
+  if (tab === 'cases') {
+    return '/cases';
   }
 
   if (isAccountsTab(tab)) {

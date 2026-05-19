@@ -11,7 +11,9 @@ const {
   getCasesMock,
   getContractsMock,
   getInvoicesMock,
+  getClientsMock,
   getClientsV2Mock,
+  getLegalEntitiesMock,
   getLegalEntitiesPagedMock,
   getClientBalanceMock,
   applyClientBalanceMock,
@@ -27,7 +29,9 @@ const {
   getCasesMock: vi.fn(),
   getContractsMock: vi.fn(),
   getInvoicesMock: vi.fn(),
+  getClientsMock: vi.fn(),
   getClientsV2Mock: vi.fn(),
+  getLegalEntitiesMock: vi.fn(),
   getLegalEntitiesPagedMock: vi.fn(),
   getClientBalanceMock: vi.fn(),
   applyClientBalanceMock: vi.fn(),
@@ -117,7 +121,9 @@ vi.mock('../../services/api', () => ({
     getCase: getCaseMock,
     getContracts: getContractsMock,
     createInvoice: createInvoiceMock,
+    getClients: getClientsMock,
     getClientsV2: getClientsV2Mock,
+    getLegalEntities: getLegalEntitiesMock,
     getLegalEntitiesPaged: getLegalEntitiesPagedMock,
     getClientBalance: getClientBalanceMock,
     applyClientBalance: applyClientBalanceMock,
@@ -190,10 +196,18 @@ vi.mock('../Clients/ClientStatusBadge', () => ({
 }));
 
 function getPickerOptionAction(label: HTMLElement): HTMLButtonElement {
+  const option = label.closest('[data-counterparty-option]');
+  if (option instanceof HTMLElement) {
+    const actions = within(option).queryAllByRole('button');
+    if (actions.length > 0) {
+      return actions[0] as HTMLButtonElement;
+    }
+  }
+
   let current: HTMLElement | null = label;
 
   while (current && current !== document.body) {
-    const actions = within(current).queryAllByRole('button', { name: 'Выбрать' });
+    const actions = within(current).queryAllByRole('button');
     if (actions.length === 1) {
       return actions[0] as HTMLButtonElement;
     }
@@ -204,23 +218,16 @@ function getPickerOptionAction(label: HTMLElement): HTMLButtonElement {
 }
 
 async function selectPickerOption(name: string): Promise<void> {
-  const labels = await screen.findAllByText(name);
-  for (const label of labels.reverse()) {
-    try {
-      fireEvent.click(getPickerOptionAction(label));
-      return;
-    } catch {
-      // Some names can also exist in hidden selects outside the picker.
+  const option = await waitFor(() => {
+    const found = Array.from(document.querySelectorAll('[data-counterparty-option]'))
+      .find((element) => element.textContent?.includes(name));
+    if (!(found instanceof HTMLElement)) {
+      throw new Error(`Не найден вариант выбора ${name}`);
     }
-  }
+    return found;
+  });
 
-  const visibleActions = screen.queryAllByRole('button', { name: 'Выбрать' });
-  if (visibleActions.length > 0) {
-    fireEvent.click(visibleActions[0]);
-    return;
-  }
-
-  throw new Error(`Не найден вариант выбора ${name}`);
+  fireEvent.click(getPickerOptionAction(option));
 }
 
 function getLastPrintHtml(): string {
@@ -242,7 +249,9 @@ describe('PaymentModal integration', () => {
     getCasesMock.mockReset();
     getContractsMock.mockReset();
     getInvoicesMock.mockReset();
+    getClientsMock.mockReset();
     getClientsV2Mock.mockReset();
+    getLegalEntitiesMock.mockReset();
     getLegalEntitiesPagedMock.mockReset();
     getClientBalanceMock.mockReset();
     applyClientBalanceMock.mockReset();
@@ -269,37 +278,41 @@ describe('PaymentModal integration', () => {
     getCasesMock.mockResolvedValue([]);
     getContractsMock.mockResolvedValue({ items: [] });
     getInvoicesMock.mockResolvedValue({ items: [] });
+    const clientLookups = [
+      { id: 69, name: 'Test Client', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
+      { id: 77, name: 'Supplier Client', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
+      { id: 88, name: 'Expense Client', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
+    ];
+    getClientsMock.mockResolvedValue(clientLookups);
     getClientsV2Mock.mockResolvedValue({
-      items: [
-        { id: 69, name: 'Test Client', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
-        { id: 77, name: 'Supplier Client', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
-        { id: 88, name: 'Expense Client', isActive: true, createdAt: '2026-04-01T00:00:00Z' },
-      ],
+      items: clientLookups,
       total: 3,
       page: 1,
       pageSize: 25,
     });
+    const legalEntityLookups = [
+      {
+        id: 301,
+        shortName: 'ООО Юрклиент',
+        fullName: 'Общество с ограниченной ответственностью Юрклиент',
+        inn: '5400000001',
+        kpp: '540001001',
+        clients: [],
+        clientsCount: 0,
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+      {
+        id: 302,
+        shortName: 'ООО Поставщик ЮЛ',
+        inn: '5400000002',
+        clients: [],
+        clientsCount: 0,
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+    ];
+    getLegalEntitiesMock.mockResolvedValue(legalEntityLookups);
     getLegalEntitiesPagedMock.mockResolvedValue({
-      items: [
-        {
-          id: 301,
-          shortName: 'ООО Юрклиент',
-          fullName: 'Общество с ограниченной ответственностью Юрклиент',
-          inn: '5400000001',
-          kpp: '540001001',
-          clients: [],
-          clientsCount: 0,
-          createdAt: '2026-04-01T00:00:00Z',
-        },
-        {
-          id: 302,
-          shortName: 'ООО Поставщик ЮЛ',
-          inn: '5400000002',
-          clients: [],
-          clientsCount: 0,
-          createdAt: '2026-04-01T00:00:00Z',
-        },
-      ],
+      items: legalEntityLookups,
       total: 2,
       page: 1,
       pageSize: 25,
@@ -517,6 +530,7 @@ describe('PaymentModal integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать контрагента' }));
     fireEvent.click(screen.getByRole('button', { name: 'Юридические лица' }));
     await selectPickerOption('ООО Юрклиент');
+    await waitFor(() => expect(screen.getAllByDisplayValue('ООО Юрклиент').length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole('button', { name: 'save' }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));

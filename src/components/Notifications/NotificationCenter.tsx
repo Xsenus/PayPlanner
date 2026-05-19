@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   Bell,
+  CheckCheck,
   CheckCircle2,
   ExternalLink,
   Filter,
@@ -89,6 +90,7 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(itemsPage.total / itemsPage.pageSize));
   const unreadCount = useMemo(
@@ -245,6 +247,28 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
     }
   };
 
+  const handleMarkAllRead = async () => {
+    try {
+      setBulkBusy(true);
+      const result = await apiService.markAllUserNotificationsRead({
+        status,
+        type: type === 'all' ? undefined : type,
+        search,
+      });
+      emitUserNotificationsChanged();
+      refresh();
+      toast.success(
+        result.updatedCount > 0
+          ? `Отмечено прочитанными: ${result.updatedCount}.`
+          : 'Непрочитанных уведомлений по текущему фильтру нет.',
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось отметить уведомления прочитанными.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-5 p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -256,14 +280,26 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => refresh()}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleMarkAllRead()}
+            disabled={loading || bulkBusy || itemsPage.total === 0}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <CheckCheck className="h-4 w-4" />
+            Прочитать все
+          </button>
+          <button
+            type="button"
+            onClick={() => refresh()}
+            disabled={loading || bulkBusy}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Обновить
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">

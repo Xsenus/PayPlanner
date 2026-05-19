@@ -89,6 +89,7 @@ type TaskJournalFilterPreferences = {
   statusFilter: TaskJournalStatus | 'active' | 'all';
   assigneeFilter: string;
   typeFilter: TaskJournalType | 'all';
+  priorityFilter: TaskJournalPriority | 'all';
   periodMode: PeriodMode;
 };
 
@@ -124,6 +125,8 @@ const PRIORITY_OPTIONS: Array<{ value: TaskJournalPriority; label: string }> = [
   { value: 'high', label: 'Высокий' },
   { value: 'urgent', label: 'Срочно' },
 ];
+
+const BULK_STATUS_OPTIONS = STATUS_OPTIONS.filter((option) => option.value !== 'approved' && option.value !== 'done');
 
 const REMINDER_OPTIONS: Array<{ value: TaskJournalReminder; label: string }> = TASK_REMINDER_DEFAULT_OPTIONS;
 
@@ -180,6 +183,7 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
     statusFilter: 'active',
     assigneeFilter: 'all',
     typeFilter: 'all',
+    priorityFilter: 'all',
     periodMode: 'day',
   };
 }
@@ -198,6 +202,10 @@ function isStatusFilter(value: unknown): value is TaskJournalStatus | 'active' |
 
 function isTypeFilter(value: unknown): value is TaskJournalType | 'all' {
   return value === 'all' || TYPE_OPTIONS.some((option) => option.value === value);
+}
+
+function isPriorityFilter(value: unknown): value is TaskJournalPriority | 'all' {
+  return value === 'all' || PRIORITY_OPTIONS.some((option) => option.value === value);
 }
 
 function isPeriodMode(value: unknown): value is PeriodMode {
@@ -258,6 +266,7 @@ function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJourn
       statusFilter: isStatusFilter(parsed.statusFilter) ? parsed.statusFilter : defaults.statusFilter,
       assigneeFilter: typeof parsed.assigneeFilter === 'string' && parsed.assigneeFilter ? parsed.assigneeFilter : defaults.assigneeFilter,
       typeFilter: isTypeFilter(parsed.typeFilter) ? parsed.typeFilter : defaults.typeFilter,
+      priorityFilter: isPriorityFilter(parsed.priorityFilter) ? parsed.priorityFilter : defaults.priorityFilter,
       periodMode: isPeriodMode(parsed.periodMode) ? parsed.periodMode : defaults.periodMode,
     };
   } catch {
@@ -544,17 +553,45 @@ function getTaskCaseTitle(task: TaskJournalItem) {
   return task.clientCaseTitle?.trim() || '';
 }
 
+function buildTaskTooltipLines(task: TaskJournalItem) {
+  const due = new Date(task.dueAt);
+  const duration = normalizeTaskDuration(task.plannedDurationMinutes);
+  const end = new Date(due.getTime() + duration * 60 * 1000);
+  const caseTitle = getTaskCaseTitle(task);
+  const assignees = getTaskAssigneeNames(task).join(', ') || task.assigneeName || 'Не назначен';
+  const lines = [
+    task.title,
+    `Контрагент: ${getTaskClientName(task) || 'не указан'}`,
+  ];
+
+  if (caseTitle) {
+    lines.push(`Дело: ${caseTitle}`);
+  }
+
+  lines.push(
+    `Время: ${formatDateOnly(due)} ${formatTimeOnly(due)}-${formatTimeOnly(end)}`,
+    `Исполнитель: ${assignees}`,
+    `Статус: ${getStatusLabel(task.status)}`,
+    `Приоритет: ${getPriorityLabel(task.priority)}`,
+    `Длительность: ${formatDuration(duration)}`,
+  );
+
+  return lines;
+}
+
 function isClosedClientCase(clientCase: ClientCase) {
   const status = String(clientCase.status ?? '').trim().toLowerCase();
   const normalized = status.replace(/ё/g, 'е');
   return normalized === '2'
     || normalized.includes('closed')
+    || normalized.includes('lost')
     || normalized.includes('complete')
     || normalized.includes('archiv')
     || normalized.includes('cancel')
     || normalized.includes('done')
     || normalized.includes('закры')
     || normalized.includes('заверш')
+    || normalized.includes('проигр')
     || normalized.includes('оконч')
     || normalized.includes('архив')
     || normalized.includes('отмен');
@@ -754,6 +791,71 @@ function getTaskEndMinute(task: TaskJournalItem) {
 function getTaskAssigneeNames(task: TaskJournalItem) {
   const participantNames = getTaskParticipants(task, 'assignee').map(getParticipantDisplayName).filter(Boolean);
   return unique(participantNames.length > 0 ? participantNames : [task.assigneeName || 'Без исполнителя']);
+}
+
+function getTaskAssigneeConflictKeys(task: TaskJournalItem) {
+  const keys = new Set<string>();
+  if (task.assigneeUserId) {
+    keys.add(`user:${task.assigneeUserId}`);
+  }
+
+  getTaskParticipants(task, 'assignee').forEach((participant) => {
+    if (participant.userId) {
+      keys.add(`user:${participant.userId}`);
+      return;
+    }
+
+    const name = getParticipantDisplayName(participant).trim().toLowerCase();
+    if (name) {
+      keys.add(`name:${name}`);
+    }
+  });
+
+  if (keys.size === 0 && task.assigneeName?.trim()) {
+    keys.add(`name:${task.assigneeName.trim().toLowerCase()}`);
+  }
+
+  return Array.from(keys);
+}
+
+function buildTaskConflictTaskIds(tasks: TaskJournalItem[]) {
+  const conflictIds = new Set<number>();
+  const byAssignee = new Map<string, TaskJournalItem[]>();
+
+  tasks
+    .filter((task) => isTaskJournalActive(task.status))
+    .forEach((task) => {
+      getTaskAssigneeConflictKeys(task).forEach((key) => {
+        const items = byAssignee.get(key) ?? [];
+        items.push(task);
+        byAssignee.set(key, items);
+      });
+    });
+
+  byAssignee.forEach((items) => {
+    const sorted = items.slice().sort((a, b) => getTaskStartMinute(a) - getTaskStartMinute(b) || a.id - b.id);
+    for (let index = 0; index < sorted.length; index += 1) {
+      const current = sorted[index];
+      for (let nextIndex = index + 1; nextIndex < sorted.length; nextIndex += 1) {
+        const candidate = sorted[nextIndex];
+        if (getTaskStartMinute(candidate) >= getTaskEndMinute(current)) {
+          break;
+        }
+
+        if (intervalsOverlap(
+          getTaskStartMinute(current),
+          getTaskEndMinute(current),
+          getTaskStartMinute(candidate),
+          getTaskEndMinute(candidate),
+        )) {
+          conflictIds.add(current.id);
+          conflictIds.add(candidate.id);
+        }
+      }
+    }
+  });
+
+  return conflictIds;
 }
 
 function getTimelineTaskTone(task: TaskJournalItem, currentUserId: number | null, assigneeFilter: string) {
@@ -1013,12 +1115,19 @@ export function TaskJournal({
   const [statusFilter, setStatusFilter] = useState<TaskJournalStatus | 'active' | 'all'>(initialPreferences.statusFilter);
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
+  const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
   const [modal, setModal] = useState<ModalState>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => new Date());
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => new Date());
   const [calendarMovingTaskId, setCalendarMovingTaskId] = useState<number | null>(null);
   const [calendarResizingTaskId, setCalendarResizingTaskId] = useState<number | null>(null);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(() => new Set());
+  const [bulkAssigneeUserId, setBulkAssigneeUserId] = useState('');
+  const [bulkPriority, setBulkPriority] = useState<TaskJournalPriority | ''>('');
+  const [bulkStatus, setBulkStatus] = useState<TaskJournalStatus | ''>('');
+  const [bulkDueAt, setBulkDueAt] = useState('');
+  const [bulkSaving, setBulkSaving] = useState(false);
   const routeTaskRequestRef = useRef(0);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
   const skipNextFilterSaveRef = useRef(false);
@@ -1044,6 +1153,7 @@ export function TaskJournal({
     setStatusFilter(nextPreferences.statusFilter);
     setAssigneeFilter(nextPreferences.assigneeFilter);
     setTypeFilter(nextPreferences.typeFilter);
+    setPriorityFilter(nextPreferences.priorityFilter);
     setPeriodMode(nextPreferences.periodMode);
   }, [currentUserId, filterOwnerKey, mode]);
 
@@ -1062,9 +1172,10 @@ export function TaskJournal({
       statusFilter,
       assigneeFilter,
       typeFilter,
+      priorityFilter,
       periodMode,
     }, mode);
-  }, [assigneeFilter, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, quickFilter, search, statusFilter, typeFilter]);
+  }, [assigneeFilter, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter]);
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
@@ -1277,6 +1388,7 @@ export function TaskJournal({
         String(task.assigneeUserId ?? task.assigneeName) === assigneeFilter ||
         hasAssigneeParticipant(task, assigneeFilter);
       const typeOk = typeFilter === 'all' || task.type === typeFilter;
+      const priorityOk = priorityFilter === 'all' || task.priority === priorityFilter;
       const dateOk =
         !Number.isNaN(due.getTime()) &&
         (!dateRangeBounds.from || due >= dateRangeBounds.from) &&
@@ -1295,9 +1407,9 @@ export function TaskJournal({
         task.tags.join(' '),
       ].some((value) => value.toLowerCase().includes(q));
 
-      return approvalScopeOk && quickOk && assigneeOk && typeOk && dateOk && searchOk;
+      return approvalScopeOk && quickOk && assigneeOk && typeOk && priorityOk && dateOk && searchOk;
     });
-  }, [assigneeFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, quickFilter, search, tasks, typeFilter]);
+  }, [assigneeFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, quickFilter, search, tasks, typeFilter]);
 
   const filteredTasks = useMemo(() => {
     const nowDate = new Date();
@@ -1327,6 +1439,25 @@ export function TaskJournal({
       })
       .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
   }, [metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
+
+  useEffect(() => {
+    setSelectedTaskIds((previous) => {
+      const existingIds = new Set(tasks.map((task) => task.id));
+      const next = new Set(Array.from(previous).filter((id) => existingIds.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [tasks]);
+
+  const selectableTasks = useMemo(
+    () => filteredTasks.filter((task) => !isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings)),
+    [currentUserId, filteredTasks, isAdminUser, taskSettings],
+  );
+  const selectableTaskIds = useMemo(() => new Set(selectableTasks.map((task) => task.id)), [selectableTasks]);
+  const selectedTasksForBulk = useMemo(
+    () => selectableTasks.filter((task) => selectedTaskIds.has(task.id)),
+    [selectableTasks, selectedTaskIds],
+  );
+  const allVisibleBulkSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedTaskIds.has(task.id));
 
   const shiftCalendarPeriod = (direction: -1 | 1) => {
     const next =
@@ -1410,6 +1541,92 @@ export function TaskJournal({
 
     if (resolvedFilter !== 'none') {
       setStatusFilter('active');
+    }
+  };
+
+  const toggleTaskSelection = (taskId: number, checked: boolean) => {
+    setSelectedTaskIds((previous) => {
+      const next = new Set(previous);
+      if (checked) {
+        next.add(taskId);
+      } else {
+        next.delete(taskId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllVisibleSelection = (checked: boolean) => {
+    setSelectedTaskIds((previous) => {
+      const next = new Set(previous);
+      selectableTasks.forEach((task) => {
+        if (checked) {
+          next.add(task.id);
+        } else {
+          next.delete(task.id);
+        }
+      });
+      return next;
+    });
+  };
+
+  const clearBulkSelection = () => {
+    setSelectedTaskIds(new Set());
+  };
+
+  const resetBulkFields = () => {
+    setBulkAssigneeUserId('');
+    setBulkPriority('');
+    setBulkStatus('');
+    setBulkDueAt('');
+  };
+
+  const handleBulkUpdate = async () => {
+    const ids = selectedTasksForBulk.map((task) => task.id);
+    if (ids.length === 0) {
+      toast.error('Выберите задачи для массового изменения.', 'Журнал задач');
+      return;
+    }
+
+    const payload: {
+      ids: number[];
+      assigneeUserId?: number;
+      priority?: TaskJournalPriority;
+      status?: TaskJournalStatus;
+      dueAt?: string;
+    } = { ids };
+
+    if (bulkAssigneeUserId) {
+      payload.assigneeUserId = Number(bulkAssigneeUserId);
+    }
+    if (bulkPriority) {
+      payload.priority = bulkPriority;
+    }
+    if (bulkStatus) {
+      payload.status = bulkStatus;
+    }
+    if (bulkDueAt) {
+      payload.dueAt = fromLocalInputValue(bulkDueAt);
+    }
+
+    if (!payload.assigneeUserId && !payload.priority && !payload.status && !payload.dueAt) {
+      toast.error('Выберите хотя бы одно изменение для задач.', 'Журнал задач');
+      return;
+    }
+
+    setBulkSaving(true);
+    try {
+      const result = await apiService.bulkUpdateTaskJournalItems(payload);
+      const skippedText = result.skipped > 0 ? ` Пропущено без прав: ${result.skipped}.` : '';
+      toast.success(`Обновлено задач: ${result.updated}.${skippedText}`, 'Журнал задач');
+      clearBulkSelection();
+      resetBulkFields();
+      await refreshTasks();
+      emitTaskChange();
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось выполнить массовое изменение задач.'), 'Журнал задач');
+    } finally {
+      setBulkSaving(false);
     }
   };
 
@@ -1815,7 +2032,7 @@ export function TaskJournal({
 
         <section className="mb-6 space-y-3" data-testid="task-filters-panel">
           <div
-            className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_repeat(3,minmax(160px,220px))]"
+            className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_repeat(4,minmax(150px,200px))]"
             data-testid="task-main-filter-row"
           >
             <label className="relative block">
@@ -1861,6 +2078,19 @@ export function TaskJournal({
             >
               <option value="all">Все типы</option>
               {TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+
+            <select
+              value={priorityFilter}
+              onChange={(event) => setPriorityFilter(event.target.value as TaskJournalPriority | 'all')}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              aria-label="Приоритет"
+              data-testid="task-priority-filter"
+            >
+              <option value="all">Все приоритеты</option>
+              {PRIORITY_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
@@ -1947,6 +2177,24 @@ export function TaskJournal({
           </div>
         </section>
 
+        {viewMode === 'list' && !isApprovalsMode && selectedTasksForBulk.length > 0 ? (
+          <TaskBulkActionsPanel
+            selectedCount={selectedTasksForBulk.length}
+            assignees={assigneeOptions}
+            assigneeUserId={bulkAssigneeUserId}
+            priority={bulkPriority}
+            status={bulkStatus}
+            dueAt={bulkDueAt}
+            saving={bulkSaving}
+            onAssigneeChange={setBulkAssigneeUserId}
+            onPriorityChange={setBulkPriority}
+            onStatusChange={setBulkStatus}
+            onDueAtChange={setBulkDueAt}
+            onApply={handleBulkUpdate}
+            onClear={clearBulkSelection}
+          />
+        ) : null}
+
         {!isApprovalsMode && automationCandidates.length > 0 ? (
           <TaskAutomationPanel
             candidates={automationCandidates}
@@ -1969,8 +2217,13 @@ export function TaskJournal({
             currentUserId={currentUserId}
             isAdminUser={isAdminUser}
             taskSettings={taskSettings}
+            selectedTaskIds={selectedTaskIds}
+            selectableTaskIds={selectableTaskIds}
+            allVisibleSelected={allVisibleBulkSelected}
             onOpenClient={onOpenClient}
             onOpenLegalEntity={onOpenLegalEntity}
+            onToggleTaskSelection={toggleTaskSelection}
+            onToggleAllVisibleSelection={toggleAllVisibleSelection}
             onEdit={openTaskEditor}
             onDelete={handleDelete}
             onStatusChange={setTaskStatus}
@@ -2175,14 +2428,132 @@ function MetricCard({
   );
 }
 
+function TaskBulkActionsPanel({
+  selectedCount,
+  assignees,
+  assigneeUserId,
+  priority,
+  status,
+  dueAt,
+  saving,
+  onAssigneeChange,
+  onPriorityChange,
+  onStatusChange,
+  onDueAtChange,
+  onApply,
+  onClear,
+}: {
+  selectedCount: number;
+  assignees: TaskJournalAssignee[];
+  assigneeUserId: string;
+  priority: TaskJournalPriority | '';
+  status: TaskJournalStatus | '';
+  dueAt: string;
+  saving: boolean;
+  onAssigneeChange: (value: string) => void;
+  onPriorityChange: (value: TaskJournalPriority | '') => void;
+  onStatusChange: (value: TaskJournalStatus | '') => void;
+  onDueAtChange: (value: string) => void;
+  onApply: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <section className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 shadow-sm" data-testid="task-bulk-actions">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+        <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">Выбрано</div>
+            <div className="mt-2 text-lg font-semibold text-slate-900">{selectedCount}</div>
+          </div>
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-500">Исполнитель</span>
+            <select
+              value={assigneeUserId}
+              onChange={(event) => onAssigneeChange(event.target.value)}
+              className="mt-1 h-10 w-full rounded-xl border border-blue-100 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              aria-label="Массово назначить исполнителя"
+            >
+              <option value="">Не менять</option>
+              {assignees.map((assignee) => (
+                <option key={assignee.id} value={String(assignee.id)}>{assignee.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-500">Приоритет</span>
+            <select
+              value={priority}
+              onChange={(event) => onPriorityChange(event.target.value as TaskJournalPriority | '')}
+              className="mt-1 h-10 w-full rounded-xl border border-blue-100 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              aria-label="Массово изменить приоритет"
+            >
+              <option value="">Не менять</option>
+              {PRIORITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-500">Статус</span>
+            <select
+              value={status}
+              onChange={(event) => onStatusChange(event.target.value as TaskJournalStatus | '')}
+              className="mt-1 h-10 w-full rounded-xl border border-blue-100 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              aria-label="Массово изменить статус"
+            >
+              <option value="">Не менять</option>
+              {BULK_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block sm:col-span-2 xl:col-span-1">
+            <span className="text-xs font-semibold text-slate-500">Срок</span>
+            <input
+              type="datetime-local"
+              value={dueAt}
+              onChange={(event) => onDueAtChange(event.target.value)}
+              className="mt-1 h-10 w-full rounded-xl border border-blue-100 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              aria-label="Массово изменить срок"
+            />
+          </label>
+        </div>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={saving}
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-blue-100 bg-white px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Снять выбор
+          </button>
+          <button
+            type="button"
+            onClick={onApply}
+            disabled={saving}
+            className="inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? 'Сохраняем...' : 'Применить'}
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function TaskTable({
   tasks,
   highlightedTaskId,
   currentUserId,
   isAdminUser,
   taskSettings,
+  selectedTaskIds,
+  selectableTaskIds,
+  allVisibleSelected,
   onOpenClient,
   onOpenLegalEntity,
+  onToggleTaskSelection,
+  onToggleAllVisibleSelection,
   onEdit,
   onDelete,
   onStatusChange,
@@ -2193,8 +2564,13 @@ function TaskTable({
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
+  selectedTaskIds: Set<number>;
+  selectableTaskIds: Set<number>;
+  allVisibleSelected: boolean;
   onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
   onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
+  onToggleTaskSelection: (taskId: number, checked: boolean) => void;
+  onToggleAllVisibleSelection: (checked: boolean) => void;
   onEdit: (task: TaskJournalItem) => void;
   onDelete: (task: TaskJournalItem) => void;
   onStatusChange: (task: TaskJournalItem, status: TaskJournalStatus) => void;
@@ -2206,6 +2582,16 @@ function TaskTable({
         <table className="min-w-[1180px] w-full">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              <th className="w-12 px-4 py-4">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  disabled={selectableTaskIds.size === 0}
+                  onChange={(event) => onToggleAllVisibleSelection(event.target.checked)}
+                  aria-label="Выбрать все задачи на странице"
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+              </th>
               <th className="px-4 py-4">Контрагент / дело</th>
               <th className="px-4 py-4">Наименование задачи</th>
               <th className="px-4 py-4">Исполнитель</th>
@@ -2219,7 +2605,7 @@ function TaskTable({
           <tbody className="divide-y divide-slate-100">
             {tasks.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-500">
+                <td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-500">
                   По текущим фильтрам задач нет.
                 </td>
               </tr>
@@ -2232,6 +2618,7 @@ function TaskTable({
               const taskObservers = getTaskParticipants(task, 'observer');
               const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
               const counterpartyName = getTaskClientName(task);
+              const canSelectTask = selectableTaskIds.has(task.id);
               const canOpenCounterparty = Boolean(
                 (task.clientId && onOpenClient) || (task.legalEntityId && onOpenLegalEntity),
               );
@@ -2253,6 +2640,16 @@ function TaskTable({
                     isHighlighted ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-200' : 'hover:bg-slate-50'
                   }`}
                 >
+                  <td className="px-4 py-4">
+                    <input
+                      type="checkbox"
+                      checked={selectedTaskIds.has(task.id)}
+                      disabled={!canSelectTask}
+                      onChange={(event) => onToggleTaskSelection(task.id, event.target.checked)}
+                      aria-label={`Выбрать задачу ${task.title}`}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+                    />
+                  </td>
                   <td className="max-w-[280px] px-4 py-4">
                     {canOpenCounterparty ? (
                       <button
@@ -2799,6 +3196,21 @@ function TaskTimelineCalendar({
   );
 }
 
+function CalendarTaskTooltip({ task }: { task: TaskJournalItem }) {
+  const lines = buildTaskTooltipLines(task);
+  return (
+    <span
+      data-testid={`task-calendar-tooltip-${task.id}`}
+      className="pointer-events-none absolute left-2 right-2 top-full z-40 mt-1 hidden rounded-lg border border-slate-200 bg-white p-2 text-left text-xs font-normal text-slate-600 shadow-lg group-hover:block group-focus-visible:block"
+    >
+      <span className="block font-semibold text-slate-900">{lines[0]}</span>
+      {lines.slice(1).map((line) => (
+        <span key={line} className="mt-1 block leading-4">{line}</span>
+      ))}
+    </span>
+  );
+}
+
 function TaskCalendar({
   tasks,
   mode,
@@ -2877,6 +3289,14 @@ function TaskCalendar({
     () => tasksByDate.get(toDateKey(selectedDate)) ?? [],
     [selectedDate, tasksByDate],
   );
+  const conflictTaskIds = useMemo(() => {
+    const ids = new Set<number>();
+    tasksByDate.forEach((items) => {
+      buildTaskConflictTaskIds(items).forEach((id) => ids.add(id));
+    });
+
+    return ids;
+  }, [tasksByDate]);
   const selectedTotalDuration = useMemo(
     () => selectedTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0),
     [selectedTasks],
@@ -2989,6 +3409,46 @@ function TaskCalendar({
       ) : (
         <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
           <div className="overflow-x-auto">
+            <div data-testid="task-calendar-mobile-strip" className="mb-3 md:hidden">
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {visibleDays.map((day) => {
+                  const key = toDateKey(day);
+                  const dayTasks = tasksByDate.get(key) ?? [];
+                  const activeDayTasks = dayTasks.filter((task) => isTaskJournalActive(task.status));
+                  const activeDayDuration = activeDayTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
+                  const hasConflict = dayTasks.some((task) => conflictTaskIds.has(task.id));
+                  const isSelected = isSameDay(day, selectedDate);
+                  const isCurrentMonth = mode !== 'month' || isSameMonth(day, anchorDate);
+
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => onSelectDate(day)}
+                      aria-label={`Выбрать ${formatDateOnly(day)}`}
+                      className={`min-w-[5.75rem] rounded-xl border px-3 py-2 text-left shadow-sm transition ${
+                        isSelected
+                          ? 'border-blue-300 bg-blue-50 text-blue-800 ring-2 ring-blue-100'
+                          : hasConflict
+                            ? 'border-rose-200 bg-rose-50 text-rose-700'
+                            : activeDayTasks.length >= 5 || activeDayDuration >= 5 * 60
+                              ? 'border-amber-200 bg-amber-50 text-amber-700'
+                              : isCurrentMonth
+                                ? 'border-slate-200 bg-white text-slate-700'
+                                : 'border-slate-100 bg-slate-50 text-slate-400'
+                      }`}
+                    >
+                      <span className="block text-xs font-semibold uppercase">{WEEKDAY_LABELS[day.getDay() === 0 ? 6 : day.getDay() - 1]}</span>
+                      <span className="mt-1 block text-lg font-semibold">{day.getDate()}</span>
+                      <span className="mt-1 block text-xs font-medium">
+                        {hasConflict ? 'Конфликт' : dayTasks.length > 0 ? `${dayTasks.length} задач` : 'Свободно'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {mode !== 'day' ? (
               <div className="mb-2 grid min-w-[860px] grid-cols-7 gap-2 text-center text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
                 {WEEKDAY_LABELS.map((label) => (
@@ -3006,6 +3466,7 @@ function TaskCalendar({
                 const isCurrentDay = isSameDay(day, new Date());
                 const activeDayTasks = dayTasks.filter((task) => isTaskJournalActive(task.status));
                 const activeDayDuration = activeDayTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
+                const dayConflictCount = dayTasks.filter((task) => conflictTaskIds.has(task.id)).length;
                 const dayLoadClass =
                   activeDayTasks.length >= 8 || activeDayDuration >= 8 * 60
                     ? 'border-rose-200 bg-rose-50/70'
@@ -3048,7 +3509,11 @@ function TaskCalendar({
                         <span className={`block truncate text-sm font-semibold ${isCurrentMonth ? 'text-slate-900' : 'text-slate-400'}`}>
                           {mode === 'day' ? formatDateOnly(day) : day.getDate()}
                         </span>
-                        {activeDayTasks.length >= 5 || activeDayDuration >= 5 * 60 ? (
+                        {dayConflictCount > 0 ? (
+                          <span className="mt-0.5 block text-[11px] font-semibold text-rose-600">
+                            Конфликт
+                          </span>
+                        ) : activeDayTasks.length >= 5 || activeDayDuration >= 5 * 60 ? (
                           <span className={`mt-0.5 block text-[11px] font-semibold ${activeDayTasks.length >= 8 || activeDayDuration >= 8 * 60 ? 'text-rose-600' : 'text-amber-600'}`}>
                             Высокая загрузка
                           </span>
@@ -3074,6 +3539,12 @@ function TaskCalendar({
                     <div className="mt-2 space-y-1.5">
                       {dayTasks.slice(0, mode === 'day' ? 8 : 3).map((task) => {
                         const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
+                        const hasTimeConflict = conflictTaskIds.has(task.id);
+                        const tooltipTitle = [
+                          ...buildTaskTooltipLines(task),
+                          ...(hasTimeConflict ? ['Конфликт: задача пересекается по времени с другой задачей исполнителя.'] : []),
+                          ...(isReadOnly ? [] : ['Перетащите карточку на другой день, чтобы перенести срок.']),
+                        ].join('\n');
                         return (
                           <button
                             key={task.id}
@@ -3090,20 +3561,26 @@ function TaskCalendar({
                               event.dataTransfer.effectAllowed = 'move';
                             }}
                             onClick={() => onEdit(task)}
-                            title={isReadOnly
-                              ? `${task.title}\n${getTaskClientName(task)}`
-                              : `${task.title}\n${getTaskClientName(task)}\nПеретащите карточку на другой день, чтобы перенести срок.`}
-                            className={`block w-full rounded-lg border px-2 py-1.5 text-left text-xs transition hover:border-blue-200 hover:bg-blue-50 ${
+                            title={tooltipTitle}
+                            className={`group relative block w-full rounded-lg border px-2 py-1.5 text-left text-xs transition hover:border-blue-200 hover:bg-blue-50 ${
                               movingTaskId === task.id
                                 ? 'border-blue-300 bg-blue-100 opacity-60'
                                 : highlightedTaskId === task.id
                                   ? 'border-blue-300 bg-blue-50'
-                                  : 'border-slate-100 bg-slate-50'
+                                  : hasTimeConflict
+                                    ? 'border-rose-200 bg-rose-50'
+                                    : 'border-slate-100 bg-slate-50'
                             }`}
                           >
                             <span className="block truncate font-semibold text-slate-900">{task.title}</span>
                             <span className="mt-0.5 block truncate text-slate-500">{getTaskClientName(task)}</span>
                             <span className="mt-1 block text-[11px] font-semibold text-slate-400">{formatDuration(task.plannedDurationMinutes)}</span>
+                            {hasTimeConflict ? (
+                              <span className="mt-1 inline-flex rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                                Конфликт
+                              </span>
+                            ) : null}
+                            <CalendarTaskTooltip task={task} />
                           </button>
                         );
                       })}
@@ -3500,6 +3977,14 @@ function TaskModal({
   const approverParticipants = useMemo(
     () => (form.participants ?? []).filter((participant) => participant.role === 'approver'),
     [form.participants],
+  );
+  const orderedApproverParticipants = useMemo(
+    () => approverParticipants.slice().sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
+    [approverParticipants],
+  );
+  const currentApprovalParticipant = useMemo(
+    () => orderedApproverParticipants.find((participant) => participant.approvalStatus !== 'approved') ?? null,
+    [orderedApproverParticipants],
   );
   const isImplicitPrimaryAssigneeParticipant = useCallback((participant: TaskJournalParticipant) => {
     if (participant.role !== 'assignee') return false;
@@ -4244,11 +4729,9 @@ function TaskModal({
               <div className="mt-4 rounded-xl border border-violet-100 bg-white p-3">
                 <div className="text-sm font-semibold text-slate-800">Очередь согласования</div>
                 <div className="mt-3 space-y-2">
-                  {approverParticipants
-                    .slice()
-                    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+                  {orderedApproverParticipants
                     .map((participant, index) => {
-                      const isCurrentApprover = participant.userId === currentUserId;
+                      const isCurrentApprover = participant === currentApprovalParticipant && participant.userId === currentUserId;
                       const statusLabel =
                         participant.approvalStatus === 'approved'
                           ? 'Согласовано'

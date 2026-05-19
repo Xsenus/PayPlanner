@@ -204,6 +204,14 @@ export interface UserNotificationTypeDto {
   label: string;
   description: string;
   tone: string;
+  priority: string;
+  channels: string[];
+  deduplicate: boolean;
+  digestible: boolean;
+}
+
+export interface UserNotificationBulkActionResultDto {
+  updatedCount: number;
 }
 
 export interface UserNotificationsQuery {
@@ -1839,6 +1847,9 @@ export class ApiService {
     status?: string;
     type?: string;
     assigneeUserId?: number;
+    clientCaseId?: number;
+    clientId?: number;
+    legalEntityId?: number;
     from?: string;
     to?: string;
     page?: number;
@@ -1849,6 +1860,9 @@ export class ApiService {
       status: params?.status,
       type: params?.type,
       assigneeUserId: params?.assigneeUserId,
+      clientCaseId: params?.clientCaseId,
+      clientId: params?.clientId,
+      legalEntityId: params?.legalEntityId,
       from: params?.from,
       to: params?.to,
       page: params?.page ?? 1,
@@ -1952,6 +1966,17 @@ export class ApiService {
     });
   }
 
+  async markAllUserNotificationsRead(params?: Pick<UserNotificationsQuery, 'status' | 'type' | 'search'>) {
+    const q = buildQuery({
+      status: params?.status,
+      type: params?.type,
+      search: params?.search,
+    });
+    return this.request<UserNotificationBulkActionResultDto>(`/notifications/inbox/read-all${q}`, {
+      method: 'POST',
+    });
+  }
+
   async archiveUserNotification(id: number) {
     return this.request<UserNotificationDto>(`/notifications/inbox/${id}/archive`, {
       method: 'PATCH',
@@ -1986,6 +2011,13 @@ export class ApiService {
     return this.request<TaskJournalItem>(`/tasks/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status, result }),
+    });
+  }
+
+  async bulkUpdateTaskJournalItems(payload: TaskJournalBulkUpdatePayload) {
+    return this.request<TaskJournalBulkUpdateResult>('/tasks/bulk', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 
@@ -2571,6 +2603,14 @@ export class ApiService {
     return this.request<ClientCase>('/cases', { method: 'POST', body: JSON.stringify(model) });
   }
 
+  async createCaseV2(model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
+    return this.request<ClientCase>('/v2/cases', { method: 'POST', body: JSON.stringify(model) });
+  }
+
+  async getCaseV2(id: number) {
+    return this.request<ClientCase>(`/v2/cases/${id}`);
+  }
+
   async updateCase(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
     return this.request<ClientCase>(`/cases/${id}`, { method: 'PUT', body: JSON.stringify(model) });
   }
@@ -2597,7 +2637,30 @@ export class ApiService {
     legalEntityId?: number;
     status?: string;
     search?: string;
-    sortBy?: 'createdAt' | 'title' | 'status';
+    responsibleUserId?: number;
+    caseType?: string;
+    priority?: string;
+    from?: string;
+    to?: string;
+    minFee?: number;
+    maxFee?: number;
+    scope?: 'all' | 'active' | 'archive' | 'mine' | string;
+    sortBy?:
+      | 'createdAt'
+      | 'title'
+      | 'status'
+      | 'caseNumber'
+      | 'client'
+      | 'caseType'
+      | 'stage'
+      | 'responsible'
+      | 'startDate'
+      | 'dueDate'
+      | 'feeAmount'
+      | 'priority'
+      | 'court'
+      | 'nextHearingAt'
+      | 'lastViewedAt';
     sortDir?: SortDir;
     page?: number;
     pageSize?: number;
@@ -2608,6 +2671,231 @@ export class ApiService {
       pageSize: params?.pageSize ?? 50,
     });
     return this.request<PagedResult<ClientCase>>(`/v2/cases${q}`);
+  }
+
+  async bulkUpdateCases(payload: { ids: number[]; status?: string; responsibleUserId?: number; stage?: string; priority?: string }) {
+    return this.request<{ updated: number; requested: number }>('/v2/cases/bulk-update', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async markCaseActivity(caseId: number, payload?: { confirmed?: boolean }) {
+    return this.request<ClientCaseActivity>(`/v2/cases/${caseId}/activity`, {
+      method: 'POST',
+      body: JSON.stringify(payload ?? {}),
+    });
+  }
+
+  async addCaseHistoryEntry(caseId: number, payload: { text: string }) {
+    return this.request<ClientCaseActivity>(`/v2/cases/${caseId}/history`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getCaseTimeline(caseId: number) {
+    return this.request<ClientCaseTimelineEntry[]>(`/v2/cases/${caseId}/timeline`);
+  }
+
+  async getCaseConversation(caseId: number) {
+    return this.request<ClientCaseConversationEntry[]>(`/v2/cases/${caseId}/conversation`);
+  }
+
+  async addCaseConversationEntry(caseId: number, payload: { text: string }) {
+    return this.request<ClientCaseConversationEntry[]>(`/v2/cases/${caseId}/conversation`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getCaseSummary(caseId: number) {
+    return this.request<ClientCaseSummary>(`/v2/cases/${caseId}/summary`);
+  }
+
+  async getCaseFinance(caseId: number) {
+    return this.request<ClientCaseFinanceDetail>(`/v2/cases/${caseId}/finance`);
+  }
+
+  async runCaseCourtSync(caseId: number) {
+    return this.request<ClientCaseCourtSyncRun>(`/v2/cases/${caseId}/court-sync/run`, {
+      method: 'POST',
+    });
+  }
+
+  async getCaseCourtSyncLogs(caseId: number) {
+    return this.request<ClientCaseCourtSyncLog[]>(`/v2/cases/${caseId}/court-sync/logs`);
+  }
+
+  async getCaseRelatedParties(caseId: number) {
+    return this.request<ClientCaseRelatedParty[]>(`/v2/cases/${caseId}/related-parties`);
+  }
+
+  async addCaseRelatedParty(caseId: number, payload: { sourceType: string; sourceId: number; role?: string; notes?: string }) {
+    return this.request<ClientCaseRelatedParty>(`/v2/cases/${caseId}/related-parties`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteCaseRelatedParty(caseId: number, relatedPartyId: number) {
+    return this.request<void>(`/v2/cases/${caseId}/related-parties/${relatedPartyId}`, { method: 'DELETE' });
+  }
+
+  async getCaseDocuments(caseId: number) {
+    return this.request<ClientCaseDocument[]>(`/v2/cases/${caseId}/documents`);
+  }
+
+  async getCaseDocumentRegistry(params?: {
+    clientCaseId?: number;
+    search?: string;
+    documentType?: string;
+    status?: string;
+    sourceTaskId?: number;
+    latestOnly?: boolean;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      clientCaseId: params?.clientCaseId,
+      search: params?.search,
+      documentType: params?.documentType,
+      status: params?.status,
+      sourceTaskId: params?.sourceTaskId,
+      latestOnly: params?.latestOnly,
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 50,
+    });
+    return this.request<PagedResult<ClientCaseDocument>>(`/case-documents${q}`);
+  }
+
+  async getCaseDocumentTemplates() {
+    return this.request<ClientCaseDocumentTemplate[]>('/v2/cases/document-templates');
+  }
+
+  async createCaseDocumentTemplate(payload: Partial<ClientCaseDocumentTemplate> & { key?: string; label?: string; name?: string; content?: string; html?: string }) {
+    return this.request<ClientCaseDocumentTemplate>('/document-templates', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCaseDocumentTemplate(templateKey: string, payload: Partial<ClientCaseDocumentTemplate> & { label?: string; name?: string; content?: string; html?: string }) {
+    return this.request<ClientCaseDocumentTemplate>(`/document-templates/${encodeURIComponent(templateKey)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async renderCaseDocumentTemplate(templateKey: string, payload: { clientCaseId: number; documentType?: string }) {
+    return this.request<RenderedCaseDocumentTemplate>(`/document-templates/${encodeURIComponent(templateKey)}/render`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getCaseDocumentTypes() {
+    return this.request<string[]>('/v2/cases/document-types');
+  }
+
+  async getCaseDocument(documentId: number) {
+    return this.request<ClientCaseDocument>(`/case-documents/${documentId}`);
+  }
+
+  async uploadCaseDocument(caseId: number, file: File, payload?: { documentType?: string; status?: string; documentKey?: string }) {
+    const form = new FormData();
+    form.append('file', file);
+    if (payload?.documentType) {
+      form.append('documentType', payload.documentType);
+    }
+    if (payload?.status) {
+      form.append('status', payload.status);
+    }
+    if (payload?.documentKey) {
+      form.append('documentKey', payload.documentKey);
+    }
+
+    return this.request<ClientCaseDocument>(`/v2/cases/${caseId}/documents`, {
+      method: 'POST',
+      body: form,
+    });
+  }
+
+  async uploadCaseDocumentVersion(documentId: number, file: File, payload?: { documentType?: string; status?: string }) {
+    const form = new FormData();
+    form.append('file', file);
+    if (payload?.documentType) {
+      form.append('documentType', payload.documentType);
+    }
+    if (payload?.status) {
+      form.append('status', payload.status);
+    }
+
+    return this.request<ClientCaseDocument>(`/case-documents/${documentId}/versions`, {
+      method: 'POST',
+      body: form,
+    });
+  }
+
+  async generateCaseDocumentTemplate(caseId: number, payload: { templateKey?: string; documentType?: string; status?: string }) {
+    return this.request<ClientCaseDocument>(`/v2/cases/${caseId}/documents/generate-template`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async downloadCaseDocument(caseId: number, documentId: number) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/v2/cases/${caseId}/documents/${documentId}/download`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')),
+    };
+  }
+
+  async downloadCaseDocumentById(documentId: number) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/case-documents/${documentId}/download`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')),
+    };
+  }
+
+  async updateCaseDocument(caseId: number, documentId: number, payload: { documentType?: string; status?: string }) {
+    return this.request<ClientCaseDocument>(`/v2/cases/${caseId}/documents/${documentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCaseDocumentById(documentId: number, payload: { documentType?: string; status?: string }) {
+    return this.request<ClientCaseDocument>(`/case-documents/${documentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteCaseDocument(caseId: number, documentId: number) {
+    return this.request<void>(`/v2/cases/${caseId}/documents/${documentId}`, { method: 'DELETE' });
   }
 
   // ===== Dictionaries =====
@@ -2879,6 +3167,14 @@ export class ApiService {
   }) {
     const q = buildQuery(params ?? {});
     return this.request<ProjectReport>(`/reports/projects${q}`);
+  }
+
+  async getLegalWorkReport(params?: {
+    from?: string;
+    to?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<LegalWorkReport>(`/reports/legal-work${q}`);
   }
 
   async getDirectionReport(params?: {
@@ -3639,6 +3935,17 @@ import type {
   ClientStatus,
   MonthlyStats,
   ClientCase,
+  ClientCaseActivity,
+  ClientCaseConversationEntry,
+  ClientCaseCourtSyncLog,
+  ClientCaseCourtSyncRun,
+  ClientCaseDocument,
+  ClientCaseDocumentTemplate,
+  RenderedCaseDocumentTemplate,
+  ClientCaseFinanceDetail,
+  ClientCaseRelatedParty,
+  ClientCaseSummary,
+  ClientCaseTimelineEntry,
   AccountSuggestion,
   SummaryStats,
   PeriodKey,
@@ -3665,6 +3972,7 @@ import type {
   MoneyCategoryReport,
   CounterpartyReport,
   ProjectReport,
+  LegalWorkReport,
   DirectionReport,
   SalesPointReport,
   VatReport,
@@ -3712,6 +4020,8 @@ import type {
   TaskJournalCaseAutomationCandidate,
   TaskJournalComment,
   TaskJournalFile,
+  TaskJournalBulkUpdatePayload,
+  TaskJournalBulkUpdateResult,
   TaskJournalItem,
   TaskJournalNotification,
   TaskJournalStatus,

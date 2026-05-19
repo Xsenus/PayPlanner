@@ -153,12 +153,13 @@ interface ClientDetailProps {
     initialValues?: Partial<ActInput> & { amount?: number | null },
     options?: { section?: "acts" | "accounts" },
   ) => void;
+  onOpenCasePage?: (caseId: number, clientId: number) => void;
 }
 
 type PaymentUpsert = PaymentPayload | ({ id: number } & PaymentPayload);
 
 type NormalizedStatus = "completed" | "pending" | "overdue";
-type ClientCaseListStatus = "all" | "open" | "hold" | "closed";
+type ClientCaseListStatus = "all" | "open" | "hold" | "closed" | "lost";
 type InvoiceViewMode = "income" | "expenseClient" | "supplier";
 type PaymentViewMode = "default" | "expenseClient" | "supplier";
 
@@ -563,6 +564,8 @@ function caseStatusLabel(s?: string) {
   if (v.includes("open")) return "Открыто";
   if (v.includes("hold")) return "Приостановлено";
   if (v.includes("closed")) return "Закрыто";
+  if (v.includes("lost")) return "Проиграно";
+  if (v.includes("проигр")) return "Проиграно";
   return s ?? "";
 }
 
@@ -573,6 +576,8 @@ function normalizeCaseStatusFilter(
   if (value.includes("open")) return "open";
   if (value.includes("hold")) return "hold";
   if (value.includes("closed")) return "closed";
+  if (value.includes("lost")) return "lost";
+  if (value.includes("проигр")) return "lost";
   return "";
 }
 
@@ -1315,6 +1320,7 @@ export function ClientDetail({
   initialSection,
   onOpenInvoicePage,
   onCreateActPage,
+  onOpenCasePage,
 }: ClientDetailProps) {
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
@@ -3356,7 +3362,12 @@ export function ClientDetail({
       const matchesSearch =
         query.length === 0 ||
         caseItem.title?.toLowerCase().includes(query) ||
-        caseItem.description?.toLowerCase().includes(query);
+        caseItem.description?.toLowerCase().includes(query) ||
+        caseItem.caseNumber?.toLowerCase().includes(query) ||
+        caseItem.caseType?.toLowerCase().includes(query) ||
+        caseItem.stage?.toLowerCase().includes(query) ||
+        caseItem.courtName?.toLowerCase().includes(query) ||
+        caseItem.courtCaseNumber?.toLowerCase().includes(query);
       const normalizedStatus = normalizeCaseStatusFilter(caseItem.status);
       const matchesStatus =
         caseStatusFilter === "all" || normalizedStatus === caseStatusFilter;
@@ -3867,6 +3878,7 @@ export function ClientDetail({
         open: "Открыто",
         hold: "Приостановлено",
         closed: "Закрыто",
+        lost: "Проиграно",
       };
       badges.push(`Статус: ${statusLabels[caseStatusFilter]}`);
     }
@@ -4430,6 +4442,12 @@ export function ClientDetail({
     }
   }, [canManageClientResponsible, ensureActLookups, invoiceModalOpen]);
 
+  useEffect(() => {
+    if (caseModalOpen) {
+      void ensureActLookups({ includeClients: false });
+    }
+  }, [caseModalOpen, ensureActLookups]);
+
   const openAddPayment = () => {
     if (!clientPermissions.canCreate) {
       showPermissionWarning(
@@ -4901,6 +4919,32 @@ export function ClientDetail({
       status: (patch.status ??
         editingCase?.status ??
         "Open") as ClientCase["status"],
+      caseNumber: (patch.caseNumber ?? editingCase?.caseNumber ?? "").trim(),
+      caseType: (patch.caseType ?? editingCase?.caseType ?? "").trim(),
+      stage: (patch.stage ?? editingCase?.stage ?? "").trim(),
+      responsibleUserId:
+        patch.responsibleUserId === undefined
+          ? editingCase?.responsibleUserId ?? null
+          : patch.responsibleUserId,
+      startDate:
+        patch.startDate === undefined
+          ? editingCase?.startDate ?? null
+          : patch.startDate,
+      dueDate:
+        patch.dueDate === undefined ? editingCase?.dueDate ?? null : patch.dueDate,
+      feeAmount: patch.feeAmount ?? editingCase?.feeAmount ?? 0,
+      priority: patch.priority ?? editingCase?.priority ?? "normal",
+      courtName: (patch.courtName ?? editingCase?.courtName ?? "").trim(),
+      courtCaseNumber: (
+        patch.courtCaseNumber ??
+        editingCase?.courtCaseNumber ??
+        ""
+      ).trim(),
+      courtUrl: (patch.courtUrl ?? editingCase?.courtUrl ?? "").trim(),
+      nextHearingAt:
+        patch.nextHearingAt === undefined
+          ? editingCase?.nextHearingAt ?? null
+          : patch.nextHearingAt,
     };
 
     if (caseMode === "edit" && editingCase) {
@@ -7869,6 +7913,7 @@ export function ClientDetail({
                             <option value="open">Открыто</option>
                             <option value="hold">Приостановлено</option>
                             <option value="closed">Закрыто</option>
+                            <option value="lost">Проиграно</option>
                           </select>
                         </ClientSectionFilterField>
                       </ClientSectionFilterPanel>
@@ -7990,6 +8035,23 @@ export function ClientDetail({
                                       "Описание дела пока не заполнено."}
                                   </p>
                                   <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                                    {caseItem.caseNumber ? (
+                                      <span>№ {caseItem.caseNumber}</span>
+                                    ) : null}
+                                    {caseItem.caseType ? (
+                                      <span>Тип: {caseItem.caseType}</span>
+                                    ) : null}
+                                    {caseItem.stage ? (
+                                      <span>Этап: {caseItem.stage}</span>
+                                    ) : null}
+                                    {caseItem.dueDate ? (
+                                      <span>Срок: {toRuDate(caseItem.dueDate)}</span>
+                                    ) : null}
+                                    {caseItem.feeAmount ? (
+                                      <span>
+                                        Гонорар: {formatCurrencySmart(caseItem.feeAmount).full}
+                                      </span>
+                                    ) : null}
                                     <span>
                                       Создано: {toRuDate(caseItem.createdAt)}
                                     </span>
@@ -7997,6 +8059,15 @@ export function ClientDetail({
                                       Платежей: {casePaymentsCount}
                                     </span>
                                   </div>
+                                  {caseItem.courtName || caseItem.courtCaseNumber || caseItem.nextHearingAt ? (
+                                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                                      {caseItem.courtName ? <span>Суд: {caseItem.courtName}</span> : null}
+                                      {caseItem.courtCaseNumber ? <span>Судебное № {caseItem.courtCaseNumber}</span> : null}
+                                      {caseItem.nextHearingAt ? (
+                                        <span>Заседание: {toRuDate(caseItem.nextHearingAt)}</span>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
                                   <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
                                     {caseAuditSummary(caseItem)}
                                   </div>
@@ -8089,6 +8160,15 @@ export function ClientDetail({
                                   >
                                     <WalletCards size={16} /> Платежи
                                   </button>
+                                  {onOpenCasePage ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => onOpenCasePage(caseItem.id, clientId)}
+                                      className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-50"
+                                    >
+                                      <FileCheck2 size={16} /> Открыть дело
+                                    </button>
+                                  ) : null}
                                   {clientPermissions.canEdit ? (
                                     <button
                                       type="button"
@@ -10550,6 +10630,8 @@ export function ClientDetail({
                 ? deleteCase
                 : undefined
             }
+            responsibles={actResponsibles}
+            allowEdit={caseMode === "edit" ? clientPermissions.canEdit : clientPermissions.canCreate}
           />
         )}
 

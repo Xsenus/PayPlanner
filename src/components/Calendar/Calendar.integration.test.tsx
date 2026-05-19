@@ -150,10 +150,17 @@ vi.mock('../ui/TablePagination', () => ({
   TablePagination: () => null,
 }));
 
+vi.mock('../Tasks/TaskJournal', () => ({
+  TaskJournal: ({ initialView }: { initialView?: string }) => (
+    <div data-testid="crm-task-calendar">{initialView}</div>
+  ),
+}));
+
 describe('Calendar integration', () => {
   beforeEach(() => {
     paymentsResult.payments = [];
     localStorage.removeItem('pp.calendar_view');
+    localStorage.removeItem('pp.calendar_section_mode');
   });
 
   it('opens the existing payment modal for invoice-managed payments from the calendar grid', async () => {
@@ -187,5 +194,15 @@ describe('Calendar integration', () => {
     await waitFor(() => {
       expect(screen.getByTestId('calendar-payment-modal').textContent).toContain('159');
     });
+  });
+
+  it('switches to the CRM work calendar without mixing it with finance payments', async () => {
+    render(<Calendar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'CRM' }));
+
+    expect((await screen.findByTestId('crm-task-calendar')).textContent).toContain('timeline');
+    expect(screen.queryByTestId('calendar-grid')).toBeNull();
+    expect(localStorage.getItem('pp.calendar_section_mode')).toBe('crm');
   });
 });

@@ -387,6 +387,7 @@ export function CounterpartyPickerModal({
                 return (
                   <div
                     key={selectionKey(selection)}
+                    data-counterparty-option={selectionKey(selection)}
                     className="flex flex-col gap-3 border-b border-slate-100 px-3 py-3 last:border-0 sm:flex-row sm:items-start sm:justify-between"
                   >
                     <div className="min-w-0">

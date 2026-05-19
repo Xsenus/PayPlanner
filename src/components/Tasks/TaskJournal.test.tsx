@@ -20,6 +20,7 @@ const apiMock = vi.hoisted(() => ({
   createTaskJournalItem: vi.fn(),
   updateTaskJournalItem: vi.fn(),
   updateTaskJournalStatus: vi.fn(),
+  bulkUpdateTaskJournalItems: vi.fn(),
   updateTaskJournalApproval: vi.fn(),
   getTaskJournalComments: vi.fn(),
   createTaskJournalComment: vi.fn(),
@@ -247,6 +248,7 @@ describe('TaskJournal', () => {
     apiMock.createTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalStatus.mockResolvedValue(createTask({ status: 'done', result: 'Готово' }));
+    apiMock.bulkUpdateTaskJournalItems.mockResolvedValue({ requested: 1, updated: 1, skipped: 0 });
     apiMock.updateTaskJournalApproval.mockResolvedValue(createTask({ status: 'approved' }));
     apiMock.getTaskJournalComments.mockResolvedValue([]);
     apiMock.createTaskJournalComment.mockResolvedValue({
@@ -295,6 +297,35 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Наименование задачи')).toBeTruthy();
     expect(screen.getByText('Иванов Иван Иванович')).toBeTruthy();
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
+  });
+
+  it('updates selected tasks through the bulk actions panel', async () => {
+    const firstTask = createTask({ id: 101, title: 'Первая задача' });
+    const secondTask = createTask({ id: 102, title: 'Вторая задача' });
+
+    await renderJournal([firstTask, secondTask], {
+      waitForTitle: 'Первая задача',
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 9, name: 'Юрист отдела', email: 'lawyer@example.com' },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Первая задача' }));
+
+    expect(screen.getByTestId('task-bulk-actions')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Массово назначить исполнителя'), { target: { value: '9' } });
+    fireEvent.change(screen.getByLabelText('Массово изменить приоритет'), { target: { value: 'urgent' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+
+    await waitFor(() => expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledTimes(1));
+    expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledWith({
+      ids: [101],
+      assigneeUserId: 9,
+      priority: 'urgent',
+    });
+    expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Обновлено задач: 1'), 'Журнал задач');
   });
 
   it('opens client card from the counterparty link in the journal', async () => {
@@ -368,6 +399,24 @@ describe('TaskJournal', () => {
     expect(screen.getByText(approvalTask.title)).toBeTruthy();
     expect(screen.queryByText(laterApprovalTask.title)).toBeNull();
     expect(screen.queryByText(regularTask.title)).toBeNull();
+  });
+
+  it('shows approval action buttons only for the current approver in queue', async () => {
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { userId: 9, role: 'approver', displayName: 'Первый согласующий', sortOrder: 0, approvalStatus: 'pending' },
+          { userId: 7, role: 'approver', displayName: 'Администратор', sortOrder: 1, approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getByTitle('Редактировать'));
+    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+
+    expect(screen.queryByRole('button', { name: 'Согласовать' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'На доработку' })).toBeNull();
   });
 
   it('shows agreed tasks as approved for the executor after approval', async () => {
@@ -484,6 +533,31 @@ describe('TaskJournal', () => {
       expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
         dateFrom: '2026-05-01',
         dateTo: '2026-05-31',
+      });
+    });
+  });
+
+  it('filters tasks by priority and remembers the selected priority', async () => {
+    await renderJournal([
+      createTask({
+        id: 101,
+        title: 'Обычная задача',
+        priority: 'normal',
+      }),
+      createTask({
+        id: 102,
+        title: 'Срочная задача',
+        priority: 'urgent',
+      }),
+    ]);
+
+    fireEvent.change(screen.getByTestId('task-priority-filter'), { target: { value: 'urgent' } });
+
+    expect(await screen.findByText('Срочная задача')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Обычная задача')).toBeNull());
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
+        priorityFilter: 'urgent',
       });
     });
   });
@@ -713,6 +787,7 @@ describe('TaskJournal', () => {
       { id: 100, clientId: 10, title: 'Открытое дело', status: 'Open', createdAt: todayAt(8) } as ClientCase,
       { id: 101, clientId: 10, title: 'Приостановленное дело', status: 'OnHold', createdAt: todayAt(8) } as ClientCase,
       { id: 102, clientId: 10, title: 'Закрытое дело', status: 'Closed', createdAt: todayAt(8) } as ClientCase,
+      { id: 107, clientId: 10, title: 'Проигранное дело', status: 'Lost', createdAt: todayAt(8) } as ClientCase,
       { id: 103, clientId: 10, title: 'Закрытое импортом', status: 'Закрытое', createdAt: todayAt(8) } as ClientCase,
       { id: 104, clientId: 10, title: 'Завершенное дело', status: 'Завершено', createdAt: todayAt(8) } as ClientCase,
       { id: 105, clientId: 10, title: 'Архивное дело', status: 'Archived', createdAt: todayAt(8) } as ClientCase,
@@ -733,6 +808,7 @@ describe('TaskJournal', () => {
     expect(options).toContain('Открытое дело');
     expect(options).toContain('Приостановленное дело');
     expect(options).not.toContain('Закрытое дело');
+    expect(options).not.toContain('Проигранное дело');
     expect(options).not.toContain('Закрытое импортом');
     expect(options).not.toContain('Завершенное дело');
     expect(options).not.toContain('Архивное дело');
@@ -1038,6 +1114,11 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Календарь задач')).toBeTruthy();
     expect(screen.getByText('Загрузка за день')).toBeTruthy();
     expect(screen.getAllByText('Тестовая задача').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('task-calendar-mobile-strip')).toBeTruthy();
+    const calendarTask = screen.getByTestId('task-calendar-task-101');
+    expect(calendarTask.getAttribute('title')).toContain('Статус: Новая');
+    expect(calendarTask.getAttribute('title')).toContain('Исполнитель: Администратор');
+    expect(screen.getByTestId('task-calendar-tooltip-101').textContent).toContain('Дело: БАНКРОТСТВО');
   });
 
   it('can open directly in calendar mode from the journal submenu', async () => {
@@ -1089,6 +1170,18 @@ describe('TaskJournal', () => {
     expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
       plannedDurationMinutes: 75,
     }));
+  });
+
+  it('highlights overlapping tasks in the task calendar', async () => {
+    await renderJournal([
+      createTask({ dueAt: todayAt(11), plannedDurationMinutes: 60, assigneeUserId: 7, assigneeName: 'Администратор' }),
+      createTask({ id: 102, title: 'Вторая задача', dueAt: todayAt(11, 30), plannedDurationMinutes: 60, assigneeUserId: 7, assigneeName: 'Администратор' }),
+    ], { initialView: 'calendar' });
+
+    expect(screen.getByText(/Есть риск конфликта/i)).toBeTruthy();
+    expect(screen.getAllByText('Конфликт').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('task-calendar-task-101').className).toContain('border-rose-200');
+    expect(screen.getByTestId('task-calendar-task-101').getAttribute('title')).toContain('Конфликт: задача пересекается');
   });
 
   it('renders a weekly workload timeline with color legend', async () => {

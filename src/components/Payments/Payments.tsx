@@ -9,7 +9,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
-import type { ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentPayload, PaymentStatus } from '../../types';
+import type { ClientCase, ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -35,6 +35,8 @@ interface PaymentsProps {
   onOpenClient?: (clientId: number, caseId?: number) => void;
   routePaymentId?: number | null;
   onRoutePaymentChange?: (paymentId: number | null) => void;
+  initialCreatePayment?: PaymentCreatePrefill | null;
+  onInitialCreatePaymentHandled?: (key: number) => void;
   defaultType?: TypeFilter;
   lockType?: boolean;
   titleKey?: string;
@@ -188,6 +190,15 @@ function MultiSelect({
   );
 }
 
+interface PaymentCreatePrefill {
+  key: number;
+  type: Payment['type'];
+  clientId?: number | null;
+  legalEntityId?: number | null;
+  clientCaseId?: number | null;
+  casesPrefetch?: ClientCase[];
+}
+
 interface ToolbarIconButtonProps {
   label: string;
   icon: JSX.Element;
@@ -259,6 +270,8 @@ export function Payments({
   onOpenClient,
   routePaymentId,
   onRoutePaymentChange,
+  initialCreatePayment,
+  onInitialCreatePaymentHandled,
   defaultType,
   lockType = false,
   titleKey,
@@ -293,6 +306,7 @@ export function Payments({
     defaultType === 'Expense' ? 'Expense' : 'Income',
   );
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [paymentCreatePrefill, setPaymentCreatePrefill] = useState<PaymentCreatePrefill | null>(null);
   const [routePaymentPreviewOpen, setRoutePaymentPreviewOpen] = useState(false);
   const [routePaymentPreviewId, setRoutePaymentPreviewId] = useState<number | null>(null);
   const [routePaymentPreview, setRoutePaymentPreview] = useState<Payment | null>(null);
@@ -836,10 +850,32 @@ export function Payments({
       }
       setModalType(type);
       setEditingPayment(null);
+      setPaymentCreatePrefill(null);
       setIsModalOpen(true);
     },
     [paymentsPermissions.canCreate, showPermissionNotice, t],
   );
+
+  useEffect(() => {
+    if (!initialCreatePayment) return;
+    if (!paymentsPermissions.canCreate) {
+      showPermissionNotice(t('permissionNoAddPayment') ?? 'Недостаточно прав для добавления платежей.');
+      onInitialCreatePaymentHandled?.(initialCreatePayment.key);
+      return;
+    }
+
+    setPaymentCreatePrefill(initialCreatePayment);
+    setModalType(initialCreatePayment.type);
+    setEditingPayment(null);
+    setIsModalOpen(true);
+    onInitialCreatePaymentHandled?.(initialCreatePayment.key);
+  }, [
+    initialCreatePayment,
+    onInitialCreatePaymentHandled,
+    paymentsPermissions.canCreate,
+    showPermissionNotice,
+    t,
+  ]);
 
   const handleEditPayment = useCallback(
     (payment: Payment) => {
@@ -848,6 +884,7 @@ export function Payments({
         return false;
       }
       setEditingPayment(payment);
+      setPaymentCreatePrefill(null);
       setModalType(payment.type);
       setIsModalOpen(true);
     },
@@ -1004,6 +1041,7 @@ export function Payments({
 
         setIsModalOpen(false);
         setEditingPayment(null);
+        setPaymentCreatePrefill(null);
       } catch (error) {
         const message = extractDisplayErrorMessage(error, t('paymentsSaveError') ?? 'Не удалось сохранить платёж.');
         toast.error(message, t('payments') ?? 'Платежи');
@@ -1145,6 +1183,7 @@ export function Payments({
   const handleCloseModal = useCallback(() => {
     setIsModalOpen(false);
     setEditingPayment(null);
+    setPaymentCreatePrefill(null);
   }, []);
 
   const handleRefresh = useCallback(async () => {
@@ -1987,6 +2026,10 @@ export function Payments({
         }}
         payment={editingPayment}
         type={modalType}
+        defaultClientId={!editingPayment && !paymentCreatePrefill?.legalEntityId ? paymentCreatePrefill?.clientId ?? undefined : undefined}
+        defaultLegalEntityId={!editingPayment ? paymentCreatePrefill?.legalEntityId ?? undefined : undefined}
+        defaultClientCaseId={!editingPayment ? paymentCreatePrefill?.clientCaseId ?? undefined : undefined}
+        casesPrefetch={!editingPayment ? paymentCreatePrefill?.casesPrefetch : undefined}
         onDelete={
           paymentsPermissions.canDelete
           && (!editingPayment || (editingPayment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))

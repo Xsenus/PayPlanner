@@ -99,6 +99,7 @@ export function TableColumnSettings<K extends string>({
 
               <input
                 type="checkbox"
+                aria-label={`Показать колонку ${column.label}`}
                 checked={isVisible}
                 onChange={() => onToggleColumn(columnKey)}
                 className="h-4 w-4 rounded border-slate-300 text-blue-600"

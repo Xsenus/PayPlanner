@@ -1,4 +1,4 @@
-import { useMemo, useState, useDeferredValue, useEffect, useRef } from 'react';
+import { lazy, Suspense, useMemo, useState, useDeferredValue, useEffect, useRef } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, Table, X } from 'lucide-react';
 import { CalendarGrid } from './CalendarGrid';
 import { PaymentModal } from './PaymentModal';
@@ -25,6 +25,7 @@ type StatusFilter = 'All' | 'Pending' | 'Completed' | 'Overdue';
 
 type StatMetric = 'completed' | 'pending' | 'overdue' | 'overall' | 'debt';
 type CalendarViewMode = 'calendar' | 'table';
+type CalendarSectionMode = 'finance' | 'crm';
 type TableFilter = {
   type?: 'Income' | 'Expense';
   statuses?: Payment['status'][];
@@ -33,7 +34,9 @@ type TableFilter = {
 };
 
 const VIEW_MODE_STORAGE_KEY = 'pp.calendar_view';
+const SECTION_MODE_STORAGE_KEY = 'pp.calendar_section_mode';
 const CALENDAR_TABLE_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const TaskJournal = lazy(() => import('../Tasks/TaskJournal').then((module) => ({ default: module.TaskJournal })));
 const CALENDAR_PAYMENT_COLUMN_CONFIGS = [
   { key: 'date', defaultVisible: true, defaultWidth: 140 },
   { key: 'plannedDate', defaultVisible: false, defaultWidth: 150 },
@@ -82,6 +85,17 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'Income' | 'Expense'>('Income');
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [sectionMode, setSectionMode] = useState<CalendarSectionMode>(() => {
+    try {
+      const stored = localStorage.getItem(SECTION_MODE_STORAGE_KEY);
+      if (stored === 'finance' || stored === 'crm') {
+        return stored;
+      }
+    } catch {
+      /** */
+    }
+    return 'finance';
+  });
 
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
@@ -456,6 +470,15 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     setViewMode(mode);
   };
 
+  const handleSectionModeChange = (mode: CalendarSectionMode) => {
+    setSectionMode(mode);
+    try {
+      localStorage.setItem(SECTION_MODE_STORAGE_KEY, mode);
+    } catch {
+      /** */
+    }
+  };
+
   const handleClearTableFilter = () => setTableFilter(null);
 
   const handleStatCardSelect = ({
@@ -508,6 +531,58 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-[calc(100vw-2rem)] mx-auto p-4 sm:p-6">
+        <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-slate-900">Календарь</div>
+            <div className="text-xs text-slate-500">
+              Финансы и рабочий CRM-календарь разделены, чтобы платежи не смешивались с задачами и сроками.
+            </div>
+          </div>
+          <div className="inline-flex rounded-xl bg-slate-100 p-1">
+            <button
+              type="button"
+              onClick={() => handleSectionModeChange('finance')}
+              aria-pressed={sectionMode === 'finance'}
+              className={[
+                'rounded-lg px-4 py-2 text-sm font-semibold transition',
+                sectionMode === 'finance'
+                  ? 'bg-white text-emerald-700 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-800',
+              ].join(' ')}
+            >
+              Финансы
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSectionModeChange('crm')}
+              aria-pressed={sectionMode === 'crm'}
+              className={[
+                'rounded-lg px-4 py-2 text-sm font-semibold transition',
+                sectionMode === 'crm'
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-800',
+              ].join(' ')}
+            >
+              CRM
+            </button>
+          </div>
+        </div>
+
+        {sectionMode === 'crm' ? (
+          <Suspense
+            fallback={
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+                Загружаем рабочий календарь...
+              </div>
+            }
+          >
+            <TaskJournal
+              initialView="timeline"
+              onOpenClient={(clientId, caseId) => onOpenClient?.(clientId, caseId ?? undefined)}
+            />
+          </Suspense>
+        ) : (
+          <>
         <div className="mb-4 sm:mb-8">
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 leading-tight text-center sm:text-left">
@@ -830,6 +905,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               : undefined
           }
         />
+          </>
+        )}
       </div>
     </div>
   );

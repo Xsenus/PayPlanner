@@ -54,6 +54,8 @@ function statusOrder(statusRaw?: string): number {
   if (s.includes('open')) return 0;
   if (s.includes('onhold') || s.includes('hold')) return 1;
   if (s.includes('closed')) return 2;
+  if (s.includes('lost')) return 3;
+  if (s.includes('проигр')) return 3;
   return 99;
 }
 
@@ -62,9 +64,11 @@ function caseStatusLabel(statusRaw?: string) {
   if (s.includes('open')) return 'Открыто';
   if (s.includes('onhold') || s.includes('hold')) return 'Приостановлено';
   if (s.includes('closed')) return 'Закрыто';
+  if (s.includes('lost')) return 'Проиграно';
   if (s.includes('в работе') || s.includes('актив')) return 'Открыто';
   if (s.includes('ожид')) return 'Приостановлено';
   if (s.includes('закры')) return 'Закрыто';
+  if (s.includes('проигр')) return 'Проиграно';
   return statusRaw ?? '';
 }
 
@@ -74,6 +78,8 @@ function statusClasses(statusRaw?: string) {
   if (s.includes('onhold') || s.includes('hold'))
     return 'bg-amber-100 text-amber-800 border border-amber-200';
   if (s.includes('closed')) return 'bg-red-100 text-red-700 border border-red-200';
+  if (s.includes('lost')) return 'bg-rose-100 text-rose-700 border border-rose-200';
+  if (s.includes('проигр')) return 'bg-rose-100 text-rose-700 border border-rose-200';
   if (s.includes('overdue') || s.includes('проср'))
     return 'bg-rose-100 text-rose-700 border border-rose-200';
   if (s.includes('pending') || s.includes('ожид'))
@@ -1723,7 +1729,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
 
               const isExpanded = expandedCards.has(client.id);
 
-              const nonClosed = sortedByStatusThenDate.filter((k) => statusOrder(k.status) !== 2);
+              const nonClosed = sortedByStatusThenDate.filter((k) => statusOrder(k.status) < 2);
               const visibleCases = isExpanded
                 ? sortedByStatusThenDate
                 : nonClosed.length

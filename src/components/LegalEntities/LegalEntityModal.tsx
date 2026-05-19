@@ -233,7 +233,7 @@ type LegalEntityCasePayload = Omit<ClientCase, "id" | "createdAt">;
 type LegalEntityInvoiceModalMode = "create" | "edit";
 type LegalEntityActModalMode = "create" | "edit";
 type LegalEntityPaymentModalMode = "create" | "edit";
-type LegalEntityCaseStatusFilter = "all" | "open" | "hold" | "closed";
+type LegalEntityCaseStatusFilter = "all" | "open" | "hold" | "closed" | "lost";
 
 const BACKEND_IMAGE_DATA_URL_MAX_LENGTH = 350_000;
 const LEGAL_ENTITY_REQUEST_BODY_MAX_LENGTH = 900_000;
@@ -283,6 +283,10 @@ const CASE_STATUS_META: Record<
     label: "Закрыто",
     className: "border-slate-200 bg-slate-50 text-slate-600",
   },
+  Lost: {
+    label: "Проиграно",
+    className: "border-rose-200 bg-rose-50 text-rose-700",
+  },
 };
 
 const INVOICE_STATUS_LABELS = {
@@ -325,6 +329,7 @@ function renderCaseStatusBadge(status?: string | null) {
 
 function normalizeCaseStatusFilter(status?: string | null): LegalEntityCaseStatusFilter {
   const value = (status ?? "").toLowerCase();
+  if (value.includes("lost") || value.includes("проигр")) return "lost";
   if (value.includes("closed")) return "closed";
   if (value.includes("hold")) return "hold";
   if (value.includes("open")) return "open";
@@ -2355,6 +2360,32 @@ export function LegalEntityModal({
       title: (patch.title ?? editingCase?.title ?? "").trim(),
       description: patch.description ?? editingCase?.description ?? "",
       status: patch.status ?? editingCase?.status ?? "Open",
+      caseNumber: (patch.caseNumber ?? editingCase?.caseNumber ?? "").trim(),
+      caseType: (patch.caseType ?? editingCase?.caseType ?? "").trim(),
+      stage: (patch.stage ?? editingCase?.stage ?? "").trim(),
+      responsibleUserId:
+        patch.responsibleUserId === undefined
+          ? editingCase?.responsibleUserId ?? null
+          : patch.responsibleUserId,
+      startDate:
+        patch.startDate === undefined
+          ? editingCase?.startDate ?? null
+          : patch.startDate,
+      dueDate:
+        patch.dueDate === undefined ? editingCase?.dueDate ?? null : patch.dueDate,
+      feeAmount: patch.feeAmount ?? editingCase?.feeAmount ?? 0,
+      priority: patch.priority ?? editingCase?.priority ?? "normal",
+      courtName: (patch.courtName ?? editingCase?.courtName ?? "").trim(),
+      courtCaseNumber: (
+        patch.courtCaseNumber ??
+        editingCase?.courtCaseNumber ??
+        ""
+      ).trim(),
+      courtUrl: (patch.courtUrl ?? editingCase?.courtUrl ?? "").trim(),
+      nextHearingAt:
+        patch.nextHearingAt === undefined
+          ? editingCase?.nextHearingAt ?? null
+          : patch.nextHearingAt,
     };
 
     if (caseMode === "edit" && editingCase) {
@@ -2727,7 +2758,12 @@ export function LegalEntityModal({
       const matchesSearch =
         query.length === 0 ||
         clientCase.title?.toLowerCase().includes(query) ||
-        clientCase.description?.toLowerCase().includes(query);
+        clientCase.description?.toLowerCase().includes(query) ||
+        clientCase.caseNumber?.toLowerCase().includes(query) ||
+        clientCase.caseType?.toLowerCase().includes(query) ||
+        clientCase.stage?.toLowerCase().includes(query) ||
+        clientCase.courtName?.toLowerCase().includes(query) ||
+        clientCase.courtCaseNumber?.toLowerCase().includes(query);
       const matchesStatus =
         caseStatusFilter === "all" ||
         normalizeCaseStatusFilter(clientCase.status) === caseStatusFilter;
@@ -2742,7 +2778,7 @@ export function LegalEntityModal({
           acc[key] += 1;
           return acc;
         },
-        { all: legalEntityCases.length, open: 0, hold: 0, closed: 0 },
+        { all: legalEntityCases.length, open: 0, hold: 0, closed: 0, lost: 0 },
       ),
     [legalEntityCases],
   );
@@ -2755,6 +2791,7 @@ export function LegalEntityModal({
         open: "Открыто",
         hold: "Приостановлено",
         closed: "Закрыто",
+        lost: "Проиграно",
       };
       badges.push(`Статус: ${labels[caseStatusFilter]}`);
     }
@@ -3158,6 +3195,7 @@ export function LegalEntityModal({
                   <option value="open">Открыто</option>
                   <option value="hold">Приостановлено</option>
                   <option value="closed">Закрыто</option>
+                  <option value="lost">Проиграно</option>
                 </select>
               </label>
             </div>
@@ -3253,9 +3291,22 @@ export function LegalEntityModal({
                             "Описание дела пока не заполнено."}
                         </p>
                         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                          {caseItem.caseNumber ? <span>№ {caseItem.caseNumber}</span> : null}
+                          {caseItem.caseType ? <span>Тип: {caseItem.caseType}</span> : null}
+                          {caseItem.stage ? <span>Этап: {caseItem.stage}</span> : null}
+                          {caseItem.dueDate ? <span>Срок: {formatDocumentDate(caseItem.dueDate)}</span> : null}
                           <span>Создано: {formatDocumentDate(caseItem.createdAt)}</span>
                           <span>Платежей: {paymentsCount}</span>
                         </div>
+                        {caseItem.courtName || caseItem.courtCaseNumber || caseItem.nextHearingAt ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                            {caseItem.courtName ? <span>Суд: {caseItem.courtName}</span> : null}
+                            {caseItem.courtCaseNumber ? <span>Судебное № {caseItem.courtCaseNumber}</span> : null}
+                            {caseItem.nextHearingAt ? (
+                              <span>Заседание: {formatDocumentDate(caseItem.nextHearingAt)}</span>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
 
                       <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
@@ -4887,6 +4938,7 @@ export function LegalEntityModal({
           }
           onSave={saveLegalEntityCase}
           onDelete={caseMode === "edit" && !readOnly ? removeLegalEntityCase : undefined}
+          responsibles={responsibles}
         />
       ) : null}
 

@@ -83,6 +83,29 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('pageSize=10');
   });
 
+  it('marks all filtered inbox notifications as read', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      updatedCount: 3,
+    }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.markAllUserNotificationsRead({
+      status: 'unread',
+      type: 'taskReminder',
+      search: 'срок',
+    });
+
+    expect(result.updatedCount).toBe(3);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/notifications/inbox/read-all?');
+    expect(String(url)).toContain('status=unread');
+    expect(String(url)).toContain('type=taskReminder');
+    expect(String(url)).toContain('search=');
+    expect(init?.method).toBe('POST');
+  });
+
   it('emits a session-expired event when the API returns 401', async () => {
     const listener = vi.fn();
     window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
