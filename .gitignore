@@ -84,3 +84,4 @@ out/
 .sass-cache/
 .stylelintcache
 .eslintcache
+.serena/
