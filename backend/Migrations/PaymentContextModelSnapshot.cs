@@ -1065,8 +1065,71 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("ActivityConfirmedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ActivityConfirmedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ActivityConfirmedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("AppealDeadlineAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CaseNumber")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CaseType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CassationDeadlineAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ClaimFiledAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Claimant")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("ClientId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("CourtCaseNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CourtDecisionAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CourtName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CourtSecretaryContacts")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CourtUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Courtroom")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
@@ -1076,6 +1139,11 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<string>("CreatedByUserName")
                         .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Defendant")
+                        .IsRequired()
+                        .HasMaxLength(300)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("DeletedAt")
@@ -1093,16 +1161,96 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DocumentsSummary")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventHistory")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("FeeAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("InactivityRemindersEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
 
+                    b.Property<string>("JudgeName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastViewedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LastViewedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastViewedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("LegalEntityId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("MotionDeadlineAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("NextHearingAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ObjectionDeadlineAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Priority")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("normal");
+
+                    b.Property<string>("Representatives")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ResponsibleUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("StartDate")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Strategy")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ThirdParties")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -1121,14 +1269,56 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AppealDeadlineAt")
+                        .HasDatabaseName("IX_ClientCases_AppealDeadlineAt");
+
+                    b.HasIndex("CaseNumber")
+                        .HasDatabaseName("IX_ClientCases_CaseNumber");
+
+                    b.HasIndex("CaseType")
+                        .HasDatabaseName("IX_ClientCases_CaseType");
+
+                    b.HasIndex("CassationDeadlineAt")
+                        .HasDatabaseName("IX_ClientCases_CassationDeadlineAt");
+
+                    b.HasIndex("ClaimFiledAt")
+                        .HasDatabaseName("IX_ClientCases_ClaimFiledAt");
+
+                    b.HasIndex("CourtDecisionAt")
+                        .HasDatabaseName("IX_ClientCases_CourtDecisionAt");
+
+                    b.HasIndex("CourtName")
+                        .HasDatabaseName("IX_ClientCases_CourtName");
+
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("IX_ClientCases_CreatedAt");
 
                     b.HasIndex("DeletedAt")
                         .HasDatabaseName("IX_ClientCase_DeletedAt_Audit");
 
+                    b.HasIndex("DueDate")
+                        .HasDatabaseName("IX_ClientCases_DueDate");
+
+                    b.HasIndex("InactivityRemindersEnabled")
+                        .HasDatabaseName("IX_ClientCases_InactivityRemindersEnabled");
+
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_ClientCase_IsDeleted");
+
+                    b.HasIndex("LastViewedAt")
+                        .HasDatabaseName("IX_ClientCases_LastViewedAt");
+
+                    b.HasIndex("MotionDeadlineAt")
+                        .HasDatabaseName("IX_ClientCases_MotionDeadlineAt");
+
+                    b.HasIndex("ObjectionDeadlineAt")
+                        .HasDatabaseName("IX_ClientCases_ObjectionDeadlineAt");
+
+                    b.HasIndex("Priority")
+                        .HasDatabaseName("IX_ClientCases_Priority");
+
+                    b.HasIndex("ResponsibleUserId")
+                        .HasDatabaseName("IX_ClientCases_ResponsibleUserId");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_ClientCases_Status");
@@ -1152,6 +1342,171 @@ namespace PayPlanner.Api.Migrations
                         {
                             t.HasCheckConstraint("CK_ClientCases_Owner", "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)");
                         });
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseDocument", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DocumentKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StoragePath")
+                        .IsRequired()
+                        .HasMaxLength(600)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StoredFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UploadedByName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("UploadedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_ClientCaseDocuments_ClientCaseId");
+
+                    b.HasIndex("DocumentType")
+                        .HasDatabaseName("IX_ClientCaseDocuments_DocumentType");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_ClientCaseDocuments_Status");
+
+                    b.HasIndex("UploadedByUserId")
+                        .HasDatabaseName("IX_ClientCaseDocuments_UploadedByUserId");
+
+                    b.HasIndex("ClientCaseId", "DocumentKey", "Version")
+                        .HasDatabaseName("IX_ClientCaseDocuments_Case_Document_Version");
+
+                    b.ToTable("ClientCaseDocuments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseRelatedParty", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ClientId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ExternalContactId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("LegalEntityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OrganizationName")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Phone")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_ClientCaseRelatedParties_ClientCaseId");
+
+                    b.HasIndex("ClientId")
+                        .HasDatabaseName("IX_ClientCaseRelatedParties_ClientId");
+
+                    b.HasIndex("ExternalContactId")
+                        .HasDatabaseName("IX_ClientCaseRelatedParties_ExternalContactId");
+
+                    b.HasIndex("LegalEntityId")
+                        .HasDatabaseName("IX_ClientCaseRelatedParties_LegalEntityId");
+
+                    b.HasIndex("SourceType")
+                        .HasDatabaseName("IX_ClientCaseRelatedParties_SourceType");
+
+                    b.ToTable("ClientCaseRelatedParties");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientContract", b =>
@@ -5526,7 +5881,64 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("LegalEntityId")
                         .OnDelete(DeleteBehavior.Cascade);
 
+                    b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Client");
+
+                    b.Navigation("LegalEntity");
+
+                    b.Navigation("ResponsibleUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseDocument", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("Documents")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("UploadedByUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseRelatedParty", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("RelatedParties")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.ExternalContact", "ExternalContact")
+                        .WithMany()
+                        .HasForeignKey("ExternalContactId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
+                        .WithMany()
+                        .HasForeignKey("LegalEntityId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Client");
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("ExternalContact");
 
                     b.Navigation("LegalEntity");
                 });
@@ -6187,9 +6599,13 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
                 {
+                    b.Navigation("Documents");
+
                     b.Navigation("InvoiceClientCases");
 
                     b.Navigation("Payments");
+
+                    b.Navigation("RelatedParties");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientStatusEntity", b =>

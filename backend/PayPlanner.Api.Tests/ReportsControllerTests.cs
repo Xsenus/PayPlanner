@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +14,136 @@ namespace PayPlanner.Api.Tests;
 
 public class ReportsControllerTests
 {
+    [Fact]
+    public async Task LegalWork_GroupsVisibleCasesDeadlinesTasksAndFinance()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = "lawyer",
+            Description = "Юрист",
+        };
+        var responsible = new User
+        {
+            Email = "lawyer@example.test",
+            FullName = "Иванов Иван",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client
+        {
+            Name = "Земцов Виктор",
+            ResponsibleUser = responsible,
+        };
+        db.Roles.Add(role);
+        db.Users.Add(responsible);
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var activeCase = new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "З-1",
+            Title = "Банкротство",
+            CaseType = "Банкротство",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = today.AddDays(-10),
+            StartDate = today.AddDays(-10),
+            DueDate = today.AddDays(-1),
+            AppealDeadlineAt = today.AddDays(3),
+            FeeAmount = 25_000m,
+        };
+        var closedCase = new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "З-2",
+            Title = "Закрытое дело",
+            CaseType = "Наследство",
+            Status = ClientCaseStatus.Closed,
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = today.AddDays(-5),
+            StartDate = today.AddDays(-5),
+            FeeAmount = 5_000m,
+        };
+        var lostCase = new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "З-3",
+            Title = "Проигранное дело",
+            CaseType = "Гражданское",
+            Status = ClientCaseStatus.Lost,
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = today.AddDays(-4),
+            StartDate = today.AddDays(-4),
+            FeeAmount = 7_000m,
+        };
+        db.ClientCases.AddRange(activeCase, closedCase, lostCase);
+        await db.SaveChangesAsync();
+
+        db.Payments.Add(new Payment
+        {
+            ClientId = client.Id,
+            ClientCaseId = activeCase.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 10_000m,
+            PaidAmount = 10_000m,
+            Date = today,
+            PlannedDate = today,
+            CreatedAt = today,
+        });
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ClientId = client.Id,
+            ClientCaseId = activeCase.Id,
+            ObjectName = "Земцов Виктор",
+            Title = "Подготовить документы",
+            AssigneeUserId = responsible.Id,
+            AssigneeName = responsible.FullName,
+            DueAt = today.AddDays(-1).AddHours(9),
+            Status = "onApproval",
+            Priority = "high",
+            Type = "task",
+            CreatedAt = today.AddDays(-2),
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateAdminPrincipal());
+
+        var action = await controller.LegalWork(today.AddDays(-30), today.AddDays(30), CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<LegalWorkReportDto>(ok.Value);
+        Assert.Equal(3, report.TotalCases);
+        Assert.Equal(1, report.ActiveCases);
+        Assert.Equal(1, report.ClosedCases);
+        Assert.Equal(1, report.LostCases);
+        Assert.Equal(1, report.OverdueDeadlineCount);
+        Assert.Equal(1, report.UpcomingDeadlineCount);
+        Assert.Equal(1, report.OpenTaskCount);
+        Assert.Equal(1, report.OverdueTaskCount);
+        Assert.Equal(1, report.OnApprovalTaskCount);
+        Assert.Equal(37_000m, report.FeeTotal);
+        Assert.Equal(10_000m, report.PaidTotal);
+        Assert.Equal(27_000m, report.OutstandingTotal);
+
+        var responsibleRow = Assert.Single(report.Responsibles);
+        Assert.Equal(responsible.Id, responsibleRow.ResponsibleUserId);
+        Assert.Equal("Иванов Иван", responsibleRow.ResponsibleName);
+        Assert.Equal(1, responsibleRow.ActiveCases);
+        Assert.Equal(1, responsibleRow.ClosedCases);
+        Assert.Equal(1, responsibleRow.LostCases);
+        Assert.Equal(1, responsibleRow.OpenTasks);
+        Assert.Equal(1, responsibleRow.OverdueDeadlines);
+
+        Assert.Contains(report.CasesByType, row => row.CaseType == "Банкротство" && row.ActiveTasks == 1);
+        Assert.Contains(report.CasesByStatus, row => row.Status == nameof(ClientCaseStatus.Open) && row.OverdueDeadlines == 1);
+        Assert.Equal("Крайний срок по делу", Assert.Single(report.OverdueDeadlines).DeadlineLabel);
+        Assert.Equal("Срок обжалования", Assert.Single(report.UpcomingDeadlines).DeadlineLabel);
+    }
+
     [Fact]
     public async Task CashFlow_ReturnsOpeningPeriodAndDailyBalances()
     {
@@ -1653,8 +1785,24 @@ public class ReportsControllerTests
             CreatedAt = DateTime.UtcNow,
         };
 
-    private static ReportsController CreateController(PaymentContext db)
-        => new(db, NullLogger<ReportsController>.Instance);
+    private static ReportsController CreateController(PaymentContext db, ClaimsPrincipal? user = null)
+    {
+        var controller = new ReportsController(db, NullLogger<ReportsController>.Instance);
+        if (user is not null)
+        {
+            controller.ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = user },
+            };
+        }
+
+        return controller;
+    }
+
+    private static ClaimsPrincipal CreateAdminPrincipal()
+        => new(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Role, "admin")],
+            authenticationType: "Test"));
 
     private static async Task<PaymentContext> CreateContextAsync()
     {

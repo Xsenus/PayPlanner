@@ -359,6 +359,50 @@ public sealed class NotificationService : INotificationService
         return await SendToUserAsync(task.AssigneeUserId.Value, message, channels, eventKey, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskAssignedAsync(
+        TaskJournalItem task,
+        string actorName,
+        int actorUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var channels = ResolveTaskMessageChannels(task);
+        var recipients = ResolveTaskNotificationUserIds(task, actorUserId);
+        if (recipients.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var message = new NotificationMessage(
+            $"Новая задача: {task.Title}",
+            BuildTaskAssignedBody(task, actorName),
+            Purpose: NotificationPurposes.TaskReminder);
+        var eventKey = $"task:{task.Id}:assigned";
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var userId in recipients)
+        {
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskAssigned,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "blue",
+                    task,
+                    new { actorUserId, actorName, task.AssigneeUserId, task.AssigneeName },
+                    cancellationToken);
+            }
+
+            if (channels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+            }
+        }
+
+        return deliveries;
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCompletedAsync(
         TaskJournalItem task,
         CancellationToken cancellationToken = default)
@@ -393,6 +437,173 @@ public sealed class NotificationService : INotificationService
             [NotificationChannels.Email, NotificationChannels.Telegram],
             $"task:{task.Id}:completed",
             cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskScheduleConflictAsync(
+        TaskJournalItem task,
+        IReadOnlyList<TaskJournalItem> conflicts,
+        string actorName,
+        int actorUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var effectiveConflicts = conflicts
+            .Where(item => item.Id != task.Id)
+            .OrderBy(item => item.DueAt)
+            .ThenBy(item => item.Id)
+            .Take(5)
+            .ToList();
+        if (effectiveConflicts.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var recipients = ResolveTaskNotificationUserIds(task, actorUserId);
+        if (recipients.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var channels = ResolveTaskMessageChannels(task);
+        var message = new NotificationMessage(
+            $"Конфликт расписания: {task.Title}",
+            BuildTaskScheduleConflictBody(task, effectiveConflicts, actorName),
+            Purpose: NotificationPurposes.TaskReminder);
+        var conflictKey = string.Join('-', effectiveConflicts.Select(item => item.Id).OrderBy(id => id));
+        var eventKey = $"task:{task.Id}:schedule-conflict:{task.DueAt:yyyyMMddHHmm}:{task.PlannedDurationMinutes}:{conflictKey}";
+        var deliveries = new List<NotificationDelivery>();
+
+        foreach (var userId in recipients)
+        {
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskScheduleConflict,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "rose",
+                    task,
+                    new
+                    {
+                        actorUserId,
+                        actorName,
+                        conflictTaskIds = effectiveConflicts.Select(item => item.Id).ToArray()
+                    },
+                    cancellationToken);
+            }
+
+            if (channels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+            }
+        }
+
+        return deliveries;
+    }
+
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalRequestedAsync(
+        TaskJournalItem task,
+        string actorName,
+        int actorUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var recipients = ResolveCurrentApproverUserIds(task, actorUserId);
+        if (recipients.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var channels = ResolveTaskMessageChannels(task);
+        var currentApprover = GetCurrentApprover(task);
+        var message = new NotificationMessage(
+            $"Задача ожидает согласования: {task.Title}",
+            BuildTaskApprovalRequestedBody(task, actorName, currentApprover),
+            Purpose: NotificationPurposes.TaskReminder);
+        var eventKey = $"task:{task.Id}:approval-request:{currentApprover?.Id ?? 0}:{DateTime.UtcNow:yyyyMMddHHmmssfff}";
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var userId in recipients)
+        {
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskApprovalRequested,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "violet",
+                    task,
+                    new { actorUserId, actorName, currentApproverId = currentApprover?.Id },
+                    cancellationToken);
+            }
+
+            if (channels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+            }
+        }
+
+        return deliveries;
+    }
+
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(
+        TaskJournalItem task,
+        TaskJournalParticipant approver,
+        string decision,
+        string actorName,
+        int actorUserId,
+        string? resolution = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.Equals(decision, "approved", StringComparison.OrdinalIgnoreCase)
+            && IsTaskWaitingForNextApprover(task))
+        {
+            return await NotifyTaskApprovalRequestedAsync(task, actorName, actorUserId, cancellationToken);
+        }
+
+        var isRevision = string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase);
+        var type = isRevision ? UserNotificationTypes.TaskRevisionRequested : UserNotificationTypes.TaskApproved;
+        var tone = isRevision ? "orange" : "emerald";
+        var subject = isRevision
+            ? $"Задача возвращена на доработку: {task.Title}"
+            : $"Задача согласована: {task.Title}";
+        var recipients = ResolveApprovalDecisionRecipientUserIds(task, actorUserId);
+        if (recipients.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var channels = ResolveTaskMessageChannels(task);
+        var message = new NotificationMessage(
+            subject,
+            BuildTaskApprovalDecisionBody(task, approver, decision, actorName, resolution),
+            Purpose: NotificationPurposes.TaskReminder);
+        var eventKey = $"task:{task.Id}:approval-decision:{approver.Id}:{decision}:{DateTime.UtcNow:yyyyMMddHHmmssfff}";
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var userId in recipients)
+        {
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    type,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    tone,
+                    task,
+                    new { actorUserId, actorName, approverId = approver.Id, decision, resolution },
+                    cancellationToken);
+            }
+
+            if (channels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+            }
+        }
+
+        return deliveries;
     }
 
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(
@@ -1242,6 +1453,33 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
+    private static string BuildTaskAssignedBody(TaskJournalItem task, string actorName)
+    {
+        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var lines = new List<string>
+        {
+            $"{actorName} назначил(а) задачу.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок: {dueText}",
+            $"Приоритет: {task.Priority}",
+        };
+
+        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
+        {
+            lines.Add($"Исполнитель: {task.AssigneeName.Trim()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(task.Description))
+        {
+            lines.Add(string.Empty);
+            lines.Add(task.Description.Trim());
+        }
+
+        return string.Join('\n', lines);
+    }
+
     private static string BuildTaskCompletedBody(TaskJournalItem task)
     {
         var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
@@ -1263,6 +1501,95 @@ public sealed class NotificationService : INotificationService
         {
             lines.Add(string.Empty);
             lines.Add($"Результат: {task.Result.Trim()}");
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildTaskScheduleConflictBody(TaskJournalItem task, IReadOnlyList<TaskJournalItem> conflicts, string actorName)
+    {
+        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var lines = new List<string>
+        {
+            $"{actorName} назначил(а) или изменил(а) задачу на время, которое пересекается с другими активными задачами.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок: {dueText}",
+        };
+
+        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
+        {
+            lines.Add($"Исполнитель: {task.AssigneeName.Trim()}");
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Пересечения:");
+        foreach (var conflict in conflicts)
+        {
+            var conflictDue = DateTime.SpecifyKind(conflict.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+            lines.Add($"- {conflictDue}: {conflict.Title}");
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildTaskApprovalRequestedBody(TaskJournalItem task, string actorName, TaskJournalParticipant? approver)
+    {
+        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var lines = new List<string>
+        {
+            $"{actorName} отправил(а) задачу на согласование.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок: {dueText}",
+        };
+
+        var approverName = ResolveParticipantName(approver);
+        if (!string.IsNullOrWhiteSpace(approverName))
+        {
+            lines.Add($"Текущий согласующий: {approverName}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(task.Result))
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Результат для проверки: {task.Result.Trim()}");
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildTaskApprovalDecisionBody(
+        TaskJournalItem task,
+        TaskJournalParticipant approver,
+        string decision,
+        string actorName,
+        string? resolution)
+    {
+        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var isRevision = string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase);
+        var actionText = isRevision ? "вернул(а) задачу на доработку" : "согласовал(а) задачу";
+        var lines = new List<string>
+        {
+            $"{actorName} {actionText}.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок: {dueText}",
+        };
+
+        var approverName = ResolveParticipantName(approver);
+        if (!string.IsNullOrWhiteSpace(approverName))
+        {
+            lines.Add($"Согласующий: {approverName}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(resolution))
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Резолюция: {resolution.Trim()}");
         }
 
         return string.Join('\n', lines);
@@ -1353,6 +1680,60 @@ public sealed class NotificationService : INotificationService
             .Distinct()
             .ToList();
     }
+
+    private static IReadOnlyList<int> ResolveCurrentApproverUserIds(TaskJournalItem task, int actorUserId)
+    {
+        var currentApprover = GetCurrentApprover(task);
+        if (currentApprover?.UserId is not { } userId || userId <= 0 || userId == actorUserId)
+        {
+            return Array.Empty<int>();
+        }
+
+        return [userId];
+    }
+
+    private static IReadOnlyList<int> ResolveApprovalDecisionRecipientUserIds(TaskJournalItem task, int actorUserId)
+    {
+        var userIds = new List<int>();
+        if (task.AuthorUserId.HasValue)
+        {
+            userIds.Add(task.AuthorUserId.Value);
+        }
+
+        if (task.AssigneeUserId.HasValue)
+        {
+            userIds.Add(task.AssigneeUserId.Value);
+        }
+
+        userIds.AddRange(task.Participants
+            .Where(participant => !string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
+            .Where(participant => participant.UserId.HasValue)
+            .Select(participant => participant.UserId!.Value));
+
+        return userIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct()
+            .ToList();
+    }
+
+    private static bool IsTaskWaitingForNextApprover(TaskJournalItem task)
+        => task.Participants.Any(participant =>
+            string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase));
+
+    private static TaskJournalParticipant? GetCurrentApprover(TaskJournalItem task)
+        => task.Participants
+            .Where(participant => string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(participant => participant.SortOrder)
+            .ThenBy(participant => participant.Id)
+            .FirstOrDefault(participant => !string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase));
+
+    private static string ResolveParticipantName(TaskJournalParticipant? participant)
+        => participant is null
+            ? string.Empty
+            : !string.IsNullOrWhiteSpace(participant.DisplayName)
+                ? participant.DisplayName.Trim()
+                : participant.User?.FullName?.Trim() ?? participant.User?.Email?.Trim() ?? string.Empty;
 
     private static IReadOnlyList<string> DeserializeList(string? raw)
     {

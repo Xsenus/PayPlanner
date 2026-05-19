@@ -342,24 +342,80 @@ namespace PayPlanner.Api.Extensions
         {
             q = q.Include(c => c.Client);
             q = q.Include(c => c.LegalEntity);
+            q = q.Include(c => c.ResponsibleUser);
             if (includePayments) q = q.Include(c => c.Payments);
             return q;
         }
 
+        public static IQueryable<ClientCase> ApplyCaseRegistryScope(this IQueryable<ClientCase> q, string? scope, int currentUserId)
+        {
+            return (scope?.Trim().ToLowerInvariant()) switch
+            {
+                "active" => q.Where(c => c.Status != ClientCaseStatus.Closed && c.Status != ClientCaseStatus.Lost),
+                "archive" => q.Where(c => c.Status == ClientCaseStatus.Closed || c.Status == ClientCaseStatus.Lost),
+                "mine" => q.Where(c => c.ResponsibleUserId == currentUserId),
+                _ => q,
+            };
+        }
+
         public static IQueryable<ClientCase> ApplyCaseFilters(
             this IQueryable<ClientCase> q,
-            int? clientId, int? legalEntityId, ClientCaseStatus? status, string? search)
+            int? clientId,
+            int? legalEntityId,
+            ClientCaseStatus? status,
+            string? search,
+            int? responsibleUserId = null,
+            string? caseType = null,
+            string? priority = null,
+            DateTime? from = null,
+            DateTime? to = null,
+            decimal? minFee = null,
+            decimal? maxFee = null)
         {
             if (clientId.HasValue) q = q.Where(c => c.ClientId == clientId.Value);
             if (legalEntityId.HasValue) q = q.Where(c => c.LegalEntityId == legalEntityId.Value);
             if (status.HasValue) q = q.Where(c => c.Status == status.Value);
+            if (responsibleUserId.HasValue) q = q.Where(c => c.ResponsibleUserId == responsibleUserId.Value);
+            if (!string.IsNullOrWhiteSpace(caseType))
+            {
+                var type = caseType.Trim().ToLower();
+                q = q.Where(c => c.CaseType != null && c.CaseType.ToLower().Contains(type));
+            }
+
+            if (!string.IsNullOrWhiteSpace(priority))
+            {
+                var normalizedPriority = priority.Trim().ToLower();
+                q = q.Where(c => c.Priority != null && c.Priority.ToLower() == normalizedPriority);
+            }
+
+            if (from.HasValue) q = q.Where(c => c.CreatedAt >= from.Value || (c.StartDate.HasValue && c.StartDate.Value >= from.Value));
+            if (to.HasValue) q = q.Where(c => c.CreatedAt <= to.Value || (c.DueDate.HasValue && c.DueDate.Value <= to.Value));
+            if (minFee.HasValue) q = q.Where(c => c.FeeAmount >= minFee.Value);
+            if (maxFee.HasValue) q = q.Where(c => c.FeeAmount <= maxFee.Value);
 
             if (!string.IsNullOrWhiteSpace(search))
             {
                 search = search.Trim().ToLower();
                 q = q.Where(c =>
+                    (c.CaseNumber != null && c.CaseNumber.ToLower().Contains(search)) ||
                     (c.Title != null && c.Title.ToLower().Contains(search)) ||
-                    (c.Description != null && c.Description.ToLower().Contains(search)));
+                    (c.Description != null && c.Description.ToLower().Contains(search)) ||
+                    (c.CaseType != null && c.CaseType.ToLower().Contains(search)) ||
+                    (c.Stage != null && c.Stage.ToLower().Contains(search)) ||
+                    (c.CourtName != null && c.CourtName.ToLower().Contains(search)) ||
+                    (c.CourtCaseNumber != null && c.CourtCaseNumber.ToLower().Contains(search)) ||
+                    (c.Claimant != null && c.Claimant.ToLower().Contains(search)) ||
+                    (c.Defendant != null && c.Defendant.ToLower().Contains(search)) ||
+                    (c.ThirdParties != null && c.ThirdParties.ToLower().Contains(search)) ||
+                    (c.Representatives != null && c.Representatives.ToLower().Contains(search)) ||
+                    (c.JudgeName != null && c.JudgeName.ToLower().Contains(search)) ||
+                    (c.CourtSecretaryContacts != null && c.CourtSecretaryContacts.ToLower().Contains(search)) ||
+                    (c.DocumentsSummary != null && c.DocumentsSummary.ToLower().Contains(search)) ||
+                    (c.EventHistory != null && c.EventHistory.ToLower().Contains(search)) ||
+                    (c.Strategy != null && c.Strategy.ToLower().Contains(search)) ||
+                    (c.Client != null && c.Client.Name != null && c.Client.Name.ToLower().Contains(search)) ||
+                    (c.LegalEntity != null && c.LegalEntity.ShortName != null && c.LegalEntity.ShortName.ToLower().Contains(search)) ||
+                    (c.LegalEntity != null && c.LegalEntity.FullName != null && c.LegalEntity.FullName.ToLower().Contains(search)));
             }
             return q;
         }
@@ -369,7 +425,23 @@ namespace PayPlanner.Api.Extensions
             bool desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
             return (sortBy?.ToLowerInvariant()) switch
             {
+                "casenumber" => desc ? q.OrderByDescending(c => c.CaseNumber) : q.OrderBy(c => c.CaseNumber),
                 "title" => desc ? q.OrderByDescending(c => c.Title) : q.OrderBy(c => c.Title),
+                "client" => desc
+                    ? q.OrderByDescending(c => c.Client != null ? c.Client.Name : c.LegalEntity != null ? c.LegalEntity.ShortName : string.Empty)
+                    : q.OrderBy(c => c.Client != null ? c.Client.Name : c.LegalEntity != null ? c.LegalEntity.ShortName : string.Empty),
+                "casetype" => desc ? q.OrderByDescending(c => c.CaseType) : q.OrderBy(c => c.CaseType),
+                "stage" => desc ? q.OrderByDescending(c => c.Stage) : q.OrderBy(c => c.Stage),
+                "responsible" => desc
+                    ? q.OrderByDescending(c => c.ResponsibleUser != null ? c.ResponsibleUser.FullName : string.Empty)
+                    : q.OrderBy(c => c.ResponsibleUser != null ? c.ResponsibleUser.FullName : string.Empty),
+                "startdate" => desc ? q.OrderByDescending(c => c.StartDate) : q.OrderBy(c => c.StartDate),
+                "duedate" => desc ? q.OrderByDescending(c => c.DueDate) : q.OrderBy(c => c.DueDate),
+                "feeamount" => desc ? q.OrderByDescending(c => (double)c.FeeAmount) : q.OrderBy(c => (double)c.FeeAmount),
+                "priority" => desc ? q.OrderByDescending(c => c.Priority) : q.OrderBy(c => c.Priority),
+                "court" => desc ? q.OrderByDescending(c => c.CourtName) : q.OrderBy(c => c.CourtName),
+                "nexthearingat" => desc ? q.OrderByDescending(c => c.NextHearingAt) : q.OrderBy(c => c.NextHearingAt),
+                "lastviewedat" => desc ? q.OrderByDescending(c => c.LastViewedAt) : q.OrderBy(c => c.LastViewedAt),
                 "status" => desc ? q.OrderByDescending(c => c.Status) : q.OrderBy(c => c.Status),
                 _ => desc ? q.OrderByDescending(c => c.CreatedAt) : q.OrderBy(c => c.CreatedAt),
             };

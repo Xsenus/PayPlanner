@@ -71,6 +71,15 @@ public class UserNotificationTypeDto
     public string Label { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string Tone { get; set; } = "blue";
+    public string Priority { get; set; } = "normal";
+    public IReadOnlyList<string> Channels { get; set; } = Array.Empty<string>();
+    public bool Deduplicate { get; set; }
+    public bool Digestible { get; set; }
+}
+
+public class UserNotificationBulkActionResultDto
+{
+    public int UpdatedCount { get; set; }
 }
 
 public class SendNotificationTestResponseDto

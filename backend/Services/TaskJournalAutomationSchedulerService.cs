@@ -12,6 +12,11 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     {
         "new", "inProgress", "waiting", "onApproval", "revision", "overdueApproval"
     };
+    private static readonly ClientCaseStatus[] FinishedCaseStatuses =
+    [
+        ClientCaseStatus.Closed,
+        ClientCaseStatus.Lost,
+    ];
 
     private const string EnabledSettingKey = "tasks.automation.caseControl.enabled";
     private const string InactiveDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
@@ -88,7 +93,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 .Where(clientCase =>
                     ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                      (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                    clientCase.Status != ClientCaseStatus.Closed)
+                    !FinishedCaseStatuses.Contains(clientCase.Status))
                 .Select(clientCase => new
                 {
                     Case = clientCase,
@@ -100,7 +105,11 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                         .Where(task => task.ClientCaseId == clientCase.Id)
                         .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
                 })
-                .Where(item => item.ActiveTaskCount == 0 && (item.LastTaskAt ?? item.Case.CreatedAt) <= cutoff)
+                .Where(item => item.ActiveTaskCount == 0
+                    && (item.LastTaskAt ?? item.Case.CreatedAt) <= cutoff
+                    && (item.Case.LastViewedAt ?? item.Case.CreatedAt) <= cutoff
+                    && (item.Case.ActivityConfirmedAt ?? item.Case.CreatedAt) <= cutoff
+                    && item.Case.InactivityRemindersEnabled)
                 .OrderBy(item => item.LastTaskAt ?? item.Case.CreatedAt)
                 .ThenBy(item => item.Case.Client != null
                     ? item.Case.Client.Name
@@ -194,7 +203,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     }
 
     private static int? ResolveCaseResponsibleUserId(ClientCase clientCase)
-        => clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
+        => clientCase.ResponsibleUserId ?? clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
 
     private static async Task<User?> ResolveAutomationAssigneeAsync(
         PaymentContext context,
@@ -230,7 +239,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         DateTime now)
     {
         var assigneeName = DisplayName(assignee);
-        var lastActivity = lastTaskAt ?? clientCase.CreatedAt;
+        var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt);
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity).TotalDays));
         var task = new TaskJournalItem
         {
@@ -310,6 +319,27 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
 
     private static string BuildObjectName(string clientName, string? caseTitle)
         => string.IsNullOrWhiteSpace(caseTitle) ? clientName.Trim() : $"{clientName.Trim()} - {caseTitle.Trim()}";
+
+    private static DateTime ResolveLastCaseActivity(ClientCase clientCase, DateTime? lastTaskAt)
+    {
+        var lastActivity = clientCase.CreatedAt;
+        if (lastTaskAt.HasValue && lastTaskAt.Value > lastActivity)
+        {
+            lastActivity = lastTaskAt.Value;
+        }
+
+        if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
+        {
+            lastActivity = clientCase.LastViewedAt.Value;
+        }
+
+        if (clientCase.ActivityConfirmedAt.HasValue && clientCase.ActivityConfirmedAt.Value > lastActivity)
+        {
+            lastActivity = clientCase.ActivityConfirmedAt.Value;
+        }
+
+        return lastActivity;
+    }
 
     private static string SerializeList(IEnumerable<string> values)
         => JsonSerializer.Serialize(values.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), JsonOptions);

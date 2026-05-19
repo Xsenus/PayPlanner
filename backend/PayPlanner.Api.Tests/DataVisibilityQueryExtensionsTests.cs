@@ -87,6 +87,48 @@ public class DataVisibilityQueryExtensionsTests
     }
 
     [Fact]
+    public void ApplyClientCaseVisibility_FiltersByClientAndLegalEntityResponsibleUsers()
+    {
+        var access = CreateAccess(10, 20);
+        var clientCases = new[]
+        {
+            new ClientCase
+            {
+                Id = 1,
+                Client = new Client { ResponsibleUserId = 10 },
+            },
+            new ClientCase
+            {
+                Id = 2,
+                LegalEntity = new LegalEntity { ResponsibleUserId = 20 },
+            },
+            new ClientCase
+            {
+                Id = 3,
+                ResponsibleUserId = 10,
+            },
+            new ClientCase
+            {
+                Id = 4,
+                Client = new Client { ResponsibleUserId = 30 },
+            },
+            new ClientCase
+            {
+                Id = 5,
+                LegalEntity = new LegalEntity { ResponsibleUserId = null },
+            },
+        };
+
+        var result = clientCases
+            .AsQueryable()
+            .ApplyClientCaseVisibility(access)
+            .Select(clientCase => clientCase.Id)
+            .ToArray();
+
+        Assert.Equal(new[] { 1, 2, 3 }, result);
+    }
+
+    [Fact]
     public void ApplyContractVisibility_FiltersContractsByLinkedCounterpartyResponsibles()
     {
         var access = CreateAccess(10, 20);

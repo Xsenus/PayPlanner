@@ -40,7 +40,9 @@ public static class DataVisibilityQueryExtensions
 
         var visibleUserIds = access.VisibleUserIds.ToArray();
         return query.Where(clientCase =>
-            (clientCase.Client != null
+            (clientCase.ResponsibleUserId.HasValue
+                && visibleUserIds.Contains(clientCase.ResponsibleUserId.Value))
+            || (clientCase.Client != null
                 && clientCase.Client.ResponsibleUserId.HasValue
                 && visibleUserIds.Contains(clientCase.Client.ResponsibleUserId.Value))
             || (clientCase.LegalEntity != null

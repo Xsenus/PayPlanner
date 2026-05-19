@@ -66,10 +66,18 @@ public class CasesController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ClientCase model, CancellationToken ct)
     {
-        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, ct);
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
+        ApplyCaseDetails(model, model);
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
         return Created($"/api/cases/{model.Id}", model);
     }
 
@@ -86,16 +94,24 @@ public class CasesController : ControllerBase
             .ApplyClientCaseVisibility(visibility)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (e is null) return NotFound();
-        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, ct);
+        var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
 
+        var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
         e.Title = model.Title;
         e.Description = model.Description;
         e.Status = model.Status;
         e.ClientId = model.ClientId;
         e.LegalEntityId = model.LegalEntityId;
+        ApplyCaseDetails(e, model);
+
+        if (shouldCloseLinkedTasks)
+        {
+            await ClientCaseTaskSyncService.CloseActiveTasksForClosedCaseAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
+        }
 
         await _db.SaveChangesAsync(ct);
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
         return Ok(e);
     }
 
@@ -123,7 +139,11 @@ public class CasesController : ControllerBase
         return NoContent();
     }
 
-    private async Task<IActionResult?> ValidateCaseOwnerAsync(int? clientId, int? legalEntityId, CancellationToken ct)
+    private async Task<IActionResult?> ValidateCaseOwnerAsync(
+        int? clientId,
+        int? legalEntityId,
+        DataVisibilityAccess visibility,
+        CancellationToken ct)
     {
         var hasClient = clientId.HasValue && clientId.Value > 0;
         var hasLegalEntity = legalEntityId.HasValue && legalEntityId.Value > 0;
@@ -132,16 +152,55 @@ public class CasesController : ControllerBase
             return BadRequest("У дела должен быть выбран ровно один владелец: клиент или юридическое лицо.");
         }
 
-        if (hasClient && !await _db.Clients.AsNoTracking().AnyAsync(client => client.Id == clientId!.Value, ct))
+        if (hasClient && !await _db.Clients
+                .AsNoTracking()
+                .ApplyClientVisibility(visibility)
+                .AnyAsync(client => client.Id == clientId!.Value, ct))
         {
             return BadRequest($"Unknown clientId {clientId!.Value}");
         }
 
-        if (hasLegalEntity && !await _db.LegalEntities.AsNoTracking().AnyAsync(entity => entity.Id == legalEntityId!.Value, ct))
+        if (hasLegalEntity && !await _db.LegalEntities
+                .AsNoTracking()
+                .ApplyLegalEntityVisibility(visibility)
+                .AnyAsync(entity => entity.Id == legalEntityId!.Value, ct))
         {
             return BadRequest($"Unknown legalEntityId {legalEntityId!.Value}");
         }
 
         return null;
     }
+
+    private static void ApplyCaseDetails(ClientCase target, ClientCase source)
+    {
+        target.CaseNumber = source.CaseNumber?.Trim() ?? string.Empty;
+        target.CaseType = source.CaseType?.Trim() ?? string.Empty;
+        target.Stage = source.Stage?.Trim() ?? string.Empty;
+        target.ResponsibleUserId = source.ResponsibleUserId;
+        target.StartDate = source.StartDate;
+        target.DueDate = source.DueDate;
+        target.FeeAmount = source.FeeAmount;
+        target.Priority = string.IsNullOrWhiteSpace(source.Priority) ? "normal" : source.Priority.Trim();
+        target.CourtName = source.CourtName?.Trim() ?? string.Empty;
+        target.CourtCaseNumber = source.CourtCaseNumber?.Trim() ?? string.Empty;
+        target.CourtUrl = source.CourtUrl?.Trim() ?? string.Empty;
+        target.NextHearingAt = source.NextHearingAt;
+        target.Claimant = source.Claimant?.Trim() ?? string.Empty;
+        target.Defendant = source.Defendant?.Trim() ?? string.Empty;
+        target.ThirdParties = source.ThirdParties?.Trim() ?? string.Empty;
+        target.Representatives = source.Representatives?.Trim() ?? string.Empty;
+        target.JudgeName = source.JudgeName?.Trim() ?? string.Empty;
+        target.Courtroom = source.Courtroom?.Trim() ?? string.Empty;
+        target.CourtSecretaryContacts = source.CourtSecretaryContacts?.Trim() ?? string.Empty;
+        target.ClaimFiledAt = source.ClaimFiledAt;
+        target.AppealDeadlineAt = source.AppealDeadlineAt;
+        target.MotionDeadlineAt = source.MotionDeadlineAt;
+        target.ObjectionDeadlineAt = source.ObjectionDeadlineAt;
+        target.DocumentsSummary = source.DocumentsSummary?.Trim() ?? string.Empty;
+        target.EventHistory = source.EventHistory?.Trim() ?? string.Empty;
+        target.Strategy = source.Strategy?.Trim() ?? string.Empty;
+    }
+
+    private static bool IsFinishedCaseStatus(ClientCaseStatus status)
+        => status is ClientCaseStatus.Closed or ClientCaseStatus.Lost;
 }

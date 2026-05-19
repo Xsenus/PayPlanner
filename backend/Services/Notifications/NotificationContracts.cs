@@ -58,17 +58,27 @@ public sealed record NotificationPurposeDefinition(
 
 public static class UserNotificationTypes
 {
+    public const string TaskAssigned = "taskAssigned";
     public const string TaskReminder = "taskReminder";
     public const string TaskChanged = "taskChanged";
     public const string TaskComment = "taskComment";
     public const string TaskCompleted = "taskCompleted";
+    public const string TaskScheduleConflict = "taskScheduleConflict";
+    public const string TaskApprovalRequested = "taskApprovalRequested";
+    public const string TaskApproved = "taskApproved";
+    public const string TaskRevisionRequested = "taskRevisionRequested";
 
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
     [
-        new(TaskReminder, "Напоминание по задаче", "Сроки, просрочки и плановые напоминания по задачам.", "amber"),
-        new(TaskChanged, "Изменение задачи", "Изменения статусов, сроков, исполнителей и других полей задачи.", "blue"),
-        new(TaskComment, "Комментарий по задаче", "Новые комментарии и сообщения по задаче.", "emerald"),
-        new(TaskCompleted, "Задача выполнена", "Уведомление постановщику о завершении задачи.", "blue")
+        new(TaskAssigned, "Новая задача", "Назначение новой задачи исполнителю или участникам.", "blue", "normal", NotificationChannels.All, true, false),
+        new(TaskReminder, "Напоминание по задаче", "Сроки, просрочки и плановые напоминания по задачам.", "amber", "high", NotificationChannels.All, true, false),
+        new(TaskChanged, "Изменение задачи", "Изменения статусов, сроков, исполнителей и других полей задачи.", "blue", "normal", NotificationChannels.All, false, true),
+        new(TaskComment, "Комментарий по задаче", "Новые комментарии и сообщения по задаче.", "emerald", "normal", NotificationChannels.All, true, true),
+        new(TaskCompleted, "Задача выполнена", "Уведомление постановщику о завершении задачи.", "blue", "normal", NotificationChannels.All, true, false),
+        new(TaskScheduleConflict, "Конфликт расписания", "Задача пересекается по времени с другой активной задачей исполнителя.", "rose", "high", NotificationChannels.All, true, false),
+        new(TaskApprovalRequested, "Ожидает согласования", "Задача отправлена согласующему на решение.", "violet", "high", NotificationChannels.All, true, false),
+        new(TaskApproved, "Задача согласована", "Согласующий подтвердил результат задачи.", "emerald", "normal", NotificationChannels.All, false, false),
+        new(TaskRevisionRequested, "Возврат на доработку", "Согласующий вернул задачу исполнителю на доработку.", "orange", "high", NotificationChannels.All, false, false)
     ];
 
     public static bool IsKnown(string? value)
@@ -82,7 +92,11 @@ public sealed record UserNotificationTypeDefinition(
     string Key,
     string Label,
     string Description,
-    string Tone);
+    string Tone,
+    string Priority,
+    IReadOnlyList<string> Channels,
+    bool Deduplicate,
+    bool Digestible);
 
 public sealed record EmailSendSettings(
     bool Enabled,
@@ -204,8 +218,12 @@ public interface INotificationService
     Task<IReadOnlyList<NotificationDelivery>> NotifyRegistrationApprovedAsync(User user, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyRegistrationRejectedAsync(User user, string? reason, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyPasswordIssuedAsync(User user, string password, IEnumerable<string>? channels = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationDelivery>> NotifyTaskAssignedAsync(TaskJournalItem task, string actorName, int actorUserId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReminderAsync(TaskJournalItem task, string reminderKey, DateTime nowUtc, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCompletedAsync(TaskJournalItem task, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationDelivery>> NotifyTaskScheduleConflictAsync(TaskJournalItem task, IReadOnlyList<TaskJournalItem> conflicts, string actorName, int actorUserId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalRequestedAsync(TaskJournalItem task, string actorName, int actorUserId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(TaskJournalItem task, TaskJournalParticipant approver, string decision, string actorName, int actorUserId, string? resolution = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCommentAsync(TaskJournalItem task, TaskJournalComment comment, CancellationToken cancellationToken = default);
 }

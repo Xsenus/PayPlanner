@@ -369,6 +369,38 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_FiltersByClientCaseId()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var firstCase = await CreateCaseAsync(db, client.Id, "Первое дело");
+        var secondCase = await CreateCaseAsync(db, client.Id, "Второе дело");
+        var expectedTask = await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: firstCase.Id);
+        await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: secondCase.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetTasks(
+            search: null,
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            clientCaseId: firstCase.Id,
+            from: null,
+            to: null,
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(ok.Value);
+        var dto = Assert.Single(page.Items);
+
+        Assert.Equal(expectedTask.Id, dto.Id);
+        Assert.Equal(firstCase.Id, dto.ClientCaseId);
+    }
+
+    [Fact]
     public async Task GetTasks_SearchesByLegalEntityAndLegalEntityCase()
     {
         await using var db = await CreateContextAsync();
@@ -450,6 +482,45 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_MapsExpiredApprovalQueueToOverdueApprovalStatus()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, status: "onApproval");
+        task.DueAt = DateTime.UtcNow.AddHours(-2);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetTasks(
+            search: null,
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(ok.Value);
+        var dto = Assert.Single(page.Items);
+
+        Assert.Equal(task.Id, dto.Id);
+        Assert.Equal("overdueApproval", dto.Status);
+    }
+
+    [Fact]
     public async Task GetAutomationCaseCandidates_ReturnsOpenCaseWithoutActiveTasks()
     {
         await using var db = await CreateContextAsync();
@@ -465,6 +536,8 @@ public class TasksControllerTests
             status: "done");
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE TaskJournalItems SET CreatedAt = {DateTime.UtcNow.AddDays(-20)}, UpdatedAt = NULL WHERE Id = {completedTask.Id}");
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE ClientCases SET CreatedAt = {DateTime.UtcNow.AddDays(-21)} WHERE Id = {clientCase.Id}");
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var result = await controller.GetAutomationCaseCandidates(inactiveDays: 14, limit: 10, ct: CancellationToken.None);
@@ -483,13 +556,41 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task GetAutomationCaseCandidates_SkipsCasesWithActiveTaskAndClosedCases()
+    public async Task GetAutomationCaseCandidates_AppliesCaseOwnerVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateTaskUserAsync(db, "author@example.com", "Автор", canEdit: false);
+        var otherResponsible = await CreateAdminUserAsync(db, "other@example.com", "Другой ответственный");
+        var visibleClient = await CreateClientAsync(db, "Видимый клиент");
+        visibleClient.ResponsibleUserId = author.Id;
+        var hiddenClient = await CreateClientAsync(db, "Скрытый клиент");
+        hiddenClient.ResponsibleUserId = otherResponsible.Id;
+        var visibleCase = await CreateCaseAsync(db, visibleClient.Id, "ВИДИМОЕ ДЕЛО");
+        var hiddenCase = await CreateCaseAsync(db, hiddenClient.Id, "СКРЫТОЕ ДЕЛО");
+        visibleCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        hiddenCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(inactiveDays: 14, limit: 10, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var candidates = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(ok.Value);
+        var candidate = Assert.Single(candidates);
+
+        Assert.Equal(visibleCase.Id, candidate.ClientCaseId);
+        Assert.DoesNotContain(candidates, item => item.ClientCaseId == hiddenCase.Id);
+    }
+
+    [Fact]
+    public async Task GetAutomationCaseCandidates_SkipsCasesWithActiveTaskAndFinishedCases()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var activeCase = await CreateCaseAsync(db, client.Id, "АКТИВНОЕ ДЕЛО");
         var closedCase = await CreateCaseAsync(db, client.Id, "ЗАКРЫТОЕ ДЕЛО", ClientCaseStatus.Closed);
+        var lostCase = await CreateCaseAsync(db, client.Id, "ПРОИГРАННОЕ ДЕЛО", ClientCaseStatus.Lost);
         await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: activeCase.Id);
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
@@ -500,6 +601,7 @@ public class TasksControllerTests
 
         Assert.DoesNotContain(candidates, item => item.ClientCaseId == activeCase.Id);
         Assert.DoesNotContain(candidates, item => item.ClientCaseId == closedCase.Id);
+        Assert.DoesNotContain(candidates, item => item.ClientCaseId == lostCase.Id);
     }
 
     [Fact]
@@ -551,6 +653,48 @@ public class TasksControllerTests
         Assert.Equal(responsible.FullName, dto.AssigneeName);
         Assert.Equal(author.Id, dto.AuthorUserId);
         Assert.Contains(dto.Participants, item => item.Role == "assignee" && item.UserId == responsible.Id);
+    }
+
+    [Fact]
+    public async Task CreateAutomationTaskForCase_PrefersCaseResponsibleOverOwnerAndFallback()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var ownerResponsible = await CreateAdminUserAsync(db, "owner@example.com", "Ответственный клиента");
+        var caseResponsible = await CreateAdminUserAsync(db, "case@example.com", "Ответственный дела");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = ownerResponsible.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        clientCase.ResponsibleUserId = caseResponsible.Id;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+
+        Assert.Equal(caseResponsible.Id, dto.AssigneeUserId);
+        Assert.Equal(caseResponsible.FullName, dto.AssigneeName);
+        Assert.Contains(dto.Participants, item => item.Role == "assignee" && item.UserId == caseResponsible.Id);
+    }
+
+    [Fact]
+    public async Task CreateAutomationTaskForCase_ReturnsNotFoundForHiddenCase()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateTaskUserAsync(db, "author@example.com", "Автор", canEdit: false, canCreate: true);
+        var otherResponsible = await CreateAdminUserAsync(db, "other@example.com", "Другой ответственный");
+        var hiddenClient = await CreateClientAsync(db, "Скрытый клиент");
+        hiddenClient.ResponsibleUserId = otherResponsible.Id;
+        var hiddenCase = await CreateCaseAsync(db, hiddenClient.Id, "СКРЫТОЕ ДЕЛО");
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTaskForCase(hiddenCase.Id, CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result.Result);
+        Assert.Empty(await db.TaskJournalItems.ToListAsync());
     }
 
     [Fact]
@@ -635,10 +779,12 @@ public class TasksControllerTests
     {
         await using var db = await CreateContextAsync();
         var defaultAssignee = await CreateAdminUserAsync(db, "gordik@example.com", "Гордик Сергей");
-        var responsible = await CreateAdminUserAsync(db, "responsible@example.com", "Ответственный");
+        var ownerResponsible = await CreateAdminUserAsync(db, "owner-responsible@example.com", "Ответственный клиента");
+        var responsible = await CreateAdminUserAsync(db, "responsible@example.com", "Ответственный дела");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
-        client.ResponsibleUserId = responsible.Id;
+        client.ResponsibleUserId = ownerResponsible.Id;
         var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        clientCase.ResponsibleUserId = responsible.Id;
         clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
         await db.SaveChangesAsync();
         var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
@@ -696,6 +842,38 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_SkipsRecentlyViewedCase()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = author.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        clientCase.LastViewedAt = DateTime.UtcNow.AddHours(-2);
+        clientCase.LastViewedByUserId = author.Id;
+        clientCase.LastViewedByUserName = author.FullName;
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.True(result.Enabled);
+            Assert.Null(result.Error);
+            Assert.Equal(0, result.CreatedCount);
+        }
+
+        Assert.Empty(await db.TaskJournalItems.Where(item => item.ClientCaseId == clientCase.Id).ToListAsync());
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_SkipsFreshAndAlreadyControlledCases()
     {
         await using var db = await CreateContextAsync();
@@ -705,8 +883,10 @@ public class TasksControllerTests
         var oldCase = await CreateCaseAsync(db, client.Id, "СТАРОЕ ДЕЛО");
         var freshCase = await CreateCaseAsync(db, client.Id, "НОВОЕ ДЕЛО");
         var activeCase = await CreateCaseAsync(db, client.Id, "АКТИВНОЕ ДЕЛО");
+        var lostCase = await CreateCaseAsync(db, client.Id, "ПРОИГРАННОЕ ДЕЛО", ClientCaseStatus.Lost);
         oldCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
         activeCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        lostCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
         await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: activeCase.Id);
         await db.SaveChangesAsync();
         var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
@@ -730,6 +910,7 @@ public class TasksControllerTests
         Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == oldCase.Id));
         Assert.Equal(0, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == freshCase.Id));
         Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == activeCase.Id));
+        Assert.Equal(0, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == lostCase.Id));
     }
 
     [Fact]
@@ -790,7 +971,8 @@ public class TasksControllerTests
         var approver = await CreateAdminUserAsync(db, "approver@example.com", "Согласующий");
         var observer = await CreateAdminUserAsync(db, "observer@example.com", "Наблюдатель");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
-        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, author);
 
         var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
         {
@@ -812,6 +994,35 @@ public class TasksControllerTests
         Assert.Contains(dto.Participants, item => item.Role == "assignee" && item.UserId == assignee.Id);
         Assert.Contains(dto.Participants, item => item.Role == "approver" && item.UserId == approver.Id);
         Assert.Contains(dto.Participants, item => item.Role == "observer" && item.UserId == observer.Id);
+        Assert.Equal([dto.Id], notifications.AssignedTaskIds);
+    }
+
+    [Fact]
+    public async Task CreateTask_NotifiesWhenScheduleConflictsWithActiveTask()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var assignee = await CreateAdminUserAsync(db, "assignee@example.com", "Исполнитель");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var existingTask = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            AssigneeUserId = assignee.Id,
+            Title = "Проверить пересечение",
+            DueAt = existingTask.DueAt.AddMinutes(30),
+            PlannedDurationMinutes = 60,
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+
+        var conflict = Assert.Single(notifications.ScheduleConflictTasks);
+        Assert.Equal(dto.Id, conflict.TaskId);
+        Assert.Contains(existingTask.Id, conflict.ConflictIds);
     }
 
     [Fact]
@@ -1070,6 +1281,172 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task BulkUpdateTasks_UpdatesAssigneePriorityDueAndHistory()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var oldAssignee = await CreateAdminUserAsync(db, "old@example.com", "Старый исполнитель");
+        var newAssignee = await CreateAdminUserAsync(db, "new@example.com", "Новый исполнитель");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var first = await CreateTaskAsync(db, author.Id, client.Id, oldAssignee.Id);
+        var second = await CreateTaskAsync(db, author.Id, client.Id, oldAssignee.Id);
+        first.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = oldAssignee.Id,
+            Role = "assignee",
+            DisplayName = oldAssignee.FullName,
+            Email = oldAssignee.Email,
+        });
+        second.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = oldAssignee.Id,
+            Role = "assignee",
+            DisplayName = oldAssignee.FullName,
+            Email = oldAssignee.Email,
+        });
+        await db.SaveChangesAsync();
+        var dueAt = DateTime.UtcNow.AddDays(3);
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, notificationService, author);
+
+        var result = await controller.BulkUpdateTasks(new BulkUpdateTaskJournalItemsRequest
+        {
+            Ids = [first.Id, second.Id],
+            AssigneeUserId = newAssignee.Id,
+            Priority = "urgent",
+            DueAt = dueAt,
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(2, GetAnonymousInt(ok.Value, "updated"));
+        Assert.Equal(2, GetAnonymousInt(ok.Value, "requested"));
+        Assert.Equal(0, GetAnonymousInt(ok.Value, "skipped"));
+
+        var stored = await db.TaskJournalItems
+            .Include(item => item.Participants)
+            .Include(item => item.Comments)
+            .Where(item => item.Id == first.Id || item.Id == second.Id)
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.All(stored, task =>
+        {
+            Assert.Equal(newAssignee.Id, task.AssigneeUserId);
+            Assert.Equal("Новый исполнитель", task.AssigneeName);
+            Assert.Equal("urgent", task.Priority);
+            Assert.Equal(dueAt, task.DueAt);
+            var participant = Assert.Single(task.Participants, item => item.Role == "assignee");
+            Assert.Equal(newAssignee.Id, participant.UserId);
+            Assert.Contains(task.Comments, item => item.Kind == "system" && item.Text.Contains("Массовое изменение", StringComparison.OrdinalIgnoreCase));
+        });
+        Assert.Equal(2, notificationService.ChangedTasks.Count);
+    }
+
+    [Fact]
+    public async Task BulkUpdateTasks_RejectsMassApproval()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, status: "onApproval");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.BulkUpdateTasks(new BulkUpdateTaskJournalItemsRequest
+        {
+            Ids = [task.Id],
+            Status = "approved",
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("Массовое согласование", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_OnApprovalAfterRevisionRestartsApprovalQueue()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var firstApprover = await CreateAdminUserAsync(db, "first@example.com", "Первый согласующий");
+        var secondApprover = await CreateAdminUserAsync(db, "second@example.com", "Второй согласующий");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: "Исправлено.", status: "revision");
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = firstApprover.Id,
+            Role = "approver",
+            DisplayName = firstApprover.FullName,
+            Email = firstApprover.Email,
+            ApprovalStatus = "approved",
+            Resolution = "Первый шаг согласован.",
+            RespondedAt = DateTime.UtcNow.AddHours(-2),
+            SortOrder = 0,
+        });
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = secondApprover.Id,
+            Role = "approver",
+            DisplayName = secondApprover.FullName,
+            Email = secondApprover.Email,
+            ApprovalStatus = "revisionRequested",
+            Resolution = "Нужно исправить дату.",
+            RespondedAt = DateTime.UtcNow.AddHours(-1),
+            SortOrder = 1,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "onApproval",
+            Result = "Исправлено и отправлено повторно.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+
+        Assert.Equal("onApproval", dto.Status);
+        Assert.All(dto.Participants.Where(item => item.Role == "approver"), participant =>
+        {
+            Assert.Equal("pending", participant.ApprovalStatus);
+            Assert.Empty(participant.Resolution);
+            Assert.Null(participant.RespondedAt);
+        });
+    }
+
+    [Fact]
+    public async Task UpdateApproval_RejectsDecisionWhenTaskIsNotOnApproval()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null, status: "inProgress");
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), approver);
+
+        var result = await controller.UpdateApproval(task.Id, new UpdateTaskJournalApprovalRequest
+        {
+            Decision = "approved",
+            Resolution = "Согласовано.",
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("не находится на согласовании", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        var participant = await db.TaskJournalParticipants.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal("pending", participant.ApprovalStatus);
+        Assert.Null(participant.Resolution);
+        Assert.Null(participant.RespondedAt);
+    }
+
+    [Fact]
     public async Task UpdateApproval_RequiresApprovalQueueOrder()
     {
         await using var db = await CreateContextAsync();
@@ -1178,7 +1555,12 @@ public class TasksControllerTests
         return user;
     }
 
-    private static async Task<User> CreateTaskUserAsync(PaymentContext db, string email, string fullName, bool canEdit)
+    private static async Task<User> CreateTaskUserAsync(
+        PaymentContext db,
+        string email,
+        string fullName,
+        bool canEdit,
+        bool canCreate = false)
     {
         var role = new Role
         {
@@ -1190,7 +1572,7 @@ public class TasksControllerTests
                 {
                     Section = RolePermissionCatalog.Tasks,
                     CanView = true,
-                    CanCreate = false,
+                    CanCreate = canCreate,
                     CanEdit = canEdit,
                     CanDelete = canEdit,
                     CanExport = true,
@@ -1309,11 +1691,22 @@ public class TasksControllerTests
         };
     }
 
+    private static int GetAnonymousInt(object? value, string propertyName)
+    {
+        var property = value?.GetType().GetProperty(propertyName);
+        Assert.NotNull(property);
+        return Assert.IsType<int>(property.GetValue(value));
+    }
+
     private sealed class RecordingNotificationService : INotificationService
     {
         public List<int> CompletedTaskIds { get; } = [];
+        public List<int> AssignedTaskIds { get; } = [];
+        public List<int> ApprovalRequestedTaskIds { get; } = [];
+        public List<(int TaskId, string Decision)> ApprovalDecisionTaskIds { get; } = [];
         public List<(int TaskId, IReadOnlyList<string> ChangeLabels, string? Comment)> ChangedTasks { get; } = [];
         public List<int> CommentTaskIds { get; } = [];
+        public List<(int TaskId, IReadOnlyList<int> ConflictIds)> ScheduleConflictTasks { get; } = [];
 
         public Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
@@ -1351,9 +1744,33 @@ public class TasksControllerTests
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReminderAsync(TaskJournalItem task, string reminderKey, DateTime nowUtc, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
 
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskAssignedAsync(TaskJournalItem task, string actorName, int actorUserId, CancellationToken cancellationToken = default)
+        {
+            AssignedTaskIds.Add(task.Id);
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCompletedAsync(TaskJournalItem task, CancellationToken cancellationToken = default)
         {
             CompletedTaskIds.Add(task.Id);
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskScheduleConflictAsync(TaskJournalItem task, IReadOnlyList<TaskJournalItem> conflicts, string actorName, int actorUserId, CancellationToken cancellationToken = default)
+        {
+            ScheduleConflictTasks.Add((task.Id, conflicts.Select(item => item.Id).ToList()));
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalRequestedAsync(TaskJournalItem task, string actorName, int actorUserId, CancellationToken cancellationToken = default)
+        {
+            ApprovalRequestedTaskIds.Add(task.Id);
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(TaskJournalItem task, TaskJournalParticipant approver, string decision, string actorName, int actorUserId, string? resolution = null, CancellationToken cancellationToken = default)
+        {
+            ApprovalDecisionTaskIds.Add((task.Id, decision));
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
 

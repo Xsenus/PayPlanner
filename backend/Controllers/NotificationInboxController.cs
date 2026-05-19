@@ -5,6 +5,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
@@ -34,14 +35,16 @@ public class NotificationInboxController : ControllerBase
             return Unauthorized();
         }
 
-        var count = await _context.UserNotifications
+        var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var unreadQuery = _context.UserNotifications
             .AsNoTracking()
-            .CountAsync(item =>
+            .Where(item =>
                 item.RecipientUserId == userId.Value
                 && !item.IsRead
                 && !item.IsArchived
-                && item.DeletedAt == null,
-                ct);
+                && item.DeletedAt == null);
+        var count = await WhereNotificationTargetVisible(unreadQuery, _context, visibility)
+            .CountAsync(ct);
 
         return Ok(count);
     }
@@ -67,23 +70,11 @@ public class NotificationInboxController : ControllerBase
         var query = _context.UserNotifications
             .AsNoTracking()
             .Where(item => item.RecipientUserId == userId.Value && item.DeletedAt == null);
+        var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
 
         query = ApplyStatusFilter(query, status);
-
-        if (!string.IsNullOrWhiteSpace(type) && UserNotificationTypes.IsKnown(type))
-        {
-            var normalizedType = UserNotificationTypes.Find(type)!.Key;
-            query = query.Where(item => item.Type == normalizedType);
-        }
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var term = search.Trim().ToLowerInvariant();
-            query = query.Where(item =>
-                item.Title.ToLower().Contains(term)
-                || item.BodyPreview.ToLower().Contains(term)
-                || item.EventKey.ToLower().Contains(term));
-        }
+        query = ApplyTypeAndSearchFilters(query, type, search);
+        query = WhereNotificationTargetVisible(query, _context, visibility);
 
         var total = await query.CountAsync(ct);
         var items = await query
@@ -101,6 +92,44 @@ public class NotificationInboxController : ControllerBase
             Page = page,
             PageSize = pageSize
         });
+    }
+
+    [HttpPost("read-all")]
+    public async Task<ActionResult<UserNotificationBulkActionResultDto>> MarkAllRead(
+        [FromQuery] string? status,
+        [FromQuery] string? type,
+        [FromQuery] string? search,
+        CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var query = _context.UserNotifications
+            .Where(item => item.RecipientUserId == userId.Value && item.DeletedAt == null);
+        var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+
+        query = ApplyStatusFilter(query, status);
+        query = ApplyTypeAndSearchFilters(query, type, search);
+        query = WhereNotificationTargetVisible(query, _context, visibility);
+
+        var items = await query
+            .Where(item => !item.IsRead)
+            .ToListAsync(ct);
+
+        foreach (var item in items)
+        {
+            MarkAsRead(item);
+        }
+
+        if (items.Count > 0)
+        {
+            await _context.SaveChangesAsync(ct);
+        }
+
+        return Ok(new UserNotificationBulkActionResultDto { UpdatedCount = items.Count });
     }
 
     [HttpPatch("{id:int}/read")]
@@ -174,12 +203,15 @@ public class NotificationInboxController : ControllerBase
             return null;
         }
 
-        return await _context.UserNotifications
-            .FirstOrDefaultAsync(item =>
+        var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var query = _context.UserNotifications
+            .Where(item =>
                 item.Id == id
                 && item.RecipientUserId == userId.Value
-                && item.DeletedAt == null,
-                ct);
+                && item.DeletedAt == null);
+        query = WhereNotificationTargetVisible(query, _context, visibility);
+        return await query
+            .FirstOrDefaultAsync(ct);
     }
 
     private static IQueryable<UserNotification> ApplyStatusFilter(
@@ -194,6 +226,53 @@ public class NotificationInboxController : ControllerBase
             "archived" => query.Where(item => item.IsArchived),
             _ => query.Where(item => !item.IsArchived)
         };
+    }
+
+    private static IQueryable<UserNotification> ApplyTypeAndSearchFilters(
+        IQueryable<UserNotification> query,
+        string? type,
+        string? search)
+    {
+        if (!string.IsNullOrWhiteSpace(type) && UserNotificationTypes.IsKnown(type))
+        {
+            var normalizedType = UserNotificationTypes.Find(type)!.Key;
+            query = query.Where(item => item.Type == normalizedType);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLowerInvariant();
+            query = query.Where(item =>
+                item.Title.ToLower().Contains(term)
+                || item.BodyPreview.ToLower().Contains(term)
+                || item.EventKey.ToLower().Contains(term));
+        }
+
+        return query;
+    }
+
+    private static IQueryable<UserNotification> WhereNotificationTargetVisible(
+        IQueryable<UserNotification> query,
+        PaymentContext context,
+        DataVisibilityAccess? visibility)
+    {
+        if (visibility is null)
+        {
+            return query.Where(item => !item.TaskJournalItemId.HasValue);
+        }
+
+        if (visibility.SeesAll)
+        {
+            return query;
+        }
+
+        var visibleTaskIds = context.TaskJournalItems
+            .ApplyTaskVisibility(visibility)
+            .Select(task => task.Id);
+
+        return query.Where(item =>
+            !item.TaskJournalItemId.HasValue
+            || visibleTaskIds.Contains(item.TaskJournalItemId.Value));
     }
 
     private static void MarkAsRead(UserNotification item)
@@ -236,6 +315,10 @@ public class NotificationInboxController : ControllerBase
             Key = item.Key,
             Label = item.Label,
             Description = item.Description,
-            Tone = item.Tone
+            Tone = item.Tone,
+            Priority = item.Priority,
+            Channels = item.Channels,
+            Deduplicate = item.Deduplicate,
+            Digestible = item.Digestible
         };
 }

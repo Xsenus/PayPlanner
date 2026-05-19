@@ -36,7 +36,7 @@ public class TasksController : ControllerBase
     };
     private static readonly HashSet<string> AllowedReminders = new(StringComparer.OrdinalIgnoreCase)
     {
-        "atDue", "before15m", "before1h", "before1d", "dailyOverdue"
+        "atDue", "before15m", "before1h", "before1d", "before3d", "before7d", "dailyOverdue"
     };
     private static readonly HashSet<string> AllowedChannels = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -58,17 +58,28 @@ public class TasksController : ControllerBase
     [
         "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
     ];
+    private static readonly ClientCaseStatus[] FinishedCaseStatuses =
+    [
+        ClientCaseStatus.Closed,
+        ClientCaseStatus.Lost,
+    ];
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
 
     private readonly PaymentContext _db;
     private readonly INotificationService _notificationService;
+    private readonly ICaseDocumentStorage _caseDocumentStorage;
     private readonly string _taskFilesRoot;
 
-    public TasksController(PaymentContext db, INotificationService notificationService, IWebHostEnvironment? environment = null)
+    public TasksController(
+        PaymentContext db,
+        INotificationService notificationService,
+        IWebHostEnvironment? environment = null,
+        ICaseDocumentStorage? caseDocumentStorage = null)
     {
         _db = db;
         _notificationService = notificationService;
+        _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
         _taskFilesRoot = Path.Combine(environment?.ContentRootPath ?? AppContext.BaseDirectory, "App_Data", "task-files");
     }
 
@@ -80,6 +91,9 @@ public class TasksController : ControllerBase
         [FromQuery] int? assigneeUserId,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
+        [FromQuery] int? clientCaseId = null,
+        [FromQuery] int? clientId = null,
+        [FromQuery] int? legalEntityId = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
@@ -123,6 +137,21 @@ public class TasksController : ControllerBase
                 task.Participants.Any(participant =>
                     participant.Role == "assignee" &&
                     participant.UserId == assigneeUserId.Value));
+        }
+
+        if (clientCaseId.HasValue)
+        {
+            query = query.Where(task => task.ClientCaseId == clientCaseId.Value);
+        }
+
+        if (clientId.HasValue)
+        {
+            query = query.Where(task => task.ClientId == clientId.Value);
+        }
+
+        if (legalEntityId.HasValue)
+        {
+            query = query.Where(task => task.LegalEntityId == legalEntityId.Value);
         }
 
         if (from.HasValue)
@@ -381,10 +410,11 @@ public class TasksController : ControllerBase
 
         var candidates = await _db.ClientCases
             .AsNoTracking()
+            .ApplyClientCaseVisibility(access.Visibility)
             .Where(clientCase =>
                 ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                  (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                clientCase.Status != ClientCaseStatus.Closed)
+                !FinishedCaseStatuses.Contains(clientCase.Status))
             .Select(clientCase => new
             {
                 clientCase.Id,
@@ -393,6 +423,8 @@ public class TasksController : ControllerBase
                 clientCase.ClientId,
                 ClientName = clientCase.Client != null ? clientCase.Client.Name : string.Empty,
                 clientCase.LegalEntityId,
+                clientCase.LastViewedAt,
+                clientCase.ActivityConfirmedAt,
                 LegalEntityName = clientCase.LegalEntity != null
                     ? (clientCase.LegalEntity.ShortName != string.Empty
                         ? clientCase.LegalEntity.ShortName
@@ -418,7 +450,22 @@ public class TasksController : ControllerBase
 
         return Ok(candidates.Select(item =>
         {
-            var lastActivity = item.LastTaskAt ?? item.CreatedAt;
+            var lastActivity = item.CreatedAt;
+            if (item.LastTaskAt.HasValue && item.LastTaskAt.Value > lastActivity)
+            {
+                lastActivity = item.LastTaskAt.Value;
+            }
+
+            if (item.LastViewedAt.HasValue && item.LastViewedAt.Value > lastActivity)
+            {
+                lastActivity = item.LastViewedAt.Value;
+            }
+
+            if (item.ActivityConfirmedAt.HasValue && item.ActivityConfirmedAt.Value > lastActivity)
+            {
+                lastActivity = item.ActivityConfirmedAt.Value;
+            }
+
             var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity).TotalDays));
             var reason = item.LastTaskAt is null
                 ? "По делу еще не было задач"
@@ -463,11 +510,12 @@ public class TasksController : ControllerBase
         var clientCase = await _db.ClientCases
             .Include(item => item.Client)
             .Include(item => item.LegalEntity)
+            .ApplyClientCaseVisibility(access.Visibility)
             .FirstOrDefaultAsync(item =>
                 item.Id == clientCaseId &&
                 ((item.ClientId.HasValue && item.Client != null) ||
                  (item.LegalEntityId.HasValue && item.LegalEntity != null)) &&
-                item.Status != ClientCaseStatus.Closed,
+                !FinishedCaseStatuses.Contains(item.Status),
                 ct);
         if (clientCase is null)
         {
@@ -494,7 +542,7 @@ public class TasksController : ControllerBase
             .IgnoreQueryFilters()
             .Where(task => task.ClientCaseId == clientCase.Id)
             .MaxAsync(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt), ct);
-        var lastActivity = lastTaskAt ?? clientCase.CreatedAt;
+        var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt);
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
         var assignee = await ResolveAutomationAssigneeAsync(clientCase, access, ct);
         var binding = BuildCaseBinding(clientCase);
@@ -555,10 +603,11 @@ public class TasksController : ControllerBase
         var candidates = await _db.ClientCases
             .Include(item => item.Client)
             .Include(item => item.LegalEntity)
+            .ApplyClientCaseVisibility(access.Visibility)
             .Where(clientCase =>
                 ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
                  (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
-                clientCase.Status != ClientCaseStatus.Closed)
+                !FinishedCaseStatuses.Contains(clientCase.Status))
             .Select(clientCase => new
             {
                 Case = clientCase,
@@ -873,6 +922,7 @@ public class TasksController : ControllerBase
         var relativePath = Path.Combine(id.ToString(), storedFileName);
         var fullPath = ResolveTaskFilePath(relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        string? caseDocumentStoragePath = null;
 
         try
         {
@@ -897,6 +947,38 @@ public class TasksController : ControllerBase
             };
 
             _db.TaskJournalFiles.Add(taskFile);
+            if (entity.ClientCaseId.HasValue)
+            {
+                var caseDocumentKey = BuildTaskCaseDocumentKey(entity.Id, normalizedDocumentKey!);
+                var latestCaseVersion = await _db.ClientCaseDocuments
+                    .Where(item => item.ClientCaseId == entity.ClientCaseId.Value && item.DocumentKey == caseDocumentKey)
+                    .MaxAsync(item => (int?)item.Version, ct) ?? 0;
+                var caseDocumentVersion = latestCaseVersion + 1;
+                var caseStoredFileName = BuildStoredFileName(caseDocumentKey, caseDocumentVersion, safeFileName);
+                caseDocumentStoragePath = _caseDocumentStorage.BuildRelativePath(entity.ClientCaseId.Value, caseStoredFileName);
+                await using (var caseStream = file.OpenReadStream())
+                {
+                    await _caseDocumentStorage.SaveAsync(caseDocumentStoragePath, caseStream, ct);
+                }
+
+                _db.ClientCaseDocuments.Add(new ClientCaseDocument
+                {
+                    ClientCaseId = entity.ClientCaseId.Value,
+                    DocumentKey = caseDocumentKey,
+                    Version = caseDocumentVersion,
+                    DocumentType = "Документ задачи",
+                    Status = "Загружен",
+                    OriginalFileName = safeFileName,
+                    StoredFileName = caseStoredFileName,
+                    StoragePath = caseDocumentStoragePath,
+                    ContentType = taskFile.ContentType,
+                    SizeBytes = taskFile.SizeBytes,
+                    UploadedByUserId = taskFile.UploadedByUserId,
+                    UploadedByName = taskFile.UploadedByName,
+                    UploadedAt = taskFile.UploadedAt,
+                });
+            }
+
             entity.UpdatedAt = DateTime.UtcNow;
             AddTaskHistory(
                 entity,
@@ -913,6 +995,11 @@ public class TasksController : ControllerBase
         catch
         {
             TryDeletePhysicalFile(fullPath);
+            if (caseDocumentStoragePath is not null)
+            {
+                _caseDocumentStorage.DeleteIfExists(caseDocumentStoragePath);
+            }
+
             throw;
         }
     }
@@ -1073,6 +1160,12 @@ public class TasksController : ControllerBase
         AddTaskHistory(entity, access, "Задача создана.");
         _db.TaskJournalItems.Add(entity);
         await _db.SaveChangesAsync(ct);
+        await _notificationService.NotifyTaskAssignedAsync(entity, access.DisplayName, access.UserId, ct);
+        if (IsApprovalActiveStatus(entity.Status))
+        {
+            await _notificationService.NotifyTaskApprovalRequestedAsync(entity, access.DisplayName, access.UserId, ct);
+        }
+        await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
         return Created($"/api/tasks/{entity.Id}", Map(entity, binding));
     }
 
@@ -1119,7 +1212,10 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = participants.Error });
         }
 
+        var previousStatus = entity.Status;
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
+        var approvalQueueRestarted = ShouldRestartApprovalQueue(previousStatus, nextStatus);
+        participants = ResetApprovalQueueIfStartingApproval(previousStatus, nextStatus, participants);
         var statusValidation = ValidateStatusRules(nextStatus, NormalizeOptional(request.Result), participants.Items);
         if (statusValidation is not null)
         {
@@ -1162,6 +1258,11 @@ public class TasksController : ControllerBase
             AddTaskHistory(entity, access, $"Изменены поля: {string.Join(", ", changeLabels)}.");
         }
 
+        if (approvalQueueRestarted)
+        {
+            AddTaskHistory(entity, access, "Очередь согласования запущена заново: все согласующие снова ожидают решения.");
+        }
+
         TaskJournalComment? userComment = null;
         if (changeComment is not null)
         {
@@ -1179,10 +1280,16 @@ public class TasksController : ControllerBase
             await _notificationService.NotifyTaskCommentAsync(entity, userComment, ct);
         }
 
+        if (approvalQueueRestarted || (!IsApprovalActiveStatus(previousStatus) && IsApprovalActiveStatus(entity.Status)))
+        {
+            await _notificationService.NotifyTaskApprovalRequestedAsync(entity, access.DisplayName, access.UserId, ct);
+        }
+
         if (becameDone)
         {
             await _notificationService.NotifyTaskCompletedAsync(entity, ct);
         }
+        await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
         return Ok(Map(entity, binding));
     }
 
@@ -1225,6 +1332,7 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = statusValidation });
         }
 
+        var approvalQueueRestarted = ResetApprovalQueueIfStartingApproval(entity.Status, nextStatus, entity.Participants);
         var becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
             && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
         var oldStatus = entity.Status;
@@ -1252,6 +1360,11 @@ public class TasksController : ControllerBase
                 parts.Add("результат обновлён");
             }
 
+            if (approvalQueueRestarted)
+            {
+                parts.Add("очередь согласования запущена заново");
+            }
+
             AddTaskHistory(entity, access, $"Изменено: {string.Join(", ", parts)}.");
         }
 
@@ -1269,7 +1382,14 @@ public class TasksController : ControllerBase
                 changeLabels.Add("Результат");
             }
 
-            await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, null, ct);
+            if (approvalQueueRestarted || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status)))
+            {
+                await _notificationService.NotifyTaskApprovalRequestedAsync(entity, access.DisplayName, access.UserId, ct);
+            }
+            else
+            {
+                await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, null, ct);
+            }
         }
 
         if (becameDone)
@@ -1277,6 +1397,185 @@ public class TasksController : ControllerBase
             await _notificationService.NotifyTaskCompletedAsync(entity, ct);
         }
         return Ok(Map(entity));
+    }
+
+    [HttpPost("bulk")]
+    public async Task<ActionResult<object>> BulkUpdateTasks([FromBody] BulkUpdateTaskJournalItemsRequest request, CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanEdit != true)
+        {
+            return Forbid();
+        }
+
+        var ids = request.Ids
+            .Where(id => id > 0)
+            .Distinct()
+            .Take(500)
+            .ToList();
+        if (ids.Count == 0)
+        {
+            return BadRequest(new { message = "Выберите задачи для массового изменения." });
+        }
+
+        var hasAssigneeChange = request.AssigneeUserId.HasValue;
+        var hasPriorityChange = !string.IsNullOrWhiteSpace(request.Priority);
+        var hasStatusChange = !string.IsNullOrWhiteSpace(request.Status);
+        var hasDueAtChange = request.DueAt.HasValue;
+        if (!hasAssigneeChange && !hasPriorityChange && !hasStatusChange && !hasDueAtChange)
+        {
+            return BadRequest(new { message = "Укажите хотя бы одно массовое изменение." });
+        }
+
+        User? assignee = null;
+        if (hasAssigneeChange)
+        {
+            assignee = await _db.Users
+                .FirstOrDefaultAsync(item => item.Id == request.AssigneeUserId!.Value && item.IsActive && item.IsApproved, ct);
+            if (assignee is null)
+            {
+                return BadRequest(new { message = "Указанный исполнитель не найден." });
+            }
+        }
+
+        var nextPriority = hasPriorityChange
+            ? NormalizeEnumValue(request.Priority, AllowedPriorities, string.Empty)
+            : null;
+        if (hasPriorityChange && string.IsNullOrWhiteSpace(nextPriority))
+        {
+            return BadRequest(new { message = "Некорректный приоритет задачи." });
+        }
+
+        var nextStatus = hasStatusChange
+            ? NormalizeEnumValue(request.Status, AllowedStatuses, string.Empty)
+            : null;
+        if (hasStatusChange && string.IsNullOrWhiteSpace(nextStatus))
+        {
+            return BadRequest(new { message = "Некорректный статус задачи." });
+        }
+
+        if (string.Equals(nextStatus, "approved", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { message = "Массовое согласование задач запрещено. Согласующий должен принимать решение по каждой задаче отдельно." });
+        }
+
+        if (hasDueAtChange && request.DueAt == default)
+        {
+            return BadRequest(new { message = "Укажите корректный срок задачи." });
+        }
+
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        var entities = await BuildVisibleTasksQuery(access)
+            .Where(task => ids.Contains(task.Id))
+            .ToListAsync(ct);
+
+        var updated = 0;
+        var notifications = new List<(TaskJournalItem Task, IReadOnlyList<string> ChangeLabels, bool BecameDone)>();
+        var now = DateTime.UtcNow;
+        foreach (var entity in entities)
+        {
+            if (ShouldRestrictExecutorFullEdit(entity, access, settings))
+            {
+                continue;
+            }
+
+            var changes = new List<string>();
+
+            if (assignee is not null && ReplacePrimaryAssignee(entity, assignee, now))
+            {
+                changes.Add("Исполнитель");
+            }
+
+            if (nextPriority is not null && !string.Equals(entity.Priority, nextPriority, StringComparison.OrdinalIgnoreCase))
+            {
+                entity.Priority = nextPriority;
+                changes.Add("Приоритет");
+            }
+
+            if (request.DueAt.HasValue && entity.DueAt != request.DueAt.Value)
+            {
+                entity.DueAt = request.DueAt.Value;
+                changes.Add("Срок");
+            }
+
+            var becameDone = false;
+            if (nextStatus is not null)
+            {
+                var oldStatus = entity.Status;
+                var oldResult = entity.Result;
+                var nextResult = NormalizeOptional(request.Result) ?? entity.Result;
+                var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants);
+                if (statusValidation is not null)
+                {
+                    continue;
+                }
+
+                var approvalQueueRestarted = ResetApprovalQueueIfStartingApproval(entity.Status, nextStatus, entity.Participants);
+                becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
+                entity.Status = nextStatus;
+                if (NormalizeOptional(request.Result) is { } result)
+                {
+                    entity.Result = result;
+                }
+
+                if (!string.Equals(oldStatus, entity.Status, StringComparison.OrdinalIgnoreCase))
+                {
+                    changes.Add("Статус");
+                }
+
+                if (!string.Equals(NormalizeOptional(oldResult), NormalizeOptional(entity.Result), StringComparison.Ordinal))
+                {
+                    changes.Add("Результат");
+                }
+
+                if (approvalQueueRestarted)
+                {
+                    changes.Add("Очередь согласования");
+                }
+            }
+
+            if (changes.Count == 0)
+            {
+                continue;
+            }
+
+            entity.UpdatedAt = now;
+            AddTaskHistory(entity, access, $"Массовое изменение: {string.Join(", ", changes)}.");
+            updated++;
+            notifications.Add((entity, changes, becameDone));
+        }
+
+        await _db.SaveChangesAsync(ct);
+        foreach (var notification in notifications)
+        {
+            await _notificationService.NotifyTaskChangedAsync(
+                notification.Task,
+                notification.ChangeLabels,
+                access.DisplayName,
+                access.UserId,
+                null,
+                ct);
+
+            if (notification.BecameDone)
+            {
+                await _notificationService.NotifyTaskCompletedAsync(notification.Task, ct);
+            }
+
+            await NotifyTaskScheduleConflictIfNeededAsync(notification.Task, access, ct);
+        }
+
+        return Ok(new
+        {
+            requested = ids.Count,
+            updated,
+            skipped = ids.Count - updated,
+        });
     }
 
     [HttpPatch("{id:int}/approval")]
@@ -1315,6 +1614,11 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = "У задачи нет согласующих." });
         }
 
+        if (!IsApprovalActiveStatus(entity.Status))
+        {
+            return BadRequest(new { message = "Задача не находится на согласовании." });
+        }
+
         var participant = request.ParticipantId.HasValue
             ? approvers.FirstOrDefault(item => item.Id == request.ParticipantId.Value)
             : approvers.FirstOrDefault(item => item.UserId == access.UserId);
@@ -1347,7 +1651,6 @@ public class TasksController : ControllerBase
         participant.RespondedAt = DateTime.UtcNow;
         participant.UpdatedAt = DateTime.UtcNow;
 
-        var previousStatus = entity.Status;
         if (string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase))
         {
             entity.Status = "revision";
@@ -1367,12 +1670,10 @@ public class TasksController : ControllerBase
             access,
             BuildApprovalHistoryText(decision, participant.DisplayName, resolution));
         await _db.SaveChangesAsync(ct);
-        var changeLabels = !string.Equals(previousStatus, entity.Status, StringComparison.OrdinalIgnoreCase)
-            ? new[] { "Согласование", "Статус" }
-            : new[] { "Согласование" };
-        await _notificationService.NotifyTaskChangedAsync(
+        await _notificationService.NotifyTaskApprovalDecisionAsync(
             entity,
-            changeLabels,
+            participant,
+            decision,
             access.DisplayName,
             access.UserId,
             resolution,
@@ -1409,6 +1710,107 @@ public class TasksController : ControllerBase
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
+
+    private async Task NotifyTaskScheduleConflictIfNeededAsync(TaskJournalItem entity, TaskAccess access, CancellationToken ct)
+    {
+        if (!ActiveTaskStatuses.Contains(entity.Status, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var conflicts = await FindTaskScheduleConflictsAsync(entity, ct);
+        if (conflicts.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyTaskScheduleConflictAsync(entity, conflicts, access.DisplayName, access.UserId, ct);
+    }
+
+    private async Task<IReadOnlyList<TaskJournalItem>> FindTaskScheduleConflictsAsync(TaskJournalItem entity, CancellationToken ct)
+    {
+        var assigneeUserIds = GetTaskAssigneeUserIds(entity);
+        var assigneeNames = GetTaskAssigneeNames(entity);
+        if (assigneeUserIds.Count == 0 && assigneeNames.Count == 0)
+        {
+            return Array.Empty<TaskJournalItem>();
+        }
+
+        var start = entity.DueAt;
+        var end = GetTaskEndAt(entity);
+        var dayStart = start.Date;
+        var dayEnd = dayStart.AddDays(1);
+
+        var candidates = await _db.TaskJournalItems
+            .Include(task => task.Participants)
+            .Where(task =>
+                task.Id != entity.Id &&
+                ActiveTaskStatuses.Contains(task.Status) &&
+                task.DueAt >= dayStart &&
+                task.DueAt < dayEnd &&
+                (
+                    (task.AssigneeUserId.HasValue && assigneeUserIds.Contains(task.AssigneeUserId.Value)) ||
+                    task.Participants.Any(participant =>
+                        participant.Role == "assignee" &&
+                        participant.UserId.HasValue &&
+                        assigneeUserIds.Contains(participant.UserId.Value)) ||
+                    (assigneeNames.Count > 0 && assigneeNames.Contains(task.AssigneeName.ToLower())) ||
+                    task.Participants.Any(participant =>
+                        participant.Role == "assignee" &&
+                        assigneeNames.Contains(participant.DisplayName.ToLower()))
+                ))
+            .ToListAsync(ct);
+
+        return candidates
+            .Where(candidate => IntervalsOverlap(start, end, candidate.DueAt, GetTaskEndAt(candidate)))
+            .OrderBy(candidate => candidate.DueAt)
+            .ThenBy(candidate => candidate.Id)
+            .ToList();
+    }
+
+    private static IReadOnlyList<int> GetTaskAssigneeUserIds(TaskJournalItem entity)
+    {
+        var ids = new HashSet<int>();
+        if (entity.AssigneeUserId is { } assigneeUserId && assigneeUserId > 0)
+        {
+            ids.Add(assigneeUserId);
+        }
+
+        foreach (var participant in entity.Participants)
+        {
+            if (participant.Role == "assignee" && participant.UserId is { } userId && userId > 0)
+            {
+                ids.Add(userId);
+            }
+        }
+
+        return ids.ToList();
+    }
+
+    private static IReadOnlyList<string> GetTaskAssigneeNames(TaskJournalItem entity)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(entity.AssigneeName))
+        {
+            names.Add(entity.AssigneeName.Trim().ToLowerInvariant());
+        }
+
+        foreach (var participant in entity.Participants)
+        {
+            if (participant.Role == "assignee" && !string.IsNullOrWhiteSpace(participant.DisplayName))
+            {
+                names.Add(participant.DisplayName.Trim().ToLowerInvariant());
+            }
+        }
+
+        return names.ToList();
+    }
+
+    private static DateTime GetTaskEndAt(TaskJournalItem entity)
+        => entity.DueAt.AddMinutes(NormalizeTaskDuration(entity.PlannedDurationMinutes));
+
+    private static bool IntervalsOverlap(DateTime firstStart, DateTime firstEnd, DateTime secondStart, DateTime secondEnd)
+        => firstStart < secondEnd && secondStart < firstEnd;
 
     private IQueryable<TaskJournalItem> BuildVisibleTasksQuery(TaskAccess access)
     {
@@ -1705,6 +2107,27 @@ public class TasksController : ControllerBase
                 ? clientName.Trim()
                 : $"{clientName.Trim()} - {caseTitle.Trim()}";
 
+    private static DateTime ResolveLastCaseActivity(ClientCase clientCase, DateTime? lastTaskAt)
+    {
+        var lastActivity = clientCase.CreatedAt;
+        if (lastTaskAt.HasValue && lastTaskAt.Value > lastActivity)
+        {
+            lastActivity = lastTaskAt.Value;
+        }
+
+        if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
+        {
+            lastActivity = clientCase.LastViewedAt.Value;
+        }
+
+        if (clientCase.ActivityConfirmedAt.HasValue && clientCase.ActivityConfirmedAt.Value > lastActivity)
+        {
+            lastActivity = clientCase.ActivityConfirmedAt.Value;
+        }
+
+        return lastActivity;
+    }
+
     private static TaskClientBinding BuildCaseBinding(ClientCase clientCase)
     {
         if (clientCase.ClientId.HasValue && clientCase.Client is not null)
@@ -1847,7 +2270,19 @@ public class TasksController : ControllerBase
         var allApproved = approvers.Count > 0
             && approvers.All(participant => string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase));
 
-        return allApproved ? "approved" : entity.Status;
+        if (allApproved)
+        {
+            return "approved";
+        }
+
+        if ((string.Equals(entity.Status, "onApproval", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entity.Status, "overdueApproval", StringComparison.OrdinalIgnoreCase))
+            && entity.DueAt < DateTime.UtcNow)
+        {
+            return "overdueApproval";
+        }
+
+        return entity.Status;
     }
 
     private static string ToIso(DateTime value)
@@ -1931,7 +2366,7 @@ public class TasksController : ControllerBase
         TaskAccess fallbackAccess,
         CancellationToken ct)
     {
-        var responsibleUserId = clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
+        var responsibleUserId = clientCase.ResponsibleUserId ?? clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
         if (responsibleUserId.HasValue)
         {
             var responsible = await _db.Users
@@ -1969,7 +2404,7 @@ public class TasksController : ControllerBase
         TaskParticipantDraft assignee,
         DateTime? lastTaskAt)
     {
-        var lastActivity = lastTaskAt ?? clientCase.CreatedAt;
+        var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt);
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
 
         return new TaskJournalItem
@@ -2071,8 +2506,68 @@ public class TasksController : ControllerBase
             result,
             approvers.Count,
             approvers.Count == 0 || approvers.All(participant =>
-                string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)));
+            string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)));
     }
+
+    private static TaskParticipantsResolution ResetApprovalQueueIfStartingApproval(
+        string? currentStatus,
+        string nextStatus,
+        TaskParticipantsResolution participants)
+    {
+        if (!ShouldRestartApprovalQueue(currentStatus, nextStatus))
+        {
+            return participants;
+        }
+
+        var resetItems = participants.Items
+            .Select(participant => string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase)
+                ? participant with { ApprovalStatus = "pending", Resolution = null }
+                : participant)
+            .ToList();
+
+        return TaskParticipantsResolution.Valid(
+            participants.PrimaryAssigneeUserId,
+            participants.PrimaryAssigneeName,
+            resetItems);
+    }
+
+    private static bool ResetApprovalQueueIfStartingApproval(
+        string? currentStatus,
+        string nextStatus,
+        IEnumerable<TaskJournalParticipant> participants)
+    {
+        if (!ShouldRestartApprovalQueue(currentStatus, nextStatus))
+        {
+            return false;
+        }
+
+        var restarted = false;
+        var now = DateTime.UtcNow;
+        foreach (var participant in participants.Where(item => string.Equals(item.Role, "approver", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!string.Equals(participant.ApprovalStatus, "pending", StringComparison.OrdinalIgnoreCase)
+                || participant.Resolution is not null
+                || participant.RespondedAt is not null)
+            {
+                restarted = true;
+            }
+
+            participant.ApprovalStatus = "pending";
+            participant.Resolution = null;
+            participant.RespondedAt = null;
+            participant.UpdatedAt = now;
+        }
+
+        return restarted;
+    }
+
+    private static bool ShouldRestartApprovalQueue(string? currentStatus, string nextStatus)
+        => string.Equals(nextStatus, "onApproval", StringComparison.OrdinalIgnoreCase)
+           && !IsApprovalActiveStatus(currentStatus);
+
+    private static bool IsApprovalActiveStatus(string? status)
+        => string.Equals(status, "onApproval", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, "overdueApproval", StringComparison.OrdinalIgnoreCase);
 
     private static string? ValidateStatusRules(
         string status,
@@ -2270,6 +2765,17 @@ public class TasksController : ControllerBase
         return $"{documentKey}-v{version}-{Guid.NewGuid():N}{extension}";
     }
 
+    private static string BuildTaskCaseDocumentKey(int taskId, string taskDocumentKey)
+    {
+        var prefix = $"task-{taskId}-";
+        var maxSuffixLength = Math.Max(1, 64 - prefix.Length);
+        var suffix = taskDocumentKey.Length <= maxSuffixLength
+            ? taskDocumentKey
+            : taskDocumentKey[..maxSuffixLength];
+
+        return prefix + suffix;
+    }
+
     private string ResolveTaskFilePath(string storagePath)
     {
         var root = Path.GetFullPath(_taskFilesRoot);
@@ -2334,6 +2840,49 @@ public class TasksController : ControllerBase
         return entity.Participants.Any(participant =>
             participant.UserId == access.UserId &&
             !string.Equals(participant.Role, "observer", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool ReplacePrimaryAssignee(TaskJournalItem entity, User assignee, DateTime nowUtc)
+    {
+        var displayName = BuildUserDisplayName(assignee.FullName, assignee.Email);
+        var currentAssignees = entity.Participants
+            .Where(participant => string.Equals(participant.Role, "assignee", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var alreadySame =
+            entity.AssigneeUserId == assignee.Id &&
+            string.Equals(entity.AssigneeName, displayName, StringComparison.Ordinal) &&
+            currentAssignees.Count == 1 &&
+            currentAssignees[0].UserId == assignee.Id &&
+            string.Equals(currentAssignees[0].DisplayName, displayName, StringComparison.Ordinal);
+        if (alreadySame)
+        {
+            return false;
+        }
+
+        if (currentAssignees.Count > 0)
+        {
+            _db.TaskJournalParticipants.RemoveRange(currentAssignees);
+            foreach (var participant in currentAssignees)
+            {
+                entity.Participants.Remove(participant);
+            }
+        }
+
+        entity.AssigneeUserId = assignee.Id;
+        entity.AssigneeName = displayName;
+        entity.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = assignee.Id,
+            Role = "assignee",
+            DisplayName = displayName,
+            Email = assignee.Email,
+            SortOrder = 0,
+            ApprovalStatus = "pending",
+            CreatedAt = nowUtc,
+            UpdatedAt = nowUtc,
+        });
+
+        return true;
     }
 
     private static IReadOnlyList<string> BuildTaskChangeLabels(

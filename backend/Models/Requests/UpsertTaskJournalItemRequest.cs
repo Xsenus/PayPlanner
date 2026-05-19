@@ -33,3 +33,13 @@ public class TaskJournalParticipantRequest
     public string? ApprovalStatus { get; set; }
     public string? Resolution { get; set; }
 }
+
+public class BulkUpdateTaskJournalItemsRequest
+{
+    public List<int> Ids { get; set; } = [];
+    public int? AssigneeUserId { get; set; }
+    public string? Priority { get; set; }
+    public string? Status { get; set; }
+    public DateTime? DueAt { get; set; }
+    public string? Result { get; set; }
+}

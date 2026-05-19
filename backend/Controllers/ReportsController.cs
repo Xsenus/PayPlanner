@@ -2,9 +2,11 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -20,6 +22,36 @@ public class ReportsController : ControllerBase
     {
         _db = db;
         _logger = logger;
+    }
+
+    [HttpGet("legal-work")]
+    public async Task<ActionResult<LegalWorkReportDto>> LegalWork(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+        var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (casesVisibility is null || tasksVisibility is null || accountsVisibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildLegalWorkReportAsync(start, end, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
     }
 
     [HttpGet("cash-flow")]
@@ -549,6 +581,353 @@ public class ReportsController : ControllerBase
 
         return Ok(report);
     }
+
+    private async Task<LegalWorkReportDto> BuildLegalWorkReportAsync(
+        DateTime start,
+        DateTime end,
+        DataVisibilityAccess casesVisibility,
+        DataVisibilityAccess tasksVisibility,
+        DataVisibilityAccess accountsVisibility,
+        CancellationToken ct)
+    {
+        var today = DateTime.UtcNow.Date;
+        var endInclusive = end.Date.AddDays(1).AddTicks(-1);
+
+        var cases = await _db.ClientCases
+            .AsNoTracking()
+            .WithCaseIncludes()
+            .ApplyClientCaseVisibility(casesVisibility)
+            .Where(item => item.CreatedAt <= endInclusive
+                && (item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost
+                    || (item.StartDate.HasValue && item.StartDate.Value >= start.Date)
+                    || (item.DueDate.HasValue && item.DueDate.Value >= start.Date)))
+            .ToListAsync(ct);
+
+        var caseIds = cases.Select(item => item.Id).Distinct().ToArray();
+
+        var tasks = caseIds.Length == 0
+            ? new List<LegalWorkTaskRow>()
+            : await _db.TaskJournalItems
+                .AsNoTracking()
+                .ApplyTaskVisibility(tasksVisibility)
+                .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))
+                .Select(item => new LegalWorkTaskRow(
+                    item.Id,
+                    item.ClientCaseId,
+                    item.AssigneeUserId,
+                    item.AssigneeName,
+                    item.Status,
+                    item.Priority,
+                    item.DueAt,
+                    item.PlannedDurationMinutes))
+                .ToListAsync(ct);
+
+        var payments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, ct);
+        var paidByCase = payments
+            .GroupBy(item => item.CaseId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(item => ResolvePaidAmount(item.Amount, item.PaidAmount, item.Status)));
+
+        var activeCases = cases.Where(item => !IsFinishedCaseStatus(item.Status)).ToList();
+        var openTasks = tasks.Where(item => IsOpenTaskStatus(item.Status)).ToList();
+        var overdueTasks = openTasks.Where(item => item.DueAt.Date < today).ToList();
+        var onApprovalTasks = openTasks
+            .Where(item => string.Equals(item.Status, "onApproval", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.Status, "overdueApproval", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var deadlines = activeCases
+            .SelectMany(item => BuildLegalWorkDeadlines(item, today))
+            .ToList();
+        var overdueDeadlines = deadlines
+            .Where(item => item.DueAt.Date < today)
+            .OrderBy(item => item.DueAt)
+            .ThenBy(item => item.CaseTitle)
+            .ToList();
+        var upcomingDeadlines = deadlines
+            .Where(item => item.DueAt.Date >= today && item.DueAt.Date <= today.AddDays(7))
+            .OrderBy(item => item.DueAt)
+            .ThenBy(item => item.CaseTitle)
+            .ToList();
+
+        var overdueDeadlineCountsByCase = overdueDeadlines
+            .GroupBy(item => item.CaseId)
+            .ToDictionary(group => group.Key, group => group.Count());
+
+        var openTaskCountsByCase = openTasks
+            .Where(item => item.ClientCaseId.HasValue)
+            .GroupBy(item => item.ClientCaseId!.Value)
+            .ToDictionary(group => group.Key, group => group.Count());
+
+        var feeTotal = cases.Sum(item => item.FeeAmount);
+        var paidTotal = paidByCase.Values.Sum();
+        var outstandingTotal = cases.Sum(item => Math.Max(0m, item.FeeAmount - paidByCase.GetValueOrDefault(item.Id)));
+
+        return new LegalWorkReportDto
+        {
+            From = start,
+            To = end,
+            TotalCases = cases.Count,
+            ActiveCases = activeCases.Count(item => item.Status == ClientCaseStatus.Open),
+            ClosedCases = cases.Count(item => item.Status == ClientCaseStatus.Closed),
+            LostCases = cases.Count(item => item.Status == ClientCaseStatus.Lost),
+            OnHoldCases = cases.Count(item => item.Status == ClientCaseStatus.OnHold),
+            OverdueDeadlineCount = overdueDeadlines.Count,
+            UpcomingDeadlineCount = upcomingDeadlines.Count,
+            OpenTaskCount = openTasks.Count,
+            OverdueTaskCount = overdueTasks.Count,
+            OnApprovalTaskCount = onApprovalTasks.Count,
+            FeeTotal = feeTotal,
+            PaidTotal = paidTotal,
+            OutstandingTotal = outstandingTotal,
+            CasesByStatus = cases
+                .GroupBy(item => item.Status)
+                .OrderBy(group => group.Key)
+                .Select(group => new LegalWorkCaseStatusItemDto
+                {
+                    Status = group.Key.ToString(),
+                    StatusLabel = FormatCaseStatus(group.Key),
+                    Count = group.Count(),
+                    FeeTotal = group.Sum(item => item.FeeAmount),
+                    OverdueDeadlines = group.Sum(item => overdueDeadlineCountsByCase.GetValueOrDefault(item.Id)),
+                })
+                .ToList(),
+            CasesByType = cases
+                .GroupBy(item => NormalizeReportText(item.CaseType, "Не указан"))
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key)
+                .Select(group => new LegalWorkCaseTypeItemDto
+                {
+                    CaseType = group.Key,
+                    Count = group.Count(),
+                    FeeTotal = group.Sum(item => item.FeeAmount),
+                    ActiveTasks = group.Sum(item => openTaskCountsByCase.GetValueOrDefault(item.Id)),
+                })
+                .ToList(),
+            Responsibles = BuildLegalWorkResponsibleItems(cases, openTasks, overdueTasks, onApprovalTasks, overdueDeadlines, paidByCase),
+            OverdueDeadlines = overdueDeadlines.Take(15).ToList(),
+            UpcomingDeadlines = upcomingDeadlines.Take(15).ToList(),
+        };
+    }
+
+    private async Task<IReadOnlyList<LegalWorkPaymentRow>> BuildLegalWorkPaymentRowsAsync(
+        IReadOnlyCollection<int> caseIds,
+        DataVisibilityAccess accountsVisibility,
+        CancellationToken ct)
+    {
+        if (caseIds.Count == 0)
+        {
+            return [];
+        }
+
+        var paymentQuery = _db.Payments
+            .AsNoTracking()
+            .ApplyPaymentVisibility(accountsVisibility)
+            .ExcludeInstallmentParentInvoices(_db)
+            .Where(item => item.Type == PaymentType.Income && item.Status != PaymentStatus.Cancelled);
+
+        var directRows = await paymentQuery
+            .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))
+            .Select(item => new LegalWorkPaymentRow(
+                item.Id,
+                item.ClientCaseId!.Value,
+                item.Amount,
+                item.PaidAmount,
+                item.Status))
+            .ToListAsync(ct);
+
+        var linkedRows = await _db.InvoiceClientCases
+            .AsNoTracking()
+            .Where(link => caseIds.Contains(link.ClientCaseId))
+            .Join(
+                paymentQuery,
+                link => link.PaymentId,
+                payment => payment.Id,
+                (link, payment) => new LegalWorkPaymentRow(
+                    payment.Id,
+                    link.ClientCaseId,
+                    payment.Amount,
+                    payment.PaidAmount,
+                    payment.Status))
+            .ToListAsync(ct);
+
+        return directRows
+            .Concat(linkedRows)
+            .GroupBy(item => new { item.PaymentId, item.CaseId })
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private static IReadOnlyList<LegalWorkResponsibleItemDto> BuildLegalWorkResponsibleItems(
+        IReadOnlyCollection<ClientCase> cases,
+        IReadOnlyCollection<LegalWorkTaskRow> openTasks,
+        IReadOnlyCollection<LegalWorkTaskRow> overdueTasks,
+        IReadOnlyCollection<LegalWorkTaskRow> onApprovalTasks,
+        IReadOnlyCollection<LegalWorkDeadlineItemDto> overdueDeadlines,
+        IReadOnlyDictionary<int, decimal> paidByCase)
+    {
+        var taskGroups = openTasks
+            .Where(item => item.AssigneeUserId.HasValue)
+            .GroupBy(item => item.AssigneeUserId!.Value)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        var overdueTaskGroups = overdueTasks
+            .Where(item => item.AssigneeUserId.HasValue)
+            .GroupBy(item => item.AssigneeUserId!.Value)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var approvalTaskGroups = onApprovalTasks
+            .Where(item => item.AssigneeUserId.HasValue)
+            .GroupBy(item => item.AssigneeUserId!.Value)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var overdueDeadlineGroups = overdueDeadlines
+            .Where(item => item.ResponsibleUserId.HasValue)
+            .GroupBy(item => item.ResponsibleUserId!.Value)
+            .ToDictionary(group => group.Key, group => group.Count());
+
+        return cases
+            .GroupBy(item => new ResponsibleReportKey(
+                item.ResponsibleUserId,
+                ResolveCaseResponsibleName(item)))
+            .Select(group =>
+            {
+                var responsibleId = group.Key.ResponsibleUserId;
+                var feeTotal = group.Sum(item => item.FeeAmount);
+                var paidTotal = group.Sum(item => paidByCase.GetValueOrDefault(item.Id));
+                var openTaskCount = responsibleId.HasValue && taskGroups.TryGetValue(responsibleId.Value, out var responsibleTasks)
+                    ? responsibleTasks.Count
+                    : 0;
+
+                return new LegalWorkResponsibleItemDto
+                {
+                    ResponsibleUserId = responsibleId,
+                    ResponsibleName = group.Key.ResponsibleName,
+                    ActiveCases = group.Count(item => !IsFinishedCaseStatus(item.Status)),
+                    ClosedCases = group.Count(item => item.Status == ClientCaseStatus.Closed),
+                    LostCases = group.Count(item => item.Status == ClientCaseStatus.Lost),
+                    OpenTasks = openTaskCount,
+                    OverdueTasks = responsibleId.HasValue ? overdueTaskGroups.GetValueOrDefault(responsibleId.Value) : 0,
+                    OnApprovalTasks = responsibleId.HasValue ? approvalTaskGroups.GetValueOrDefault(responsibleId.Value) : 0,
+                    OverdueDeadlines = responsibleId.HasValue ? overdueDeadlineGroups.GetValueOrDefault(responsibleId.Value) : 0,
+                    FeeTotal = feeTotal,
+                    PaidTotal = paidTotal,
+                    OutstandingTotal = Math.Max(0m, feeTotal - paidTotal),
+                };
+            })
+            .OrderByDescending(item => item.ActiveCases + item.OpenTasks + item.OverdueDeadlines)
+            .ThenBy(item => item.ResponsibleName)
+            .ToList();
+    }
+
+    private static IEnumerable<LegalWorkDeadlineItemDto> BuildLegalWorkDeadlines(ClientCase item, DateTime today)
+    {
+        foreach (var row in BuildDeadlineRows(item))
+        {
+            yield return new LegalWorkDeadlineItemDto
+            {
+                CaseId = item.Id,
+                CaseNumber = item.CaseNumber,
+                CaseTitle = item.Title,
+                ClientName = ResolveCaseOwnerName(item),
+                ResponsibleUserId = item.ResponsibleUserId,
+                ResponsibleName = ResolveCaseResponsibleName(item),
+                DeadlineType = row.Type,
+                DeadlineLabel = row.Label,
+                DueAt = row.DueAt,
+                DaysOffset = (row.DueAt.Date - today).Days,
+            };
+        }
+    }
+
+    private static IEnumerable<DeadlineSourceRow> BuildDeadlineRows(ClientCase item)
+    {
+        if (item.DueDate.HasValue)
+        {
+            yield return new DeadlineSourceRow("due", "Крайний срок по делу", item.DueDate.Value);
+        }
+
+        if (item.NextHearingAt.HasValue)
+        {
+            yield return new DeadlineSourceRow("hearing", "Судебное заседание", item.NextHearingAt.Value);
+        }
+
+        if (item.ClaimFiledAt.HasValue)
+        {
+            yield return new DeadlineSourceRow("claim", "Подача иска", item.ClaimFiledAt.Value);
+        }
+
+        if (item.AppealDeadlineAt.HasValue)
+        {
+            yield return new DeadlineSourceRow("appeal", "Срок обжалования", item.AppealDeadlineAt.Value);
+        }
+
+        if (item.MotionDeadlineAt.HasValue)
+        {
+            yield return new DeadlineSourceRow("motion", "Срок ходатайства", item.MotionDeadlineAt.Value);
+        }
+
+        if (item.ObjectionDeadlineAt.HasValue)
+        {
+            yield return new DeadlineSourceRow("objection", "Срок возражений", item.ObjectionDeadlineAt.Value);
+        }
+    }
+
+    private static decimal ResolvePaidAmount(decimal amount, decimal paidAmount, PaymentStatus status)
+    {
+        if (paidAmount > 0m)
+        {
+            return Math.Min(amount, paidAmount);
+        }
+
+        return status == PaymentStatus.Completed ? amount : 0m;
+    }
+
+    private static bool IsOpenTaskStatus(string? status)
+        => !string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase);
+
+    private static string ResolveCaseResponsibleName(ClientCase item)
+    {
+        var name = item.ResponsibleUser?.FullName;
+        return NormalizeReportText(name, "Не назначен");
+    }
+
+    private static string ResolveCaseOwnerName(ClientCase item)
+    {
+        if (item.Client is not null)
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.Client.Name) ? item.Client.Name : item.Client.Company,
+                "Клиент без имени");
+        }
+
+        if (item.LegalEntity is not null)
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.LegalEntity.ShortName) ? item.LegalEntity.ShortName : item.LegalEntity.FullName,
+                "Юридическое лицо без названия");
+        }
+
+        return "Без владельца";
+    }
+
+    private static string NormalizeReportText(string? value, string fallback)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
+    }
+
+    private static string FormatCaseStatus(ClientCaseStatus status)
+        => status switch
+        {
+            ClientCaseStatus.Open => "В работе",
+            ClientCaseStatus.OnHold => "Приостановлено",
+            ClientCaseStatus.Closed => "Закрыто",
+            ClientCaseStatus.Lost => "Проиграно",
+            _ => status.ToString(),
+        };
+
+    private static bool IsFinishedCaseStatus(ClientCaseStatus status)
+        => status is ClientCaseStatus.Closed or ClientCaseStatus.Lost;
 
     private async Task<CashFlowReportDto> BuildCashFlowReportAsync(
         DateTime from,
@@ -2680,6 +3059,32 @@ public class ReportsController : ControllerBase
             SpreadsheetImportBatchStatus.RolledBackWithConflicts => "Откатан с конфликтами",
             _ => status,
         };
+
+    private sealed record LegalWorkTaskRow(
+        int Id,
+        int? ClientCaseId,
+        int? AssigneeUserId,
+        string AssigneeName,
+        string Status,
+        string Priority,
+        DateTime DueAt,
+        int PlannedDurationMinutes);
+
+    private sealed record LegalWorkPaymentRow(
+        int PaymentId,
+        int CaseId,
+        decimal Amount,
+        decimal PaidAmount,
+        PaymentStatus Status);
+
+    private sealed record DeadlineSourceRow(
+        string Type,
+        string Label,
+        DateTime DueAt);
+
+    private sealed record ResponsibleReportKey(
+        int? ResponsibleUserId,
+        string ResponsibleName);
 
     private sealed class CashFlowAccountQueryRow
     {

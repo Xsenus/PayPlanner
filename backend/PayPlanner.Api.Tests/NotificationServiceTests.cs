@@ -130,6 +130,245 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskAssignedAsync_CreatesInAppNotificationForAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "task-author@example.com");
+        var assignee = new User
+        {
+            Email = "new-assignee@example.com",
+            FullName = "Новый исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "ЗЕМЦОВ - банкротство",
+            Title = "Подготовить отзыв",
+            Description = "Проверить материалы дела",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(4),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        Assert.Empty(deliveries);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(assignee.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, notification.Type);
+        Assert.Equal($"task:{task.Id}:assigned", notification.EventKey);
+        Assert.Contains("Новая задача", notification.Title);
+        Assert.Contains("Подготовить отзыв", notification.BodyPreview);
+        Assert.False(notification.IsRead);
+    }
+
+    [Fact]
+    public async Task NotifyTaskScheduleConflictAsync_CreatesInAppNotificationForAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "schedule-author@example.com");
+        var assignee = new User
+        {
+            Email = "schedule-assignee@example.com",
+            FullName = "Исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "ЗЕМЦОВ - банкротство",
+            Title = "Новая задача",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(2),
+            PlannedDurationMinutes = 60,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        var conflictTask = new TaskJournalItem
+        {
+            ObjectName = "ЗЕМЦОВ - банкротство",
+            Title = "Существующая задача",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = task.DueAt.AddMinutes(30),
+            PlannedDurationMinutes = 60,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.AddRange(task, conflictTask);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskScheduleConflictAsync(task, [conflictTask], author.FullName, author.Id);
+
+        Assert.Empty(deliveries);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(assignee.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskScheduleConflict, notification.Type);
+        Assert.Contains("Конфликт расписания", notification.Title);
+        Assert.Contains("Существующая задача", notification.BodyPreview);
+    }
+
+    [Fact]
+    public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForCurrentApprover()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "approval-author@example.com");
+        var approver = new User
+        {
+            Email = "approver@example.com",
+            FullName = "Согласующий",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(approver);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "ЕГОРОВ - спор",
+            Title = "Проверить заявление",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            DueAt = DateTime.UtcNow.AddHours(4),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "onApproval",
+            Participants =
+            [
+                new TaskJournalParticipant
+                {
+                    UserId = approver.Id,
+                    DisplayName = approver.FullName,
+                    Role = "approver",
+                    ApprovalStatus = "pending",
+                    SortOrder = 0
+                }
+            ]
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskApprovalRequestedAsync(task, author.FullName, author.Id);
+
+        Assert.Empty(deliveries);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(approver.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskApprovalRequested, notification.Type);
+        Assert.Contains("ожидает согласования", notification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Проверить заявление", notification.BodyPreview);
+    }
+
+    [Fact]
+    public async Task NotifyTaskApprovalDecisionAsync_CreatesRevisionNotificationForAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var roleUser = await CreateUserAsync(db, "approval-role@example.com");
+        var assignee = new User
+        {
+            Email = "revision-assignee@example.com",
+            FullName = "Исполнитель",
+            PasswordHash = "hash",
+            RoleId = roleUser.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var approver = new User
+        {
+            Email = "revision-approver@example.com",
+            FullName = "Согласующий",
+            PasswordHash = "hash",
+            RoleId = roleUser.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(assignee, approver);
+        await db.SaveChangesAsync();
+
+        var participant = new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            DisplayName = approver.FullName,
+            Role = "approver",
+            ApprovalStatus = "revisionRequested",
+            SortOrder = 0
+        };
+        var task = new TaskJournalItem
+        {
+            ObjectName = "ЕГОРОВ - спор",
+            Title = "Проверить результат",
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(4),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "revision",
+            Participants = [participant]
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskApprovalDecisionAsync(
+            task,
+            participant,
+            "revisionRequested",
+            approver.FullName,
+            approver.Id,
+            "Нужно исправить результат");
+
+        Assert.Empty(deliveries);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(assignee.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskRevisionRequested, notification.Type);
+        Assert.Contains("доработку", notification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Нужно исправить результат", notification.BodyPreview);
+    }
+
+    [Fact]
     public async Task SendToUserAsync_SendsThroughAllMatchingSendersForPurpose()
     {
         await using var db = await CreateContextAsync();

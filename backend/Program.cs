@@ -99,6 +99,7 @@ builder.Services.AddScoped<ISpreadsheetImportService, SpreadsheetImportService>(
 builder.Services.AddScoped<InstallmentService>();
 builder.Services.AddScoped<StatsSummaryService>();
 builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();
+builder.Services.AddSingleton<ICaseDocumentStorage, LocalCaseDocumentStorage>();
 builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));

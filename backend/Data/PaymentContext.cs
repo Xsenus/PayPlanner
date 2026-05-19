@@ -1184,6 +1184,27 @@ public class PaymentContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Title).HasMaxLength(200).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(1000);
+            entity.Property(e => e.CaseNumber).HasMaxLength(64);
+            entity.Property(e => e.CaseType).HasMaxLength(120);
+            entity.Property(e => e.Stage).HasMaxLength(160);
+            entity.Property(e => e.FeeAmount).HasPrecision(18, 2);
+            entity.Property(e => e.Priority).HasMaxLength(32).HasDefaultValue("normal");
+            entity.Property(e => e.CourtName).HasMaxLength(200);
+            entity.Property(e => e.CourtCaseNumber).HasMaxLength(100);
+            entity.Property(e => e.CourtUrl).HasMaxLength(1000);
+            entity.Property(e => e.Claimant).HasMaxLength(300);
+            entity.Property(e => e.Defendant).HasMaxLength(300);
+            entity.Property(e => e.ThirdParties).HasMaxLength(1000);
+            entity.Property(e => e.Representatives).HasMaxLength(1000);
+            entity.Property(e => e.JudgeName).HasMaxLength(200);
+            entity.Property(e => e.Courtroom).HasMaxLength(120);
+            entity.Property(e => e.CourtSecretaryContacts).HasMaxLength(500);
+            entity.Property(e => e.DocumentsSummary).HasMaxLength(4000);
+            entity.Property(e => e.EventHistory).HasMaxLength(4000);
+            entity.Property(e => e.Strategy).HasMaxLength(4000);
+            entity.Property(e => e.LastViewedByUserName).HasMaxLength(256);
+            entity.Property(e => e.ActivityConfirmedByUserName).HasMaxLength(256);
+            entity.Property(e => e.InactivityRemindersEnabled).HasDefaultValue(true);
 
             // Связь с клиентом
             entity.HasOne(cc => cc.Client)
@@ -1196,9 +1217,28 @@ public class PaymentContext : DbContext
                   .HasForeignKey(cc => cc.LegalEntityId)
                   .OnDelete(DeleteBehavior.Cascade);
 
+            entity.HasOne(cc => cc.ResponsibleUser)
+                  .WithMany()
+                  .HasForeignKey(cc => cc.ResponsibleUserId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             // ---- Индексы ----
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_ClientCases_Status");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_ClientCases_CreatedAt");
+            entity.HasIndex(e => e.CaseNumber).HasDatabaseName("IX_ClientCases_CaseNumber");
+            entity.HasIndex(e => e.CaseType).HasDatabaseName("IX_ClientCases_CaseType");
+            entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_ClientCases_ResponsibleUserId");
+            entity.HasIndex(e => e.DueDate).HasDatabaseName("IX_ClientCases_DueDate");
+            entity.HasIndex(e => e.Priority).HasDatabaseName("IX_ClientCases_Priority");
+            entity.HasIndex(e => e.CourtName).HasDatabaseName("IX_ClientCases_CourtName");
+            entity.HasIndex(e => e.LastViewedAt).HasDatabaseName("IX_ClientCases_LastViewedAt");
+            entity.HasIndex(e => e.InactivityRemindersEnabled).HasDatabaseName("IX_ClientCases_InactivityRemindersEnabled");
+            entity.HasIndex(e => e.ClaimFiledAt).HasDatabaseName("IX_ClientCases_ClaimFiledAt");
+            entity.HasIndex(e => e.CourtDecisionAt).HasDatabaseName("IX_ClientCases_CourtDecisionAt");
+            entity.HasIndex(e => e.AppealDeadlineAt).HasDatabaseName("IX_ClientCases_AppealDeadlineAt");
+            entity.HasIndex(e => e.CassationDeadlineAt).HasDatabaseName("IX_ClientCases_CassationDeadlineAt");
+            entity.HasIndex(e => e.MotionDeadlineAt).HasDatabaseName("IX_ClientCases_MotionDeadlineAt");
+            entity.HasIndex(e => e.ObjectionDeadlineAt).HasDatabaseName("IX_ClientCases_ObjectionDeadlineAt");
             entity.HasIndex(e => new { e.ClientId, e.CreatedAt }).HasDatabaseName("IX_ClientCases_ClientId_CreatedAt");
             entity.HasIndex(e => new { e.ClientId, e.Status }).HasDatabaseName("IX_ClientCases_ClientId_Status");
             entity.HasIndex(e => new { e.LegalEntityId, e.CreatedAt }).HasDatabaseName("IX_ClientCases_LegalEntityId_CreatedAt");
@@ -1206,6 +1246,77 @@ public class PaymentContext : DbContext
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_ClientCases_Owner",
                 "(\"ClientId\" IS NOT NULL AND \"LegalEntityId\" IS NULL) OR (\"ClientId\" IS NULL AND \"LegalEntityId\" IS NOT NULL)"));
+        });
+
+        // ------------------ ClientCaseDocument ------------------
+        modelBuilder.Entity<ClientCaseDocument>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DocumentKey).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.DocumentType).HasMaxLength(120).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(120).IsRequired();
+            entity.Property(e => e.OriginalFileName).HasMaxLength(260).IsRequired();
+            entity.Property(e => e.StoredFileName).HasMaxLength(260).IsRequired();
+            entity.Property(e => e.StoragePath).HasMaxLength(600).IsRequired();
+            entity.Property(e => e.ContentType).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.UploadedByName).HasMaxLength(256).IsRequired();
+
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.Documents)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.UploadedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.UploadedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_ClientCaseDocuments_ClientCaseId");
+            entity.HasIndex(e => e.UploadedByUserId).HasDatabaseName("IX_ClientCaseDocuments_UploadedByUserId");
+            entity.HasIndex(e => e.DocumentType).HasDatabaseName("IX_ClientCaseDocuments_DocumentType");
+            entity.HasIndex(e => e.Status).HasDatabaseName("IX_ClientCaseDocuments_Status");
+            entity.HasIndex(e => new { e.ClientCaseId, e.DocumentKey, e.Version })
+                .HasDatabaseName("IX_ClientCaseDocuments_Case_Document_Version");
+        });
+
+        // ------------------ ClientCaseRelatedParty ------------------
+        modelBuilder.Entity<ClientCaseRelatedParty>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SourceType).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.DisplayName).HasMaxLength(300).IsRequired();
+            entity.Property(e => e.Role).HasMaxLength(120);
+            entity.Property(e => e.OrganizationName).HasMaxLength(500);
+            entity.Property(e => e.Phone).HasMaxLength(100);
+            entity.Property(e => e.Email).HasMaxLength(200);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.RelatedParties)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Client)
+                .WithMany()
+                .HasForeignKey(e => e.ClientId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.ExternalContact)
+                .WithMany()
+                .HasForeignKey(e => e.ExternalContactId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.LegalEntity)
+                .WithMany()
+                .HasForeignKey(e => e.LegalEntityId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_ClientCaseRelatedParties_ClientCaseId");
+            entity.HasIndex(e => e.SourceType).HasDatabaseName("IX_ClientCaseRelatedParties_SourceType");
+            entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_ClientCaseRelatedParties_ClientId");
+            entity.HasIndex(e => e.ExternalContactId).HasDatabaseName("IX_ClientCaseRelatedParties_ExternalContactId");
+            entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_ClientCaseRelatedParties_LegalEntityId");
         });
 
         // ------------------ DealType ------------------
@@ -2425,6 +2536,10 @@ public class PaymentContext : DbContext
     /// Дела (кейсы) клиентов.
     /// </summary>
     public DbSet<ClientCase> ClientCases { get; set; }
+
+    public DbSet<ClientCaseDocument> ClientCaseDocuments { get; set; }
+
+    public DbSet<ClientCaseRelatedParty> ClientCaseRelatedParties { get; set; }
 
     /// <summary>
     /// Карточки клиентов.

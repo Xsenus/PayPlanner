@@ -18,6 +18,11 @@ namespace PayPlanner.Api.Models
         /// <summary>
         /// Дело закрыто.
         /// </summary>
-        Closed = 2
+        Closed = 2,
+
+        /// <summary>
+        /// Дело завершено с отрицательным результатом.
+        /// </summary>
+        Lost = 3
     }
 }

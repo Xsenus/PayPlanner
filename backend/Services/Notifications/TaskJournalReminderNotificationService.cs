@@ -70,7 +70,7 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                     task.AssigneeUserId.HasValue
                     && task.Status != "done"
                     && task.Status != "cancelled"
-                    && task.DueAt <= nowUtc.AddDays(1))
+                    && task.DueAt <= nowUtc.AddDays(7))
                 .OrderBy(task => task.DueAt)
                 .Take(500)
                 .ToListAsync(cancellationToken);
@@ -105,6 +105,8 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
         var dueAt = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc);
         return reminderKey switch
         {
+            "before7d" => IsInsideReminderWindow(nowUtc, dueAt, TimeSpan.FromDays(7)),
+            "before3d" => IsInsideReminderWindow(nowUtc, dueAt, TimeSpan.FromDays(3)),
             "before1d" => IsInsideReminderWindow(nowUtc, dueAt, TimeSpan.FromDays(1)),
             "before1h" => IsInsideReminderWindow(nowUtc, dueAt, TimeSpan.FromHours(1)),
             "before15m" => IsInsideReminderWindow(nowUtc, dueAt, TimeSpan.FromMinutes(15)),

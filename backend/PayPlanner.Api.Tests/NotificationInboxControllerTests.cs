@@ -15,6 +15,24 @@ namespace PayPlanner.Api.Tests;
 public class NotificationInboxControllerTests
 {
     [Fact]
+    public async Task GetTypes_IncludesRoutingMetadata()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "types@example.com");
+        var controller = CreateController(db, user.Id);
+
+        var result = controller.GetTypes();
+
+        var types = Assert.IsAssignableFrom<IReadOnlyList<UserNotificationTypeDto>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        var approval = Assert.Single(types, item => item.Key == UserNotificationTypes.TaskApprovalRequested);
+        Assert.Equal("high", approval.Priority);
+        Assert.Contains(NotificationChannels.InApp, approval.Channels);
+        Assert.True(approval.Deduplicate);
+        Assert.False(approval.Digestible);
+    }
+
+    [Fact]
     public async Task InboxActions_UpdateOnlyCurrentUserNotification()
     {
         await using var db = await CreateContextAsync();
@@ -77,20 +95,149 @@ public class NotificationInboxControllerTests
         Assert.Equal(1, count);
     }
 
-    private static UserNotification CreateNotification(int userId, string eventKey)
+    [Fact]
+    public async Task GetNotifications_HidesTaskNotificationWhenTaskIsNotVisible()
+    {
+        await using var db = await CreateContextAsync();
+        var currentUser = await CreateUserAsync(db, "visible-notifications@example.com");
+        var otherUser = await CreateUserAsync(db, "hidden-task-owner@example.com");
+        var visibleTask = CreateTask(currentUser.Id, "Видимая задача");
+        var hiddenTask = CreateTask(otherUser.Id, "Чужая задача");
+        db.TaskJournalItems.AddRange(visibleTask, hiddenTask);
+        await db.SaveChangesAsync();
+        var visible = CreateNotification(
+            currentUser.Id,
+            "task:visible:changed",
+            UserNotificationTypes.TaskChanged,
+            title: "Видимое уведомление");
+        visible.TaskJournalItemId = visibleTask.Id;
+        visible.ObjectId = visibleTask.Id;
+        var hidden = CreateNotification(
+            currentUser.Id,
+            "task:hidden:changed",
+            UserNotificationTypes.TaskChanged,
+            title: "Скрытое уведомление");
+        hidden.TaskJournalItemId = hiddenTask.Id;
+        hidden.ObjectId = hiddenTask.Id;
+        db.UserNotifications.AddRange(visible, hidden);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, currentUser.Id);
+
+        var listResult = await controller.GetNotifications("active", null, null);
+        var page = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var unreadResult = await controller.GetUnreadCount(CancellationToken.None);
+        var unreadCount = Assert.IsType<int>(Assert.IsType<OkObjectResult>(unreadResult.Result).Value);
+
+        Assert.Single(page.Items);
+        Assert.Equal(visible.Id, page.Items[0].Id);
+        Assert.Equal(1, unreadCount);
+    }
+
+    [Fact]
+    public async Task MarkAllRead_UpdatesOnlyFilteredCurrentUserNotifications()
+    {
+        await using var db = await CreateContextAsync();
+        var currentUser = await CreateUserAsync(db, "current-bulk@example.com");
+        var otherUser = await CreateUserAsync(db, "other-bulk@example.com");
+        var target = CreateNotification(
+            currentUser.Id,
+            "task:1:reminder",
+            UserNotificationTypes.TaskReminder,
+            title: "Срок по задаче",
+            body: "Нужно проверить срок");
+        var otherType = CreateNotification(
+            currentUser.Id,
+            "task:2:changed",
+            UserNotificationTypes.TaskChanged,
+            title: "Срок изменен",
+            body: "Нужно проверить срок");
+        var otherSearch = CreateNotification(
+            currentUser.Id,
+            "task:3:reminder",
+            UserNotificationTypes.TaskReminder,
+            title: "Другое событие",
+            body: "Без совпадения");
+        var archived = CreateNotification(
+            currentUser.Id,
+            "task:4:reminder",
+            UserNotificationTypes.TaskReminder,
+            title: "Срок в архиве",
+            body: "Нужно проверить срок");
+        archived.IsArchived = true;
+        archived.ArchivedAt = DateTime.UtcNow;
+        var otherUserNotification = CreateNotification(
+            otherUser.Id,
+            "task:5:reminder",
+            UserNotificationTypes.TaskReminder,
+            title: "Срок по чужой задаче",
+            body: "Нужно проверить срок");
+        db.UserNotifications.AddRange(target, otherType, otherSearch, archived, otherUserNotification);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, currentUser.Id);
+
+        var result = await controller.MarkAllRead(
+            "active",
+            UserNotificationTypes.TaskReminder,
+            "срок",
+            CancellationToken.None);
+
+        var dto = Assert.IsType<UserNotificationBulkActionResultDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(1, dto.UpdatedCount);
+
+        await db.Entry(target).ReloadAsync();
+        await db.Entry(otherType).ReloadAsync();
+        await db.Entry(otherSearch).ReloadAsync();
+        await db.Entry(archived).ReloadAsync();
+        await db.Entry(otherUserNotification).ReloadAsync();
+        Assert.True(target.IsRead);
+        Assert.False(otherType.IsRead);
+        Assert.False(otherSearch.IsRead);
+        Assert.False(archived.IsRead);
+        Assert.False(otherUserNotification.IsRead);
+    }
+
+    private static UserNotification CreateNotification(
+        int userId,
+        string eventKey,
+        string type = UserNotificationTypes.TaskChanged,
+        string title = "Изменение по задаче",
+        string body = "Описание события")
         => new()
         {
             RecipientUserId = userId,
-            Type = UserNotificationTypes.TaskChanged,
+            Type = type,
             EventKey = eventKey,
-            Title = "Изменение по задаче",
-            BodyPreview = "Описание события",
+            Title = title,
+            BodyPreview = body,
             Tone = "blue",
             ObjectType = "task",
             ObjectId = 1,
             TaskJournalItemId = null,
             MetadataJson = "{}",
             CreatedAt = DateTime.UtcNow
+        };
+
+    private static TaskJournalItem CreateTask(int userId, string title)
+        => new()
+        {
+            ObjectName = "Тестовое дело",
+            Title = title,
+            AuthorUserId = userId,
+            AuthorName = $"user-{userId}",
+            AssigneeUserId = userId,
+            AssigneeName = $"user-{userId}",
+            DueAt = DateTime.UtcNow.AddHours(2),
+            PlannedDurationMinutes = 60,
+            Type = "task",
+            Priority = "normal",
+            Status = "new",
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            TagsJson = "[]",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
         };
 
     private static NotificationInboxController CreateController(PaymentContext db, int userId)
