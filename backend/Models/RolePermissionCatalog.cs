@@ -11,6 +11,7 @@ public static class RolePermissionCatalog
     public const string Calculator = "calculator";
     public const string LegalEntities = "legalEntities";
     public const string Clients = "clients";
+    public const string Cases = "cases";
     public const string Accounts = "accounts";
     public const string Acts = "acts";
     public const string Payments = "payments";
@@ -27,6 +28,7 @@ public static class RolePermissionCatalog
         Calculator,
         LegalEntities,
         Clients,
+        Cases,
         Accounts,
         Acts,
         Payments,
@@ -41,6 +43,7 @@ public static class RolePermissionCatalog
         Tasks,
         LegalEntities,
         Clients,
+        Cases,
         Accounts,
         Acts,
         Payments,
@@ -49,6 +52,11 @@ public static class RolePermissionCatalog
 
     public static bool HasDataScope(string section)
         => DataScopedSections.Contains(section, StringComparer.OrdinalIgnoreCase);
+
+    public static string? GetFallbackSection(string section)
+        => string.Equals(section, Cases, StringComparison.OrdinalIgnoreCase)
+            ? Clients
+            : null;
 
     public static string GetDefaultViewScope(string section, bool allowRoleManagement)
         => allowRoleManagement || !HasDataScope(section)
@@ -64,6 +72,7 @@ public static class RolePermissionCatalog
             [Calculator] = new(true, true, true, true, true, false, GetDefaultViewScope(Calculator, allowRoleManagement)),
             [LegalEntities] = new(true, true, true, true, true, false, GetDefaultViewScope(LegalEntities, allowRoleManagement)),
             [Clients] = new(true, true, true, true, true, false, GetDefaultViewScope(Clients, allowRoleManagement)),
+            [Cases] = new(true, true, true, true, true, false, GetDefaultViewScope(Cases, allowRoleManagement)),
             [Accounts] = new(true, true, true, true, true, false, GetDefaultViewScope(Accounts, allowRoleManagement)),
             [Acts] = new(true, true, true, true, true, false, GetDefaultViewScope(Acts, allowRoleManagement)),
             [Payments] = new(true, true, true, true, true, false, GetDefaultViewScope(Payments, allowRoleManagement)),
@@ -99,6 +108,7 @@ public static class RolePermissionCatalog
             Calculator = ToSection(defaults[Calculator]),
             LegalEntities = ToSection(defaults[LegalEntities]),
             Clients = ToSection(defaults[Clients]),
+            Cases = ToSection(defaults[Cases]),
             Accounts = ToSection(defaults[Accounts]),
             Acts = ToSection(defaults[Acts]),
             Payments = ToSection(defaults[Payments]),

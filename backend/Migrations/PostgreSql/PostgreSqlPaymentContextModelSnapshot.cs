@@ -1094,6 +1094,22 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AccessRequestReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("AccessRequestedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("AccessRequestedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AccessRequestedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime?>("ActivityConfirmedAt")
                         .HasColumnType("timestamp without time zone");
 
@@ -1207,12 +1223,28 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<DateTime?>("HiddenFromExecutorAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("HiddenFromExecutorByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("HiddenFromExecutorByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<bool>("InactivityRemindersEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(true);
 
                     b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsHiddenFromExecutor")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
@@ -1298,6 +1330,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccessRequestedAt")
+                        .HasDatabaseName("IX_ClientCases_AccessRequestedAt");
+
                     b.HasIndex("AppealDeadlineAt")
                         .HasDatabaseName("IX_ClientCases_AppealDeadlineAt");
 
@@ -1333,6 +1368,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_ClientCase_IsDeleted");
+
+                    b.HasIndex("IsHiddenFromExecutor")
+                        .HasDatabaseName("IX_ClientCases_IsHiddenFromExecutor");
 
                     b.HasIndex("LastViewedAt")
                         .HasDatabaseName("IX_ClientCases_LastViewedAt");
@@ -4895,6 +4933,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime?>("ApprovalDueAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("AssigneeName")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -5023,6 +5064,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(256)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ApprovalDueAt")
+                        .HasDatabaseName("IX_TaskJournalItems_ApprovalDueAt");
 
                     b.HasIndex("AssigneeUserId")
                         .HasDatabaseName("IX_TaskJournalItems_AssigneeUserId");

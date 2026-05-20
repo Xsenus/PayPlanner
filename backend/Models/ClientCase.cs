@@ -282,6 +282,28 @@ namespace PayPlanner.Api.Models
         public bool InactivityRemindersEnabled { get; set; } = true;
 
         /// <summary>
+        /// Дело скрыто от исполнителей с ограниченной видимостью и доступно только ролям с полным обзором.
+        /// </summary>
+        public bool IsHiddenFromExecutor { get; set; }
+
+        public DateTime? HiddenFromExecutorAt { get; set; }
+
+        public int? HiddenFromExecutorByUserId { get; set; }
+
+        [MaxLength(256)]
+        public string HiddenFromExecutorByUserName { get; set; } = string.Empty;
+
+        public DateTime? AccessRequestedAt { get; set; }
+
+        public int? AccessRequestedByUserId { get; set; }
+
+        [MaxLength(256)]
+        public string AccessRequestedByUserName { get; set; } = string.Empty;
+
+        [MaxLength(1000)]
+        public string AccessRequestReason { get; set; } = string.Empty;
+
+        /// <summary>
         /// Описание или примечания по делу.
         /// </summary>
         public string Description { get; set; } = string.Empty;

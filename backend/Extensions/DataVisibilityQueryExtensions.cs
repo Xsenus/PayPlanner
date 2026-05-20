@@ -40,14 +40,15 @@ public static class DataVisibilityQueryExtensions
 
         var visibleUserIds = access.VisibleUserIds.ToArray();
         return query.Where(clientCase =>
-            (clientCase.ResponsibleUserId.HasValue
+            !clientCase.IsHiddenFromExecutor
+            && ((clientCase.ResponsibleUserId.HasValue
                 && visibleUserIds.Contains(clientCase.ResponsibleUserId.Value))
             || (clientCase.Client != null
                 && clientCase.Client.ResponsibleUserId.HasValue
                 && visibleUserIds.Contains(clientCase.Client.ResponsibleUserId.Value))
             || (clientCase.LegalEntity != null
                 && clientCase.LegalEntity.ResponsibleUserId.HasValue
-                && visibleUserIds.Contains(clientCase.LegalEntity.ResponsibleUserId.Value)));
+                && visibleUserIds.Contains(clientCase.LegalEntity.ResponsibleUserId.Value))));
     }
 
     public static IQueryable<TaskJournalItem> ApplyTaskVisibility(

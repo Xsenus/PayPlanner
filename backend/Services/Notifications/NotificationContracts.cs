@@ -67,6 +67,9 @@ public static class UserNotificationTypes
     public const string TaskApprovalRequested = "taskApprovalRequested";
     public const string TaskApproved = "taskApproved";
     public const string TaskRevisionRequested = "taskRevisionRequested";
+    public const string CaseInactivityControl = "caseInactivityControl";
+    public const string CaseAccessRequested = "caseAccessRequested";
+    public const string CaseAccessResolved = "caseAccessResolved";
 
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
     [
@@ -78,7 +81,10 @@ public static class UserNotificationTypes
         new(TaskScheduleConflict, "Конфликт расписания", "Задача пересекается по времени с другой активной задачей исполнителя.", "rose", "high", NotificationChannels.All, true, false),
         new(TaskApprovalRequested, "Ожидает согласования", "Задача отправлена согласующему на решение.", "violet", "high", NotificationChannels.All, true, false),
         new(TaskApproved, "Задача согласована", "Согласующий подтвердил результат задачи.", "emerald", "normal", NotificationChannels.All, false, false),
-        new(TaskRevisionRequested, "Возврат на доработку", "Согласующий вернул задачу исполнителю на доработку.", "orange", "high", NotificationChannels.All, false, false)
+        new(TaskRevisionRequested, "Возврат на доработку", "Согласующий вернул задачу исполнителю на доработку.", "orange", "high", NotificationChannels.All, false, false),
+        new(CaseInactivityControl, "Автоконтроль дела", "По делу долго не было активных задач, создана контрольная задача.", "amber", "high", NotificationChannels.All, true, false),
+        new(CaseAccessRequested, "Запрос доступа к делу", "Исполнитель запросил доступ к скрытому делу.", "violet", "high", NotificationChannels.All, false, false),
+        new(CaseAccessResolved, "Решение по доступу к делу", "Руководитель разрешил или отклонил доступ к скрытому делу.", "emerald", "normal", NotificationChannels.All, false, false)
     ];
 
     public static bool IsKnown(string? value)
@@ -97,6 +103,52 @@ public sealed record UserNotificationTypeDefinition(
     IReadOnlyList<string> Channels,
     bool Deduplicate,
     bool Digestible);
+
+public static class UserNotificationPreferenceSettings
+{
+    public const string SettingKey = "notifications.typePreferences.v1";
+
+    public static IReadOnlyList<string> ParseDisabledTypes(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return [];
+        }
+
+        try
+        {
+            var storage = JsonSerializer.Deserialize<UserNotificationPreferenceStorage>(rawValue, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return NormalizeTypes(storage?.DisabledTypes);
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    public static bool IsTypeEnabled(string? rawValue, string? type)
+    {
+        var normalizedType = NormalizeType(type);
+        return string.IsNullOrWhiteSpace(normalizedType)
+               || !ParseDisabledTypes(rawValue).Contains(normalizedType, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> NormalizeTypes(IEnumerable<string>? values)
+        => (values ?? [])
+            .Select(NormalizeType)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static string? NormalizeType(string? value)
+        => UserNotificationTypes.Find(value)?.Key;
+
+    private sealed class UserNotificationPreferenceStorage
+    {
+        public List<string> DisabledTypes { get; set; } = [];
+    }
+}
 
 public sealed record EmailSendSettings(
     bool Enabled,
@@ -207,6 +259,10 @@ public interface INotificationService
         CancellationToken cancellationToken = default,
         int? senderId = null);
 
+    Task<IReadOnlyList<NotificationDelivery>> RetryDeliveryAsync(
+        int deliveryId,
+        CancellationToken cancellationToken = default);
+
     Task<NotificationSettingsDto> UpsertSenderAsync(
         PayPlanner.Api.Models.Requests.UpsertNotificationSenderRequest request,
         int? senderId = null,
@@ -226,4 +282,5 @@ public interface INotificationService
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(TaskJournalItem task, TaskJournalParticipant approver, string decision, string actorName, int actorUserId, string? resolution = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCommentAsync(TaskJournalItem task, TaskJournalComment comment, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(TaskJournalItem task, int daysWithoutActiveTask, CancellationToken cancellationToken = default);
 }

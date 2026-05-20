@@ -12,6 +12,7 @@ public class UpsertTaskJournalItemRequest
     public int? AssigneeUserId { get; set; }
     public string? AssigneeName { get; set; }
     public DateTime DueAt { get; set; }
+    public DateTime? ApprovalDueAt { get; set; }
     public int? PlannedDurationMinutes { get; set; }
     public string Type { get; set; } = "task";
     public string Priority { get; set; } = "normal";
@@ -42,4 +43,9 @@ public class BulkUpdateTaskJournalItemsRequest
     public string? Status { get; set; }
     public DateTime? DueAt { get; set; }
     public string? Result { get; set; }
+}
+
+public class BulkDeleteTaskJournalItemsRequest
+{
+    public List<int> Ids { get; set; } = [];
 }

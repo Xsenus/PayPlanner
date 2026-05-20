@@ -130,6 +130,62 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskChangedAsync_SkipsInAppNotificationWhenTypeDisabledForUser()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "author-disabled-type@example.com");
+        var assignee = new User
+        {
+            Email = "assignee-disabled-type@example.com",
+            FullName = "Исполнитель без уведомлений об изменениях",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = assignee.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = JsonSerializer.Serialize(new { disabledTypes = new[] { UserNotificationTypes.TaskChanged } }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Подготовить заявление",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(3),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "inProgress"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskChangedAsync(
+            task,
+            ["Статус"],
+            author.FullName,
+            author.Id);
+
+        Assert.Empty(deliveries);
+        Assert.Equal(0, await db.UserNotifications.CountAsync());
+    }
+
+    [Fact]
     public async Task NotifyTaskAssignedAsync_CreatesInAppNotificationForAssignee()
     {
         await using var db = await CreateContextAsync();
@@ -177,6 +233,102 @@ public class NotificationServiceTests
         Assert.Contains("Новая задача", notification.Title);
         Assert.Contains("Подготовить отзыв", notification.BodyPreview);
         Assert.False(notification.IsRead);
+    }
+
+    [Fact]
+    public async Task NotifyCaseInactivityControlTaskCreatedAsync_CreatesDedicatedInAppNotification()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateUserAsync(db, "inactive-assignee@example.com");
+        var task = new TaskJournalItem
+        {
+            ObjectName = "ЗЕМЦОВ - банкротство",
+            Title = "Проверить движение по делу",
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(4),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new",
+            Type = "control"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyCaseInactivityControlTaskCreatedAsync(task, 20);
+
+        Assert.Empty(deliveries);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.CaseInactivityControl, notification.Type);
+        Assert.Equal(assignee.Id, notification.RecipientUserId);
+        Assert.Equal(task.Id, notification.TaskJournalItemId);
+        Assert.Contains("20 дн", notification.BodyPreview);
+    }
+
+    [Fact]
+    public async Task NotifyCaseInactivityControlTaskCreatedAsync_NotifiesEscalationObserver()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateUserAsync(db, "inactive-assignee@example.com");
+        var observer = new User
+        {
+            Email = "inactive-observer@example.com",
+            FullName = "inactive-observer@example.com",
+            PasswordHash = "hash",
+            RoleId = assignee.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(observer);
+        await db.SaveChangesAsync();
+        var task = new TaskJournalItem
+        {
+            ObjectName = "ЗЕМЦОВ - банкротство",
+            Title = "Проверить движение по делу",
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(4),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new",
+            Type = "control",
+            Participants =
+            [
+                new TaskJournalParticipant
+                {
+                    UserId = assignee.Id,
+                    Role = "assignee",
+                    DisplayName = assignee.FullName,
+                    Email = assignee.Email,
+                    ApprovalStatus = "pending"
+                },
+                new TaskJournalParticipant
+                {
+                    UserId = observer.Id,
+                    Role = "observer",
+                    DisplayName = observer.FullName,
+                    Email = observer.Email,
+                    ApprovalStatus = "pending"
+                }
+            ]
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyCaseInactivityControlTaskCreatedAsync(task, 35);
+
+        var notifications = await db.UserNotifications
+            .OrderBy(item => item.RecipientUserId)
+            .ToListAsync();
+        Assert.Equal(2, notifications.Count);
+        Assert.Contains(notifications, item => item.RecipientUserId == assignee.Id);
+        Assert.Contains(notifications, item => item.RecipientUserId == observer.Id);
     }
 
     [Fact]
@@ -242,10 +394,21 @@ public class NotificationServiceTests
     }
 
     [Fact]
-    public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForCurrentApprover()
+    public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForApproverAndAssignee()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateUserAsync(db, "approval-author@example.com");
+        var assignee = new User
+        {
+            Email = "approval-assignee@example.com",
+            FullName = "Исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
         var approver = new User
         {
             Email = "approver@example.com",
@@ -257,7 +420,7 @@ public class NotificationServiceTests
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
-        db.Users.Add(approver);
+        db.Users.AddRange(assignee, approver);
         await db.SaveChangesAsync();
 
         var task = new TaskJournalItem
@@ -266,6 +429,8 @@ public class NotificationServiceTests
             Title = "Проверить заявление",
             AuthorUserId = author.Id,
             AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
             DueAt = DateTime.UtcNow.AddHours(4),
             RemindersJson = "[]",
             ChannelsJson = "[\"inApp\"]",
@@ -290,11 +455,18 @@ public class NotificationServiceTests
         var deliveries = await service.NotifyTaskApprovalRequestedAsync(task, author.FullName, author.Id);
 
         Assert.Empty(deliveries);
-        var notification = await db.UserNotifications.SingleAsync();
-        Assert.Equal(approver.Id, notification.RecipientUserId);
-        Assert.Equal(UserNotificationTypes.TaskApprovalRequested, notification.Type);
-        Assert.Contains("ожидает согласования", notification.Title, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Проверить заявление", notification.BodyPreview);
+        var notifications = await db.UserNotifications
+            .OrderBy(item => item.RecipientUserId)
+            .ToListAsync();
+        Assert.Equal(
+            new[] { assignee.Id, approver.Id }.OrderBy(id => id).ToArray(),
+            notifications.Select(item => item.RecipientUserId).OrderBy(id => id).ToArray());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskApprovalRequested, notification.Type);
+            Assert.Contains("ожидает согласования", notification.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Проверить заявление", notification.BodyPreview);
+        });
     }
 
     [Fact]
@@ -439,6 +611,41 @@ public class NotificationServiceTests
         Assert.Single(sent);
         Assert.Equal(NotificationDeliveryStatus.Sent, sent[0].Status);
         Assert.Equal(222333, telegramService.Messages.Single().ChatId);
+    }
+
+    [Fact]
+    public async Task RetryDeliveryAsync_CreatesNewDeliveryAndKeepsOriginalFailed()
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        var user = await CreateUserAsync(db, "retry@example.com");
+        db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = "manual:failed",
+            Channel = NotificationChannels.Email,
+            RecipientUserId = user.Id,
+            RecipientAddress = user.Email,
+            Subject = "Неотправленное уведомление",
+            BodyPreview = "Текст для повторной отправки.",
+            Status = NotificationDeliveryStatus.Failed,
+            Error = "SMTP unavailable",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-10)
+        });
+        await db.SaveChangesAsync();
+        var original = await db.NotificationDeliveries.SingleAsync();
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+
+        var deliveries = await service.RetryDeliveryAsync(original.Id);
+
+        var retry = Assert.Single(deliveries);
+        Assert.NotEqual(original.Id, retry.Id);
+        Assert.Equal(NotificationDeliveryStatus.Sent, retry.Status);
+        Assert.StartsWith("manual:failed:retry:", retry.EventKey, StringComparison.Ordinal);
+        Assert.Single(emailService.Messages);
+
+        await db.Entry(original).ReloadAsync();
+        Assert.Equal(NotificationDeliveryStatus.Failed, original.Status);
     }
 
     [Fact]

@@ -221,6 +221,9 @@ public class RolePermissionsController : ControllerBase
                 case RolePermissionCatalog.Clients:
                     dto.Clients = ToSection(permission);
                     break;
+                case RolePermissionCatalog.Cases:
+                    dto.Cases = ToSection(permission);
+                    break;
                 case RolePermissionCatalog.Accounts:
                     dto.Accounts = ToSection(permission);
                     break;
@@ -245,6 +248,12 @@ public class RolePermissionsController : ControllerBase
             }
         }
 
+        if (!permissions.Any(permission => string.Equals(permission.Section, RolePermissionCatalog.Cases, StringComparison.OrdinalIgnoreCase))
+            && permissions.FirstOrDefault(permission => string.Equals(permission.Section, RolePermissionCatalog.Clients, StringComparison.OrdinalIgnoreCase)) is { } clientsPermission)
+        {
+            dto.Cases = ToSection(clientsPermission);
+        }
+
         return dto;
     }
 
@@ -257,6 +266,7 @@ public class RolePermissionsController : ControllerBase
             [RolePermissionCatalog.Calculator] = ToValues(dto.Calculator),
             [RolePermissionCatalog.LegalEntities] = ToValues(dto.LegalEntities),
             [RolePermissionCatalog.Clients] = ToValues(dto.Clients),
+            [RolePermissionCatalog.Cases] = ToValues(dto.Cases),
             [RolePermissionCatalog.Accounts] = ToValues(dto.Accounts),
             [RolePermissionCatalog.Acts] = ToValues(dto.Acts),
             [RolePermissionCatalog.Payments] = ToValues(dto.Payments),

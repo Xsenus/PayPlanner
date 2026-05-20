@@ -86,6 +86,18 @@ public static class DataVisibilityService
             .Where(permission => permission.RoleId == user.RoleId && permission.Section == section)
             .Select(permission => permission.ViewScope)
             .FirstOrDefaultAsync(ct);
+        if (rawScope is null)
+        {
+            var fallbackSection = RolePermissionCatalog.GetFallbackSection(section);
+            if (!string.IsNullOrWhiteSpace(fallbackSection))
+            {
+                rawScope = await db.RolePermissions
+                    .AsNoTracking()
+                    .Where(permission => permission.RoleId == user.RoleId && permission.Section == fallbackSection)
+                    .Select(permission => permission.ViewScope)
+                    .FirstOrDefaultAsync(ct);
+            }
+        }
 
         var scope = NormalizeScope(section, rawScope, isAdmin);
         var visibleUserIds = new List<int> { user.Id };

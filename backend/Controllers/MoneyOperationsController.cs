@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
@@ -140,6 +141,23 @@ public class MoneyOperationsController : ControllerBase
 
     private Task<DataVisibilityAccess?> ResolveMoneyVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+
+    private async Task<bool> CanExportMoneyOperationsAsync(CancellationToken ct)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue)
+        {
+            return User?.IsInRole("admin") == true || User?.Identity?.IsAuthenticated != true;
+        }
+
+        if (User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Payments, ct);
+        return permission?.CanExport == true;
+    }
 
     private static IQueryable<MoneyOperationQueryRow> ApplyMoneyOperationVisibility(
         IQueryable<MoneyOperationQueryRow> query,
@@ -403,6 +421,11 @@ public class MoneyOperationsController : ControllerBase
             return Unauthorized();
         }
 
+        if (!await CanExportMoneyOperationsAsync(ct))
+        {
+            return Forbid();
+        }
+
         var csv = await SqliteRetryHelper.ExecuteAsync(
             async cancellationToken =>
             {
@@ -448,6 +471,11 @@ public class MoneyOperationsController : ControllerBase
             return Unauthorized();
         }
 
+        if (!await CanExportMoneyOperationsAsync(ct))
+        {
+            return Forbid();
+        }
+
         var xml = await SqliteRetryHelper.ExecuteAsync(
             async cancellationToken =>
             {
@@ -490,6 +518,11 @@ public class MoneyOperationsController : ControllerBase
             return Unauthorized();
         }
 
+        if (!await CanExportMoneyOperationsAsync(ct))
+        {
+            return Forbid();
+        }
+
         var items = await SqliteRetryHelper.ExecuteAsync(
             async cancellationToken =>
             {
@@ -530,6 +563,11 @@ public class MoneyOperationsController : ControllerBase
         if (visibility is null)
         {
             return Unauthorized();
+        }
+
+        if (!await CanExportMoneyOperationsAsync(ct))
+        {
+            return Forbid();
         }
 
         var items = await SqliteRetryHelper.ExecuteAsync(

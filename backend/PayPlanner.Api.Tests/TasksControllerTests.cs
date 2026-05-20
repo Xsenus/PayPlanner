@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -38,6 +39,101 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateSettings_PersistsCaseInactivityAutomationSettings()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "admin-settings@example.com", "Администратор");
+        var fallbackAssignee = await CreateAdminUserAsync(db, "fallback-settings@example.com", "Резервный исполнитель");
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var result = await controller.UpdateSettings(new TaskJournalSettingsRequest
+        {
+            RestrictExecutorEditing = false,
+            AllowExecutorDeadlineChangeRequests = false,
+            CaseInactivityAutomationEnabled = false,
+            CaseInactivityDays = 400,
+            CaseInactivityLimit = 0,
+            CaseInactivityDefaultAssigneeUserId = fallbackAssignee.Id,
+            CaseInactivityEscalationDays = 7,
+            CaseInactivityEscalationUserId = fallbackAssignee.Id,
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalSettingsDto>(ok.Value);
+
+        Assert.False(dto.RestrictExecutorEditing);
+        Assert.False(dto.AllowExecutorDeadlineChangeRequests);
+        Assert.False(dto.CaseInactivityAutomationEnabled);
+        Assert.Equal(365, dto.CaseInactivityDays);
+        Assert.Equal(1, dto.CaseInactivityLimit);
+        Assert.Equal(fallbackAssignee.Id, dto.CaseInactivityDefaultAssigneeUserId);
+        Assert.Equal(365, dto.CaseInactivityEscalationDays);
+        Assert.Equal(fallbackAssignee.Id, dto.CaseInactivityEscalationUserId);
+
+        var stored = await db.SystemSettings
+            .AsNoTracking()
+            .Where(item => item.Key.StartsWith("tasks.automation.caseControl."))
+            .ToDictionaryAsync(item => item.Key, item => item.Value);
+
+        Assert.Equal("false", stored["tasks.automation.caseControl.enabled"]);
+        Assert.Equal("365", stored["tasks.automation.caseControl.inactiveDays"]);
+        Assert.Equal("1", stored["tasks.automation.caseControl.limit"]);
+        Assert.Equal(fallbackAssignee.Id.ToString(), stored["tasks.automation.caseControl.defaultAssigneeUserId"]);
+        Assert.Equal("365", stored["tasks.automation.caseControl.escalationDays"]);
+        Assert.Equal(fallbackAssignee.Id.ToString(), stored["tasks.automation.caseControl.escalationUserId"]);
+    }
+
+    [Fact]
+    public async Task GetCaseControlAutomationDiagnostics_ReturnsCurrentAutomationState()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "admin-diagnostics@example.com", "Администратор");
+        var fallbackAssignee = await CreateAdminUserAsync(db, "fallback-diagnostics@example.com", "Резервный исполнитель");
+        var escalationUser = await CreateAdminUserAsync(db, "escalation-diagnostics@example.com", "Руководитель");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        var now = DateTime.UtcNow;
+        clientCase.CreatedAt = now.AddDays(-45);
+        db.SystemSettings.AddRange(
+            new SystemSetting { Key = "tasks.automation.caseControl.enabled", Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.inactiveDays", Value = "14", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.limit", Value = "10", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.defaultAssigneeUserId", Value = fallbackAssignee.Id.ToString(), CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.escalationDays", Value = "30", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.escalationUserId", Value = escalationUser.Id.ToString(), CreatedAt = now, UpdatedAt = now });
+        db.ObjectAuditEvents.Add(new ObjectAuditEvent
+        {
+            ObjectType = "client-case",
+            ObjectId = clientCase.Id,
+            Action = "Automation",
+            Description = "Создана контрольная задача по делу БАНКРОТСТВО.",
+            MetadataJson = "{\"event\":\"caseInactivityControlTaskCreated\"}",
+            CreatedAt = now.AddDays(-1),
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var result = await controller.GetCaseControlAutomationDiagnostics(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalAutomationDiagnosticsDto>(ok.Value);
+
+        Assert.True(dto.Enabled);
+        Assert.Equal(14, dto.InactivityDays);
+        Assert.Equal(30, dto.EscalationDays);
+        Assert.Equal(10, dto.Limit);
+        Assert.Equal(fallbackAssignee.Id, dto.DefaultAssigneeUserId);
+        Assert.Equal("Резервный исполнитель", dto.DefaultAssigneeName);
+        Assert.Equal(escalationUser.Id, dto.EscalationUserId);
+        Assert.Equal("Руководитель", dto.EscalationUserName);
+        Assert.Equal(1, dto.VisibleCandidateCount);
+        Assert.Equal(1, dto.VisibleEscalationCandidateCount);
+        Assert.Equal(1, dto.CreatedTaskCountLast7Days);
+        Assert.NotNull(dto.LastCreatedAt);
+        Assert.Equal("Создана контрольная задача по делу БАНКРОТСТВО.", dto.LastCreatedDescription);
+    }
+
+    [Fact]
     public async Task CreateTask_AllowsInternalTaskWithoutClient()
     {
         await using var db = await CreateContextAsync();
@@ -68,6 +164,8 @@ public class TasksControllerTests
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
@@ -86,6 +184,44 @@ public class TasksControllerTests
         Assert.Equal("Иванов Иван Иванович", dto.ClientName);
         Assert.Equal("БАНКРОТСТВО", dto.ClientCaseTitle);
         Assert.Equal("Иванов Иван Иванович - БАНКРОТСТВО", dto.ObjectName);
+    }
+
+    [Fact]
+    public async Task CreateTask_PersistsApprovalDueAt()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var approvalDueAt = DateTime.UtcNow.AddHours(8);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Подготовить заявление",
+            DueAt = DateTime.UtcNow.AddHours(2),
+            ApprovalDueAt = approvalDueAt,
+            Status = "onApproval",
+            Participants =
+            [
+                new TaskJournalParticipantRequest
+                {
+                    UserId = approver.Id,
+                    Role = "approver",
+                    Name = approver.FullName,
+                },
+            ],
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+
+        Assert.NotNull(dto.ApprovalDueAt);
+        Assert.Equal(approvalDueAt, await db.TaskJournalItems
+            .Where(item => item.Id == dto.Id)
+            .Select(item => item.ApprovalDueAt)
+            .SingleAsync());
     }
 
     [Fact]
@@ -521,6 +657,47 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_UsesApprovalDueAtForApprovalOverdueStatus()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var approvalDueAt = DateTime.UtcNow.AddHours(2);
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, status: "onApproval", approvalDueAt: approvalDueAt);
+        task.DueAt = DateTime.UtcNow.AddHours(-2);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetTasks(
+            search: null,
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(ok.Value);
+        var dto = Assert.Single(page.Items);
+
+        Assert.Equal(task.Id, dto.Id);
+        Assert.Equal("onApproval", dto.Status);
+        Assert.NotNull(dto.ApprovalDueAt);
+    }
+
+    [Fact]
     public async Task GetAutomationCaseCandidates_ReturnsOpenCaseWithoutActiveTasks()
     {
         await using var db = await CreateContextAsync();
@@ -611,6 +788,8 @@ public class TasksControllerTests
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var result = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
@@ -641,6 +820,7 @@ public class TasksControllerTests
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         client.ResponsibleUserId = responsible.Id;
         var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
@@ -666,6 +846,7 @@ public class TasksControllerTests
         client.ResponsibleUserId = ownerResponsible.Id;
         var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
         clientCase.ResponsibleUserId = caseResponsible.Id;
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
@@ -722,7 +903,10 @@ public class TasksControllerTests
         var firstCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
         var secondCase = await CreateCaseAsync(db, client.Id, "СЕМЕЙНЫЙ СПОР");
         var activeCase = await CreateCaseAsync(db, client.Id, "АКТИВНОЕ ДЕЛО");
+        firstCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        secondCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
         await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: activeCase.Id);
+        await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var result = await controller.CreateAutomationTasksForCandidates(limit: 10, ct: CancellationToken.None);
@@ -772,6 +956,88 @@ public class TasksControllerTests
         Assert.Equal(author.Id, task.AssigneeUserId);
         Assert.Contains(task.Participants, item => item.Role == "assignee" && item.UserId == author.Id);
         Assert.Contains(task.Comments, item => item.Kind == "system" && item.Text.Contains("фоновым автоконтролем", StringComparison.OrdinalIgnoreCase));
+
+        var auditEvent = await db.ObjectAuditEvents.SingleAsync(item =>
+            item.ObjectType == "client-case" &&
+            item.ObjectId == clientCase.Id &&
+            item.Action == "Automation");
+        Assert.Contains("Автоконтроль создал задачу", auditEvent.Description ?? string.Empty);
+        Assert.Contains(task.Id.ToString(), auditEvent.MetadataJson ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task TaskJournalAutomationScheduler_EscalatesLongInactiveCase()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "case-responsible@example.com", "Ответственный дела");
+        var escalationUser = await CreateAdminUserAsync(db, "escalation@example.com", "Руководитель");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = assignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-45);
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:EscalationDays"] = "30",
+            ["TaskJournal:Automation:EscalationUserId"] = escalationUser.Id.ToString(),
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.True(result.Enabled);
+            Assert.Null(result.Error);
+            Assert.Equal(1, result.CreatedCount);
+        }
+
+        var task = await db.TaskJournalItems
+            .Include(item => item.Participants)
+            .SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal("urgent", task.Priority);
+        Assert.Equal(assignee.Id, task.AssigneeUserId);
+        Assert.Contains(task.Participants, item => item.Role == "observer" && item.UserId == escalationUser.Id);
+
+        var auditEvent = await db.ObjectAuditEvents.SingleAsync(item =>
+            item.ObjectType == "client-case" &&
+            item.ObjectId == clientCase.Id &&
+            item.Action == "Automation");
+        Assert.Contains("\"isEscalated\":true", auditEvent.MetadataJson ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task TaskJournalAutomationScheduler_NotifiesAssigneeAboutInactiveCaseControlTask()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "inactive-notify@example.com", "Ответственный");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = assignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        }, notifications);
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Equal(1, result.CreatedCount);
+            Assert.Null(result.Error);
+        }
+
+        var task = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        var notification = Assert.Single(notifications.CaseInactivityControls);
+        Assert.Equal(task.Id, notification.TaskId);
+        Assert.True(notification.DaysWithoutActiveTask >= 14);
     }
 
     [Fact]
@@ -936,6 +1202,23 @@ public class TasksControllerTests
         Assert.Contains("SUMMARY:Проверить документы", content);
         Assert.Contains("DTSTART:20260510T090000Z", content);
         Assert.Contains("DTEND:20260510T103000Z", content);
+    }
+
+    [Fact]
+    public async Task ExportCalendar_ReturnsForbidWhenTaskExportIsDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateTaskUserAsync(
+            db,
+            "task-export-denied@example.com",
+            "Пользователь без календаря",
+            canEdit: false,
+            canExport: false);
+        var controller = CreateController(db, new RecordingNotificationService(), user);
+
+        var result = await controller.ExportCalendar(from: null, to: null, ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
     }
 
     [Fact]
@@ -1194,7 +1477,12 @@ public class TasksControllerTests
         var commentsResult = await controller.GetComments(task.Id, CancellationToken.None);
         var commentsOk = Assert.IsType<OkObjectResult>(commentsResult.Result);
         var comments = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCommentDto>>(commentsOk.Value);
-        Assert.Contains(comments, item => item.Kind == "system" && item.Text.Contains("Возвращено на доработку", StringComparison.OrdinalIgnoreCase));
+        var history = Assert.Single(comments, item => item.Kind == "system" && item.Text.Contains("Возвращено на доработку", StringComparison.OrdinalIgnoreCase));
+        using var metadata = JsonDocument.Parse(history.MetadataJson);
+        Assert.Equal("approvalDecision", metadata.RootElement.GetProperty("kind").GetString());
+        Assert.Equal("revisionRequested", metadata.RootElement.GetProperty("decision").GetString());
+        Assert.Equal("revision", metadata.RootElement.GetProperty("resultingStatus").GetString());
+        Assert.Equal(approver.Id, metadata.RootElement.GetProperty("approverUserId").GetInt32());
     }
 
     [Fact]
@@ -1339,6 +1627,68 @@ public class TasksControllerTests
             Assert.Contains(task.Comments, item => item.Kind == "system" && item.Text.Contains("Массовое изменение", StringComparison.OrdinalIgnoreCase));
         });
         Assert.Equal(2, notificationService.ChangedTasks.Count);
+    }
+
+    [Fact]
+    public async Task BulkDeleteTasks_RemovesSelectedTasks()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var first = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var second = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.BulkDeleteTasks(new BulkDeleteTaskJournalItemsRequest
+        {
+            Ids = [first.Id],
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(1, GetAnonymousInt(ok.Value, "updated"));
+        Assert.Equal(1, GetAnonymousInt(ok.Value, "requested"));
+        Assert.Equal(0, GetAnonymousInt(ok.Value, "skipped"));
+
+        Assert.False(await db.TaskJournalItems.AnyAsync(item => item.Id == first.Id));
+        Assert.True(await db.TaskJournalItems.AnyAsync(item => item.Id == second.Id));
+        var deletedTaskIsDeleted = await db.TaskJournalItems
+            .IgnoreQueryFilters()
+            .Where(item => item.Id == first.Id)
+            .Select(item => EF.Property<bool>(item, "IsDeleted"))
+            .SingleAsync();
+        Assert.True(deletedTaskIsDeleted);
+    }
+
+    [Fact]
+    public async Task BulkUpdateTasks_NotifiesApprovalWhenSentToApproval()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: "Проверьте результат.");
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+            SortOrder = 0,
+        });
+        await db.SaveChangesAsync();
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, notificationService, author);
+
+        var result = await controller.BulkUpdateTasks(new BulkUpdateTaskJournalItemsRequest
+        {
+            Ids = [task.Id],
+            Status = "onApproval",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(1, GetAnonymousInt(ok.Value, "updated"));
+        Assert.Contains(task.Id, notificationService.ApprovalRequestedTaskIds);
     }
 
     [Fact]
@@ -1520,13 +1870,18 @@ public class TasksControllerTests
 
     private static (TaskJournalAutomationSchedulerService Scheduler, ServiceProvider Provider) CreateAutomationScheduler(
         PaymentContext db,
-        IReadOnlyDictionary<string, string?> values)
+        IReadOnlyDictionary<string, string?> values,
+        INotificationService? notificationService = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(values)
             .Build();
         var services = new ServiceCollection();
         services.AddSingleton(db);
+        if (notificationService is not null)
+        {
+            services.AddSingleton(notificationService);
+        }
         var provider = services.BuildServiceProvider();
 
         return (
@@ -1560,7 +1915,8 @@ public class TasksControllerTests
         string email,
         string fullName,
         bool canEdit,
-        bool canCreate = false)
+        bool canCreate = false,
+        bool canExport = true)
     {
         var role = new Role
         {
@@ -1575,7 +1931,7 @@ public class TasksControllerTests
                     CanCreate = canCreate,
                     CanEdit = canEdit,
                     CanDelete = canEdit,
-                    CanExport = true,
+                    CanExport = canExport,
                 },
             ],
         };
@@ -1653,7 +2009,8 @@ public class TasksControllerTests
         string? result = null,
         string status = "new",
         DateTime? createdAt = null,
-        int? legalEntityId = null)
+        int? legalEntityId = null,
+        DateTime? approvalDueAt = null)
     {
         var task = new TaskJournalItem
         {
@@ -1667,6 +2024,7 @@ public class TasksControllerTests
             AssigneeUserId = assigneeUserId,
             AssigneeName = "Исполнитель",
             DueAt = DateTime.UtcNow.AddHours(1),
+            ApprovalDueAt = approvalDueAt,
             PlannedDurationMinutes = 60,
             Status = status,
             Result = result,
@@ -1707,6 +2065,7 @@ public class TasksControllerTests
         public List<(int TaskId, IReadOnlyList<string> ChangeLabels, string? Comment)> ChangedTasks { get; } = [];
         public List<int> CommentTaskIds { get; } = [];
         public List<(int TaskId, IReadOnlyList<int> ConflictIds)> ScheduleConflictTasks { get; } = [];
+        public List<(int TaskId, int DaysWithoutActiveTask)> CaseInactivityControls { get; } = [];
 
         public Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
@@ -1721,6 +2080,9 @@ public class TasksControllerTests
             => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
 
         public Task<IReadOnlyList<NotificationDelivery>> SendAsync(NotificationRecipient recipient, NotificationMessage message, IEnumerable<string>? channels = null, string? eventKey = null, CancellationToken cancellationToken = default, int? senderId = null)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> RetryDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
 
         public Task<NotificationSettingsDto> UpsertSenderAsync(UpsertNotificationSenderRequest request, int? senderId = null, CancellationToken cancellationToken = default)
@@ -1783,6 +2145,12 @@ public class TasksControllerTests
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCommentAsync(TaskJournalItem task, TaskJournalComment comment, CancellationToken cancellationToken = default)
         {
             CommentTaskIds.Add(task.Id);
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(TaskJournalItem task, int daysWithoutActiveTask, CancellationToken cancellationToken = default)
+        {
+            CaseInactivityControls.Add((task.Id, daysWithoutActiveTask));
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
     }

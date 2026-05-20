@@ -263,6 +263,36 @@ public class NotificationsController : ControllerBase
         });
     }
 
+    [HttpPost("deliveries/{id:int}/retry")]
+    public async Task<ActionResult<IReadOnlyList<NotificationDeliveryDto>>> RetryDelivery(int id, CancellationToken ct)
+    {
+        try
+        {
+            var deliveries = await _notificationService.RetryDeliveryAsync(id, ct);
+            return Ok(deliveries.Select(MapDelivery).ToList());
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "NotificationDeliveryNotFound")
+        {
+            return NotFound();
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "NotificationDeliveryAlreadySent")
+        {
+            return BadRequest(new { message = "Уведомление уже было успешно отправлено." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "NotificationDeliveryPending")
+        {
+            return BadRequest(new { message = "Уведомление еще находится в обработке." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "NotificationDeliveryChannelInvalid")
+        {
+            return BadRequest(new { message = "Повторная отправка доступна только для email и Telegram." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "NotificationDeliveryRecipientMissing")
+        {
+            return BadRequest(new { message = "Не удалось определить получателя для повторной отправки." });
+        }
+    }
+
     [HttpPost("test")]
     public async Task<ActionResult<SendNotificationTestResponseDto>> SendTest(
         [FromBody] SendNotificationTestRequest request,

@@ -18,6 +18,7 @@ public class TaskJournalItemDto
     public int? AuthorUserId { get; set; }
     public string AuthorName { get; set; } = string.Empty;
     public string DueAt { get; set; } = string.Empty;
+    public string? ApprovalDueAt { get; set; }
     public int PlannedDurationMinutes { get; set; } = 60;
     public string Type { get; set; } = "task";
     public string Priority { get; set; } = "normal";
@@ -52,6 +53,7 @@ public class TaskJournalCommentDto
     public string AuthorName { get; set; } = string.Empty;
     public string Kind { get; set; } = "comment";
     public string Text { get; set; } = string.Empty;
+    public string MetadataJson { get; set; } = "{}";
     public string CreatedAt { get; set; } = string.Empty;
     public string? UpdatedAt { get; set; }
 }
@@ -90,10 +92,12 @@ public class TaskJournalCaseAutomationCandidateDto
     public int ActiveTaskCount { get; set; }
     public int CompletedTaskCount { get; set; }
     public int DaysWithoutActiveTask { get; set; }
+    public bool IsEscalated { get; set; }
     public string? LastTaskAt { get; set; }
     public string SuggestedTitle { get; set; } = string.Empty;
     public string SuggestedDescription { get; set; } = string.Empty;
     public string SuggestedDueAt { get; set; } = string.Empty;
+    public string SuggestedPriority { get; set; } = "high";
 }
 
 public class TaskJournalAutomationCreateResultDto
@@ -102,8 +106,31 @@ public class TaskJournalAutomationCreateResultDto
     public int SkippedCount { get; set; }
 }
 
+public class TaskJournalAutomationDiagnosticsDto
+{
+    public bool Enabled { get; set; }
+    public int InactivityDays { get; set; }
+    public int EscalationDays { get; set; }
+    public int Limit { get; set; }
+    public int? DefaultAssigneeUserId { get; set; }
+    public string DefaultAssigneeName { get; set; } = string.Empty;
+    public int? EscalationUserId { get; set; }
+    public string EscalationUserName { get; set; } = string.Empty;
+    public int VisibleCandidateCount { get; set; }
+    public int VisibleEscalationCandidateCount { get; set; }
+    public int CreatedTaskCountLast7Days { get; set; }
+    public string? LastCreatedAt { get; set; }
+    public string? LastCreatedDescription { get; set; }
+}
+
 public class TaskJournalSettingsDto
 {
     public bool RestrictExecutorEditing { get; set; } = true;
     public bool AllowExecutorDeadlineChangeRequests { get; set; } = true;
+    public bool CaseInactivityAutomationEnabled { get; set; } = true;
+    public int CaseInactivityDays { get; set; } = 14;
+    public int CaseInactivityLimit { get; set; } = 25;
+    public int? CaseInactivityDefaultAssigneeUserId { get; set; }
+    public int CaseInactivityEscalationDays { get; set; } = 30;
+    public int? CaseInactivityEscalationUserId { get; set; }
 }

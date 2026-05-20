@@ -65,6 +65,12 @@ public class TasksController : ControllerBase
     ];
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
+    private const string CaseInactivityAutomationEnabledSettingKey = "tasks.automation.caseControl.enabled";
+    private const string CaseInactivityAutomationDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
+    private const string CaseInactivityAutomationLimitSettingKey = "tasks.automation.caseControl.limit";
+    private const string CaseInactivityAutomationDefaultAssigneeSettingKey = "tasks.automation.caseControl.defaultAssigneeUserId";
+    private const string CaseInactivityAutomationEscalationDaysSettingKey = "tasks.automation.caseControl.escalationDays";
+    private const string CaseInactivityAutomationEscalationUserSettingKey = "tasks.automation.caseControl.escalationUserId";
 
     private readonly PaymentContext _db;
     private readonly INotificationService _notificationService;
@@ -336,11 +342,119 @@ public class TasksController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
+        var inactivityDays = Math.Clamp(request.CaseInactivityDays, 1, 365);
+        var inactivityLimit = Math.Clamp(request.CaseInactivityLimit, 1, 100);
+        var escalationDays = Math.Clamp(request.CaseInactivityEscalationDays, inactivityDays, 365);
+        var requestedDefaultAssigneeUserId = request.CaseInactivityDefaultAssigneeUserId.GetValueOrDefault();
+        var defaultAssigneeUserId = requestedDefaultAssigneeUserId > 0
+            ? requestedDefaultAssigneeUserId.ToString()
+            : "0";
+        var requestedEscalationUserId = request.CaseInactivityEscalationUserId.GetValueOrDefault();
+        var escalationUserId = requestedEscalationUserId > 0
+            ? requestedEscalationUserId.ToString()
+            : "0";
+
         await UpsertSystemSettingAsync(RestrictExecutorEditingSettingKey, request.RestrictExecutorEditing ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowExecutorDeadlineChangeRequestsSettingKey, request.AllowExecutorDeadlineChangeRequests ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(CaseInactivityAutomationEnabledSettingKey, request.CaseInactivityAutomationEnabled ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(CaseInactivityAutomationDaysSettingKey, inactivityDays.ToString(), now, ct);
+        await UpsertSystemSettingAsync(CaseInactivityAutomationLimitSettingKey, inactivityLimit.ToString(), now, ct);
+        await UpsertSystemSettingAsync(CaseInactivityAutomationDefaultAssigneeSettingKey, defaultAssigneeUserId, now, ct);
+        await UpsertSystemSettingAsync(CaseInactivityAutomationEscalationDaysSettingKey, escalationDays.ToString(), now, ct);
+        await UpsertSystemSettingAsync(CaseInactivityAutomationEscalationUserSettingKey, escalationUserId, now, ct);
         await _db.SaveChangesAsync(ct);
 
         return Ok(await GetTaskJournalSettingsAsync(ct));
+    }
+
+    [HttpGet("automation/case-control/diagnostics")]
+    public async Task<ActionResult<TaskJournalAutomationDiagnosticsDto>> GetCaseControlAutomationDiagnostics(CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        var defaultAssignee = await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityDefaultAssigneeUserId, ct);
+        var escalationUser = await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityEscalationUserId, ct);
+        var now = DateTime.UtcNow;
+        var inactivityCutoff = now.AddDays(-settings.CaseInactivityDays);
+        var escalationCutoff = now.AddDays(-settings.CaseInactivityEscalationDays);
+
+        var visibleCases = _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(access.Visibility)
+            .Where(clientCase =>
+                ((clientCase.ClientId.HasValue && clientCase.Client != null) ||
+                 (clientCase.LegalEntityId.HasValue && clientCase.LegalEntity != null)) &&
+                !FinishedCaseStatuses.Contains(clientCase.Status))
+            .Select(clientCase => new
+            {
+                clientCase.Id,
+                clientCase.CreatedAt,
+                clientCase.LastViewedAt,
+                clientCase.ActivityConfirmedAt,
+                clientCase.InactivityRemindersEnabled,
+                ActiveTaskCount = _db.TaskJournalItems.Count(task =>
+                    task.ClientCaseId == clientCase.Id &&
+                    ActiveTaskStatuses.Contains(task.Status)),
+                LastTaskAt = _db.TaskJournalItems
+                    .IgnoreQueryFilters()
+                    .Where(task => task.ClientCaseId == clientCase.Id)
+                    .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+            });
+
+        var candidateQuery = visibleCases.Where(item =>
+            item.ActiveTaskCount == 0 &&
+            (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
+            (item.LastViewedAt ?? item.CreatedAt) <= inactivityCutoff &&
+            (item.ActivityConfirmedAt ?? item.CreatedAt) <= inactivityCutoff &&
+            item.InactivityRemindersEnabled);
+
+        var escalationCandidateQuery = visibleCases.Where(item =>
+            item.ActiveTaskCount == 0 &&
+            (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
+            (item.LastViewedAt ?? item.CreatedAt) <= escalationCutoff &&
+            (item.ActivityConfirmedAt ?? item.CreatedAt) <= escalationCutoff &&
+            item.InactivityRemindersEnabled);
+
+        var auditQuery = _db.ObjectAuditEvents
+            .AsNoTracking()
+            .Where(item =>
+                item.ObjectType == "client-case" &&
+                item.Action == "Automation" &&
+                item.MetadataJson != null &&
+                item.MetadataJson.Contains("caseInactivityControlTaskCreated"));
+
+        var lastCreated = await auditQuery
+            .OrderByDescending(item => item.CreatedAt)
+            .Select(item => new { item.CreatedAt, item.Description })
+            .FirstOrDefaultAsync(ct);
+
+        var createdSince = now.AddDays(-7);
+        return Ok(new TaskJournalAutomationDiagnosticsDto
+        {
+            Enabled = settings.CaseInactivityAutomationEnabled,
+            InactivityDays = settings.CaseInactivityDays,
+            EscalationDays = settings.CaseInactivityEscalationDays,
+            Limit = settings.CaseInactivityLimit,
+            DefaultAssigneeUserId = settings.CaseInactivityDefaultAssigneeUserId,
+            DefaultAssigneeName = defaultAssignee is null ? string.Empty : BuildUserDisplayName(defaultAssignee.FullName, defaultAssignee.Email),
+            EscalationUserId = settings.CaseInactivityEscalationUserId,
+            EscalationUserName = escalationUser is null ? string.Empty : BuildUserDisplayName(escalationUser.FullName, escalationUser.Email),
+            VisibleCandidateCount = settings.CaseInactivityAutomationEnabled ? await candidateQuery.CountAsync(ct) : 0,
+            VisibleEscalationCandidateCount = settings.CaseInactivityAutomationEnabled ? await escalationCandidateQuery.CountAsync(ct) : 0,
+            CreatedTaskCountLast7Days = await auditQuery.CountAsync(item => item.CreatedAt >= createdSince, ct),
+            LastCreatedAt = lastCreated is null ? null : ToIso(lastCreated.CreatedAt),
+            LastCreatedDescription = lastCreated?.Description,
+        });
     }
 
     [HttpGet("calendar.ics")]
@@ -356,6 +470,11 @@ public class TasksController : ControllerBase
         }
 
         if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanExport != true)
         {
             return Forbid();
         }
@@ -389,8 +508,9 @@ public class TasksController : ControllerBase
 
     [HttpGet("automation/case-candidates")]
     public async Task<ActionResult<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>> GetAutomationCaseCandidates(
-        [FromQuery] int inactiveDays = 14,
-        [FromQuery] int limit = 30,
+        [FromQuery] int? inactiveDays = null,
+        [FromQuery] int? limit = null,
+        [FromQuery] int? escalationDays = null,
         CancellationToken ct = default)
     {
         var access = await GetTaskAccessAsync(ct);
@@ -404,9 +524,17 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        inactiveDays = Math.Clamp(inactiveDays, 1, 365);
-        limit = Math.Clamp(limit, 1, 100);
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        if (!settings.CaseInactivityAutomationEnabled)
+        {
+            return Ok(Array.Empty<TaskJournalCaseAutomationCandidateDto>());
+        }
+
+        var effectiveInactiveDays = Math.Clamp(inactiveDays ?? settings.CaseInactivityDays, 1, 365);
+        var effectiveLimit = Math.Clamp(limit ?? settings.CaseInactivityLimit, 1, 100);
+        var effectiveEscalationDays = Math.Clamp(escalationDays ?? settings.CaseInactivityEscalationDays, effectiveInactiveDays, 365);
         var now = DateTime.UtcNow;
+        var cutoff = now.AddDays(-effectiveInactiveDays);
 
         var candidates = await _db.ClientCases
             .AsNoTracking()
@@ -425,6 +553,7 @@ public class TasksController : ControllerBase
                 clientCase.LegalEntityId,
                 clientCase.LastViewedAt,
                 clientCase.ActivityConfirmedAt,
+                clientCase.InactivityRemindersEnabled,
                 LegalEntityName = clientCase.LegalEntity != null
                     ? (clientCase.LegalEntity.ShortName != string.Empty
                         ? clientCase.LegalEntity.ShortName
@@ -441,11 +570,15 @@ public class TasksController : ControllerBase
                     .Where(task => task.ClientCaseId == clientCase.Id)
                     .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
             })
-            .Where(item => item.ActiveTaskCount == 0)
+            .Where(item => item.ActiveTaskCount == 0
+                && (item.LastTaskAt ?? item.CreatedAt) <= cutoff
+                && (item.LastViewedAt ?? item.CreatedAt) <= cutoff
+                && (item.ActivityConfirmedAt ?? item.CreatedAt) <= cutoff
+                && item.InactivityRemindersEnabled)
             .OrderBy(item => item.LastTaskAt ?? item.CreatedAt)
             .ThenBy(item => item.ClientName != string.Empty ? item.ClientName : item.LegalEntityName)
             .ThenBy(item => item.Title)
-            .Take(limit)
+            .Take(effectiveLimit)
             .ToListAsync(ct);
 
         return Ok(candidates.Select(item =>
@@ -467,9 +600,10 @@ public class TasksController : ControllerBase
             }
 
             var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity).TotalDays));
+            var isEscalated = daysWithoutActiveTask >= effectiveEscalationDays;
             var reason = item.LastTaskAt is null
                 ? "По делу еще не было задач"
-                : daysWithoutActiveTask >= inactiveDays
+                : daysWithoutActiveTask >= effectiveInactiveDays
                     ? $"Нет активной задачи уже {daysWithoutActiveTask} дн."
                     : "Нет активной задачи";
 
@@ -485,10 +619,12 @@ public class TasksController : ControllerBase
                 ActiveTaskCount = item.ActiveTaskCount,
                 CompletedTaskCount = item.CompletedTaskCount,
                 DaysWithoutActiveTask = daysWithoutActiveTask,
+                IsEscalated = isEscalated,
                 LastTaskAt = item.LastTaskAt.HasValue ? ToIso(item.LastTaskAt.Value) : null,
                 SuggestedTitle = "Проверить движение по делу",
-                SuggestedDescription = "Автоконтроль: по делу нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.",
+                SuggestedDescription = BuildAutomationTaskDescription(isEscalated),
                 SuggestedDueAt = ToIso(now.Date.AddDays(1).AddHours(9)),
+                SuggestedPriority = ResolveAutomationPriority(daysWithoutActiveTask, effectiveInactiveDays, effectiveEscalationDays),
             };
         }).ToList());
     }
@@ -542,9 +678,28 @@ public class TasksController : ControllerBase
             .IgnoreQueryFilters()
             .Where(task => task.ClientCaseId == clientCase.Id)
             .MaxAsync(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt), ct);
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        if (!settings.CaseInactivityAutomationEnabled || !clientCase.InactivityRemindersEnabled)
+        {
+            return BadRequest(new { message = "Автоконтроль для этого дела отключен." });
+        }
+
         var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt);
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
+        if (daysWithoutActiveTask < settings.CaseInactivityDays)
+        {
+            return Conflict(new
+            {
+                message = "По делу недавно было движение. Контрольная задача пока не требуется.",
+                daysWithoutActiveTask,
+            });
+        }
+
+        var isEscalated = daysWithoutActiveTask >= settings.CaseInactivityEscalationDays;
         var assignee = await ResolveAutomationAssigneeAsync(clientCase, access, ct);
+        var escalationUser = isEscalated
+            ? await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityEscalationUserId, ct)
+            : null;
         var binding = BuildCaseBinding(clientCase);
         if (binding.Error is not null)
         {
@@ -558,7 +713,7 @@ public class TasksController : ControllerBase
             ClientCaseId = clientCase.Id,
             ObjectName = BuildObjectName(binding.OwnerName, clientCase.Title),
             Title = "Проверить движение по делу",
-            Description = "Автоконтроль: по делу нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.",
+            Description = BuildAutomationTaskDescription(isEscalated),
             AssigneeUserId = assignee.UserId,
             AssigneeName = assignee.DisplayName,
             AuthorUserId = access.UserId,
@@ -566,7 +721,7 @@ public class TasksController : ControllerBase
             DueAt = DateTime.UtcNow.Date.AddDays(1).AddHours(9),
             PlannedDurationMinutes = 60,
             Type = "control",
-            Priority = daysWithoutActiveTask >= 14 ? "high" : "normal",
+            Priority = ResolveAutomationPriority(daysWithoutActiveTask, settings.CaseInactivityDays, settings.CaseInactivityEscalationDays),
             Status = "new",
             Result = null,
             RemindersJson = SerializeList(["before1d", "atDue"], AllowedReminders, ["atDue"]),
@@ -576,6 +731,7 @@ public class TasksController : ControllerBase
             UpdatedAt = DateTime.UtcNow,
             Participants = [ToParticipantEntity(assignee)],
         };
+        AddEscalationObserver(entity, escalationUser, assignee.UserId, DateTime.UtcNow);
 
         AddTaskHistory(entity, access, "Задача создана автоматически из автоконтроля дела.");
         _db.TaskJournalItems.Add(entity);
@@ -600,6 +756,19 @@ public class TasksController : ControllerBase
         }
 
         limit = Math.Clamp(limit, 1, 100);
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        if (!settings.CaseInactivityAutomationEnabled)
+        {
+            return Ok(new TaskJournalAutomationCreateResultDto
+            {
+                CreatedTasks = Array.Empty<TaskJournalItemDto>(),
+                SkippedCount = 0,
+            });
+        }
+
+        var effectiveLimit = Math.Min(limit, settings.CaseInactivityLimit);
+        var cutoff = DateTime.UtcNow.AddDays(-settings.CaseInactivityDays);
+        var escalationUser = await ResolveConfiguredAutomationUserAsync(settings.CaseInactivityEscalationUserId, ct);
         var candidates = await _db.ClientCases
             .Include(item => item.Client)
             .Include(item => item.LegalEntity)
@@ -619,7 +788,11 @@ public class TasksController : ControllerBase
                     .Where(task => task.ClientCaseId == clientCase.Id)
                     .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
             })
-            .Where(item => item.ActiveTaskCount == 0)
+            .Where(item => item.ActiveTaskCount == 0
+                && (item.LastTaskAt ?? item.Case.CreatedAt) <= cutoff
+                && (item.Case.LastViewedAt ?? item.Case.CreatedAt) <= cutoff
+                && (item.Case.ActivityConfirmedAt ?? item.Case.CreatedAt) <= cutoff
+                && item.Case.InactivityRemindersEnabled)
             .OrderBy(item => item.LastTaskAt ?? item.Case.CreatedAt)
             .ThenBy(item => item.Case.Client != null
                 ? item.Case.Client.Name
@@ -627,7 +800,7 @@ public class TasksController : ControllerBase
                     ? item.Case.LegalEntity.ShortName
                     : string.Empty)
             .ThenBy(item => item.Case.Title)
-            .Take(limit)
+            .Take(effectiveLimit)
             .ToListAsync(ct);
 
         var created = new List<(TaskJournalItem Entity, TaskClientBinding Binding)>();
@@ -640,7 +813,7 @@ public class TasksController : ControllerBase
             }
 
             var assignee = await ResolveAutomationAssigneeAsync(item.Case, access, ct);
-            var entity = BuildAutomationTaskEntity(item.Case, binding, access, assignee, item.LastTaskAt);
+            var entity = BuildAutomationTaskEntity(item.Case, binding, access, assignee, item.LastTaskAt, settings, escalationUser);
             AddTaskHistory(entity, access, "Задача создана автоматически из массового автоконтроля дел.");
             _db.TaskJournalItems.Add(entity);
             created.Add((entity, binding));
@@ -1144,6 +1317,7 @@ public class TasksController : ControllerBase
             AuthorUserId = access.UserId,
             AuthorName = access.DisplayName,
             DueAt = request.DueAt,
+            ApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt),
             PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes),
             Type = NormalizeEnumValue(request.Type, AllowedTypes, "task"),
             Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal"),
@@ -1236,6 +1410,7 @@ public class TasksController : ControllerBase
         entity.AssigneeUserId = participants.PrimaryAssigneeUserId;
         entity.AssigneeName = participants.PrimaryAssigneeName;
         entity.DueAt = request.DueAt;
+        entity.ApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt);
         entity.PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes);
         entity.Type = NormalizeEnumValue(request.Type, AllowedTypes, "task");
         entity.Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal");
@@ -1475,7 +1650,7 @@ public class TasksController : ControllerBase
             .ToListAsync(ct);
 
         var updated = 0;
-        var notifications = new List<(TaskJournalItem Task, IReadOnlyList<string> ChangeLabels, bool BecameDone)>();
+        var notifications = new List<(TaskJournalItem Task, IReadOnlyList<string> ChangeLabels, bool BecameDone, bool ApprovalRequested)>();
         var now = DateTime.UtcNow;
         foreach (var entity in entities)
         {
@@ -1485,6 +1660,7 @@ public class TasksController : ControllerBase
             }
 
             var changes = new List<string>();
+            var approvalRequested = false;
 
             if (assignee is not null && ReplacePrimaryAssignee(entity, assignee, now))
             {
@@ -1519,6 +1695,8 @@ public class TasksController : ControllerBase
                 becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
                 entity.Status = nextStatus;
+                approvalRequested = approvalQueueRestarted
+                    || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status));
                 if (NormalizeOptional(request.Result) is { } result)
                 {
                     entity.Result = result;
@@ -1548,7 +1726,7 @@ public class TasksController : ControllerBase
             entity.UpdatedAt = now;
             AddTaskHistory(entity, access, $"Массовое изменение: {string.Join(", ", changes)}.");
             updated++;
-            notifications.Add((entity, changes, becameDone));
+            notifications.Add((entity, changes, becameDone, approvalRequested));
         }
 
         await _db.SaveChangesAsync(ct);
@@ -1561,6 +1739,11 @@ public class TasksController : ControllerBase
                 access.UserId,
                 null,
                 ct);
+
+            if (notification.ApprovalRequested)
+            {
+                await _notificationService.NotifyTaskApprovalRequestedAsync(notification.Task, access.DisplayName, access.UserId, ct);
+            }
 
             if (notification.BecameDone)
             {
@@ -1575,6 +1758,60 @@ public class TasksController : ControllerBase
             requested = ids.Count,
             updated,
             skipped = ids.Count - updated,
+        });
+    }
+
+    [HttpPost("bulk/delete")]
+    public async Task<ActionResult<object>> BulkDeleteTasks([FromBody] BulkDeleteTaskJournalItemsRequest request, CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanDelete != true)
+        {
+            return Forbid();
+        }
+
+        var ids = request.Ids
+            .Where(id => id > 0)
+            .Distinct()
+            .Take(500)
+            .ToList();
+        if (ids.Count == 0)
+        {
+            return BadRequest(new { message = "Выберите задачи для массового удаления." });
+        }
+
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        var entities = await BuildVisibleTasksQuery(access)
+            .Where(task => ids.Contains(task.Id))
+            .ToListAsync(ct);
+
+        var deleted = 0;
+        foreach (var entity in entities)
+        {
+            if (ShouldRestrictExecutorFullEdit(entity, access, settings))
+            {
+                continue;
+            }
+
+            _db.TaskJournalItems.Remove(entity);
+            deleted++;
+        }
+
+        if (deleted > 0)
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return Ok(new
+        {
+            requested = ids.Count,
+            updated = deleted,
+            skipped = ids.Count - deleted,
         });
     }
 
@@ -1668,7 +1905,19 @@ public class TasksController : ControllerBase
         AddTaskHistory(
             entity,
             access,
-            BuildApprovalHistoryText(decision, participant.DisplayName, resolution));
+            BuildApprovalHistoryText(decision, participant.DisplayName, resolution),
+            new
+            {
+                kind = "approvalDecision",
+                participantId = participant.Id,
+                approverUserId = participant.UserId,
+                approverName = participant.DisplayName,
+                decision,
+                resolution,
+                resultingStatus = entity.Status,
+                approvalDueAt = entity.ApprovalDueAt,
+                respondedAt = participant.RespondedAt
+            });
         await _db.SaveChangesAsync(ct);
         await _notificationService.NotifyTaskApprovalDecisionAsync(
             entity,
@@ -1849,13 +2098,28 @@ public class TasksController : ControllerBase
             .AsNoTracking()
             .Where(item =>
                 item.Key == RestrictExecutorEditingSettingKey ||
-                item.Key == AllowExecutorDeadlineChangeRequestsSettingKey)
+                item.Key == AllowExecutorDeadlineChangeRequestsSettingKey ||
+                item.Key == CaseInactivityAutomationEnabledSettingKey ||
+                item.Key == CaseInactivityAutomationDaysSettingKey ||
+                item.Key == CaseInactivityAutomationLimitSettingKey ||
+                item.Key == CaseInactivityAutomationDefaultAssigneeSettingKey ||
+                item.Key == CaseInactivityAutomationEscalationDaysSettingKey ||
+                item.Key == CaseInactivityAutomationEscalationUserSettingKey)
             .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
 
+        var defaultAssigneeUserId = ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationDefaultAssigneeSettingKey), 0);
+        var escalationUserId = ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationEscalationUserSettingKey), 0);
+        var inactivityDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationDaysSettingKey), 14), 1, 365);
         return new TaskJournalSettingsDto
         {
             RestrictExecutorEditing = ParseBoolSetting(settings.GetValueOrDefault(RestrictExecutorEditingSettingKey), true),
             AllowExecutorDeadlineChangeRequests = ParseBoolSetting(settings.GetValueOrDefault(AllowExecutorDeadlineChangeRequestsSettingKey), true),
+            CaseInactivityAutomationEnabled = ParseBoolSetting(settings.GetValueOrDefault(CaseInactivityAutomationEnabledSettingKey), true),
+            CaseInactivityDays = inactivityDays,
+            CaseInactivityLimit = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationLimitSettingKey), 25), 1, 100),
+            CaseInactivityDefaultAssigneeUserId = defaultAssigneeUserId > 0 ? defaultAssigneeUserId : null,
+            CaseInactivityEscalationDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationEscalationDaysSettingKey), 30), inactivityDays, 365),
+            CaseInactivityEscalationUserId = escalationUserId > 0 ? escalationUserId : null,
         };
     }
 
@@ -1880,6 +2144,9 @@ public class TasksController : ControllerBase
 
     private static bool ParseBoolSetting(string? value, bool fallback)
         => bool.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static int ParseIntSetting(string? value, int fallback)
+        => int.TryParse(value, out var parsed) ? parsed : fallback;
 
     private async Task<TaskParticipantsResolution> ResolveParticipantsAsync(
         UpsertTaskJournalItemRequest request,
@@ -2193,6 +2460,11 @@ public class TasksController : ControllerBase
             return "Укажите дату и время исполнения.";
         }
 
+        if (request.ApprovalDueAt.HasValue && request.ApprovalDueAt.Value == default)
+        {
+            return "Укажите корректный срок согласования.";
+        }
+
         var changeComment = NormalizeOptional(request.ChangeComment);
         if (changeComment is { Length: > 4000 })
         {
@@ -2227,6 +2499,7 @@ public class TasksController : ControllerBase
             AuthorUserId = entity.AuthorUserId,
             AuthorName = entity.AuthorName,
             DueAt = ToIso(entity.DueAt),
+            ApprovalDueAt = entity.ApprovalDueAt.HasValue ? ToIso(entity.ApprovalDueAt.Value) : null,
             PlannedDurationMinutes = entity.PlannedDurationMinutes,
             Type = entity.Type,
             Priority = entity.Priority,
@@ -2277,7 +2550,7 @@ public class TasksController : ControllerBase
 
         if ((string.Equals(entity.Status, "onApproval", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(entity.Status, "overdueApproval", StringComparison.OrdinalIgnoreCase))
-            && entity.DueAt < DateTime.UtcNow)
+            && GetApprovalDueAt(entity) < DateTime.UtcNow)
         {
             return "overdueApproval";
         }
@@ -2285,11 +2558,17 @@ public class TasksController : ControllerBase
         return entity.Status;
     }
 
+    private static DateTime GetApprovalDueAt(TaskJournalItem entity)
+        => entity.ApprovalDueAt ?? entity.DueAt;
+
     private static string ToIso(DateTime value)
         => DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("O");
 
     private static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static DateTime? NormalizeApprovalDueAt(DateTime? value)
+        => value.HasValue && value.Value != default ? value.Value : null;
 
     private static string NormalizeEnumValue(string? value, HashSet<string> allowedValues, string fallback)
     {
@@ -2397,24 +2676,78 @@ public class TasksController : ControllerBase
             null);
     }
 
+    private async Task<User?> ResolveConfiguredAutomationUserAsync(int? configuredUserId, CancellationToken ct)
+    {
+        if (!configuredUserId.HasValue || configuredUserId.Value <= 0)
+        {
+            return null;
+        }
+
+        return await _db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(user =>
+                user.Id == configuredUserId.Value &&
+                user.IsActive &&
+                user.IsApproved,
+                ct);
+    }
+
+    private static string ResolveAutomationPriority(int daysWithoutActiveTask, int inactiveDays, int escalationDays)
+    {
+        if (daysWithoutActiveTask >= escalationDays)
+        {
+            return "urgent";
+        }
+
+        return daysWithoutActiveTask >= inactiveDays ? "high" : "normal";
+    }
+
+    private static string BuildAutomationTaskDescription(bool isEscalated)
+        => isEscalated
+            ? "Автоконтроль: по делу давно нет активной задачи, сработала эскалация. Срочно проверьте текущее состояние и зафиксируйте следующий шаг."
+            : "Автоконтроль: по делу нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.";
+
+    private static void AddEscalationObserver(TaskJournalItem task, User? escalationUser, int? assigneeUserId, DateTime nowUtc)
+    {
+        if (escalationUser is null || escalationUser.Id == assigneeUserId)
+        {
+            return;
+        }
+
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = escalationUser.Id,
+            Role = "observer",
+            DisplayName = BuildUserDisplayName(escalationUser.FullName, escalationUser.Email),
+            Email = escalationUser.Email,
+            SortOrder = task.Participants.Count,
+            ApprovalStatus = "pending",
+            CreatedAt = nowUtc,
+            UpdatedAt = nowUtc,
+        });
+    }
+
     private static TaskJournalItem BuildAutomationTaskEntity(
         ClientCase clientCase,
         TaskClientBinding binding,
         TaskAccess access,
         TaskParticipantDraft assignee,
-        DateTime? lastTaskAt)
+        DateTime? lastTaskAt,
+        TaskJournalSettingsDto settings,
+        User? escalationUser)
     {
         var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt);
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
+        var isEscalated = daysWithoutActiveTask >= settings.CaseInactivityEscalationDays;
 
-        return new TaskJournalItem
+        var task = new TaskJournalItem
         {
             ClientId = binding.ClientId,
             LegalEntityId = binding.LegalEntityId,
             ClientCaseId = clientCase.Id,
             ObjectName = BuildObjectName(binding.OwnerName, clientCase.Title),
             Title = "Проверить движение по делу",
-            Description = "Автоконтроль: по делу нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.",
+            Description = BuildAutomationTaskDescription(isEscalated),
             AssigneeUserId = assignee.UserId,
             AssigneeName = assignee.DisplayName,
             AuthorUserId = access.UserId,
@@ -2422,7 +2755,7 @@ public class TasksController : ControllerBase
             DueAt = DateTime.UtcNow.Date.AddDays(1).AddHours(9),
             PlannedDurationMinutes = 60,
             Type = "control",
-            Priority = daysWithoutActiveTask >= 14 ? "high" : "normal",
+            Priority = ResolveAutomationPriority(daysWithoutActiveTask, settings.CaseInactivityDays, settings.CaseInactivityEscalationDays),
             Status = "new",
             Result = null,
             RemindersJson = SerializeList(["before1d", "atDue"], AllowedReminders, ["atDue"]),
@@ -2432,6 +2765,9 @@ public class TasksController : ControllerBase
             UpdatedAt = DateTime.UtcNow,
             Participants = [ToParticipantEntity(assignee)],
         };
+
+        AddEscalationObserver(task, isEscalated ? escalationUser : null, assignee.UserId, DateTime.UtcNow);
+        return task;
     }
 
     private static string SerializeList(IEnumerable<string>? values, HashSet<string> allowedValues, IReadOnlyCollection<string> fallback)
@@ -2686,6 +3022,7 @@ public class TasksController : ControllerBase
             AuthorName = comment.AuthorName,
             Kind = comment.Kind,
             Text = comment.Text,
+            MetadataJson = string.IsNullOrWhiteSpace(comment.MetadataJson) ? "{}" : comment.MetadataJson,
             CreatedAt = ToIso(comment.CreatedAt),
             UpdatedAt = comment.UpdatedAt.HasValue ? ToIso(comment.UpdatedAt.Value) : null,
         };
@@ -2904,6 +3241,10 @@ public class TasksController : ControllerBase
         if (entity.DueAt != request.DueAt)
         {
             changes.Add("Срок");
+        }
+        if (entity.ApprovalDueAt != NormalizeApprovalDueAt(request.ApprovalDueAt))
+        {
+            changes.Add("Срок согласования");
         }
         if (entity.PlannedDurationMinutes != NormalizeTaskDuration(request.PlannedDurationMinutes))
         {

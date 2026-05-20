@@ -1065,6 +1065,22 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AccessRequestReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("AccessRequestedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AccessRequestedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AccessRequestedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("ActivityConfirmedAt")
                         .HasColumnType("TEXT");
 
@@ -1178,12 +1194,28 @@ namespace PayPlanner.Api.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<DateTime?>("HiddenFromExecutorAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("HiddenFromExecutorByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("HiddenFromExecutorByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("InactivityRemindersEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(true);
 
                     b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsHiddenFromExecutor")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
@@ -1269,6 +1301,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccessRequestedAt")
+                        .HasDatabaseName("IX_ClientCases_AccessRequestedAt");
+
                     b.HasIndex("AppealDeadlineAt")
                         .HasDatabaseName("IX_ClientCases_AppealDeadlineAt");
 
@@ -1304,6 +1339,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_ClientCase_IsDeleted");
+
+                    b.HasIndex("IsHiddenFromExecutor")
+                        .HasDatabaseName("IX_ClientCases_IsHiddenFromExecutor");
 
                     b.HasIndex("LastViewedAt")
                         .HasDatabaseName("IX_ClientCases_LastViewedAt");
@@ -4774,6 +4812,9 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("ApprovalDueAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AssigneeName")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -4902,6 +4943,9 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ApprovalDueAt")
+                        .HasDatabaseName("IX_TaskJournalItems_ApprovalDueAt");
 
                     b.HasIndex("AssigneeUserId")
                         .HasDatabaseName("IX_TaskJournalItems_AssigneeUserId");

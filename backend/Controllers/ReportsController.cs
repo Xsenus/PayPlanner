@@ -15,6 +15,9 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class ReportsController : ControllerBase
 {
+    private const string CaseInactivityAutomationDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
+    private const string CaseInactivityAutomationEscalationDaysSettingKey = "tasks.automation.caseControl.escalationDays";
+
     private readonly PaymentContext _db;
     private readonly ILogger<ReportsController> _logger;
 
@@ -22,6 +25,52 @@ public class ReportsController : ControllerBase
     {
         _db = db;
         _logger = logger;
+    }
+
+    private async Task<ActionResult<TReport>> ExecuteVisibleReportAsync<TReport>(
+        string section,
+        Func<DataVisibilityAccess, CancellationToken, Task<TReport>> buildReport,
+        CancellationToken ct)
+    {
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var visibility = await _db.ResolveDataVisibilityAsync(User, section, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => buildReport(visibility, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
+    private async Task<bool> CanViewReportsAsync(CancellationToken ct)
+    {
+        if (User.IsInRole("admin"))
+        {
+            return true;
+        }
+
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return false;
+        }
+
+        if (await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Reports, ct);
+        return permission?.CanView == true;
     }
 
     [HttpGet("legal-work")]
@@ -38,7 +87,12 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
         var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
         var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (casesVisibility is null || tasksVisibility is null || accountsVisibility is null)
@@ -48,6 +102,45 @@ public class ReportsController : ControllerBase
 
         var report = await SqliteRetryHelper.ExecuteAsync(
             cancellationToken => BuildLegalWorkReportAsync(start, end, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
+    [HttpGet("case-activity")]
+    public async Task<ActionResult<CaseActivityReportDto>> CaseActivity(
+        [FromQuery] int? inactiveDays,
+        [FromQuery] int? escalationDays,
+        [FromQuery] string? activity,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        if (casesVisibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var settings = await GetCaseActivityReportSettingsAsync(ct);
+        var effectiveInactiveDays = Math.Clamp(inactiveDays ?? settings.InactivityDays, 1, 365);
+        var effectiveEscalationDays = Math.Clamp(escalationDays ?? settings.EscalationDays, effectiveInactiveDays, 365);
+        var effectiveLimit = Math.Clamp(limit ?? 50, 1, 200);
+        var normalizedActivity = NormalizeCaseActivityFilter(activity);
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildCaseActivityReportAsync(
+                effectiveInactiveDays,
+                effectiveEscalationDays,
+                normalizedActivity,
+                effectiveLimit,
+                casesVisibility,
+                cancellationToken),
             _logger,
             ct);
 
@@ -74,12 +167,16 @@ public class ReportsController : ControllerBase
             ? null
             : accountName.Trim();
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildCashFlowReportAsync(start, end, source, normalizedAccountName, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildCashFlowReportAsync(
+                start,
+                end,
+                source,
+                normalizedAccountName,
+                visibility,
+                cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("categories")]
@@ -97,12 +194,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildCategoryReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildCategoryReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("counterparties")]
@@ -120,12 +215,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildCounterpartyReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildCounterpartyReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("projects")]
@@ -143,12 +236,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildProjectReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildProjectReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("directions")]
@@ -166,12 +257,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildDirectionReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildDirectionReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("sales-points")]
@@ -189,12 +278,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildSalesPointReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildSalesPointReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("vat")]
@@ -212,12 +299,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildVatReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildVatReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("plan-fact")]
@@ -235,12 +320,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildPlanFactReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildPlanFactReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("advances")]
@@ -258,12 +341,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildAdvanceReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildAdvanceReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("payment-priorities")]
@@ -281,12 +362,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildPaymentPriorityReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildPaymentPriorityReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("paid-accounts")]
@@ -304,12 +383,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildPaidAccountReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildPaidAccountReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("paid-invoices")]
@@ -327,12 +404,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildPaidInvoiceReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildPaidInvoiceReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("invoice-statuses")]
@@ -349,12 +424,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildInvoiceStatusReportAsync(start, end, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Accounts,
+            (visibility, cancellationToken) => BuildInvoiceStatusReportAsync(start, end, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("act-statuses")]
@@ -371,12 +444,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildActStatusReportAsync(start, end, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Acts,
+            (visibility, cancellationToken) => BuildActStatusReportAsync(start, end, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("contract-statuses")]
@@ -393,12 +464,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildContractStatusReportAsync(start, end, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Contracts,
+            (visibility, cancellationToken) => BuildContractStatusReportAsync(start, end, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("payment-orders")]
@@ -416,12 +485,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildPaymentOrderReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildPaymentOrderReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("payment-purposes")]
@@ -439,12 +506,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildPaymentPurposeReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildPaymentPurposeReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("match-statuses")]
@@ -462,12 +527,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildMatchStatusReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildMatchStatusReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("journal-statuses")]
@@ -485,12 +548,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildJournalStatusReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildJournalStatusReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("currencies")]
@@ -508,12 +569,10 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
-        var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildCurrencyReportAsync(start, end, source, cancellationToken),
-            _logger,
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildCurrencyReportAsync(start, end, source, visibility, cancellationToken),
             ct);
-
-        return Ok(report);
     }
 
     [HttpGet("cash-orders")]
@@ -528,6 +587,11 @@ public class ReportsController : ControllerBase
         if (end < start)
         {
             (start, end) = (end, start);
+        }
+
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
         }
 
         var report = await SqliteRetryHelper.ExecuteAsync(
@@ -552,6 +616,11 @@ public class ReportsController : ControllerBase
             (start, end) = (end, start);
         }
 
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
         var report = await SqliteRetryHelper.ExecuteAsync(
             cancellationToken => BuildBankStatementImportReportAsync(start, end, cancellationToken),
             _logger,
@@ -572,6 +641,11 @@ public class ReportsController : ControllerBase
         if (end < start)
         {
             (start, end) = (end, start);
+        }
+
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
         }
 
         var report = await SqliteRetryHelper.ExecuteAsync(
@@ -759,6 +833,133 @@ public class ReportsController : ControllerBase
             .ToList();
     }
 
+    private async Task<CaseActivityReportSettings> GetCaseActivityReportSettingsAsync(CancellationToken ct)
+    {
+        var settings = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.Key == CaseInactivityAutomationDaysSettingKey ||
+                item.Key == CaseInactivityAutomationEscalationDaysSettingKey)
+            .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
+
+        var inactivityDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationDaysSettingKey), 14), 1, 365);
+        var escalationDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationEscalationDaysSettingKey), 30), inactivityDays, 365);
+        return new CaseActivityReportSettings(inactivityDays, escalationDays);
+    }
+
+    private async Task<CaseActivityReportDto> BuildCaseActivityReportAsync(
+        int inactivityDays,
+        int escalationDays,
+        string activity,
+        int limit,
+        DataVisibilityAccess casesVisibility,
+        CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var cutoff = now.AddDays(-inactivityDays);
+
+        var visibleCases = await _db.ClientCases
+            .AsNoTracking()
+            .WithCaseIncludes()
+            .ApplyClientCaseVisibility(casesVisibility)
+            .ToListAsync(ct);
+
+        var activeCases = visibleCases
+            .Where(item => !IsFinishedCaseStatus(item.Status))
+            .ToList();
+        var caseIds = activeCases.Select(item => item.Id).Distinct().ToArray();
+
+        var taskRows = caseIds.Length == 0
+            ? new List<CaseActivityTaskRow>()
+            : await _db.TaskJournalItems
+                .AsNoTracking()
+                .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))
+                .Select(item => new CaseActivityTaskRow(
+                    item.ClientCaseId!.Value,
+                    item.Status,
+                    item.UpdatedAt ?? item.CreatedAt))
+                .ToListAsync(ct);
+
+        var tasksByCase = taskRows
+            .GroupBy(item => item.ClientCaseId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        var rows = activeCases
+            .Select(clientCase =>
+            {
+                var tasks = tasksByCase.GetValueOrDefault(clientCase.Id) ?? [];
+                var activeTaskCount = tasks.Count(item => IsOpenTaskStatus(item.Status));
+                var completedTaskCount = tasks.Count - activeTaskCount;
+                var lastTaskAt = tasks.Count > 0
+                    ? tasks.Max(item => item.LastActivityAt)
+                    : (DateTime?)null;
+                var lastActivityAt = ResolveCaseLastActivityAt(clientCase, lastTaskAt);
+                var daysWithoutActivity = Math.Max(0, (now.Date - lastActivityAt.Date).Days);
+                var isInactive =
+                    activeTaskCount == 0
+                    && lastActivityAt <= cutoff
+                    && (clientCase.LastViewedAt ?? clientCase.CreatedAt) <= cutoff
+                    && (clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) <= cutoff
+                    && clientCase.InactivityRemindersEnabled;
+                var isEscalated = isInactive && daysWithoutActivity >= escalationDays;
+                var owner = ResolveCaseOwner(clientCase);
+
+                return new CaseActivityReportItemDto
+                {
+                    CaseId = clientCase.Id,
+                    CaseNumber = clientCase.CaseNumber,
+                    CaseTitle = clientCase.Title,
+                    CaseType = NormalizeReportText(clientCase.CaseType, "Не указан"),
+                    Status = clientCase.Status.ToString(),
+                    StatusLabel = FormatCaseStatus(clientCase.Status),
+                    OwnerId = owner.OwnerId,
+                    OwnerType = owner.OwnerType,
+                    OwnerName = owner.OwnerName,
+                    ResponsibleUserId = clientCase.ResponsibleUserId,
+                    ResponsibleName = ResolveCaseResponsibleName(clientCase),
+                    CreatedAt = clientCase.CreatedAt,
+                    LastActivityAt = lastActivityAt,
+                    LastTaskAt = lastTaskAt,
+                    LastViewedAt = clientCase.LastViewedAt,
+                    ActivityConfirmedAt = clientCase.ActivityConfirmedAt,
+                    DaysWithoutActivity = daysWithoutActivity,
+                    ActiveTaskCount = activeTaskCount,
+                    CompletedTaskCount = completedTaskCount,
+                    InactivityRemindersEnabled = clientCase.InactivityRemindersEnabled,
+                    IsInactive = isInactive,
+                    IsEscalated = isEscalated,
+                    Reason = BuildCaseActivityReason(clientCase, activeTaskCount, lastActivityAt, cutoff, isInactive),
+                };
+            })
+            .ToList();
+
+        var filteredRows = FilterCaseActivityRows(rows, activity)
+            .OrderByDescending(item => item.IsInactive)
+            .ThenByDescending(item => item.IsEscalated)
+            .ThenByDescending(item => item.DaysWithoutActivity)
+            .ThenBy(item => item.OwnerName)
+            .ThenBy(item => item.CaseTitle)
+            .Take(limit)
+            .ToList();
+
+        return new CaseActivityReportDto
+        {
+            GeneratedAt = now,
+            InactivityDays = inactivityDays,
+            EscalationDays = escalationDays,
+            Activity = activity,
+            TotalVisibleCases = visibleCases.Count,
+            ActiveCaseCount = activeCases.Count,
+            FinishedCaseCount = visibleCases.Count(item => IsFinishedCaseStatus(item.Status)),
+            InactiveCaseCount = rows.Count(item => item.IsInactive),
+            EscalatedCaseCount = rows.Count(item => item.IsEscalated),
+            DisabledCaseCount = rows.Count(item => !item.InactivityRemindersEnabled),
+            WithActiveTasksCount = rows.Count(item => item.ActiveTaskCount > 0),
+            WithoutResponsibleCount = rows.Count(item => !item.ResponsibleUserId.HasValue),
+            Items = filteredRows,
+        };
+    }
+
     private static IReadOnlyList<LegalWorkResponsibleItemDto> BuildLegalWorkResponsibleItems(
         IReadOnlyCollection<ClientCase> cases,
         IReadOnlyCollection<LegalWorkTaskRow> openTasks,
@@ -885,6 +1086,112 @@ public class ReportsController : ControllerBase
         => !string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase);
 
+    private static IEnumerable<CaseActivityReportItemDto> FilterCaseActivityRows(
+        IReadOnlyCollection<CaseActivityReportItemDto> rows,
+        string activity)
+        => activity switch
+        {
+            "inactive" => rows.Where(item => item.IsInactive),
+            "escalated" => rows.Where(item => item.IsEscalated),
+            "disabled" => rows.Where(item => !item.InactivityRemindersEnabled),
+            "active" => rows.Where(item => !item.IsInactive && item.InactivityRemindersEnabled),
+            _ => rows,
+        };
+
+    private static string NormalizeCaseActivityFilter(string? activity)
+    {
+        var normalized = activity?.Trim().ToLowerInvariant();
+        return normalized is "inactive" or "active" or "escalated" or "disabled"
+            ? normalized
+            : "all";
+    }
+
+    private static int ParseIntSetting(string? value, int fallback)
+        => int.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static DateTime ResolveCaseLastActivityAt(ClientCase clientCase, DateTime? lastTaskAt)
+    {
+        var lastActivity = clientCase.CreatedAt;
+        if (lastTaskAt.HasValue && lastTaskAt.Value > lastActivity)
+        {
+            lastActivity = lastTaskAt.Value;
+        }
+
+        if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
+        {
+            lastActivity = clientCase.LastViewedAt.Value;
+        }
+
+        if (clientCase.ActivityConfirmedAt.HasValue && clientCase.ActivityConfirmedAt.Value > lastActivity)
+        {
+            lastActivity = clientCase.ActivityConfirmedAt.Value;
+        }
+
+        return lastActivity;
+    }
+
+    private static string BuildCaseActivityReason(
+        ClientCase clientCase,
+        int activeTaskCount,
+        DateTime lastActivityAt,
+        DateTime cutoff,
+        bool isInactive)
+    {
+        if (!clientCase.InactivityRemindersEnabled)
+        {
+            return "Автоконтроль по делу выключен";
+        }
+
+        if (activeTaskCount > 0)
+        {
+            return $"Есть активные задачи: {activeTaskCount}";
+        }
+
+        if ((clientCase.LastViewedAt ?? clientCase.CreatedAt) > cutoff)
+        {
+            return "Карточку дела недавно открывали";
+        }
+
+        if ((clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) > cutoff)
+        {
+            return "Активность подтверждена вручную";
+        }
+
+        if (lastActivityAt > cutoff)
+        {
+            return "Недавно была активность по задаче или делу";
+        }
+
+        return isInactive
+            ? "Нет активных задач и свежей активности по делу"
+            : "Не попадает под правило неактивности";
+    }
+
+    private static CaseActivityOwner ResolveCaseOwner(ClientCase item)
+    {
+        if (item.Client is not null)
+        {
+            return new CaseActivityOwner(
+                item.ClientId,
+                "client",
+                NormalizeReportText(
+                    !string.IsNullOrWhiteSpace(item.Client.Name) ? item.Client.Name : item.Client.Company,
+                    "Клиент без имени"));
+        }
+
+        if (item.LegalEntity is not null)
+        {
+            return new CaseActivityOwner(
+                item.LegalEntityId,
+                "legalEntity",
+                NormalizeReportText(
+                    !string.IsNullOrWhiteSpace(item.LegalEntity.ShortName) ? item.LegalEntity.ShortName : item.LegalEntity.FullName,
+                    "Юридическое лицо без названия"));
+        }
+
+        return new CaseActivityOwner(null, "none", "Без владельца");
+    }
+
     private static string ResolveCaseResponsibleName(ClientCase item)
     {
         var name = item.ResponsibleUser?.FullName;
@@ -934,9 +1241,10 @@ public class ReportsController : ControllerBase
         DateTime to,
         MoneyOperationSource? source,
         string? accountName,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var openingRows = await BuildFactQuery(null, from.AddDays(-1), source, accountName)
+        var openingRows = await BuildFactQuery(null, from.AddDays(-1), source, accountName, paymentsVisibility)
             .GroupBy(item => new { item.Source, AccountName = item.AccountName ?? string.Empty })
             .Select(group => new CashFlowAccountQueryRow
             {
@@ -953,7 +1261,7 @@ public class ReportsController : ControllerBase
             })
             .ToListAsync(ct);
 
-        var periodRows = await BuildFactQuery(from, to, source, accountName)
+        var periodRows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .GroupBy(item => new { item.Source, AccountName = item.AccountName ?? string.Empty })
             .Select(group => new CashFlowAccountQueryRow
             {
@@ -970,7 +1278,7 @@ public class ReportsController : ControllerBase
             })
             .ToListAsync(ct);
 
-        var dailyRows = await BuildFactQuery(from, to, source, accountName)
+        var dailyRows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .GroupBy(item => item.Date.Date)
             .Select(group => new CashFlowDayQueryRow
             {
@@ -1093,7 +1401,8 @@ public class ReportsController : ControllerBase
         DateTime? from,
         DateTime? to,
         MoneyOperationSource? source,
-        string? accountName)
+        string? accountName,
+        DataVisibilityAccess paymentsVisibility)
     {
         var query = _db.MoneyOperations
             .AsNoTracking()
@@ -1123,16 +1432,37 @@ public class ReportsController : ControllerBase
             query = query.Where(item => item.AccountName == accountName);
         }
 
-        return query;
+        return ApplyMoneyOperationVisibility(query, paymentsVisibility);
+    }
+
+    private IQueryable<MoneyOperation> ApplyMoneyOperationVisibility(
+        IQueryable<MoneyOperation> query,
+        DataVisibilityAccess paymentsVisibility)
+    {
+        if (paymentsVisibility.SeesAll)
+        {
+            return query;
+        }
+
+        var visibleInvoiceIds = _db.Payments
+            .AsNoTracking()
+            .ApplyPaymentVisibility(paymentsVisibility)
+            .Where(payment => payment.InvoiceId.HasValue)
+            .Select(payment => payment.InvoiceId!.Value);
+
+        return query.Where(operation =>
+            operation.LinkedInvoiceId.HasValue
+            && visibleInvoiceIds.Contains(operation.LinkedInvoiceId.Value));
     }
 
     private async Task<MoneyCategoryReportDto> BuildCategoryReportAsync(
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var query = BuildFactQuery(from, to, source, null)
+        var query = BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Include(item => item.IncomeType);
 
         var rows = await query
@@ -1210,9 +1540,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -1286,9 +1617,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -1362,9 +1694,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -1438,9 +1771,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -1514,9 +1848,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -1592,9 +1927,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildPlanFactQuery(from, to, source)
+        var rows = await BuildPlanFactQuery(from, to, source, paymentsVisibility)
             .Select(item => new PlanFactQueryRow
             {
                 Date = item.Date,
@@ -1658,7 +1994,8 @@ public class ReportsController : ControllerBase
     private IQueryable<MoneyOperation> BuildPlanFactQuery(
         DateTime from,
         DateTime to,
-        MoneyOperationSource? source)
+        MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility)
     {
         var query = _db.MoneyOperations
             .AsNoTracking()
@@ -1674,7 +2011,7 @@ public class ReportsController : ControllerBase
             query = query.Where(item => item.Source == source.Value);
         }
 
-        return query;
+        return ApplyMoneyOperationVisibility(query, paymentsVisibility);
     }
 
     private static decimal SumPlanFact(
@@ -1692,9 +2029,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Where(item => item.IsAdvancePayment)
             .Select(item => new
             {
@@ -1768,9 +2106,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -1844,9 +2183,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -1920,9 +2260,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -1999,10 +2340,12 @@ public class ReportsController : ControllerBase
     private async Task<InvoiceStatusReportDto> BuildInvoiceStatusReportAsync(
         DateTime from,
         DateTime to,
+        DataVisibilityAccess accountsVisibility,
         CancellationToken ct)
     {
         var rows = await _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(accountsVisibility)
             .Where(item => item.DocumentKind == DocumentKind.Invoice && item.Date >= from && item.Date <= to)
             .Select(item => new
             {
@@ -2122,10 +2465,12 @@ public class ReportsController : ControllerBase
     private async Task<ActStatusReportDto> BuildActStatusReportAsync(
         DateTime from,
         DateTime to,
+        DataVisibilityAccess actsVisibility,
         CancellationToken ct)
     {
         var rows = await _db.Acts
             .AsNoTracking()
+            .ApplyActVisibility(actsVisibility)
             .Where(item => item.Date >= from && item.Date <= to)
             .Select(item => new
             {
@@ -2236,10 +2581,12 @@ public class ReportsController : ControllerBase
     private async Task<ContractStatusReportDto> BuildContractStatusReportAsync(
         DateTime from,
         DateTime to,
+        DataVisibilityAccess contractsVisibility,
         CancellationToken ct)
     {
         var rows = await _db.Contracts
             .AsNoTracking()
+            .ApplyContractVisibility(contractsVisibility)
             .Where(item => item.Date >= from && item.Date <= to)
             .Select(item => new
             {
@@ -2364,9 +2711,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -2440,9 +2788,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -2516,9 +2865,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -2608,9 +2958,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Source,
@@ -2734,9 +3085,10 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null)
+        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -3076,6 +3428,20 @@ public class ReportsController : ControllerBase
         decimal Amount,
         decimal PaidAmount,
         PaymentStatus Status);
+
+    private sealed record CaseActivityReportSettings(
+        int InactivityDays,
+        int EscalationDays);
+
+    private sealed record CaseActivityTaskRow(
+        int ClientCaseId,
+        string Status,
+        DateTime LastActivityAt);
+
+    private sealed record CaseActivityOwner(
+        int? OwnerId,
+        string OwnerType,
+        string OwnerName);
 
     private sealed record DeadlineSourceRow(
         string Type,

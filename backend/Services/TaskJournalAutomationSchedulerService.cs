@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Services;
 
@@ -22,6 +23,8 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     private const string InactiveDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
     private const string LimitSettingKey = "tasks.automation.caseControl.limit";
     private const string DefaultAssigneeSettingKey = "tasks.automation.caseControl.defaultAssigneeUserId";
+    private const string EscalationDaysSettingKey = "tasks.automation.caseControl.escalationDays";
+    private const string EscalationUserSettingKey = "tasks.automation.caseControl.escalationUserId";
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
@@ -77,6 +80,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         {
             using var scope = _scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var notificationService = scope.ServiceProvider.GetService<INotificationService>();
             var settings = await LoadSettingsAsync(context, cancellationToken);
             if (!settings.Enabled)
             {
@@ -84,6 +88,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             }
 
             var defaultAssignee = await ResolveConfiguredAutomationUserAsync(context, settings.DefaultAssigneeUserId, cancellationToken);
+            var escalationUser = await ResolveConfiguredAutomationUserAsync(context, settings.EscalationUserId, cancellationToken);
 
             var now = DateTime.UtcNow;
             var cutoff = now.AddDays(-settings.InactiveDays);
@@ -121,6 +126,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 .ToListAsync(cancellationToken);
 
             var created = 0;
+            var createdTasks = new List<CreatedAutomationTask>();
             foreach (var candidate in candidates)
             {
                 var owner = ResolveCaseOwner(candidate.Case);
@@ -146,14 +152,19 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     continue;
                 }
 
-                var task = BuildAutomationTask(candidate.Case, owner, assignee, candidate.LastTaskAt, now);
+                var daysWithoutActiveTask = ResolveDaysWithoutActiveTask(candidate.Case, candidate.LastTaskAt, now);
+                var task = BuildAutomationTask(candidate.Case, owner, assignee, candidate.LastTaskAt, now, settings, escalationUser);
                 context.TaskJournalItems.Add(task);
+                createdTasks.Add(new CreatedAutomationTask(task, daysWithoutActiveTask, daysWithoutActiveTask >= settings.EscalationDays));
                 created += 1;
             }
 
             if (created > 0)
             {
                 await context.SaveChangesAsync(cancellationToken);
+                AddInactivityAuditEvents(context, createdTasks, now);
+                await context.SaveChangesAsync(cancellationToken);
+                await NotifyCreatedAutomationTasksAsync(notificationService, createdTasks, cancellationToken);
             }
 
             return new TaskJournalAutomationSchedulerResult(created, candidates.Count - created, true, null);
@@ -173,14 +184,19 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 item.Key == EnabledSettingKey ||
                 item.Key == InactiveDaysSettingKey ||
                 item.Key == LimitSettingKey ||
-                item.Key == DefaultAssigneeSettingKey)
+                item.Key == DefaultAssigneeSettingKey ||
+                item.Key == EscalationDaysSettingKey ||
+                item.Key == EscalationUserSettingKey)
             .ToDictionaryAsync(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase, cancellationToken);
 
+        var inactiveDays = Math.Clamp(GetInteger(values, InactiveDaysSettingKey, "TaskJournal:Automation:InactiveDays", 14), 1, 365);
         return new TaskJournalAutomationSettings(
             GetBoolean(values, EnabledSettingKey, "TaskJournal:Automation:Enabled", true),
-            Math.Clamp(GetInteger(values, InactiveDaysSettingKey, "TaskJournal:Automation:InactiveDays", 14), 1, 365),
+            inactiveDays,
             Math.Clamp(GetInteger(values, LimitSettingKey, "TaskJournal:Automation:Limit", 25), 1, 100),
-            GetNullableInteger(values, DefaultAssigneeSettingKey, "TaskJournal:Automation:DefaultAssigneeUserId"));
+            GetNullableInteger(values, DefaultAssigneeSettingKey, "TaskJournal:Automation:DefaultAssigneeUserId"),
+            Math.Clamp(GetInteger(values, EscalationDaysSettingKey, "TaskJournal:Automation:EscalationDays", 30), inactiveDays, 365),
+            GetNullableInteger(values, EscalationUserSettingKey, "TaskJournal:Automation:EscalationUserId"));
     }
 
     private async Task<User?> ResolveConfiguredAutomationUserAsync(
@@ -231,16 +247,54 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 cancellationToken);
     }
 
+    private static string ResolveAutomationPriority(int daysWithoutActiveTask, int inactiveDays, int escalationDays)
+    {
+        if (daysWithoutActiveTask >= escalationDays)
+        {
+            return "urgent";
+        }
+
+        return daysWithoutActiveTask >= inactiveDays ? "high" : "normal";
+    }
+
+    private static string BuildAutomationTaskDescription(bool isEscalated)
+        => isEscalated
+            ? "Автоконтроль: по делу давно нет активной задачи, сработала эскалация. Срочно проверьте текущее состояние и зафиксируйте следующий шаг."
+            : "Автоконтроль: по делу давно нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.";
+
+    private static void AddEscalationObserver(TaskJournalItem task, User? escalationUser, int assigneeUserId, DateTime now)
+    {
+        if (escalationUser is null || escalationUser.Id == assigneeUserId)
+        {
+            return;
+        }
+
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = escalationUser.Id,
+            Role = "observer",
+            DisplayName = DisplayName(escalationUser),
+            Email = escalationUser.Email,
+            SortOrder = task.Participants.Count,
+            ApprovalStatus = "pending",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+    }
+
     private static TaskJournalItem BuildAutomationTask(
         ClientCase clientCase,
         CaseOwnerBinding owner,
         User assignee,
         DateTime? lastTaskAt,
-        DateTime now)
+        DateTime now,
+        TaskJournalAutomationSettings settings,
+        User? escalationUser)
     {
         var assigneeName = DisplayName(assignee);
         var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt);
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity).TotalDays));
+        var isEscalated = daysWithoutActiveTask >= settings.EscalationDays;
         var task = new TaskJournalItem
         {
             ClientId = owner.ClientId,
@@ -248,7 +302,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             ClientCaseId = clientCase.Id,
             ObjectName = BuildObjectName(owner.Name, clientCase.Title),
             Title = "Проверить движение по делу",
-            Description = "Автоконтроль: по делу давно нет активной задачи. Проверьте текущее состояние и зафиксируйте следующий шаг.",
+            Description = BuildAutomationTaskDescription(isEscalated),
             AssigneeUserId = assignee.Id,
             AssigneeName = assigneeName,
             AuthorUserId = assignee.Id,
@@ -256,7 +310,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             DueAt = now.Date.AddDays(1).AddHours(9),
             PlannedDurationMinutes = 60,
             Type = "control",
-            Priority = daysWithoutActiveTask >= 14 ? "high" : "normal",
+            Priority = ResolveAutomationPriority(daysWithoutActiveTask, settings.InactiveDays, settings.EscalationDays),
             Status = "new",
             Result = null,
             RemindersJson = SerializeList(["before1d", "atDue", "dailyOverdue"]),
@@ -288,8 +342,43 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             CreatedAt = now,
             UpdatedAt = now,
         });
+        AddEscalationObserver(task, isEscalated ? escalationUser : null, assignee.Id, now);
 
         return task;
+    }
+
+    private static void AddInactivityAuditEvents(
+        PaymentContext context,
+        IReadOnlyCollection<CreatedAutomationTask> createdTasks,
+        DateTime now)
+    {
+        foreach (var item in createdTasks)
+        {
+            if (!item.Task.ClientCaseId.HasValue)
+            {
+                continue;
+            }
+
+            context.ObjectAuditEvents.Add(new ObjectAuditEvent
+            {
+                ObjectType = "client-case",
+                ObjectId = item.Task.ClientCaseId.Value,
+                Action = "Automation",
+                Description = $"Автоконтроль создал задачу \"{item.Task.Title}\" для {item.Task.AssigneeName}: нет движения {item.DaysWithoutActiveTask} дн.",
+                ActorUserName = "Автоконтроль дел",
+                CreatedAt = now,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    eventType = "caseInactivityControlTaskCreated",
+                    taskId = item.Task.Id,
+                    taskTitle = item.Task.Title,
+                    assigneeUserId = item.Task.AssigneeUserId,
+                    assigneeName = item.Task.AssigneeName,
+                    daysWithoutActiveTask = item.DaysWithoutActiveTask,
+                    isEscalated = item.IsEscalated,
+                }, JsonOptions),
+            });
+        }
     }
 
     private static string DisplayName(User user)
@@ -341,6 +430,35 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         return lastActivity;
     }
 
+    private static int ResolveDaysWithoutActiveTask(ClientCase clientCase, DateTime? lastTaskAt, DateTime now)
+        => Math.Max(0, (int)Math.Floor((now - ResolveLastCaseActivity(clientCase, lastTaskAt)).TotalDays));
+
+    private async Task NotifyCreatedAutomationTasksAsync(
+        INotificationService? notificationService,
+        IReadOnlyList<CreatedAutomationTask> createdTasks,
+        CancellationToken cancellationToken)
+    {
+        if (notificationService is null || createdTasks.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (task, daysWithoutActiveTask, _) in createdTasks)
+        {
+            try
+            {
+                await notificationService.NotifyCaseInactivityControlTaskCreatedAsync(
+                    task,
+                    daysWithoutActiveTask,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Failed to notify about automatic case-control task {TaskId}.", task.Id);
+            }
+        }
+    }
+
     private static string SerializeList(IEnumerable<string> values)
         => JsonSerializer.Serialize(values.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), JsonOptions);
 
@@ -378,7 +496,11 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         bool Enabled,
         int InactiveDays,
         int Limit,
-        int? DefaultAssigneeUserId);
+        int? DefaultAssigneeUserId,
+        int EscalationDays,
+        int? EscalationUserId);
+
+    private sealed record CreatedAutomationTask(TaskJournalItem Task, int DaysWithoutActiveTask, bool IsEscalated);
 
     private sealed record CaseOwnerBinding(int? ClientId, int? LegalEntityId, string Name);
 }

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -11,6 +12,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -68,6 +70,338 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Get_FiltersInactiveCasesByActivity()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "activity-owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент активности",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var inactiveCase = new ClientCase
+        {
+            Client = client,
+            Title = "Давно без движения",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CreatedAt = DateTime.UtcNow.AddDays(-30),
+            LastTaskAt = DateTime.UtcNow.AddDays(-21),
+            LastViewedAt = DateTime.UtcNow.AddDays(-20),
+            ActivityConfirmedAt = DateTime.UtcNow.AddDays(-19),
+            InactivityRemindersEnabled = true,
+        };
+        var activeCase = new ClientCase
+        {
+            Client = client,
+            Title = "Недавно проверено",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            CreatedAt = DateTime.UtcNow.AddDays(-30),
+            LastTaskAt = DateTime.UtcNow.AddDays(-21),
+            LastViewedAt = DateTime.UtcNow.AddDays(-1),
+            InactivityRemindersEnabled = true,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.AddRange(inactiveCase, activeCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.Get(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 50,
+            activity: "inactive",
+            inactiveDays: 14,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var item = Assert.Single(GetAnonymousItems(ok.Value));
+        Assert.Equal(inactiveCase.Id, item.Id);
+    }
+
+    [Fact]
+    public async Task GetById_HiddenCaseReturnsAccessHintForExecutor()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var manager = await CreateUserAsync(db, "manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var client = new Client
+        {
+            Name = "Видимый клиент",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Скрытое от исполнителя дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            IsHiddenFromExecutor = true,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var ownerController = CreateController(db, owner);
+        var ownerResult = await ownerController.GetById(clientCase.Id, CancellationToken.None);
+
+        var forbidden = Assert.IsType<ObjectResult>(ownerResult);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
+        var messageProperty = forbidden.Value!.GetType().GetProperty("message");
+        Assert.NotNull(messageProperty);
+        Assert.Contains("Дело скрыто от исполнителя", Assert.IsType<string>(messageProperty.GetValue(forbidden.Value)), StringComparison.Ordinal);
+
+        var managerController = CreateController(db, manager);
+        var managerResult = await managerController.GetById(clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(managerResult);
+        Assert.Equal("Скрытое от исполнителя дело", Assert.IsType<ClientCase>(ok.Value).Title);
+    }
+
+    [Fact]
+    public async Task RequestAccess_RecordsRequestForHiddenCase()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var manager = await CreateUserAsync(db, "manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var client = new Client
+        {
+            Name = "Видимый клиент",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Скрытое от исполнителя дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            IsHiddenFromExecutor = true,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.RequestAccess(clientCase.Id, new CasesV2Controller.RequestCaseAccessRequest
+        {
+            Reason = "Нужно проверить процессуальный срок.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseAccessRequestDto>(ok.Value);
+        Assert.Equal(clientCase.Id, dto.ClientCaseId);
+        Assert.Equal(owner.Id, dto.RequestedByUserId);
+        Assert.Equal("Владелец", dto.RequestedByUserName);
+        Assert.True(dto.IsHiddenFromExecutor);
+        Assert.Equal("Нужно проверить процессуальный срок.", dto.Reason);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal(owner.Id, clientCase.AccessRequestedByUserId);
+        Assert.Equal("Владелец", clientCase.AccessRequestedByUserName);
+        Assert.Equal("Нужно проверить процессуальный срок.", clientCase.AccessRequestReason);
+        Assert.Contains("Запрошен доступ к делу", clientCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("Нужно проверить процессуальный срок", clientCase.EventHistory, StringComparison.Ordinal);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(manager.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CaseAccessRequested, notification.Type);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("Запрошен доступ к делу", notification.Title, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetAccessRequests_ReturnsVisiblePendingRequests()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Исполнитель");
+        var manager = await CreateUserAsync(db, "manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var other = await CreateUserAsync(db, "other@example.com", "Другой");
+        var client = new Client
+        {
+            Name = "Клиент с запросом",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var visibleCase = new ClientCase
+        {
+            Client = client,
+            Title = "Скрытое дело",
+            CaseNumber = "CASE-HIDDEN",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            IsHiddenFromExecutor = true,
+            AccessRequestedAt = new DateTime(2026, 5, 19, 9, 0, 0, DateTimeKind.Utc),
+            AccessRequestedByUserId = owner.Id,
+            AccessRequestedByUserName = "Исполнитель",
+            AccessRequestReason = "Нужно проверить срок.",
+        };
+        var otherClient = new Client
+        {
+            Name = "Чужой клиент",
+            IsActive = true,
+            ResponsibleUserId = other.Id,
+        };
+        var otherCase = new ClientCase
+        {
+            Client = otherClient,
+            Title = "Чужой запрос",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = other.Id,
+            IsHiddenFromExecutor = true,
+            AccessRequestedAt = new DateTime(2026, 5, 19, 8, 0, 0, DateTimeKind.Utc),
+            AccessRequestedByUserId = other.Id,
+            AccessRequestedByUserName = "Другой",
+        };
+        db.Clients.AddRange(client, otherClient);
+        db.ClientCases.AddRange(visibleCase, otherCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, manager);
+
+        var result = await controller.GetAccessRequests(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var items = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseAccessRequestListItemDto>>(ok.Value);
+        Assert.Equal(2, items.Count);
+        var item = Assert.Single(items, candidate => candidate.ClientCaseId == visibleCase.Id);
+        Assert.Equal("CASE-HIDDEN", item.CaseNumber);
+        Assert.Equal("Скрытое дело", item.Title);
+        Assert.Equal("Клиент с запросом", item.OwnerName);
+        Assert.Equal(owner.Id, item.ResponsibleUserId);
+        Assert.Equal("Исполнитель", item.RequestedByUserName);
+        Assert.Equal("Нужно проверить срок.", item.Reason);
+    }
+
+    [Fact]
+    public async Task ResolveAccessRequest_GrantUnhidesCaseAndClearsPendingRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Исполнитель");
+        var manager = await CreateUserAsync(db, "manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var client = new Client
+        {
+            Name = "Клиент",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Скрытое дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            IsHiddenFromExecutor = true,
+            AccessRequestedAt = new DateTime(2026, 5, 19, 9, 0, 0, DateTimeKind.Utc),
+            AccessRequestedByUserId = owner.Id,
+            AccessRequestedByUserName = "Исполнитель",
+            AccessRequestReason = "Нужен доступ.",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, manager);
+
+        var result = await controller.ResolveAccessRequest(clientCase.Id, new CasesV2Controller.ResolveCaseAccessRequest
+        {
+            Grant = true,
+            Comment = "Можно продолжать работу.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseAccessRequestResolutionDto>(ok.Value);
+        Assert.True(dto.Granted);
+        Assert.False(dto.IsHiddenFromExecutor);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.False(clientCase.IsHiddenFromExecutor);
+        Assert.Null(clientCase.AccessRequestedAt);
+        Assert.Null(clientCase.AccessRequestedByUserId);
+        Assert.Equal(string.Empty, clientCase.AccessRequestedByUserName);
+        Assert.Equal(string.Empty, clientCase.AccessRequestReason);
+        Assert.Contains("Запрос доступа разрешен", clientCase.EventHistory, StringComparison.Ordinal);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(owner.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CaseAccessResolved, notification.Type);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("разрешен", notification.Title, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ResolveAccessRequest_DenyKeepsCaseHiddenAndClearsPendingRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Исполнитель");
+        var manager = await CreateUserAsync(db, "manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var client = new Client
+        {
+            Name = "Клиент",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Скрытое дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            IsHiddenFromExecutor = true,
+            AccessRequestedAt = new DateTime(2026, 5, 19, 9, 0, 0, DateTimeKind.Utc),
+            AccessRequestedByUserId = owner.Id,
+            AccessRequestedByUserName = "Исполнитель",
+            AccessRequestReason = "Нужен доступ.",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, manager);
+
+        var result = await controller.ResolveAccessRequest(clientCase.Id, new CasesV2Controller.ResolveCaseAccessRequest
+        {
+            Grant = false,
+            Comment = "Пока рано.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseAccessRequestResolutionDto>(ok.Value);
+        Assert.False(dto.Granted);
+        Assert.True(dto.IsHiddenFromExecutor);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.True(clientCase.IsHiddenFromExecutor);
+        Assert.Null(clientCase.AccessRequestedAt);
+        Assert.Null(clientCase.AccessRequestedByUserId);
+        Assert.Equal(string.Empty, clientCase.AccessRequestedByUserName);
+        Assert.Equal(string.Empty, clientCase.AccessRequestReason);
+        Assert.Contains("Запрос доступа отклонен", clientCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("Пока рано", clientCase.EventHistory, StringComparison.Ordinal);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(owner.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CaseAccessResolved, notification.Type);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("отклонен", notification.Title, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Get_AppliesRegistryScope()
     {
         await using var db = await CreateContextAsync();
@@ -115,6 +449,106 @@ public class CasesV2ControllerTests
         Assert.Equal(new[] { "Мое активное дело", "Чужое активное дело" }, (await LoadScope("active")).Select(item => item.Title).ToArray());
         Assert.Equal(new[] { "Закрытое дело", "Проигранное дело" }, (await LoadScope("archive")).Select(item => item.Title).ToArray());
         Assert.Equal(new[] { "Мое активное дело", "Проигранное дело" }, (await LoadScope("mine")).Select(item => item.Title).ToArray());
+    }
+
+    [Fact]
+    public async Task ExportRegistryCsv_AppliesVisibilityAndFilters()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var otherResponsible = await CreateUserAsync(db, "other@example.com", "Другой");
+        var visibleClient = new Client
+        {
+            Name = "Видимый клиент",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var hiddenClient = new Client
+        {
+            Name = "Скрытый клиент",
+            IsActive = true,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        db.ClientCases.AddRange(
+            new ClientCase
+            {
+                Client = visibleClient,
+                Title = "Видимое дело",
+                CaseNumber = "CASE-001",
+                ResponsibleUserId = owner.Id,
+                Status = ClientCaseStatus.Open,
+                FeeAmount = 25_000m,
+            },
+            new ClientCase
+            {
+                Client = hiddenClient,
+                Title = "Скрытое дело",
+                CaseNumber = "CASE-002",
+                ResponsibleUserId = otherResponsible.Id,
+                Status = ClientCaseStatus.Open,
+                FeeAmount = 50_000m,
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.ExportRegistryCsv(
+            clientId: null,
+            legalEntityId: null,
+            status: ClientCaseStatus.Open,
+            search: "дело",
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: "title",
+            sortDir: "asc",
+            scope: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal("text/csv; charset=utf-8", file.ContentType);
+        Assert.StartsWith("cases-registry-", file.FileDownloadName);
+        var csv = Encoding.UTF8.GetString(file.FileContents);
+        Assert.Contains("№ дела", csv);
+        Assert.Contains("CASE-001", csv);
+        Assert.Contains("Видимое дело", csv);
+        Assert.Contains("В работе", csv);
+        Assert.DoesNotContain("CASE-002", csv);
+        Assert.DoesNotContain("Скрытое дело", csv);
+    }
+
+    [Fact]
+    public async Task ExportRegistryCsv_ReturnsForbidWhenExportDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var permission = await db.RolePermissions.FirstAsync(item => item.RoleId == owner.RoleId && item.Section == RolePermissionCatalog.Cases);
+        permission.CanExport = false;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.ExportRegistryCsv(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: null,
+            sortDir: null,
+            scope: null,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
     }
 
     [Fact]
@@ -1047,6 +1481,8 @@ public class CasesV2ControllerTests
             ResponsibleUserId = nextResponsible.Id,
             Stage = "Судебное производство",
             Priority = "urgent",
+            IsHiddenFromExecutor = true,
+            InactivityRemindersEnabled = false,
         }, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -1061,19 +1497,55 @@ public class CasesV2ControllerTests
         Assert.Equal(nextResponsible.Id, visibleByClient.ResponsibleUserId);
         Assert.Equal("Судебное производство", visibleByClient.Stage);
         Assert.Equal("urgent", visibleByClient.Priority);
+        Assert.True(visibleByClient.IsHiddenFromExecutor);
+        Assert.False(visibleByClient.InactivityRemindersEnabled);
+        Assert.Equal(owner.Id, visibleByClient.HiddenFromExecutorByUserId);
+        Assert.Equal("Владелец", visibleByClient.HiddenFromExecutorByUserName);
         Assert.Equal(ClientCaseStatus.OnHold, visibleByCaseResponsible.Status);
         Assert.Equal(nextResponsible.Id, visibleByCaseResponsible.ResponsibleUserId);
         Assert.Equal("Судебное производство", visibleByCaseResponsible.Stage);
         Assert.Equal("urgent", visibleByCaseResponsible.Priority);
+        Assert.True(visibleByCaseResponsible.IsHiddenFromExecutor);
+        Assert.False(visibleByCaseResponsible.InactivityRemindersEnabled);
         Assert.Equal(ClientCaseStatus.Open, hiddenCase.Status);
         Assert.Equal(otherResponsible.Id, hiddenCase.ResponsibleUserId);
+        Assert.False(hiddenCase.IsHiddenFromExecutor);
+        Assert.True(hiddenCase.InactivityRemindersEnabled);
         Assert.Contains("Массовое изменение", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("статус «В работе» → «Приостановлено»", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("ответственный «Ответственный владельца» → «Новый ответственный»", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("стадия «Подготовка» → «Судебное производство»", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("приоритет «Обычный» → «Критический»", visibleByClient.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("доступ: скрыто от исполнителя", visibleByClient.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("автоконтроль: выключен", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("ответственный «Владелец» → «Новый ответственный»", visibleByCaseResponsible.EventHistory, StringComparison.Ordinal);
         Assert.DoesNotContain("Массовое изменение", hiddenCase.EventHistory, StringComparison.Ordinal);
+
+        var changedAuditEvents = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .Where(item => item.ObjectType == "client-case" && item.Action == "Updated")
+            .ToListAsync();
+        var visibleChangedAuditEvents = changedAuditEvents
+            .Where(item => item.ObjectId == visibleByClient.Id || item.ObjectId == visibleByCaseResponsible.Id)
+            .ToList();
+
+        Assert.Equal(2, visibleChangedAuditEvents.Count);
+        Assert.DoesNotContain(changedAuditEvents, item => item.ObjectId == hiddenCase.Id);
+        foreach (var auditEvent in visibleChangedAuditEvents)
+        {
+            Assert.NotNull(auditEvent.MetadataJson);
+            using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+            var reason = metadata.RootElement.GetProperty("reason").GetString();
+            Assert.StartsWith("Массовое изменение дел (2):", reason);
+            Assert.Contains("статус: Приостановлено", reason, StringComparison.Ordinal);
+            Assert.Contains("ответственный: Новый ответственный", reason, StringComparison.Ordinal);
+            Assert.Contains("доступ: скрыто от исполнителя", reason, StringComparison.Ordinal);
+            Assert.Contains("автоконтроль: выключен", reason, StringComparison.Ordinal);
+            Assert.Contains("Status", auditEvent.MetadataJson, StringComparison.Ordinal);
+            Assert.Contains("ResponsibleUserId", auditEvent.MetadataJson, StringComparison.Ordinal);
+            Assert.Contains("IsHiddenFromExecutor", auditEvent.MetadataJson, StringComparison.Ordinal);
+            Assert.Contains("InactivityRemindersEnabled", auditEvent.MetadataJson, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -2201,7 +2673,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var viewer = await CreateUserAsync(db, "viewer@example.com", "Наблюдатель");
-        var permission = await db.RolePermissions.FirstAsync(item => item.RoleId == viewer.RoleId && item.Section == RolePermissionCatalog.Clients);
+        var permission = await db.RolePermissions.FirstAsync(item => item.RoleId == viewer.RoleId && item.Section == RolePermissionCatalog.Cases);
         permission.CanEdit = false;
         var client = new Client
         {
@@ -2352,7 +2824,7 @@ public class CasesV2ControllerTests
             [
                 new RolePermission
                 {
-                    Section = RolePermissionCatalog.Clients,
+                    Section = RolePermissionCatalog.Cases,
                     CanView = true,
                     CanCreate = true,
                     CanEdit = true,

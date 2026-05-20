@@ -36,6 +36,7 @@ public class NotificationInboxController : ControllerBase
         }
 
         var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var disabledTypes = await LoadDisabledNotificationTypesAsync(userId.Value, ct);
         var unreadQuery = _context.UserNotifications
             .AsNoTracking()
             .Where(item =>
@@ -43,6 +44,7 @@ public class NotificationInboxController : ControllerBase
                 && !item.IsRead
                 && !item.IsArchived
                 && item.DeletedAt == null);
+        unreadQuery = ApplyDisabledTypeFilter(unreadQuery, disabledTypes);
         var count = await WhereNotificationTargetVisible(unreadQuery, _context, visibility)
             .CountAsync(ct);
 
@@ -71,8 +73,10 @@ public class NotificationInboxController : ControllerBase
             .AsNoTracking()
             .Where(item => item.RecipientUserId == userId.Value && item.DeletedAt == null);
         var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var disabledTypes = await LoadDisabledNotificationTypesAsync(userId.Value, ct);
 
         query = ApplyStatusFilter(query, status);
+        query = ApplyDisabledTypeFilter(query, disabledTypes);
         query = ApplyTypeAndSearchFilters(query, type, search);
         query = WhereNotificationTargetVisible(query, _context, visibility);
 
@@ -110,8 +114,10 @@ public class NotificationInboxController : ControllerBase
         var query = _context.UserNotifications
             .Where(item => item.RecipientUserId == userId.Value && item.DeletedAt == null);
         var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var disabledTypes = await LoadDisabledNotificationTypesAsync(userId.Value, ct);
 
         query = ApplyStatusFilter(query, status);
+        query = ApplyDisabledTypeFilter(query, disabledTypes);
         query = ApplyTypeAndSearchFilters(query, type, search);
         query = WhereNotificationTargetVisible(query, _context, visibility);
 
@@ -209,9 +215,24 @@ public class NotificationInboxController : ControllerBase
                 item.Id == id
                 && item.RecipientUserId == userId.Value
                 && item.DeletedAt == null);
+        var disabledTypes = await LoadDisabledNotificationTypesAsync(userId.Value, ct);
+        query = ApplyDisabledTypeFilter(query, disabledTypes);
         query = WhereNotificationTargetVisible(query, _context, visibility);
         return await query
             .FirstOrDefaultAsync(ct);
+    }
+
+    private async Task<IReadOnlyList<string>> LoadDisabledNotificationTypesAsync(int userId, CancellationToken ct)
+    {
+        var value = await _context.UserSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.UserId == userId
+                && item.Key == UserNotificationPreferenceSettings.SettingKey)
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(ct);
+
+        return UserNotificationPreferenceSettings.ParseDisabledTypes(value);
     }
 
     private static IQueryable<UserNotification> ApplyStatusFilter(
@@ -249,6 +270,18 @@ public class NotificationInboxController : ControllerBase
         }
 
         return query;
+    }
+
+    private static IQueryable<UserNotification> ApplyDisabledTypeFilter(
+        IQueryable<UserNotification> query,
+        IReadOnlyCollection<string> disabledTypes)
+    {
+        if (disabledTypes.Count == 0)
+        {
+            return query;
+        }
+
+        return query.Where(item => !disabledTypes.Contains(item.Type));
     }
 
     private static IQueryable<UserNotification> WhereNotificationTargetVisible(

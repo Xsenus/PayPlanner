@@ -145,6 +145,372 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CaseActivity_BuildsInactivityDiagnostics()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "case-activity-admin", Description = "Admin" };
+        var responsible = new User
+        {
+            Email = "case-owner@example.test",
+            FullName = "Case Owner",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client
+        {
+            Name = "Activity Client",
+            ResponsibleUser = responsible,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(responsible);
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var now = DateTime.UtcNow;
+        var inactiveCase = new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "A-1",
+            Title = "Inactive case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = now.AddDays(-45),
+            LastViewedAt = now.AddDays(-45),
+            ActivityConfirmedAt = now.AddDays(-45),
+            InactivityRemindersEnabled = true,
+        };
+        var activeCase = new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "A-2",
+            Title = "Active case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = now.AddDays(-40),
+            InactivityRemindersEnabled = true,
+        };
+        var disabledCase = new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "A-3",
+            Title = "Disabled case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = now.AddDays(-40),
+            InactivityRemindersEnabled = false,
+        };
+        var closedCase = new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "A-4",
+            Title = "Closed case",
+            Status = ClientCaseStatus.Closed,
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = now.AddDays(-40),
+        };
+        db.ClientCases.AddRange(inactiveCase, activeCase, disabledCase, closedCase);
+        await db.SaveChangesAsync();
+
+        var oldCompletedTask = new TaskJournalItem
+        {
+            ClientCaseId = inactiveCase.Id,
+            ObjectName = "Inactive case",
+            Title = "Old completed task",
+            Status = "done",
+            DueAt = now.AddDays(-40),
+            CreatedAt = now.AddDays(-40),
+            UpdatedAt = now.AddDays(-40),
+        };
+        db.TaskJournalItems.AddRange(
+            oldCompletedTask,
+            new TaskJournalItem
+            {
+                ClientCaseId = activeCase.Id,
+                ObjectName = "Active case",
+                Title = "Open task",
+                Status = "new",
+                DueAt = now.AddDays(1),
+                CreatedAt = now.AddDays(-1),
+                UpdatedAt = now.AddDays(-1),
+            });
+        await db.SaveChangesAsync();
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            UPDATE TaskJournalItems
+            SET CreatedAt = {now.AddDays(-40)}, UpdatedAt = {now.AddDays(-40)}
+            WHERE Id = {oldCompletedTask.Id}
+            """);
+
+        var controller = CreateController(db, CreateAdminPrincipal());
+
+        var action = await controller.CaseActivity(14, 30, "all", 10, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CaseActivityReportDto>(ok.Value);
+        Assert.Equal(4, report.TotalVisibleCases);
+        Assert.Equal(3, report.ActiveCaseCount);
+        Assert.Equal(1, report.FinishedCaseCount);
+        Assert.Equal(1, report.InactiveCaseCount);
+        Assert.Equal(1, report.EscalatedCaseCount);
+        Assert.Equal(1, report.DisabledCaseCount);
+        Assert.Equal(1, report.WithActiveTasksCount);
+
+        var row = Assert.Single(report.Items, item => item.CaseId == inactiveCase.Id);
+        Assert.True(row.IsInactive);
+        Assert.True(row.IsEscalated);
+        Assert.Equal(0, row.ActiveTaskCount);
+        Assert.Equal(1, row.CompletedTaskCount);
+        Assert.Contains("Нет активных задач", row.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CaseActivity_UsesCaseVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "case-activity-lawyer", Description = "Lawyer" };
+        var visibleUser = new User
+        {
+            Email = "visible-case-report@example.test",
+            FullName = "Visible User",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = "hidden-case-report@example.test",
+            FullName = "Hidden User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var visibleClient = new Client { Name = "Visible Client", ResponsibleUserId = visibleUser.Id };
+        var hiddenClient = new Client { Name = "Hidden Client", ResponsibleUserId = hiddenUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        db.ClientCases.AddRange(
+            new ClientCase
+            {
+                ClientId = visibleClient.Id,
+                CaseNumber = "VISIBLE",
+                Title = "Visible case",
+                Status = ClientCaseStatus.Open,
+                CreatedAt = DateTime.UtcNow.AddDays(-40),
+            },
+            new ClientCase
+            {
+                ClientId = hiddenClient.Id,
+                CaseNumber = "HIDDEN",
+                Title = "Hidden case",
+                Status = ClientCaseStatus.Open,
+                CreatedAt = DateTime.UtcNow.AddDays(-40),
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var action = await controller.CaseActivity(14, 30, "all", 10, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CaseActivityReportDto>(ok.Value);
+        Assert.Equal(1, report.TotalVisibleCases);
+        var row = Assert.Single(report.Items);
+        Assert.Equal("VISIBLE", row.CaseNumber);
+    }
+
+    [Fact]
+    public async Task CashFlow_UsesPaymentVisibilityForLinkedOperations()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = "lawyer",
+            Description = "Юрист",
+        };
+        var visibleUser = new User
+        {
+            Email = "visible@example.test",
+            FullName = "Видимый пользователь",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = "hidden@example.test",
+            FullName = "Скрытый пользователь",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                CanCreate = true,
+                CanEdit = true,
+                CanDelete = true,
+                CanExport = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var visibleInvoice = new Invoice
+        {
+            Number = "101",
+            Date = new DateTime(2026, 5, 5),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var hiddenInvoice = new Invoice
+        {
+            Number = "102",
+            Date = new DateTime(2026, 5, 5),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var visiblePayment = new Payment
+        {
+            Invoice = visibleInvoice,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 12_000m,
+            PaidAmount = 12_000m,
+            Date = new DateTime(2026, 5, 5),
+            PlannedDate = new DateTime(2026, 5, 5),
+            CreatedAt = DateTime.UtcNow,
+        };
+        visiblePayment.Responsibles.Add(new PaymentResponsible { UserId = visibleUser.Id });
+
+        var hiddenPayment = new Payment
+        {
+            Invoice = hiddenInvoice,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 50_000m,
+            PaidAmount = 50_000m,
+            Date = new DateTime(2026, 5, 5),
+            PlannedDate = new DateTime(2026, 5, 5),
+            CreatedAt = DateTime.UtcNow,
+        };
+        hiddenPayment.Responsibles.Add(new PaymentResponsible { UserId = hiddenUser.Id });
+
+        db.Payments.AddRange(visiblePayment, hiddenPayment);
+        db.MoneyOperations.AddRange(
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной",
+                Amount = 12_000m,
+                Date = new DateTime(2026, 5, 5),
+                LinkedInvoice = visibleInvoice,
+            },
+            new MoneyOperation
+            {
+                Source = MoneyOperationSource.Bank,
+                Direction = MoneyOperationDirection.Income,
+                AccountingType = MoneyOperationAccountingType.Fact,
+                AccountName = "Основной",
+                Amount = 50_000m,
+                Date = new DateTime(2026, 5, 5),
+                LinkedInvoice = hiddenInvoice,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var action = await controller.CashFlow(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CashFlowReportDto>(ok.Value);
+        Assert.Equal(12_000m, report.Income);
+        Assert.Equal(0m, report.Expense);
+        Assert.Equal(1, report.IncomeCount);
+        Assert.DoesNotContain(report.ByAccount, item => item.Income == 50_000m);
+    }
+
+    [Fact]
+    public async Task CashFlow_ReturnsForbidWhenReportsAreHiddenForRole()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = "limited",
+            Description = "Ограниченная роль",
+        };
+        var user = new User
+        {
+            Email = "limited@example.test",
+            FullName = "Ограниченный пользователь",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Reports,
+            CanView = false,
+            ViewScope = DataVisibilityScope.All,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.CashFlow(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+    }
+
+    [Fact]
     public async Task CashFlow_ReturnsOpeningPeriodAndDailyBalances()
     {
         await using var db = await CreateContextAsync();
@@ -1788,13 +2154,10 @@ public class ReportsControllerTests
     private static ReportsController CreateController(PaymentContext db, ClaimsPrincipal? user = null)
     {
         var controller = new ReportsController(db, NullLogger<ReportsController>.Instance);
-        if (user is not null)
+        controller.ControllerContext = new ControllerContext
         {
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = user },
-            };
-        }
+            HttpContext = new DefaultHttpContext { User = user ?? CreateAdminPrincipal() },
+        };
 
         return controller;
     }
@@ -1802,6 +2165,11 @@ public class ReportsControllerTests
     private static ClaimsPrincipal CreateAdminPrincipal()
         => new(new ClaimsIdentity(
             [new Claim(ClaimTypes.Role, "admin")],
+            authenticationType: "Test"));
+
+    private static ClaimsPrincipal CreateUserPrincipal(int userId)
+        => new(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
             authenticationType: "Test"));
 
     private static async Task<PaymentContext> CreateContextAsync()

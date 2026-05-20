@@ -40,6 +40,8 @@ public class TaskJournalItem
 
     public DateTime DueAt { get; set; }
 
+    public DateTime? ApprovalDueAt { get; set; }
+
     public int PlannedDurationMinutes { get; set; } = 60;
 
     [MaxLength(32)]

@@ -1205,6 +1205,10 @@ public class PaymentContext : DbContext
             entity.Property(e => e.LastViewedByUserName).HasMaxLength(256);
             entity.Property(e => e.ActivityConfirmedByUserName).HasMaxLength(256);
             entity.Property(e => e.InactivityRemindersEnabled).HasDefaultValue(true);
+            entity.Property(e => e.IsHiddenFromExecutor).HasDefaultValue(false);
+            entity.Property(e => e.HiddenFromExecutorByUserName).HasMaxLength(256);
+            entity.Property(e => e.AccessRequestedByUserName).HasMaxLength(256);
+            entity.Property(e => e.AccessRequestReason).HasMaxLength(1000);
 
             // Связь с клиентом
             entity.HasOne(cc => cc.Client)
@@ -1233,6 +1237,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.CourtName).HasDatabaseName("IX_ClientCases_CourtName");
             entity.HasIndex(e => e.LastViewedAt).HasDatabaseName("IX_ClientCases_LastViewedAt");
             entity.HasIndex(e => e.InactivityRemindersEnabled).HasDatabaseName("IX_ClientCases_InactivityRemindersEnabled");
+            entity.HasIndex(e => e.IsHiddenFromExecutor).HasDatabaseName("IX_ClientCases_IsHiddenFromExecutor");
+            entity.HasIndex(e => e.AccessRequestedAt).HasDatabaseName("IX_ClientCases_AccessRequestedAt");
             entity.HasIndex(e => e.ClaimFiledAt).HasDatabaseName("IX_ClientCases_ClaimFiledAt");
             entity.HasIndex(e => e.CourtDecisionAt).HasDatabaseName("IX_ClientCases_CourtDecisionAt");
             entity.HasIndex(e => e.AppealDeadlineAt).HasDatabaseName("IX_ClientCases_AppealDeadlineAt");
@@ -1857,6 +1863,7 @@ public class PaymentContext : DbContext
                 .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasIndex(e => e.DueAt).HasDatabaseName("IX_TaskJournalItems_DueAt");
+            entity.HasIndex(e => e.ApprovalDueAt).HasDatabaseName("IX_TaskJournalItems_ApprovalDueAt");
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_TaskJournalItems_Status");
             entity.HasIndex(e => e.Type).HasDatabaseName("IX_TaskJournalItems_Type");
             entity.HasIndex(e => e.Priority).HasDatabaseName("IX_TaskJournalItems_Priority");

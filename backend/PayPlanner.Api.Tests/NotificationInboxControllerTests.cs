@@ -96,6 +96,44 @@ public class NotificationInboxControllerTests
     }
 
     [Fact]
+    public async Task GetNotificationsAndUnreadCount_IgnoreDisabledUserNotificationTypes()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "disabled-types@example.com");
+        var visible = CreateNotification(
+            user.Id,
+            "task:1:assigned",
+            UserNotificationTypes.TaskAssigned,
+            title: "Новая задача");
+        var disabled = CreateNotification(
+            user.Id,
+            "task:2:changed",
+            UserNotificationTypes.TaskChanged,
+            title: "Изменение задачи");
+        db.UserNotifications.AddRange(visible, disabled);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = """{"disabledTypes":["taskChanged"]}""",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user.Id);
+
+        var listResult = await controller.GetNotifications("active", null, null);
+        var page = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var unreadResult = await controller.GetUnreadCount(CancellationToken.None);
+        var unreadCount = Assert.IsType<int>(Assert.IsType<OkObjectResult>(unreadResult.Result).Value);
+
+        Assert.Single(page.Items);
+        Assert.Equal(visible.Id, page.Items[0].Id);
+        Assert.Equal(1, unreadCount);
+    }
+
+    [Fact]
     public async Task GetNotifications_HidesTaskNotificationWhenTaskIsNotVisible()
     {
         await using var db = await CreateContextAsync();

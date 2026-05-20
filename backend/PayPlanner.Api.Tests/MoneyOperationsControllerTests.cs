@@ -450,6 +450,54 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task ExportCsv_ReturnsForbidWhenPaymentExportIsDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = $"payments-view-only-{Guid.NewGuid():N}",
+            Description = "Деньги без выгрузки",
+            Permissions =
+            [
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Payments,
+                    CanView = true,
+                    CanExport = false,
+                    ViewScope = DataVisibilityScope.All,
+                },
+            ],
+        };
+        var user = new User
+        {
+            Email = "money-export-denied@example.com",
+            FullName = "Пользователь без выгрузки",
+            PasswordHash = "test",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user.Id, isAdminClaim: false);
+
+        var action = await controller.ExportCsv(
+            from: null,
+            to: null,
+            source: null,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: null,
+            accountName: null,
+            categoryName: null,
+            linkedInvoiceId: null,
+            search: null,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
     public async Task Print_ReturnsFilteredJournalHtmlWithEscapedRowsAndTotals()
     {
         await using var db = await CreateContextAsync();
@@ -4664,20 +4712,25 @@ public class MoneyOperationsControllerTests
         return db;
     }
 
-    private static MoneyOperationsController CreateController(PaymentContext db, int? userId = null)
+    private static MoneyOperationsController CreateController(PaymentContext db, int? userId = null, bool isAdminClaim = true)
     {
         var controller = new MoneyOperationsController(db, NullLogger<MoneyOperationsController>.Instance);
         if (userId.HasValue)
         {
+            var claims = new List<Claim>
+            {
+                new(ClaimTypes.NameIdentifier, userId.Value.ToString()),
+            };
+            if (isAdminClaim)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, "admin"));
+            }
+
             controller.ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext
                 {
-                    User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [
-                        new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()),
-                        new Claim(ClaimTypes.Role, "admin"),
-                    ], "TestAuth")),
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth")),
                 },
             };
         }

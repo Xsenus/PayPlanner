@@ -10,6 +10,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers.V2;
 
@@ -20,6 +21,7 @@ public class CasesV2Controller : ControllerBase
 {
     private const long MaxCaseDocumentBytes = 25 * 1024 * 1024;
     private const int MaxRegistryPageSize = 200;
+    private const int MaxRegistryExportRows = 5000;
     private const string RelatedPartySourceClient = "client";
     private const string RelatedPartySourceExternalContact = "externalContact";
     private const string RelatedPartySourceLegalEntity = "legalEntity";
@@ -28,6 +30,7 @@ public class CasesV2Controller : ControllerBase
     private const string CaseHistoryAuthorMarker = "Автор:";
     private const string CaseDocumentTemplatesSettingKey = "cases.documentTemplates";
     private static readonly JsonSerializerOptions CaseDocumentTemplateJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions UserNotificationJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedCasePriorities = new(StringComparer.OrdinalIgnoreCase)
     {
         "low",
@@ -70,7 +73,7 @@ public class CasesV2Controller : ControllerBase
     }
 
     private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
-        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
 
     private async Task<ActionResult?> RequireCasesPermissionAsync(
         Func<RolePermission, bool> predicate,
@@ -88,7 +91,7 @@ public class CasesV2Controller : ControllerBase
             return null;
         }
 
-        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Clients, ct);
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Cases, ct);
         return permission is not null && predicate(permission) ? null : Forbid();
     }
 
@@ -128,6 +131,8 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         [FromQuery] string? scope = null,
+        [FromQuery] string? activity = null,
+        [FromQuery] int? inactiveDays = null,
         CancellationToken ct = default)
     {
         var visibility = await ResolveCasesVisibilityAsync(ct);
@@ -139,12 +144,24 @@ public class CasesV2Controller : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, MaxRegistryPageSize);
 
-        var q = _db.ClientCases.AsQueryable()
-            .WithCaseIncludes()
-            .ApplyClientCaseVisibility(visibility)
-            .ApplyCaseRegistryScope(scope, visibility.UserId)
-            .ApplyCaseFilters(clientId, legalEntityId, status, search, responsibleUserId, caseType, priority, from, to, minFee, maxFee)
-            .ApplyCaseSort(sortBy, sortDir);
+        var q = BuildRegistryQuery(
+            visibility,
+            clientId,
+            legalEntityId,
+            status,
+            search,
+            responsibleUserId,
+            caseType,
+            priority,
+            from,
+            to,
+            minFee,
+            maxFee,
+            sortBy,
+            sortDir,
+            scope,
+            activity,
+            inactiveDays);
 
         var total = await q.CountAsync(ct);
         var items = await q
@@ -157,6 +174,631 @@ public class CasesV2Controller : ControllerBase
 
         return Ok(new { items, total, page, pageSize });
     }
+
+    [HttpGet("export.csv")]
+    public async Task<IActionResult> ExportRegistryCsv(
+        [FromQuery] int? clientId,
+        [FromQuery] int? legalEntityId,
+        [FromQuery] ClientCaseStatus? status,
+        [FromQuery] string? search,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] string? priority,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] decimal? minFee,
+        [FromQuery] decimal? maxFee,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        [FromQuery] string? scope = null,
+        [FromQuery] string? activity = null,
+        [FromQuery] int? inactiveDays = null,
+        CancellationToken ct = default)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var items = await BuildRegistryQuery(
+                visibility,
+                clientId,
+                legalEntityId,
+                status,
+                search,
+                responsibleUserId,
+                caseType,
+                priority,
+                from,
+                to,
+                minFee,
+                maxFee,
+                sortBy,
+                sortDir,
+                scope,
+                activity,
+                inactiveDays)
+            .Take(MaxRegistryExportRows)
+            .AsNoTracking()
+            .ToListAsync(ct);
+        await ApplyFinanceSummaryAsync(items, ct);
+        await ApplyTaskSummaryAsync(items, ct);
+
+        var bytes = BuildRegistryCsv(items);
+        var fileName = $"cases-registry-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv";
+        return File(bytes, "text/csv; charset=utf-8", fileName);
+    }
+
+    [HttpGet("print")]
+    public async Task<IActionResult> PrintRegistry(
+        [FromQuery] int? clientId,
+        [FromQuery] int? legalEntityId,
+        [FromQuery] ClientCaseStatus? status,
+        [FromQuery] string? search,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] string? priority,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] decimal? minFee,
+        [FromQuery] decimal? maxFee,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        [FromQuery] string? scope = null,
+        [FromQuery] string? activity = null,
+        [FromQuery] int? inactiveDays = null,
+        CancellationToken ct = default)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var items = await BuildRegistryQuery(
+                visibility,
+                clientId,
+                legalEntityId,
+                status,
+                search,
+                responsibleUserId,
+                caseType,
+                priority,
+                from,
+                to,
+                minFee,
+                maxFee,
+                sortBy,
+                sortDir,
+                scope,
+                activity,
+                inactiveDays)
+            .Take(MaxRegistryExportRows)
+            .AsNoTracking()
+            .ToListAsync(ct);
+        await ApplyFinanceSummaryAsync(items, ct);
+        await ApplyTaskSummaryAsync(items, ct);
+
+        return Content(BuildRegistryPrintHtml(items), "text/html; charset=utf-8", Encoding.UTF8);
+    }
+
+    private IQueryable<ClientCase> BuildRegistryQuery(
+        DataVisibilityAccess visibility,
+        int? clientId,
+        int? legalEntityId,
+        ClientCaseStatus? status,
+        string? search,
+        int? responsibleUserId,
+        string? caseType,
+        string? priority,
+        DateTime? from,
+        DateTime? to,
+        decimal? minFee,
+        decimal? maxFee,
+        string? sortBy,
+        string? sortDir,
+        string? scope,
+        string? activity,
+        int? inactiveDays)
+        => _db.ClientCases.AsQueryable()
+            .WithCaseIncludes()
+            .ApplyClientCaseVisibility(visibility)
+            .ApplyCaseRegistryScope(scope, visibility.UserId)
+            .ApplyCaseFilters(clientId, legalEntityId, status, search, responsibleUserId, caseType, priority, from, to, minFee, maxFee)
+            .ApplyCaseActivityFilter(activity, inactiveDays, _db.TaskJournalItems.IgnoreQueryFilters())
+            .ApplyCaseSort(sortBy, sortDir);
+
+    private static IQueryable<ClientCase> ApplyClientCaseAccessManagementVisibility(
+        IQueryable<ClientCase> query,
+        DataVisibilityAccess visibility)
+    {
+        if (visibility.SeesAll)
+        {
+            return query;
+        }
+
+        var visibleUserIds = visibility.VisibleUserIds.ToArray();
+        return query.Where(clientCase =>
+            (clientCase.ResponsibleUserId.HasValue
+                && visibleUserIds.Contains(clientCase.ResponsibleUserId.Value))
+            || (clientCase.Client != null
+                && clientCase.Client.ResponsibleUserId.HasValue
+                && visibleUserIds.Contains(clientCase.Client.ResponsibleUserId.Value))
+            || (clientCase.LegalEntity != null
+                && clientCase.LegalEntity.ResponsibleUserId.HasValue
+                && visibleUserIds.Contains(clientCase.LegalEntity.ResponsibleUserId.Value)));
+    }
+
+    private async Task<IReadOnlyList<int>> ResolveCaseAccessManagerUserIdsAsync(
+        ClientCase clientCase,
+        int requesterUserId,
+        CancellationToken ct)
+    {
+        var targetUserIds = new HashSet<int>();
+        AddIfPositive(targetUserIds, clientCase.ResponsibleUserId);
+        AddIfPositive(targetUserIds, clientCase.Client?.ResponsibleUserId);
+        AddIfPositive(targetUserIds, clientCase.LegalEntity?.ResponsibleUserId);
+
+        var targetUsers = await _db.Users
+            .AsNoTracking()
+            .Where(item => targetUserIds.Contains(item.Id))
+            .Select(item => new
+            {
+                item.Id,
+                item.DepartmentId,
+                item.Department,
+            })
+            .ToListAsync(ct);
+
+        var candidates = await _db.Users
+            .AsNoTracking()
+            .Where(item => item.IsActive && item.IsApproved)
+            .Select(item => new
+            {
+                item.Id,
+                item.DepartmentId,
+                item.Department,
+                RoleName = item.Role != null ? item.Role.Name : string.Empty,
+                Permission = item.Role == null
+                    ? null
+                    : item.Role.Permissions
+                        .Where(permission => permission.Section == RolePermissionCatalog.Cases)
+                        .Select(permission => new
+                        {
+                            permission.CanView,
+                            permission.CanEdit,
+                            permission.ViewScope,
+                        })
+                        .FirstOrDefault(),
+            })
+            .ToListAsync(ct);
+
+        return candidates
+            .Where(candidate => candidate.Id != requesterUserId)
+            .Where(candidate =>
+            {
+                var isAdmin = string.Equals(candidate.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
+                if (!isAdmin && candidate.Permission is not { CanView: true, CanEdit: true })
+                {
+                    return false;
+                }
+
+                var scope = isAdmin
+                    ? DataVisibilityScope.All
+                    : DataVisibilityScope.Normalize(candidate.Permission?.ViewScope, DataVisibilityScope.Own);
+
+                if (string.Equals(scope, DataVisibilityScope.All, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (string.Equals(scope, DataVisibilityScope.Own, StringComparison.OrdinalIgnoreCase))
+                {
+                    return targetUserIds.Contains(candidate.Id);
+                }
+
+                if (!string.Equals(scope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                var candidateDepartment = candidate.Department?.Trim();
+                return targetUsers.Any(target =>
+                    (candidate.DepartmentId.HasValue
+                        && target.DepartmentId.HasValue
+                        && candidate.DepartmentId.Value == target.DepartmentId.Value)
+                    || (!string.IsNullOrWhiteSpace(candidateDepartment)
+                        && !string.IsNullOrWhiteSpace(target.Department)
+                        && string.Equals(candidateDepartment, target.Department.Trim(), StringComparison.Ordinal)));
+            })
+            .Select(candidate => candidate.Id)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+    }
+
+    private async Task AddCaseUserNotificationAsync(
+        int recipientUserId,
+        string type,
+        string eventKey,
+        string title,
+        string body,
+        string tone,
+        ClientCase clientCase,
+        object? metadata,
+        CancellationToken ct)
+    {
+        if (recipientUserId <= 0 || string.IsNullOrWhiteSpace(eventKey))
+        {
+            return;
+        }
+
+        if (!await IsCaseUserNotificationTypeEnabledAsync(recipientUserId, type, ct))
+        {
+            return;
+        }
+
+        var alreadyExists = await _db.UserNotifications
+            .AsNoTracking()
+            .AnyAsync(item => item.RecipientUserId == recipientUserId && item.EventKey == eventKey, ct);
+        if (alreadyExists)
+        {
+            return;
+        }
+
+        var recipientExists = await _db.Users
+            .AsNoTracking()
+            .AnyAsync(item => item.Id == recipientUserId && item.IsActive, ct);
+        if (!recipientExists)
+        {
+            return;
+        }
+
+        _db.UserNotifications.Add(new UserNotification
+        {
+            RecipientUserId = recipientUserId,
+            Type = type,
+            EventKey = eventKey,
+            Title = Truncate(title.Trim(), 300),
+            BodyPreview = Truncate(body.Trim(), 1000),
+            Tone = string.IsNullOrWhiteSpace(tone) ? "blue" : tone.Trim(),
+            ObjectType = "case",
+            ObjectId = clientCase.Id,
+            MetadataJson = metadata is null ? "{}" : JsonSerializer.Serialize(metadata, UserNotificationJsonOptions),
+            CreatedAt = DateTime.UtcNow,
+        });
+    }
+
+    private async Task<bool> IsCaseUserNotificationTypeEnabledAsync(int recipientUserId, string type, CancellationToken ct)
+    {
+        var setting = await _db.UserSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.UserId == recipientUserId
+                && item.Key == UserNotificationPreferenceSettings.SettingKey)
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(ct);
+
+        return UserNotificationPreferenceSettings.IsTypeEnabled(setting, type);
+    }
+
+    private static void AddIfPositive(ISet<int> values, int? value)
+    {
+        if (value.HasValue && value.Value > 0)
+        {
+            values.Add(value.Value);
+        }
+    }
+
+    private static string BuildCaseNotificationTitle(ClientCase clientCase)
+    {
+        if (!string.IsNullOrWhiteSpace(clientCase.CaseNumber))
+        {
+            return $"№{clientCase.CaseNumber} · {clientCase.Title}";
+        }
+
+        return string.IsNullOrWhiteSpace(clientCase.Title)
+            ? $"Дело #{clientCase.Id}"
+            : clientCase.Title;
+    }
+
+    private static string BuildCaseOwnerName(ClientCase clientCase)
+        => clientCase.Client?.Name
+            ?? clientCase.LegalEntity?.ShortName
+            ?? clientCase.LegalEntity?.FullName
+            ?? "Контрагент не указан";
+
+    private static string BuildCaseAccessRequestNotificationBody(
+        ClientCase clientCase,
+        string actorName,
+        string? reason)
+    {
+        var builder = new StringBuilder()
+            .Append("Пользователь ")
+            .Append(actorName)
+            .Append(" запросил доступ к скрытому делу.")
+            .AppendLine()
+            .Append("Контрагент: ")
+            .Append(BuildCaseOwnerName(clientCase))
+            .AppendLine()
+            .Append("Дело: ")
+            .Append(BuildCaseNotificationTitle(clientCase));
+
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            builder
+                .AppendLine()
+                .Append("Причина: ")
+                .Append(reason);
+        }
+
+        return builder.ToString();
+    }
+
+    private static string BuildCaseAccessResolutionNotificationBody(
+        ClientCase clientCase,
+        bool granted,
+        string actorName,
+        string? comment)
+    {
+        var builder = new StringBuilder()
+            .Append(actorName)
+            .Append(granted ? " разрешил доступ к делу." : " отклонил запрос доступа к делу.")
+            .AppendLine()
+            .Append("Контрагент: ")
+            .Append(BuildCaseOwnerName(clientCase))
+            .AppendLine()
+            .Append("Дело: ")
+            .Append(BuildCaseNotificationTitle(clientCase));
+
+        if (!string.IsNullOrWhiteSpace(comment))
+        {
+            builder
+                .AppendLine()
+                .Append("Комментарий: ")
+                .Append(comment);
+        }
+
+        return builder.ToString();
+    }
+
+    private static byte[] BuildRegistryCsv(IReadOnlyCollection<ClientCase> items)
+    {
+        var header = new[]
+        {
+            "№ дела",
+            "Название",
+            "Клиент/юр. лицо",
+            "Ответственный",
+            "Статус",
+            "Тип",
+            "Этап",
+            "Создано",
+            "Начало",
+            "Срок",
+            "Открытые задачи",
+            "Просроченные задачи",
+            "Выполненные задачи",
+            "Прогресс",
+            "Последняя активность",
+            "Гонорар",
+            "Счета",
+            "Оплачено",
+            "Долг",
+            "Последний просмотр",
+            "Активность подтвердил",
+            "Приоритет",
+            "Суд",
+            "№ в суде",
+            "Заседание",
+        };
+
+        var lines = new List<string>
+        {
+            string.Join(';', header.Select(CsvCell)),
+        };
+
+        foreach (var item in items)
+        {
+            lines.Add(string.Join(';', new[]
+            {
+                item.CaseNumber,
+                item.Title,
+                GetOwnerName(item),
+                GetResponsibleName(item),
+                GetCaseStatusLabel(item.Status),
+                item.CaseType,
+                item.Stage,
+                FormatRuDate(item.CreatedAt),
+                FormatRuDate(item.StartDate),
+                FormatRuDate(item.DueDate),
+                item.OpenTaskCount.ToString(CultureInfo.InvariantCulture),
+                item.OverdueTaskCount.ToString(CultureInfo.InvariantCulture),
+                item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
+                $"{item.TaskProgressPercent}%",
+                FormatRuDateTime(GetLatestCaseActivityAt(item)),
+                FormatMoney(item.FeeAmount),
+                FormatMoney(item.IncomeTotal),
+                FormatMoney(item.IncomePaid),
+                FormatMoney(item.IncomeOutstanding),
+                FormatRuDateTime(item.LastViewedAt),
+                item.ActivityConfirmedByUserName,
+                GetPriorityLabel(item.Priority),
+                item.CourtName,
+                item.CourtCaseNumber,
+                FormatRuDateTime(item.NextHearingAt),
+            }.Select(CsvCell)));
+        }
+
+        var csv = string.Join('\n', lines);
+        var preamble = Encoding.UTF8.GetPreamble();
+        var body = Encoding.UTF8.GetBytes(csv);
+        var result = new byte[preamble.Length + body.Length];
+        Buffer.BlockCopy(preamble, 0, result, 0, preamble.Length);
+        Buffer.BlockCopy(body, 0, result, preamble.Length, body.Length);
+        return result;
+    }
+
+    private static string BuildRegistryPrintHtml(IReadOnlyCollection<ClientCase> items)
+    {
+        var generatedAt = DateTime.Now.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        var totalFee = items.Sum(item => item.FeeAmount);
+        var totalIncome = items.Sum(item => item.IncomeTotal);
+        var totalPaid = items.Sum(item => item.IncomePaid);
+        var totalDebt = items.Sum(item => item.IncomeOutstanding);
+        var rows = string.Join('\n', items.Select(item => $"""
+            <tr>
+              <td>{Html(item.CaseNumber)}</td>
+              <td>
+                <strong>{Html(item.Title)}</strong>
+                <div class="muted">{Html(GetOwnerName(item))}</div>
+              </td>
+              <td>{Html(GetResponsibleName(item))}</td>
+              <td>{Html(GetCaseStatusLabel(item.Status))}</td>
+              <td>{Html(item.CaseType)}</td>
+              <td>{Html(item.Stage)}</td>
+              <td>{Html(FormatRuDate(item.DueDate))}</td>
+              <td class="num">{Html(FormatMoney(item.FeeAmount))}</td>
+              <td class="num">{Html(FormatMoney(item.IncomeTotal))}</td>
+              <td class="num">{Html(FormatMoney(item.IncomePaid))}</td>
+              <td class="num">{Html(FormatMoney(item.IncomeOutstanding))}</td>
+              <td>{item.OpenTaskCount} / {item.OverdueTaskCount}</td>
+              <td>{Html(FormatRuDateTime(GetLatestCaseActivityAt(item)))}</td>
+            </tr>
+            """));
+
+        return $$"""
+            <!doctype html>
+            <html lang="ru">
+            <head>
+              <meta charset="utf-8">
+              <title>Реестр дел</title>
+              <style>
+                body { font-family: Arial, sans-serif; color: #0f172a; margin: 24px; }
+                h1 { margin: 0 0 6px; font-size: 24px; }
+                .meta { color: #64748b; margin-bottom: 18px; font-size: 12px; }
+                .summary { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 8px; margin-bottom: 18px; }
+                .summary div { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
+                .summary span { display: block; color: #64748b; font-size: 11px; text-transform: uppercase; }
+                .summary strong { font-size: 15px; }
+                table { border-collapse: collapse; width: 100%; font-size: 11px; }
+                th, td { border: 1px solid #cbd5e1; padding: 6px 7px; vertical-align: top; }
+                th { background: #f1f5f9; text-align: left; }
+                .muted { color: #64748b; margin-top: 3px; }
+                .num { white-space: nowrap; text-align: right; }
+                @media print {
+                  body { margin: 10mm; }
+                  .summary { grid-template-columns: repeat(5, 1fr); }
+                }
+              </style>
+            </head>
+            <body>
+              <h1>Реестр дел</h1>
+              <div class="meta">Сформировано: {{Html(generatedAt)}}. В печатную форму попали первые {{MaxRegistryExportRows}} строк текущей выборки.</div>
+              <section class="summary">
+                <div><span>Дел</span><strong>{{items.Count}}</strong></div>
+                <div><span>Гонорар</span><strong>{{Html(FormatMoney(totalFee))}}</strong></div>
+                <div><span>Счета</span><strong>{{Html(FormatMoney(totalIncome))}}</strong></div>
+                <div><span>Оплачено</span><strong>{{Html(FormatMoney(totalPaid))}}</strong></div>
+                <div><span>Долг</span><strong>{{Html(FormatMoney(totalDebt))}}</strong></div>
+              </section>
+              <table>
+                <thead>
+                  <tr>
+                    <th>№ дела</th>
+                    <th>Название / клиент</th>
+                    <th>Ответственный</th>
+                    <th>Статус</th>
+                    <th>Тип</th>
+                    <th>Этап</th>
+                    <th>Срок</th>
+                    <th>Гонорар</th>
+                    <th>Счета</th>
+                    <th>Оплачено</th>
+                    <th>Долг</th>
+                    <th>Задачи</th>
+                    <th>Активность</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {{rows}}
+                </tbody>
+              </table>
+            </body>
+            </html>
+            """;
+    }
+
+    private static string CsvCell(string? value)
+        => $"\"{(value ?? string.Empty).Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+
+    private static string Html(string? value)
+        => WebUtility.HtmlEncode(value ?? string.Empty);
+
+    private static string GetOwnerName(ClientCase clientCase)
+        => FirstNonEmpty(clientCase.Client?.Name, clientCase.LegalEntity?.ShortName, clientCase.LegalEntity?.FullName, "—");
+
+    private static string GetResponsibleName(ClientCase clientCase)
+        => FirstNonEmpty(clientCase.ResponsibleUser?.FullName, "Ответственный владельца");
+
+    private static string FirstNonEmpty(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+
+    private static string FormatRuDate(DateTime? value)
+        => value.HasValue
+            ? value.Value.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"))
+            : string.Empty;
+
+    private static string FormatRuDateTime(DateTime? value)
+        => value.HasValue
+            ? value.Value.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"))
+            : string.Empty;
+
+    private static string FormatMoney(decimal value)
+        => value.ToString("N2", CultureInfo.GetCultureInfo("ru-RU")) + " ₽";
+
+    private static DateTime? GetLatestCaseActivityAt(ClientCase clientCase)
+    {
+        var values = new[]
+        {
+            clientCase.LastTaskAt,
+            clientCase.ActivityConfirmedAt,
+            clientCase.LastViewedAt,
+        }.Where(value => value.HasValue).Select(value => value!.Value).ToArray();
+
+        return values.Length == 0 ? null : values.Max();
+    }
+
+    private static string GetCaseStatusLabel(ClientCaseStatus status)
+        => status switch
+        {
+            ClientCaseStatus.Open => "В работе",
+            ClientCaseStatus.OnHold => "Приостановлено",
+            ClientCaseStatus.Closed => "Закрыто",
+            ClientCaseStatus.Lost => "Проиграно",
+            _ => status.ToString(),
+        };
+
+    private static string GetPriorityLabel(string? priority)
+        => priority?.Trim().ToLowerInvariant() switch
+        {
+            "low" => "Низкий",
+            "normal" => "Обычный",
+            "high" => "Высокий",
+            "urgent" => "Критический",
+            _ => priority ?? string.Empty,
+        };
 
     [HttpGet("document-templates")]
     [HttpGet("/api/document-templates")]
@@ -337,6 +979,11 @@ public class CasesV2Controller : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
@@ -354,7 +1001,212 @@ public class CasesV2Controller : ControllerBase
             await ApplyTaskSummaryAsync([entity], ct);
         }
 
+        if (entity is null)
+        {
+            var isHidden = await _db.ClientCases
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == id && item.IsHiddenFromExecutor, ct);
+            if (isHidden)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    message = "Дело скрыто от исполнителя. Отправьте запрос доступа ответственному руководителю.",
+                });
+            }
+        }
+
         return entity is not null ? Ok(entity) : NotFound();
+    }
+
+    [HttpPost("{id:int}/access-request")]
+    public async Task<ActionResult<ClientCaseAccessRequestDto>> RequestAccess(
+        int id,
+        [FromBody] RequestCaseAccessRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var currentUserId = User.GetUserId();
+        if (!currentUserId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var clientCase = await _db.ClientCases
+            .WithCaseIncludes()
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var actorName = User.GetDisplayName();
+        var reason = NormalizeOptional(request?.Reason);
+        reason = reason is null ? string.Empty : Truncate(NormalizeHistoryText(reason), 1000);
+        var now = DateTime.UtcNow;
+
+        clientCase.AccessRequestedAt = now;
+        clientCase.AccessRequestedByUserId = currentUserId.Value;
+        clientCase.AccessRequestedByUserName = Truncate(actorName, 256);
+        clientCase.AccessRequestReason = reason;
+
+        var reasonSuffix = string.IsNullOrWhiteSpace(reason) ? string.Empty : $" Причина: {reason}.";
+        AppendCaseEvent(clientCase, $"Запрошен доступ к делу. Автор: {actorName}.{reasonSuffix}");
+        _db.SetAuditReason($"Запрошен доступ к делу: {actorName}");
+
+        var managerUserIds = await ResolveCaseAccessManagerUserIdsAsync(clientCase, currentUserId.Value, ct);
+        foreach (var managerUserId in managerUserIds)
+        {
+            await AddCaseUserNotificationAsync(
+                managerUserId,
+                UserNotificationTypes.CaseAccessRequested,
+                $"case:{clientCase.Id}:access-request:{now:yyyyMMddHHmmssfff}:{currentUserId.Value}",
+                $"Запрошен доступ к делу: {BuildCaseNotificationTitle(clientCase)}",
+                BuildCaseAccessRequestNotificationBody(clientCase, actorName, reason),
+                "violet",
+                clientCase,
+                new
+                {
+                    requestedByUserId = currentUserId.Value,
+                    requestedByUserName = actorName,
+                    reason,
+                    requestedAt = now,
+                },
+                ct);
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new ClientCaseAccessRequestDto
+        {
+            ClientCaseId = clientCase.Id,
+            RequestedAt = now,
+            RequestedByUserId = currentUserId.Value,
+            RequestedByUserName = actorName,
+            Reason = reason,
+            IsHiddenFromExecutor = clientCase.IsHiddenFromExecutor,
+        });
+    }
+
+    [HttpGet("access-requests")]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseAccessRequestListItemDto>>> GetAccessRequests(CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var items = await ApplyClientCaseAccessManagementVisibility(_db.ClientCases.AsQueryable(), visibility)
+            .WithCaseIncludes()
+            .Where(item => item.AccessRequestedAt.HasValue)
+            .OrderByDescending(item => item.AccessRequestedAt)
+            .Take(100)
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+        return Ok(items.Select(MapClientCaseAccessRequest).ToList());
+    }
+
+    [HttpPost("{id:int}/access-request/resolve")]
+    public async Task<ActionResult<ClientCaseAccessRequestResolutionDto>> ResolveAccessRequest(
+        int id,
+        [FromBody] ResolveCaseAccessRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await ApplyClientCaseAccessManagementVisibility(_db.ClientCases.AsQueryable(), visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        if (!clientCase.AccessRequestedAt.HasValue)
+        {
+            return BadRequest(new { message = "По этому делу нет активного запроса доступа." });
+        }
+
+        var requestedByUserId = clientCase.AccessRequestedByUserId;
+        var requestedByUserName = clientCase.AccessRequestedByUserName;
+        var requestReason = clientCase.AccessRequestReason;
+        var grant = request?.Grant == true;
+        var actorName = User.GetDisplayName();
+        var actorUserId = User.GetUserId();
+        var resolvedAt = DateTime.UtcNow;
+        var comment = NormalizeOptional(request?.Comment);
+        comment = comment is null ? string.Empty : Truncate(NormalizeHistoryText(comment), 1000);
+        var commentSuffix = string.IsNullOrWhiteSpace(comment) ? string.Empty : $" Комментарий: {comment}.";
+
+        if (grant)
+        {
+            ApplyHiddenFromExecutorMetadata(clientCase, isHidden: false, User.GetUserId(), actorName);
+            AppendCaseEvent(clientCase, $"Запрос доступа разрешен. Решение: {actorName}.{commentSuffix}");
+            _db.SetAuditReason($"Запрос доступа к делу разрешен: {actorName}");
+        }
+        else
+        {
+            clientCase.AccessRequestedAt = null;
+            clientCase.AccessRequestedByUserId = null;
+            clientCase.AccessRequestedByUserName = string.Empty;
+            clientCase.AccessRequestReason = string.Empty;
+            AppendCaseEvent(clientCase, $"Запрос доступа отклонен. Решение: {actorName}.{commentSuffix}");
+            _db.SetAuditReason($"Запрос доступа к делу отклонен: {actorName}");
+        }
+
+        if (requestedByUserId.HasValue && (!actorUserId.HasValue || requestedByUserId.Value != actorUserId.Value))
+        {
+            await AddCaseUserNotificationAsync(
+                requestedByUserId.Value,
+                UserNotificationTypes.CaseAccessResolved,
+                $"case:{clientCase.Id}:access-request:resolved:{(grant ? "granted" : "denied")}:{resolvedAt:yyyyMMddHHmmssfff}:{requestedByUserId.Value}",
+                grant
+                    ? $"Доступ к делу разрешен: {BuildCaseNotificationTitle(clientCase)}"
+                    : $"Доступ к делу отклонен: {BuildCaseNotificationTitle(clientCase)}",
+                BuildCaseAccessResolutionNotificationBody(clientCase, grant, actorName, comment),
+                grant ? "emerald" : "orange",
+                clientCase,
+                new
+                {
+                    requestedByUserId,
+                    requestedByUserName,
+                    requestReason,
+                    resolvedByUserName = actorName,
+                    resolvedAt,
+                    granted = grant,
+                    comment,
+                },
+                ct);
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new ClientCaseAccessRequestResolutionDto
+        {
+            ClientCaseId = clientCase.Id,
+            Granted = grant,
+            ResolvedAt = resolvedAt,
+            ResolvedByUserName = actorName,
+            IsHiddenFromExecutor = clientCase.IsHiddenFromExecutor,
+        });
     }
 
     [HttpGet("{id:int}/timeline")]
@@ -1636,6 +2488,7 @@ public class CasesV2Controller : ControllerBase
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
         ApplyCaseDetails(model, model);
+        ApplyHiddenFromExecutorMetadata(model, model.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, model.Id, User.GetUserId(), User.GetDisplayName(), ct);
@@ -1669,7 +2522,12 @@ public class CasesV2Controller : ControllerBase
         e.Status = model.Status;
         e.ClientId = model.ClientId;
         e.LegalEntityId = model.LegalEntityId;
+        var previousHiddenFromExecutor = e.IsHiddenFromExecutor;
         ApplyCaseDetails(e, model);
+        if (previousHiddenFromExecutor != e.IsHiddenFromExecutor)
+        {
+            ApplyHiddenFromExecutorMetadata(e, e.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
+        }
 
         if (shouldCloseLinkedTasks)
         {
@@ -1735,9 +2593,14 @@ public class CasesV2Controller : ControllerBase
 
         var nextStage = NormalizeOptional(request.Stage);
         var nextPriority = NormalizeOptional(request.Priority);
-        if (request.Status is null && !request.ResponsibleUserId.HasValue && nextStage is null && nextPriority is null)
+        if (request.Status is null
+            && !request.ResponsibleUserId.HasValue
+            && nextStage is null
+            && nextPriority is null
+            && !request.IsHiddenFromExecutor.HasValue
+            && !request.InactivityRemindersEnabled.HasValue)
         {
-            return BadRequest("Укажите новый статус, ответственного, стадию или приоритет.");
+            return BadRequest("Укажите новый статус, ответственного, стадию, приоритет, режим доступа или автоконтроль.");
         }
 
         User? nextResponsible = null;
@@ -1774,6 +2637,8 @@ public class CasesV2Controller : ControllerBase
         }
 
         var casesClosedByUpdate = new List<int>();
+        var changedCasesCount = 0;
+        var actorUserId = User.GetUserId();
         var actorName = User.GetDisplayName();
         foreach (var item in cases)
         {
@@ -1813,10 +2678,38 @@ public class CasesV2Controller : ControllerBase
                 item.Priority = nextPriority;
             }
 
+            if (request.IsHiddenFromExecutor.HasValue && item.IsHiddenFromExecutor != request.IsHiddenFromExecutor.Value)
+            {
+                var nextHidden = request.IsHiddenFromExecutor.Value;
+                changes.Add(nextHidden ? "доступ: скрыто от исполнителя" : "доступ: открыто исполнителю");
+                item.IsHiddenFromExecutor = nextHidden;
+                if (nextHidden)
+                {
+                    ApplyHiddenFromExecutorMetadata(item, true, actorUserId, actorName);
+                }
+                else
+                {
+                    ApplyHiddenFromExecutorMetadata(item, false, actorUserId, actorName);
+                }
+            }
+
+            if (request.InactivityRemindersEnabled.HasValue && item.InactivityRemindersEnabled != request.InactivityRemindersEnabled.Value)
+            {
+                var nextEnabled = request.InactivityRemindersEnabled.Value;
+                changes.Add(nextEnabled ? "автоконтроль: включен" : "автоконтроль: выключен");
+                item.InactivityRemindersEnabled = nextEnabled;
+            }
+
             if (changes.Count > 0)
             {
+                changedCasesCount++;
                 AppendCaseEvent(item, $"Массовое изменение: {string.Join("; ", changes)}. Изменил: {actorName}.");
             }
+        }
+
+        if (changedCasesCount > 0)
+        {
+            _db.SetAuditReason(BuildBulkUpdateAuditReason(request, nextResponsible, nextStage, nextPriority, changedCasesCount));
         }
 
         if (casesClosedByUpdate.Count > 0)
@@ -1905,6 +2798,31 @@ public class CasesV2Controller : ControllerBase
         target.EventHistory = source.EventHistory?.Trim() ?? string.Empty;
         target.Strategy = source.Strategy?.Trim() ?? string.Empty;
         target.InactivityRemindersEnabled = source.InactivityRemindersEnabled;
+        target.IsHiddenFromExecutor = source.IsHiddenFromExecutor;
+    }
+
+    private static void ApplyHiddenFromExecutorMetadata(
+        ClientCase clientCase,
+        bool isHidden,
+        int? actorUserId,
+        string actorName)
+    {
+        clientCase.IsHiddenFromExecutor = isHidden;
+        if (isHidden)
+        {
+            clientCase.HiddenFromExecutorAt = DateTime.UtcNow;
+            clientCase.HiddenFromExecutorByUserId = actorUserId;
+            clientCase.HiddenFromExecutorByUserName = Truncate(actorName, 256);
+            return;
+        }
+
+        clientCase.HiddenFromExecutorAt = null;
+        clientCase.HiddenFromExecutorByUserId = null;
+        clientCase.HiddenFromExecutorByUserName = string.Empty;
+        clientCase.AccessRequestedAt = null;
+        clientCase.AccessRequestedByUserId = null;
+        clientCase.AccessRequestedByUserName = string.Empty;
+        clientCase.AccessRequestReason = string.Empty;
     }
 
     private static DateTime? ResolveProceduralDeadline(
@@ -2741,6 +3659,25 @@ public class CasesV2Controller : ControllerBase
         };
     }
 
+    private static ClientCaseAccessRequestListItemDto MapClientCaseAccessRequest(ClientCase clientCase)
+        => new()
+        {
+            ClientCaseId = clientCase.Id,
+            CaseNumber = clientCase.CaseNumber,
+            Title = clientCase.Title,
+            OwnerName = clientCase.Client?.Name
+                ?? clientCase.LegalEntity?.ShortName
+                ?? clientCase.LegalEntity?.FullName
+                ?? string.Empty,
+            ResponsibleUserId = clientCase.ResponsibleUserId,
+            ResponsibleName = FormatCaseResponsible(clientCase.ResponsibleUser),
+            RequestedAt = clientCase.AccessRequestedAt!.Value,
+            RequestedByUserId = clientCase.AccessRequestedByUserId,
+            RequestedByUserName = clientCase.AccessRequestedByUserName,
+            Reason = clientCase.AccessRequestReason,
+            IsHiddenFromExecutor = clientCase.IsHiddenFromExecutor,
+        };
+
     private async Task<Dictionary<int, Contract>> LoadFinanceContractsAsync(
         IReadOnlyCollection<Payment> visiblePayments,
         IReadOnlyCollection<int> invoicePaymentIds,
@@ -3078,6 +4015,9 @@ public class CasesV2Controller : ControllerBase
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
+    private static string Truncate(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..maxLength].TrimEnd();
+
     private static string NormalizeHistoryText(string value)
     {
         var builder = new StringBuilder(value.Length);
@@ -3305,6 +4245,53 @@ public class CasesV2Controller : ControllerBase
         _ => FormatCaseTextValue(value),
     };
 
+    private static string BuildBulkUpdateAuditReason(
+        BulkUpdateCasesRequest request,
+        User? nextResponsible,
+        string? nextStage,
+        string? nextPriority,
+        int changedCasesCount)
+    {
+        var targets = new List<string>();
+
+        if (request.Status is not null)
+        {
+            targets.Add($"статус: {FormatCaseStatus(request.Status.Value)}");
+        }
+
+        if (request.ResponsibleUserId.HasValue)
+        {
+            targets.Add($"ответственный: {FormatCaseResponsible(nextResponsible)}");
+        }
+
+        if (request.IsHiddenFromExecutor.HasValue)
+        {
+            targets.Add(request.IsHiddenFromExecutor.Value
+                ? "доступ: скрыто от исполнителя"
+                : "доступ: открыто исполнителю");
+        }
+
+        if (request.InactivityRemindersEnabled.HasValue)
+        {
+            targets.Add(request.InactivityRemindersEnabled.Value
+                ? "автоконтроль: включен"
+                : "автоконтроль: выключен");
+        }
+
+        if (nextStage is not null)
+        {
+            targets.Add($"стадия: {nextStage}");
+        }
+
+        if (nextPriority is not null)
+        {
+            targets.Add($"приоритет: {FormatCasePriority(nextPriority)}");
+        }
+
+        var summary = targets.Count == 0 ? "поля не указаны" : string.Join("; ", targets);
+        return $"Массовое изменение дел ({changedCasesCount}): {summary}";
+    }
+
     public sealed class BulkUpdateCasesRequest
     {
         public int[]? Ids { get; set; }
@@ -3312,6 +4299,53 @@ public class CasesV2Controller : ControllerBase
         public int? ResponsibleUserId { get; set; }
         public string? Stage { get; set; }
         public string? Priority { get; set; }
+        public bool? IsHiddenFromExecutor { get; set; }
+        public bool? InactivityRemindersEnabled { get; set; }
+    }
+
+    public sealed class RequestCaseAccessRequest
+    {
+        public string? Reason { get; set; }
+    }
+
+    public sealed class ResolveCaseAccessRequest
+    {
+        public bool Grant { get; set; }
+        public string? Comment { get; set; }
+    }
+
+    public sealed class ClientCaseAccessRequestDto
+    {
+        public int ClientCaseId { get; set; }
+        public DateTime RequestedAt { get; set; }
+        public int RequestedByUserId { get; set; }
+        public string RequestedByUserName { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
+        public bool IsHiddenFromExecutor { get; set; }
+    }
+
+    public sealed class ClientCaseAccessRequestListItemDto
+    {
+        public int ClientCaseId { get; set; }
+        public string CaseNumber { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string OwnerName { get; set; } = string.Empty;
+        public int? ResponsibleUserId { get; set; }
+        public string ResponsibleName { get; set; } = string.Empty;
+        public DateTime RequestedAt { get; set; }
+        public int? RequestedByUserId { get; set; }
+        public string RequestedByUserName { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
+        public bool IsHiddenFromExecutor { get; set; }
+    }
+
+    public sealed class ClientCaseAccessRequestResolutionDto
+    {
+        public int ClientCaseId { get; set; }
+        public bool Granted { get; set; }
+        public DateTime ResolvedAt { get; set; }
+        public string ResolvedByUserName { get; set; } = string.Empty;
+        public bool IsHiddenFromExecutor { get; set; }
     }
 
     public sealed class MarkClientCaseActivityRequest

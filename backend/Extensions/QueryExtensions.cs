@@ -420,6 +420,66 @@ namespace PayPlanner.Api.Extensions
             return q;
         }
 
+        public static IQueryable<ClientCase> ApplyCaseActivityFilter(
+            this IQueryable<ClientCase> q,
+            string? activity,
+            int? inactiveDays = null,
+            IQueryable<TaskJournalItem>? taskJournalItems = null)
+        {
+            var normalized = activity?.Trim().ToLowerInvariant();
+            if (normalized is not ("inactive" or "active"))
+            {
+                return q;
+            }
+
+            var days = Math.Clamp(inactiveDays ?? 14, 1, 365);
+            var cutoff = DateTime.UtcNow.AddDays(-days);
+            IQueryable<ClientCase> inactiveQuery;
+
+            if (taskJournalItems is null)
+            {
+                inactiveQuery = q.Where(c =>
+                    c.InactivityRemindersEnabled
+                    && c.Status != ClientCaseStatus.Closed
+                    && c.Status != ClientCaseStatus.Lost
+                    && c.CreatedAt <= cutoff
+                    && (c.LastViewedAt ?? c.CreatedAt) <= cutoff
+                    && (c.ActivityConfirmedAt ?? c.CreatedAt) <= cutoff);
+
+                return normalized == "inactive"
+                    ? inactiveQuery
+                    : q.Where(c =>
+                        !c.InactivityRemindersEnabled
+                        || c.Status == ClientCaseStatus.Closed
+                        || c.Status == ClientCaseStatus.Lost
+                        || c.CreatedAt > cutoff
+                        || (c.LastViewedAt ?? c.CreatedAt) > cutoff
+                        || (c.ActivityConfirmedAt ?? c.CreatedAt) > cutoff);
+            }
+
+            inactiveQuery = q.Where(c =>
+                c.InactivityRemindersEnabled
+                && c.Status != ClientCaseStatus.Closed
+                && c.Status != ClientCaseStatus.Lost
+                && (taskJournalItems
+                    .Where(task => task.ClientCaseId == c.Id)
+                    .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)) ?? c.CreatedAt) <= cutoff
+                && (c.LastViewedAt ?? c.CreatedAt) <= cutoff
+                && (c.ActivityConfirmedAt ?? c.CreatedAt) <= cutoff);
+
+            return normalized == "inactive"
+                ? inactiveQuery
+                : q.Where(c =>
+                    !c.InactivityRemindersEnabled
+                    || c.Status == ClientCaseStatus.Closed
+                    || c.Status == ClientCaseStatus.Lost
+                    || (taskJournalItems
+                        .Where(task => task.ClientCaseId == c.Id)
+                        .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)) ?? c.CreatedAt) > cutoff
+                    || (c.LastViewedAt ?? c.CreatedAt) > cutoff
+                    || (c.ActivityConfirmedAt ?? c.CreatedAt) > cutoff);
+        }
+
         public static IQueryable<ClientCase> ApplyCaseSort(this IQueryable<ClientCase> q, string? sortBy, string? sortDir)
         {
             bool desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);

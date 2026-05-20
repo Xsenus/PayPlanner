@@ -17,7 +17,7 @@ public class CasesController : ControllerBase
     public CasesController(PaymentContext db) => _db = db;
 
     private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
-        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
 
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int? clientId, [FromQuery] int? legalEntityId, CancellationToken ct)

@@ -439,6 +439,68 @@ public sealed class NotificationService : INotificationService
             cancellationToken);
     }
 
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
+        TaskJournalItem task,
+        int daysWithoutActiveTask,
+        CancellationToken cancellationToken = default)
+    {
+        if (!task.AssigneeUserId.HasValue)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var channels = ResolveTaskMessageChannels(task);
+        var recipientUserIds = new[] { task.AssigneeUserId.Value }
+            .Concat(task.Participants
+                .Where(participant =>
+                    participant.UserId.HasValue &&
+                    string.Equals(participant.Role, "observer", StringComparison.OrdinalIgnoreCase))
+                .Select(participant => participant.UserId!.Value))
+            .Distinct()
+            .ToList();
+        var eventKey = $"case:{task.ClientCaseId ?? 0}:inactivity-control:{task.Id}";
+        var message = new NotificationMessage(
+            $"Автоконтроль дела: {task.ObjectName}",
+            BuildCaseInactivityControlBody(task, daysWithoutActiveTask),
+            Purpose: NotificationPurposes.TaskReminder);
+
+        if (HasTaskChannel(task, NotificationChannels.InApp))
+        {
+            foreach (var recipientUserId in recipientUserIds)
+            {
+                await CreateUserNotificationAsync(
+                    recipientUserId,
+                    UserNotificationTypes.CaseInactivityControl,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "amber",
+                    task,
+                    new
+                    {
+                        task.ClientCaseId,
+                        daysWithoutActiveTask,
+                        task.AssigneeUserId,
+                        isEscalationObserver = recipientUserId != task.AssigneeUserId.Value
+                    },
+                    cancellationToken);
+            }
+        }
+
+        if (channels.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var recipientUserId in recipientUserIds)
+        {
+            deliveries.AddRange(await SendToUserAsync(recipientUserId, message, channels, eventKey, cancellationToken));
+        }
+
+        return deliveries;
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskScheduleConflictAsync(
         TaskJournalItem task,
         IReadOnlyList<TaskJournalItem> conflicts,
@@ -508,7 +570,7 @@ public sealed class NotificationService : INotificationService
         int actorUserId,
         CancellationToken cancellationToken = default)
     {
-        var recipients = ResolveCurrentApproverUserIds(task, actorUserId);
+        var recipients = ResolveApprovalRequestRecipientUserIds(task, actorUserId);
         if (recipients.Count == 0)
         {
             return Array.Empty<NotificationDelivery>();
@@ -751,6 +813,65 @@ public sealed class NotificationService : INotificationService
         return deliveries;
     }
 
+    public async Task<IReadOnlyList<NotificationDelivery>> RetryDeliveryAsync(
+        int deliveryId,
+        CancellationToken cancellationToken = default)
+    {
+        var original = await _context.NotificationDeliveries
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == deliveryId, cancellationToken);
+        if (original is null)
+        {
+            throw new InvalidOperationException("NotificationDeliveryNotFound");
+        }
+
+        if (string.Equals(original.Status, NotificationDeliveryStatus.Sent, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("NotificationDeliveryAlreadySent");
+        }
+
+        if (string.Equals(original.Status, NotificationDeliveryStatus.Pending, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("NotificationDeliveryPending");
+        }
+
+        var channel = NormalizeChannel(original.Channel);
+        if (channel is not (NotificationChannels.Email or NotificationChannels.Telegram))
+        {
+            throw new InvalidOperationException("NotificationDeliveryChannelInvalid");
+        }
+
+        var message = new NotificationMessage(
+            string.IsNullOrWhiteSpace(original.Subject) ? "Повтор уведомления PayPlanner" : original.Subject,
+            string.IsNullOrWhiteSpace(original.BodyPreview) ? "Повторная отправка уведомления PayPlanner." : original.BodyPreview);
+        var eventKey = $"{original.EventKey}:retry:{DateTime.UtcNow:yyyyMMddHHmmssfff}:{Guid.NewGuid():N}";
+
+        if (original.RecipientUserId.HasValue)
+        {
+            return await SendToUserAsync(
+                original.RecipientUserId.Value,
+                message,
+                [channel],
+                eventKey,
+                cancellationToken,
+                original.NotificationSenderId);
+        }
+
+        var recipient = BuildRetryRecipient(original, channel);
+        if (recipient is null)
+        {
+            throw new InvalidOperationException("NotificationDeliveryRecipientMissing");
+        }
+
+        return await SendAsync(
+            recipient,
+            message,
+            [channel],
+            eventKey,
+            cancellationToken,
+            original.NotificationSenderId);
+    }
+
     private async Task SendDeliveryAsync(
         NotificationDelivery delivery,
         NotificationSenderTarget target,
@@ -816,6 +937,24 @@ public sealed class NotificationService : INotificationService
         delivery.Error = $"Канал '{delivery.Channel}' не поддерживается.";
     }
 
+    private static NotificationRecipient? BuildRetryRecipient(NotificationDelivery delivery, string channel)
+    {
+        var address = delivery.RecipientAddress?.Trim();
+        if (string.IsNullOrWhiteSpace(address))
+        {
+            return null;
+        }
+
+        if (channel == NotificationChannels.Email)
+        {
+            return new NotificationRecipient(null, address, address, null);
+        }
+
+        return long.TryParse(address, NumberStyles.Integer, CultureInfo.InvariantCulture, out var chatId)
+            ? new NotificationRecipient(null, address, null, chatId)
+            : null;
+    }
+
     private async Task<long?> ResolveTelegramChatIdAsync(
         NotificationRecipient recipient,
         int? senderId,
@@ -875,6 +1014,11 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        if (!await IsUserNotificationTypeEnabledAsync(recipientUserId, type, cancellationToken))
+        {
+            return;
+        }
+
         var alreadyExists = await _context.UserNotifications
             .AsNoTracking()
             .AnyAsync(item =>
@@ -909,6 +1053,22 @@ public sealed class NotificationService : INotificationService
             CreatedAt = DateTime.UtcNow
         });
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<bool> IsUserNotificationTypeEnabledAsync(
+        int recipientUserId,
+        string type,
+        CancellationToken cancellationToken)
+    {
+        var setting = await _context.UserSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.UserId == recipientUserId
+                && item.Key == UserNotificationPreferenceSettings.SettingKey)
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return UserNotificationPreferenceSettings.IsTypeEnabled(setting, type);
     }
 
     private async Task<IReadOnlyList<NotificationSenderTarget>> ResolveSenderTargetsAsync(
@@ -1506,6 +1666,28 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
+    private static string BuildCaseInactivityControlBody(TaskJournalItem task, int daysWithoutActiveTask)
+    {
+        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var lines = new List<string>
+        {
+            "По делу давно нет активной задачи, поэтому автоконтроль создал контрольную задачу.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Нет активных задач: {Math.Max(0, daysWithoutActiveTask)} дн.",
+            $"Срок: {dueText}",
+            "Проверьте состояние дела и зафиксируйте следующий шаг."
+        };
+
+        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
+        {
+            lines.Add($"Исполнитель: {task.AssigneeName.Trim()}");
+        }
+
+        return string.Join('\n', lines);
+    }
+
     private static string BuildTaskScheduleConflictBody(TaskJournalItem task, IReadOnlyList<TaskJournalItem> conflicts, string actorName)
     {
         var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
@@ -1690,6 +1872,35 @@ public sealed class NotificationService : INotificationService
         }
 
         return [userId];
+    }
+
+    private static IReadOnlyList<int> ResolveApprovalRequestRecipientUserIds(TaskJournalItem task, int actorUserId)
+    {
+        var userIds = new List<int>();
+        if (task.AuthorUserId.HasValue)
+        {
+            userIds.Add(task.AuthorUserId.Value);
+        }
+
+        if (task.AssigneeUserId.HasValue)
+        {
+            userIds.Add(task.AssigneeUserId.Value);
+        }
+
+        userIds.AddRange(task.Participants
+            .Where(participant => !string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
+            .Where(participant => participant.UserId.HasValue)
+            .Select(participant => participant.UserId!.Value));
+
+        if (GetCurrentApprover(task)?.UserId is { } approverUserId)
+        {
+            userIds.Add(approverUserId);
+        }
+
+        return userIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct()
+            .ToList();
     }
 
     private static IReadOnlyList<int> ResolveApprovalDecisionRecipientUserIds(TaskJournalItem task, int actorUserId)
