@@ -102,6 +102,8 @@ builder.Services.AddScoped<IFormRequirementsService, FormRequirementsService>();
 builder.Services.AddSingleton<ICaseDocumentStorage, LocalCaseDocumentStorage>();
 builder.Services.AddSingleton<IInvoiceDocumentPdfService, InvoiceDocumentPdfService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
+builder.Services.Configure<AppFeatureFlagsOptions>(
+    builder.Configuration.GetSection(AppFeatureFlagsOptions.SectionName));
 builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));
 builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 
