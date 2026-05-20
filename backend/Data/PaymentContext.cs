@@ -76,6 +76,9 @@ public class PaymentContext : DbContext
 
     private static readonly HashSet<Type> MetadataOnlyAuditedEntityTypes = new()
     {
+        typeof(ClientCaseRelatedParty),
+        typeof(ClientCaseWorkOrder),
+        typeof(ClientCaseWorkOrderItem),
         typeof(Role),
         typeof(User),
     };
@@ -1297,6 +1300,8 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Email).HasMaxLength(200);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.ArchivedByUserName).HasMaxLength(256);
+            entity.Property(e => e.ArchiveReason).HasMaxLength(1000);
 
             entity.HasOne(e => e.ClientCase)
                 .WithMany(e => e.RelatedParties)
@@ -1319,10 +1324,66 @@ public class PaymentContext : DbContext
                 .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_ClientCaseRelatedParties_ClientCaseId");
+            entity.HasIndex(e => new { e.ClientCaseId, e.IsArchived }).HasDatabaseName("IX_ClientCaseRelatedParties_ClientCaseId_IsArchived");
             entity.HasIndex(e => e.SourceType).HasDatabaseName("IX_ClientCaseRelatedParties_SourceType");
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_ClientCaseRelatedParties_ClientId");
             entity.HasIndex(e => e.ExternalContactId).HasDatabaseName("IX_ClientCaseRelatedParties_ExternalContactId");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_ClientCaseRelatedParties_LegalEntityId");
+        });
+
+        // ------------------ ClientCaseWorkOrder ------------------
+        modelBuilder.Entity<ClientCaseWorkOrder>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Currency).HasMaxLength(3).IsRequired();
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.UpdatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.ApprovalRequestedByUserName).HasMaxLength(256);
+            entity.Property(e => e.ApprovalDecisionByUserName).HasMaxLength(256);
+            entity.Property(e => e.ApprovalComment).HasMaxLength(1000);
+
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.WorkOrders)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.ClientCaseId)
+                .IsUnique()
+                .HasDatabaseName("IX_ClientCaseWorkOrders_ClientCaseId");
+            entity.HasIndex(e => e.Status).HasDatabaseName("IX_ClientCaseWorkOrders_Status");
+            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_ClientCaseWorkOrders_CreatedAt");
+            entity.HasIndex(e => e.ApprovalRequestedAt).HasDatabaseName("IX_ClientCaseWorkOrders_ApprovalRequestedAt");
+            entity.HasIndex(e => e.ApprovalDecisionAt).HasDatabaseName("IX_ClientCaseWorkOrders_ApprovalDecisionAt");
+        });
+
+        // ------------------ ClientCaseWorkOrderItem ------------------
+        modelBuilder.Entity<ClientCaseWorkOrderItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ServiceName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(1000);
+            entity.Property(e => e.ExecutorName).HasMaxLength(256);
+            entity.Property(e => e.Quantity).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
+
+            entity.HasOne(e => e.WorkOrder)
+                .WithMany(e => e.Items)
+                .HasForeignKey(e => e.ClientCaseWorkOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ExecutorUser)
+                .WithMany()
+                .HasForeignKey(e => e.ExecutorUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.ClientCaseWorkOrderId).HasDatabaseName("IX_ClientCaseWorkOrderItems_WorkOrderId");
+            entity.HasIndex(e => e.ExecutorUserId).HasDatabaseName("IX_ClientCaseWorkOrderItems_ExecutorUserId");
+            entity.HasIndex(e => e.DueDate).HasDatabaseName("IX_ClientCaseWorkOrderItems_DueDate");
         });
 
         // ------------------ DealType ------------------
@@ -2419,6 +2480,9 @@ public class PaymentContext : DbContext
     {
         if (clrType == typeof(Client)) return "client";
         if (clrType == typeof(ClientCase)) return "client-case";
+        if (clrType == typeof(ClientCaseRelatedParty)) return "client-case-related-party";
+        if (clrType == typeof(ClientCaseWorkOrder)) return "client-case-work-order";
+        if (clrType == typeof(ClientCaseWorkOrderItem)) return "client-case-work-order-item";
         if (clrType == typeof(User)) return "user";
         if (clrType == typeof(Role)) return "role";
         if (clrType == typeof(Payment)) return "payment";
@@ -2508,12 +2572,12 @@ public class PaymentContext : DbContext
         string userNamePropertyName,
         (int? UserId, string? UserName) actor)
     {
-        if (entry.Metadata.FindProperty(userIdPropertyName) is not null)
+        if (actor.UserId.HasValue && entry.Metadata.FindProperty(userIdPropertyName) is not null)
         {
             entry.Property(userIdPropertyName).CurrentValue = actor.UserId;
         }
 
-        if (entry.Metadata.FindProperty(userNamePropertyName) is not null)
+        if (!string.IsNullOrWhiteSpace(actor.UserName) && entry.Metadata.FindProperty(userNamePropertyName) is not null)
         {
             entry.Property(userNamePropertyName).CurrentValue = actor.UserName;
         }
@@ -2547,6 +2611,10 @@ public class PaymentContext : DbContext
     public DbSet<ClientCaseDocument> ClientCaseDocuments { get; set; }
 
     public DbSet<ClientCaseRelatedParty> ClientCaseRelatedParties { get; set; }
+
+    public DbSet<ClientCaseWorkOrder> ClientCaseWorkOrders { get; set; }
+
+    public DbSet<ClientCaseWorkOrderItem> ClientCaseWorkOrderItems { get; set; }
 
     /// <summary>
     /// Карточки клиентов.

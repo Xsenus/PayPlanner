@@ -18,4 +18,9 @@ public class ClientCaseRelatedPartyDto
     public DateTime CreatedAt { get; set; }
     public int? CreatedByUserId { get; set; }
     public string CreatedByUserName { get; set; } = string.Empty;
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
+    public int? ArchivedByUserId { get; set; }
+    public string ArchivedByUserName { get; set; } = string.Empty;
+    public string ArchiveReason { get; set; } = string.Empty;
 }

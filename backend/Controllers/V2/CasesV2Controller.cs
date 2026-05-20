@@ -1359,6 +1359,7 @@ public class CasesV2Controller : ControllerBase
             CaseTitle = clientCase.Title,
             OwnerName = ResolveCaseOwnerName(clientCase),
             Totals = BuildFinanceTotals(clientCase, visiblePayments),
+            Calendar = BuildFinanceCalendar(visiblePayments),
             Invoices = BuildFinanceInvoices(visiblePayments, linkedContracts),
             Payments = visiblePayments.Select(MapFinancePayment).ToList(),
             Contracts = linkedContracts.Values
@@ -2146,7 +2147,10 @@ public class CasesV2Controller : ControllerBase
     }
 
     [HttpGet("{id:int}/related-parties")]
-    public async Task<ActionResult<IReadOnlyList<ClientCaseRelatedPartyDto>>> GetRelatedParties(int id, CancellationToken ct)
+    public async Task<ActionResult<IReadOnlyList<ClientCaseRelatedPartyDto>>> GetRelatedParties(
+        int id,
+        [FromQuery] bool includeArchived,
+        CancellationToken ct)
     {
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
@@ -2163,10 +2167,17 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
-        var items = await _db.ClientCaseRelatedParties
+        var query = _db.ClientCaseRelatedParties
             .AsNoTracking()
-            .Where(item => item.ClientCaseId == id)
-            .OrderBy(item => item.SourceType)
+            .Where(item => item.ClientCaseId == id);
+        if (!includeArchived)
+        {
+            query = query.Where(item => !item.IsArchived);
+        }
+
+        var items = await query
+            .OrderBy(item => item.IsArchived)
+            .ThenBy(item => item.SourceType)
             .ThenBy(item => item.DisplayName)
             .ThenBy(item => item.Id)
             .ToListAsync(ct);
@@ -2225,11 +2236,32 @@ public class CasesV2Controller : ControllerBase
             if (await _db.ClientCaseRelatedParties.AnyAsync(item =>
                     item.ClientCaseId == id &&
                     item.SourceType == RelatedPartySourceClient &&
+                    !item.IsArchived &&
                     item.ClientId == client.Id, ct))
             {
                 return Conflict(new { message = "Это физическое лицо уже связано с делом." });
             }
 
+            var archivedParty = await _db.ClientCaseRelatedParties
+                .FirstOrDefaultAsync(item =>
+                    item.ClientCaseId == id &&
+                    item.SourceType == RelatedPartySourceClient &&
+                    item.IsArchived &&
+                    item.ClientId == client.Id, ct);
+            if (archivedParty is not null)
+            {
+                archivedParty.DisplayName = client.Name;
+                archivedParty.Role = role;
+                archivedParty.OrganizationName = client.LegalEntity?.ShortName ?? client.Company ?? string.Empty;
+                archivedParty.Phone = client.Phone;
+                archivedParty.Email = client.Email;
+                archivedParty.Notes = notes;
+                RestoreRelatedParty(archivedParty);
+                _db.SetAuditReason($"Связанное лицо восстановлено в деле #{id}: {archivedParty.DisplayName} ({archivedParty.Role}).");
+                AppendCaseEvent(clientCase, $"Связь с делом восстановлена: {archivedParty.DisplayName} ({archivedParty.Role}). Восстановил: {User.GetDisplayName()}.");
+                await _db.SaveChangesAsync(ct);
+                return Ok(MapRelatedParty(archivedParty));
+            }
             relatedParty = new ClientCaseRelatedParty
             {
                 ClientCaseId = id,
@@ -2268,9 +2300,31 @@ public class CasesV2Controller : ControllerBase
             if (await _db.ClientCaseRelatedParties.AnyAsync(item =>
                     item.ClientCaseId == id &&
                     item.SourceType == RelatedPartySourceExternalContact &&
+                    !item.IsArchived &&
                     item.ExternalContactId == contact.Id, ct))
             {
                 return Conflict(new { message = "Этот контакт уже связан с делом." });
+            }
+
+            var archivedContactParty = await _db.ClientCaseRelatedParties
+                .FirstOrDefaultAsync(item =>
+                    item.ClientCaseId == id &&
+                    item.SourceType == RelatedPartySourceExternalContact &&
+                    item.IsArchived &&
+                    item.ExternalContactId == contact.Id, ct);
+            if (archivedContactParty is not null)
+            {
+                archivedContactParty.DisplayName = contact.FullName;
+                archivedContactParty.Role = role;
+                archivedContactParty.OrganizationName = contact.LegalEntity?.ShortName ?? string.Empty;
+                archivedContactParty.Phone = contact.Phone ?? string.Empty;
+                archivedContactParty.Email = contact.Email ?? string.Empty;
+                archivedContactParty.Notes = notes;
+                RestoreRelatedParty(archivedContactParty);
+                _db.SetAuditReason($"Связанное лицо восстановлено в деле #{id}: {archivedContactParty.DisplayName} ({archivedContactParty.Role}).");
+                AppendCaseEvent(clientCase, $"Связь с делом восстановлена: {archivedContactParty.DisplayName} ({archivedContactParty.Role}). Восстановил: {User.GetDisplayName()}.");
+                await _db.SaveChangesAsync(ct);
+                return Ok(MapRelatedParty(archivedContactParty));
             }
 
             relatedParty = new ClientCaseRelatedParty
@@ -2303,9 +2357,31 @@ public class CasesV2Controller : ControllerBase
             if (await _db.ClientCaseRelatedParties.AnyAsync(item =>
                     item.ClientCaseId == id &&
                     item.SourceType == RelatedPartySourceLegalEntity &&
+                    !item.IsArchived &&
                     item.LegalEntityId == legalEntity.Id, ct))
             {
                 return Conflict(new { message = "Эта организация уже связана с делом." });
+            }
+
+            var archivedLegalEntityParty = await _db.ClientCaseRelatedParties
+                .FirstOrDefaultAsync(item =>
+                    item.ClientCaseId == id &&
+                    item.SourceType == RelatedPartySourceLegalEntity &&
+                    item.IsArchived &&
+                    item.LegalEntityId == legalEntity.Id, ct);
+            if (archivedLegalEntityParty is not null)
+            {
+                archivedLegalEntityParty.DisplayName = !string.IsNullOrWhiteSpace(legalEntity.ShortName) ? legalEntity.ShortName : legalEntity.FullName ?? $"Юрлицо #{legalEntity.Id}";
+                archivedLegalEntityParty.Role = role;
+                archivedLegalEntityParty.OrganizationName = legalEntity.FullName ?? string.Empty;
+                archivedLegalEntityParty.Phone = legalEntity.Phone ?? string.Empty;
+                archivedLegalEntityParty.Email = legalEntity.Email ?? string.Empty;
+                archivedLegalEntityParty.Notes = notes;
+                RestoreRelatedParty(archivedLegalEntityParty);
+                _db.SetAuditReason($"Связанное лицо восстановлено в деле #{id}: {archivedLegalEntityParty.DisplayName} ({archivedLegalEntityParty.Role}).");
+                AppendCaseEvent(clientCase, $"Связь с делом восстановлена: {archivedLegalEntityParty.DisplayName} ({archivedLegalEntityParty.Role}). Восстановил: {User.GetDisplayName()}.");
+                await _db.SaveChangesAsync(ct);
+                return Ok(MapRelatedParty(archivedLegalEntityParty));
             }
 
             relatedParty = new ClientCaseRelatedParty
@@ -2330,6 +2406,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         _db.ClientCaseRelatedParties.Add(relatedParty);
+        _db.SetAuditReason($"Связанное лицо добавлено к делу #{id}: {relatedParty.DisplayName} ({relatedParty.Role}).");
         AppendCaseEvent(clientCase, $"Связь с делом добавлена: {relatedParty.DisplayName} ({relatedParty.Role}). Добавил: {User.GetDisplayName()}.");
         var autoRelatedParty = await BuildAutoLegalEntityRelatedPartyAsync(
             id,
@@ -2381,11 +2458,593 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
-        _db.ClientCaseRelatedParties.Remove(relatedParty);
+        if (relatedParty.IsArchived)
+        {
+            return NoContent();
+        }
+
+        relatedParty.IsArchived = true;
+        relatedParty.ArchivedAt = DateTime.UtcNow;
+        relatedParty.ArchivedByUserId = User.GetUserId();
+        relatedParty.ArchivedByUserName = User.GetDisplayName();
+        relatedParty.ArchiveReason = "Archived from case card";
+        _db.SetAuditReason($"Связанное лицо архивировано в деле #{id}: {relatedParty.DisplayName}.");
         AppendCaseEvent(clientCase, $"Связь с делом удалена: {relatedParty.DisplayName}. Удалил: {User.GetDisplayName()}.");
         await _db.SaveChangesAsync(ct);
 
         return NoContent();
+    }
+
+    [HttpGet("{id:int}/work-order")]
+    public async Task<ActionResult<ClientCaseWorkOrderDto>> GetWorkOrder(int id, CancellationToken ct)
+    {
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var exists = await _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .AnyAsync(item => item.Id == id, ct);
+        if (!exists)
+        {
+            return NotFound();
+        }
+
+        var workOrder = await _db.ClientCaseWorkOrders
+            .AsNoTracking()
+            .Include(item => item.Items)
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id, ct);
+
+        return Ok(workOrder is null
+            ? ClientCaseWorkOrderDto.Empty(id)
+            : MapWorkOrder(workOrder));
+    }
+
+    [HttpGet("{id:int}/work-order/print")]
+    public async Task<IActionResult> PrintWorkOrder(int id, CancellationToken ct)
+    {
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .AsNoTracking()
+            .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
+            .Include(item => item.ResponsibleUser)
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var workOrder = await _db.ClientCaseWorkOrders
+            .AsNoTracking()
+            .Include(item => item.Items)
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id, ct);
+        if (workOrder is null)
+        {
+            return NotFound(new { message = "По делу еще нет заказ-наряда." });
+        }
+
+        return Content(BuildWorkOrderPrintHtml(clientCase, workOrder), "text/html; charset=utf-8", Encoding.UTF8);
+    }
+
+    [HttpPost("{id:int}/work-order")]
+    public async Task<ActionResult<ClientCaseWorkOrderDto>> CreateWorkOrder(
+        int id,
+        [FromBody] UpsertClientCaseWorkOrderRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var existing = await _db.ClientCaseWorkOrders
+            .Include(item => item.Items)
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id, ct);
+        if (existing is not null)
+        {
+            return Conflict(new { message = "По делу уже есть предварительный расчет." });
+        }
+
+        var now = DateTime.UtcNow;
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCaseId = id,
+            Title = NormalizeRequired(request?.Title, "Предварительный расчет"),
+            Status = NormalizeWorkOrderStatus(request?.Status),
+            Currency = NormalizeCurrency(request?.Currency),
+            Notes = Truncate(NormalizeOptional(request?.Notes) ?? string.Empty, 1000),
+            CreatedAt = now,
+            CreatedByUserId = User.GetUserId(),
+            CreatedByUserName = User.GetDisplayName(),
+        };
+
+        _db.ClientCaseWorkOrders.Add(workOrder);
+        _db.SetAuditReason($"Предварительный расчет создан в деле #{id}: {workOrder.Title}.");
+        AppendCaseEvent(clientCase, $"Создан предварительный расчет «{workOrder.Title}». Автор: {User.GetDisplayName()}.");
+        await _db.SaveChangesAsync(ct);
+
+        return Created($"/api/v2/cases/{id}/work-order", MapWorkOrder(workOrder));
+    }
+
+    [HttpPatch("{id:int}/work-order")]
+    public async Task<ActionResult<ClientCaseWorkOrderDto>> UpdateWorkOrder(
+        int id,
+        [FromBody] UpsertClientCaseWorkOrderRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        if (IsWorkOrderLockedForEditing(workOrder))
+        {
+            return BadRequest(new { message = BuildWorkOrderLockedMessage(workOrder.Status) });
+        }
+
+        var changes = new List<string>();
+        var nextTitle = NormalizeOptional(request?.Title);
+        if (nextTitle is not null && !string.Equals(workOrder.Title, nextTitle, StringComparison.Ordinal))
+        {
+            workOrder.Title = nextTitle;
+            changes.Add($"название: {nextTitle}");
+        }
+
+        var nextStatus = NormalizeOptional(request?.Status);
+        if (nextStatus is not null)
+        {
+            var normalizedStatus = NormalizeWorkOrderStatus(nextStatus);
+            if (IsWorkOrderApprovalManagedStatus(normalizedStatus))
+            {
+                return BadRequest(new { message = "Статусы согласования заказ-наряда меняются только через действия согласования и создания счета." });
+            }
+
+            if (!string.Equals(workOrder.Status, normalizedStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                workOrder.Status = normalizedStatus;
+                changes.Add($"статус: {FormatWorkOrderStatus(normalizedStatus)}");
+            }
+        }
+
+        var nextCurrency = NormalizeOptional(request?.Currency);
+        if (nextCurrency is not null)
+        {
+            var normalizedCurrency = NormalizeCurrency(nextCurrency);
+            if (!string.Equals(workOrder.Currency, normalizedCurrency, StringComparison.Ordinal))
+            {
+                workOrder.Currency = normalizedCurrency;
+                changes.Add($"валюта: {normalizedCurrency}");
+            }
+        }
+
+        if (request?.Notes is not null)
+        {
+            workOrder.Notes = Truncate(NormalizeOptional(request.Notes) ?? string.Empty, 1000);
+            changes.Add("примечание обновлено");
+        }
+
+        if (changes.Count == 0)
+        {
+            return Ok(MapWorkOrder(workOrder));
+        }
+
+        StampWorkOrderUpdate(workOrder);
+        _db.SetAuditReason($"Предварительный расчет обновлен в деле #{id}: {string.Join("; ", changes)}.");
+        AppendCaseEvent(clientCase, $"Предварительный расчет обновлен: {string.Join("; ", changes)}. Изменил: {User.GetDisplayName()}.");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapWorkOrder(workOrder));
+    }
+
+    [HttpDelete("{id:int}/work-order")]
+    public async Task<IActionResult> DeleteWorkOrder(int id, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        if (IsWorkOrderLockedForEditing(workOrder))
+        {
+            return BadRequest(new { message = BuildWorkOrderLockedMessage(workOrder.Status) });
+        }
+
+        _db.ClientCaseWorkOrders.Remove(workOrder);
+        _db.SetAuditReason($"Предварительный расчет удален из дела #{id}: {workOrder.Title}.");
+        AppendCaseEvent(clientCase, $"Предварительный расчет «{workOrder.Title}» удален. Удалил: {User.GetDisplayName()}.");
+        await _db.SaveChangesAsync(ct);
+
+        return NoContent();
+    }
+
+    [HttpPost("{id:int}/work-order/items")]
+    public async Task<ActionResult<ClientCaseWorkOrderDto>> AddWorkOrderItem(
+        int id,
+        [FromBody] UpsertClientCaseWorkOrderItemRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        if (IsWorkOrderLockedForEditing(workOrder))
+        {
+            return BadRequest(new { message = BuildWorkOrderLockedMessage(workOrder.Status) });
+        }
+
+        var (item, itemError) = await BuildWorkOrderItemAsync(workOrder, request, ct);
+        if (itemError is not null)
+        {
+            return BadRequest(new { message = itemError });
+        }
+
+        item ??= new ClientCaseWorkOrderItem();
+        if (item.ServiceName.Length == 0)
+        {
+            return BadRequest(new { message = "Укажите услугу или этап работ." });
+        }
+
+        workOrder.Items.Add(item);
+        RecalculateWorkOrder(workOrder);
+        StampWorkOrderUpdate(workOrder);
+        _db.SetAuditReason($"В предварительный расчет дела #{id} добавлена услуга: {item.ServiceName}.");
+        AppendCaseEvent(clientCase, $"В предварительный расчет добавлена услуга «{item.ServiceName}» на сумму {item.TotalAmount:0.##} {workOrder.Currency}. Добавил: {User.GetDisplayName()}.");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapWorkOrder(workOrder));
+    }
+
+    [HttpPatch("{id:int}/work-order/items/{itemId:int}")]
+    public async Task<ActionResult<ClientCaseWorkOrderDto>> UpdateWorkOrderItem(
+        int id,
+        int itemId,
+        [FromBody] UpsertClientCaseWorkOrderItemRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        if (IsWorkOrderLockedForEditing(workOrder))
+        {
+            return BadRequest(new { message = BuildWorkOrderLockedMessage(workOrder.Status) });
+        }
+
+        var item = workOrder.Items.FirstOrDefault(entry => entry.Id == itemId);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        var itemError = await ApplyWorkOrderItemAsync(item, request, ct);
+        if (itemError is not null)
+        {
+            return BadRequest(new { message = itemError });
+        }
+
+        if (item.ServiceName.Length == 0)
+        {
+            return BadRequest(new { message = "Укажите услугу или этап работ." });
+        }
+
+        RecalculateWorkOrder(workOrder);
+        StampWorkOrderUpdate(workOrder);
+        _db.SetAuditReason($"Позиция предварительного расчета обновлена в деле #{id}: {item.ServiceName}.");
+        AppendCaseEvent(clientCase, $"Позиция предварительного расчета «{item.ServiceName}» обновлена. Изменил: {User.GetDisplayName()}.");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapWorkOrder(workOrder));
+    }
+
+    [HttpDelete("{id:int}/work-order/items/{itemId:int}")]
+    public async Task<ActionResult<ClientCaseWorkOrderDto>> DeleteWorkOrderItem(
+        int id,
+        int itemId,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        if (IsWorkOrderLockedForEditing(workOrder))
+        {
+            return BadRequest(new { message = BuildWorkOrderLockedMessage(workOrder.Status) });
+        }
+
+        var item = workOrder.Items.FirstOrDefault(entry => entry.Id == itemId);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        _db.ClientCaseWorkOrderItems.Remove(item);
+        workOrder.Items.Remove(item);
+        RecalculateWorkOrder(workOrder);
+        StampWorkOrderUpdate(workOrder);
+        _db.SetAuditReason($"Позиция предварительного расчета удалена из дела #{id}: {item.ServiceName}.");
+        AppendCaseEvent(clientCase, $"Позиция предварительного расчета «{item.ServiceName}» удалена. Удалил: {User.GetDisplayName()}.");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapWorkOrder(workOrder));
+    }
+
+    [HttpPost("{id:int}/work-order/create-invoice")]
+    public async Task<ActionResult<ClientCaseWorkOrderInvoiceDto>> CreateInvoiceFromWorkOrder(
+        int id,
+        [FromBody] CreateClientCaseWorkOrderInvoiceRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        RecalculateWorkOrder(workOrder);
+        if (workOrder.TotalAmount <= 0m || workOrder.Items.Count == 0)
+        {
+            return BadRequest(new { message = "Добавьте услуги с ненулевой стоимостью перед созданием счета." });
+        }
+        if (!string.Equals(NormalizeWorkOrderStatus(workOrder.Status), "approved", StringComparison.Ordinal))
+        {
+            return BadRequest(new { message = "Перед созданием счета согласуйте заказ-наряд." });
+        }
+
+        var invoiceDate = request?.Date?.Date ?? DateTime.UtcNow.Date;
+        var dueDate = request?.DueDate?.Date ?? invoiceDate;
+        var number = await BuildWorkOrderInvoiceNumberAsync(id, workOrder.Id, invoiceDate, request?.Number, ct);
+        var now = DateTime.UtcNow;
+        var invoice = new Invoice
+        {
+            Number = number,
+            Date = invoiceDate,
+            CreatedAt = now,
+        };
+        var payment = new Payment
+        {
+            Account = number,
+            AccountDate = invoiceDate,
+            Invoice = invoice,
+            Date = dueDate,
+            PlannedDate = dueDate,
+            Amount = workOrder.TotalAmount,
+            PaidAmount = 0m,
+            Status = PaymentStatus.Pending,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.Draft,
+            Type = PaymentType.Income,
+            DocumentKind = DocumentKind.Invoice,
+            Description = NormalizeOptional(request?.Description)
+                ?? $"Счет по заказ-наряду «{workOrder.Title}»",
+            ClientId = clientCase.ClientId,
+            LegalEntityId = clientCase.LegalEntityId,
+            ClientCaseId = clientCase.Id,
+            ClientCaseReference = NormalizeOptional(clientCase.CaseNumber) ?? clientCase.Title,
+            CreatedAt = now,
+        };
+
+        payment.InvoiceClientCases.Add(new InvoiceClientCase
+        {
+            ClientCaseId = clientCase.Id,
+        });
+
+        var responsibleIds = workOrder.Items
+            .Where(item => item.ExecutorUserId.HasValue)
+            .Select(item => item.ExecutorUserId!.Value)
+            .Distinct()
+            .ToList();
+        foreach (var responsibleId in responsibleIds)
+        {
+            payment.Responsibles.Add(new PaymentResponsible
+            {
+                UserId = responsibleId,
+            });
+        }
+
+        var sortOrder = 1;
+        foreach (var item in workOrder.Items.OrderBy(item => item.SortOrder).ThenBy(item => item.Id))
+        {
+            payment.InvoiceLineItems.Add(new InvoiceLineItem
+            {
+                Name = item.ServiceName,
+                Quantity = item.Quantity,
+                Unit = "шт",
+                Price = item.UnitPrice,
+                SortOrder = sortOrder++,
+                CreatedAt = now,
+            });
+        }
+
+        PaymentDomainService.Normalize(payment);
+        workOrder.Status = "invoice_created";
+        StampWorkOrderUpdate(workOrder);
+        _db.SetAuditReason($"По предварительному расчету дела #{id} создан счет №{number}.");
+        AppendCaseEvent(clientCase, $"По предварительному расчету «{workOrder.Title}» создан счет №{number} на сумму {workOrder.TotalAmount:0.##} {workOrder.Currency}. Создал: {User.GetDisplayName()}.");
+
+        _db.Payments.Add(payment);
+        await _db.SaveChangesAsync(ct);
+
+        return Created($"/invoices/{payment.Id}", new ClientCaseWorkOrderInvoiceDto
+        {
+            PaymentId = payment.Id,
+            InvoiceEntityId = payment.InvoiceId ?? invoice.Id,
+            Number = number,
+            Date = invoiceDate,
+            DueDate = dueDate,
+            Amount = payment.Amount,
+            WorkOrder = MapWorkOrder(workOrder),
+        });
+    }
+
+    [HttpPost("{id:int}/work-order/submit-approval")]
+    public async Task<ActionResult<ClientCaseWorkOrderDto>> SubmitWorkOrderApproval(
+        int id,
+        [FromBody] ClientCaseWorkOrderApprovalRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        RecalculateWorkOrder(workOrder);
+        if (workOrder.TotalAmount <= 0m || workOrder.Items.Count == 0)
+        {
+            return BadRequest(new { message = "Добавьте услуги с ненулевой стоимостью перед отправкой заказ-наряда на согласование." });
+        }
+
+        var now = DateTime.UtcNow;
+        workOrder.Status = "pending_approval";
+        workOrder.ApprovalRequestedAt = now;
+        workOrder.ApprovalRequestedByUserId = User.GetUserId();
+        workOrder.ApprovalRequestedByUserName = User.GetDisplayName();
+        workOrder.ApprovalDecisionAt = null;
+        workOrder.ApprovalDecisionByUserId = null;
+        workOrder.ApprovalDecisionByUserName = string.Empty;
+        workOrder.ApprovalComment = Truncate(NormalizeOptional(request?.Comment) ?? string.Empty, 1000);
+        StampWorkOrderUpdate(workOrder);
+        _db.SetAuditReason($"Заказ-наряд дела #{id} отправлен на согласование.");
+        AppendCaseEvent(clientCase, $"Заказ-наряд «{workOrder.Title}» отправлен на согласование. Инициатор: {User.GetDisplayName()}.{FormatOptionalComment(workOrder.ApprovalComment)}");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapWorkOrder(workOrder));
+    }
+
+    [HttpPost("{id:int}/work-order/approve")]
+    public async Task<ActionResult<ClientCaseWorkOrderDto>> ApproveWorkOrder(
+        int id,
+        [FromBody] ClientCaseWorkOrderApprovalRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        if (!string.Equals(NormalizeWorkOrderStatus(workOrder.Status), "pending_approval", StringComparison.Ordinal))
+        {
+            return BadRequest(new { message = "Согласовать можно только заказ-наряд в статусе «На согласовании»." });
+        }
+
+        ApplyWorkOrderApprovalDecision(workOrder, "approved", request?.Comment);
+        _db.SetAuditReason($"Заказ-наряд дела #{id} согласован.");
+        AppendCaseEvent(clientCase, $"Заказ-наряд «{workOrder.Title}» согласован. Согласующий: {User.GetDisplayName()}.{FormatOptionalComment(workOrder.ApprovalComment)}");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapWorkOrder(workOrder));
+    }
+
+    [HttpPost("{id:int}/work-order/request-revision")]
+    public async Task<ActionResult<ClientCaseWorkOrderDto>> RequestWorkOrderRevision(
+        int id,
+        [FromBody] ClientCaseWorkOrderApprovalRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        var currentStatus = NormalizeWorkOrderStatus(workOrder.Status);
+        if (currentStatus is not "pending_approval" and not "approved")
+        {
+            return BadRequest(new { message = "Вернуть на доработку можно только заказ-наряд в статусе «На согласовании» или «Согласован»." });
+        }
+
+        ApplyWorkOrderApprovalDecision(workOrder, "revision_required", request?.Comment);
+        _db.SetAuditReason($"Заказ-наряд дела #{id} возвращен на доработку.");
+        AppendCaseEvent(clientCase, $"Заказ-наряд «{workOrder.Title}» возвращен на доработку. Согласующий: {User.GetDisplayName()}.{FormatOptionalComment(workOrder.ApprovalComment)}");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapWorkOrder(workOrder));
     }
 
     [HttpGet("{id:int}/court-sync/logs")]
@@ -3757,6 +4416,48 @@ public class CasesV2Controller : ControllerBase
         return totals;
     }
 
+    private static ClientCaseFinanceCalendarDto BuildFinanceCalendar(IReadOnlyCollection<Payment> payments)
+    {
+        var today = DateTime.UtcNow.Date;
+        var calendar = new ClientCaseFinanceCalendarDto();
+
+        foreach (var payment in payments)
+        {
+            var outstanding = ResolveFinancePaymentOutstanding(payment);
+            calendar.PaymentCount += 1;
+            calendar.PlanTotal += payment.Amount;
+            calendar.PaidTotal += payment.PaidAmount;
+            calendar.OutstandingTotal += outstanding;
+
+            if (payment.Status == PaymentStatus.Cancelled)
+            {
+                calendar.CancelledCount += 1;
+                continue;
+            }
+
+            if (outstanding <= 0m || payment.Status == PaymentStatus.Completed)
+            {
+                calendar.PaidCount += 1;
+                continue;
+            }
+
+            var plannedDate = ResolveFinancePaymentCalendarDate(payment).Date;
+            if (payment.Status == PaymentStatus.Overdue || plannedDate < today)
+            {
+                calendar.OverdueCount += 1;
+                calendar.OverdueTotal += outstanding;
+                continue;
+            }
+
+            calendar.PlannedCount += 1;
+            calendar.NextPaymentDate = calendar.NextPaymentDate is null || plannedDate < calendar.NextPaymentDate.Value.Date
+                ? plannedDate
+                : calendar.NextPaymentDate;
+        }
+
+        return calendar;
+    }
+
     private static IReadOnlyList<ClientCaseFinanceInvoiceDto> BuildFinanceInvoices(
         IReadOnlyCollection<Payment> payments,
         IReadOnlyDictionary<int, Contract> contractsById)
@@ -3889,8 +4590,357 @@ public class CasesV2Controller : ControllerBase
     private static DateTime ResolveFinancePaymentSortDate(Payment payment)
         => payment.PaidDate ?? payment.LastPaymentDate ?? payment.Date;
 
+    private static DateTime ResolveFinancePaymentCalendarDate(Payment payment)
+        => payment.PlannedDate != default
+            ? payment.PlannedDate
+            : payment.Date;
+
     private static string? NormalizeFinanceInvoiceNumber(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
+
+    private async Task<ActionResult<(ClientCase ClientCase, ClientCaseWorkOrder WorkOrder)>> LoadEditableWorkOrderAsync(
+        int id,
+        CancellationToken ct)
+    {
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var workOrder = await _db.ClientCaseWorkOrders
+            .Include(item => item.Items)
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id, ct);
+        if (workOrder is null)
+        {
+            return NotFound();
+        }
+
+        return (clientCase, workOrder);
+    }
+
+    private async Task<(ClientCaseWorkOrderItem? Item, string? Error)> BuildWorkOrderItemAsync(
+        ClientCaseWorkOrder workOrder,
+        UpsertClientCaseWorkOrderItemRequest? request,
+        CancellationToken ct)
+    {
+        var nextSortOrder = workOrder.Items.Count == 0 ? 1 : workOrder.Items.Max(item => item.SortOrder) + 1;
+        var item = new ClientCaseWorkOrderItem
+        {
+            ClientCaseWorkOrderId = workOrder.Id,
+            SortOrder = request?.SortOrder > 0 ? request.SortOrder.Value : nextSortOrder,
+        };
+        var error = await ApplyWorkOrderItemAsync(item, request, ct);
+        return (item, error);
+    }
+
+    private async Task<string?> ApplyWorkOrderItemAsync(
+        ClientCaseWorkOrderItem item,
+        UpsertClientCaseWorkOrderItemRequest? request,
+        CancellationToken ct)
+    {
+        item.ServiceName = Truncate(NormalizeRequired(request?.ServiceName, item.ServiceName), 200);
+        item.Description = Truncate(NormalizeOptional(request?.Description) ?? item.Description, 1000);
+        item.DueDate = request?.DueDate ?? item.DueDate;
+        item.Quantity = NormalizePositiveMoney(request?.Quantity, item.Quantity <= 0 ? 1 : item.Quantity);
+        item.UnitPrice = NormalizeNonNegativeMoney(request?.UnitPrice, item.UnitPrice);
+        item.TotalAmount = decimal.Round(item.Quantity * item.UnitPrice, 2, MidpointRounding.AwayFromZero);
+        if (request?.SortOrder is > 0)
+        {
+            item.SortOrder = request.SortOrder.Value;
+        }
+
+        if (request?.ExecutorUserId is not null)
+        {
+            if (request.ExecutorUserId <= 0)
+            {
+                item.ExecutorUserId = null;
+                item.ExecutorName = string.Empty;
+            }
+            else
+            {
+                var executor = await _db.Users
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(user => user.Id == request.ExecutorUserId.Value && user.IsActive, ct);
+                if (executor is null)
+                {
+                    return "Исполнитель услуги не найден или неактивен.";
+                }
+
+                item.ExecutorUserId = executor.Id;
+                item.ExecutorName = executor.FullName;
+            }
+        }
+        else if (NormalizeOptional(request?.ExecutorName) is { } executorName)
+        {
+            item.ExecutorName = Truncate(executorName, 256);
+        }
+
+        return null;
+    }
+
+    private static void RecalculateWorkOrder(ClientCaseWorkOrder workOrder)
+    {
+        foreach (var item in workOrder.Items)
+        {
+            item.TotalAmount = decimal.Round(item.Quantity * item.UnitPrice, 2, MidpointRounding.AwayFromZero);
+        }
+
+        workOrder.TotalAmount = decimal.Round(workOrder.Items.Sum(item => item.TotalAmount), 2, MidpointRounding.AwayFromZero);
+    }
+
+    private void StampWorkOrderUpdate(ClientCaseWorkOrder workOrder)
+    {
+        workOrder.UpdatedAt = DateTime.UtcNow;
+        workOrder.UpdatedByUserId = User.GetUserId();
+        workOrder.UpdatedByUserName = User.GetDisplayName();
+    }
+
+    private void ApplyWorkOrderApprovalDecision(ClientCaseWorkOrder workOrder, string status, string? comment)
+    {
+        workOrder.Status = status;
+        workOrder.ApprovalDecisionAt = DateTime.UtcNow;
+        workOrder.ApprovalDecisionByUserId = User.GetUserId();
+        workOrder.ApprovalDecisionByUserName = User.GetDisplayName();
+        workOrder.ApprovalComment = Truncate(NormalizeOptional(comment) ?? string.Empty, 1000);
+        StampWorkOrderUpdate(workOrder);
+    }
+
+    private static string FormatOptionalComment(string? comment)
+    {
+        var normalized = NormalizeOptional(comment);
+        return normalized is null ? string.Empty : $" Комментарий: {normalized}.";
+    }
+
+    private static ClientCaseWorkOrderDto MapWorkOrder(ClientCaseWorkOrder workOrder)
+    {
+        RecalculateWorkOrder(workOrder);
+        return new ClientCaseWorkOrderDto
+        {
+            Id = workOrder.Id,
+            ClientCaseId = workOrder.ClientCaseId,
+            Title = workOrder.Title,
+            Status = workOrder.Status,
+            StatusLabel = FormatWorkOrderStatus(workOrder.Status),
+            Currency = workOrder.Currency,
+            Notes = workOrder.Notes,
+            TotalAmount = workOrder.TotalAmount,
+            CreatedAt = workOrder.CreatedAt,
+            CreatedByUserId = workOrder.CreatedByUserId,
+            CreatedByUserName = workOrder.CreatedByUserName,
+            UpdatedAt = workOrder.UpdatedAt,
+            UpdatedByUserId = workOrder.UpdatedByUserId,
+            UpdatedByUserName = workOrder.UpdatedByUserName,
+            ApprovalRequestedAt = workOrder.ApprovalRequestedAt,
+            ApprovalRequestedByUserId = workOrder.ApprovalRequestedByUserId,
+            ApprovalRequestedByUserName = workOrder.ApprovalRequestedByUserName,
+            ApprovalDecisionAt = workOrder.ApprovalDecisionAt,
+            ApprovalDecisionByUserId = workOrder.ApprovalDecisionByUserId,
+            ApprovalDecisionByUserName = workOrder.ApprovalDecisionByUserName,
+            ApprovalComment = workOrder.ApprovalComment,
+            Items = workOrder.Items
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.Id)
+                .Select(MapWorkOrderItem)
+                .ToList(),
+        };
+    }
+
+    private static ClientCaseWorkOrderItemDto MapWorkOrderItem(ClientCaseWorkOrderItem item)
+        => new()
+        {
+            Id = item.Id,
+            ClientCaseWorkOrderId = item.ClientCaseWorkOrderId,
+            ServiceName = item.ServiceName,
+            Description = item.Description,
+            ExecutorUserId = item.ExecutorUserId,
+            ExecutorName = item.ExecutorName,
+            DueDate = item.DueDate,
+            Quantity = item.Quantity,
+            UnitPrice = item.UnitPrice,
+            TotalAmount = item.TotalAmount,
+            SortOrder = item.SortOrder,
+        };
+
+    private static string BuildWorkOrderPrintHtml(ClientCase clientCase, ClientCaseWorkOrder workOrder)
+    {
+        RecalculateWorkOrder(workOrder);
+        var generatedAt = DateTime.UtcNow.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        var rows = string.Join(Environment.NewLine, workOrder.Items
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .Select((item, index) => $"""
+              <tr>
+                <td>{index + 1}</td>
+                <td>
+                  <strong>{Html(item.ServiceName)}</strong>
+                  <div class="muted">{Html(item.Description)}</div>
+                </td>
+                <td>{Html(item.ExecutorName)}</td>
+                <td>{Html(FormatRuDate(item.DueDate))}</td>
+                <td class="num">{Html(item.Quantity.ToString("N2", CultureInfo.GetCultureInfo("ru-RU")))}</td>
+                <td class="num">{Html(FormatMoney(item.UnitPrice))}</td>
+                <td class="num">{Html(FormatMoney(item.TotalAmount))}</td>
+              </tr>
+            """));
+        if (string.IsNullOrWhiteSpace(rows))
+        {
+            rows = """<tr><td colspan="7" class="empty">Услуги пока не добавлены.</td></tr>""";
+        }
+
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Заказ-наряд {{Html(workOrder.Title)}}</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, Arial, sans-serif; color: #0f172a; }
+    body { margin: 0; padding: 32px; background: #f8fafc; }
+    main { max-width: 1100px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; }
+    h1 { margin: 0; font-size: 28px; line-height: 1.2; }
+    h2 { margin: 28px 0 10px; font-size: 16px; text-transform: uppercase; letter-spacing: .08em; color: #64748b; }
+    .meta { margin-top: 8px; color: #64748b; font-size: 13px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+    .stat { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; background: #f8fafc; }
+    .stat span { display: block; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .stat strong { display: block; margin-top: 6px; font-size: 18px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 8px; text-align: left; vertical-align: top; }
+    th { color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; background: #f8fafc; }
+    .num { text-align: right; white-space: nowrap; }
+    .muted { margin-top: 3px; color: #64748b; font-size: 12px; }
+    .empty { text-align: center; color: #64748b; padding: 24px; }
+    .total { margin-top: 18px; display: flex; justify-content: flex-end; font-size: 20px; font-weight: 700; }
+    @media print { body { padding: 0; background: #fff; } main { border: 0; border-radius: 0; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Заказ-наряд / предварительный расчет</h1>
+    <div class="meta">Сформировано: {{Html(generatedAt)}}</div>
+    <div class="grid">
+      <div class="stat"><span>Дело</span><strong>{{Html(clientCase.Title)}}</strong><div class="muted">{{Html(clientCase.CaseNumber)}}</div></div>
+      <div class="stat"><span>Клиент</span><strong>{{Html(GetOwnerName(clientCase))}}</strong></div>
+      <div class="stat"><span>Ответственный</span><strong>{{Html(GetResponsibleName(clientCase))}}</strong></div>
+      <div class="stat"><span>Статус</span><strong>{{Html(FormatWorkOrderStatus(workOrder.Status))}}</strong></div>
+      <div class="stat"><span>Валюта</span><strong>{{Html(workOrder.Currency)}}</strong></div>
+      <div class="stat"><span>Итого</span><strong>{{Html(FormatMoney(workOrder.TotalAmount))}}</strong></div>
+    </div>
+    <h2>{{Html(workOrder.Title)}}</h2>
+    <div class="meta">{{Html(workOrder.Notes)}}</div>
+    <table>
+      <thead>
+        <tr>
+          <th>в"–</th>
+          <th>Услуга</th>
+          <th>Исполнитель</th>
+          <th>Срок</th>
+          <th class="num">Кол-во</th>
+          <th class="num">Цена</th>
+          <th class="num">Сумма</th>
+        </tr>
+      </thead>
+      <tbody>
+{{rows}}
+      </tbody>
+    </table>
+    <div class="total">Итого: {{Html(FormatMoney(workOrder.TotalAmount))}}</div>
+  </main>
+</body>
+</html>
+""";
+    }
+
+    private static string NormalizeWorkOrderStatus(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
+        return normalized switch
+        {
+            "approved" or "согласован" or "согласовано" => "approved",
+            "pending_approval" or "pending-approval" or "on_approval" or "on-approval" or "на согласовании" => "pending_approval",
+            "revision_required" or "revision-required" or "returned" or "returned_for_revision" or "на доработке" or "доработка" => "revision_required",
+            "invoice_created" or "invoice-created" or "счет создан" or "счёт создан" => "invoice_created",
+            "cancelled" or "canceled" or "отменен" or "отменён" => "cancelled",
+            _ => "draft",
+        };
+    }
+
+    private static string FormatWorkOrderStatus(string? value)
+        => NormalizeWorkOrderStatus(value) switch
+        {
+            "approved" => "Согласован",
+            "pending_approval" => "На согласовании",
+            "revision_required" => "На доработке",
+            "invoice_created" => "Счет создан",
+            "cancelled" => "Отменен",
+            _ => "Черновик",
+        };
+
+    private static bool IsWorkOrderLockedForEditing(ClientCaseWorkOrder workOrder)
+        => IsWorkOrderApprovalManagedStatus(workOrder.Status);
+
+    private static bool IsWorkOrderApprovalManagedStatus(string? status)
+        => NormalizeWorkOrderStatus(status) is "pending_approval" or "approved" or "invoice_created";
+
+    private static string BuildWorkOrderLockedMessage(string? status)
+        => NormalizeWorkOrderStatus(status) switch
+        {
+            "pending_approval" => "Заказ-наряд на согласовании: редактирование доступно после возврата на доработку.",
+            "approved" => "Согласованный заказ-наряд нельзя редактировать. Создайте счет или верните расчет на доработку.",
+            "invoice_created" => "По заказ-наряду уже создан счет: редактирование заблокировано.",
+            _ => "Заказ-наряд недоступен для редактирования в текущем статусе.",
+        };
+
+    private async Task<string> BuildWorkOrderInvoiceNumberAsync(
+        int clientCaseId,
+        int workOrderId,
+        DateTime invoiceDate,
+        string? requestedNumber,
+        CancellationToken ct)
+    {
+        var baseNumber = NormalizeOptional(requestedNumber) ?? $"WO-{clientCaseId}-{workOrderId}";
+        var candidate = baseNumber.Length > 120 ? baseNumber[..120] : baseNumber;
+        var suffix = 1;
+        while (await _db.Invoices.AsNoTracking().AnyAsync(
+            invoice => invoice.Number == candidate && invoice.Date.Date == invoiceDate.Date,
+            ct))
+        {
+            suffix++;
+            var suffixText = $"-{suffix}";
+            var maxBaseLength = Math.Max(1, 120 - suffixText.Length);
+            var truncatedBase = baseNumber.Length > maxBaseLength ? baseNumber[..maxBaseLength] : baseNumber;
+            candidate = $"{truncatedBase}{suffixText}";
+        }
+
+        return candidate;
+    }
+
+    private static string NormalizeCurrency(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToUpperInvariant();
+        return normalized is { Length: 3 } ? normalized : "RUB";
+    }
+
+    private static decimal NormalizePositiveMoney(decimal? value, decimal fallback)
+    {
+        var current = value ?? fallback;
+        return current <= 0 ? 1 : decimal.Round(current, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static decimal NormalizeNonNegativeMoney(decimal? value, decimal fallback)
+    {
+        var current = value ?? fallback;
+        return current < 0 ? 0 : decimal.Round(current, 2, MidpointRounding.AwayFromZero);
+    }
 
     private async Task<ClientCaseRelatedParty?> BuildAutoLegalEntityRelatedPartyAsync(
         int clientCaseId,
@@ -3912,6 +4962,7 @@ public class CasesV2Controller : ControllerBase
         var alreadyLinked = await _db.ClientCaseRelatedParties.AnyAsync(item =>
             item.ClientCaseId == clientCaseId &&
             item.SourceType == RelatedPartySourceLegalEntity &&
+            !item.IsArchived &&
             item.LegalEntityId == legalEntity.Id, ct);
         if (alreadyLinked)
         {
@@ -3938,6 +4989,15 @@ public class CasesV2Controller : ControllerBase
         => visibility.SeesAll
             || (legalEntity.ResponsibleUserId.HasValue && visibility.VisibleUserIds.Contains(legalEntity.ResponsibleUserId.Value));
 
+    private static void RestoreRelatedParty(ClientCaseRelatedParty party)
+    {
+        party.IsArchived = false;
+        party.ArchivedAt = null;
+        party.ArchivedByUserId = null;
+        party.ArchivedByUserName = string.Empty;
+        party.ArchiveReason = string.Empty;
+    }
+
     private static ClientCaseRelatedPartyDto MapRelatedParty(ClientCaseRelatedParty party)
         => new()
         {
@@ -3957,6 +5017,11 @@ public class CasesV2Controller : ControllerBase
             CreatedAt = party.CreatedAt,
             CreatedByUserId = party.CreatedByUserId,
             CreatedByUserName = party.CreatedByUserName,
+            IsArchived = party.IsArchived,
+            ArchivedAt = party.ArchivedAt,
+            ArchivedByUserId = party.ArchivedByUserId,
+            ArchivedByUserName = party.ArchivedByUserName,
+            ArchiveReason = party.ArchiveReason,
         };
 
     private static int? ResolveRelatedPartySourceId(ClientCaseRelatedParty party)
@@ -4371,6 +5436,101 @@ public class CasesV2Controller : ControllerBase
         public string? Notes { get; set; }
     }
 
+    public sealed class UpsertClientCaseWorkOrderRequest
+    {
+        public string? Title { get; set; }
+        public string? Status { get; set; }
+        public string? Currency { get; set; }
+        public string? Notes { get; set; }
+    }
+
+    public sealed class UpsertClientCaseWorkOrderItemRequest
+    {
+        public string? ServiceName { get; set; }
+        public string? Description { get; set; }
+        public int? ExecutorUserId { get; set; }
+        public string? ExecutorName { get; set; }
+        public DateTime? DueDate { get; set; }
+        public decimal? Quantity { get; set; }
+        public decimal? UnitPrice { get; set; }
+        public int? SortOrder { get; set; }
+    }
+
+    public sealed class CreateClientCaseWorkOrderInvoiceRequest
+    {
+        public string? Number { get; set; }
+        public DateTime? Date { get; set; }
+        public DateTime? DueDate { get; set; }
+        public string? Description { get; set; }
+    }
+
+    public sealed class ClientCaseWorkOrderApprovalRequest
+    {
+        public string? Comment { get; set; }
+    }
+
+    public sealed class ClientCaseWorkOrderInvoiceDto
+    {
+        public int PaymentId { get; set; }
+        public int? InvoiceEntityId { get; set; }
+        public string Number { get; set; } = string.Empty;
+        public DateTime Date { get; set; }
+        public DateTime DueDate { get; set; }
+        public decimal Amount { get; set; }
+        public ClientCaseWorkOrderDto WorkOrder { get; set; } = new();
+    }
+
+    public sealed class ClientCaseWorkOrderDto
+    {
+        public int? Id { get; set; }
+        public int ClientCaseId { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string StatusLabel { get; set; } = string.Empty;
+        public string Currency { get; set; } = "RUB";
+        public string Notes { get; set; } = string.Empty;
+        public decimal TotalAmount { get; set; }
+        public DateTime? CreatedAt { get; set; }
+        public int? CreatedByUserId { get; set; }
+        public string CreatedByUserName { get; set; } = string.Empty;
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedByUserId { get; set; }
+        public string UpdatedByUserName { get; set; } = string.Empty;
+        public DateTime? ApprovalRequestedAt { get; set; }
+        public int? ApprovalRequestedByUserId { get; set; }
+        public string ApprovalRequestedByUserName { get; set; } = string.Empty;
+        public DateTime? ApprovalDecisionAt { get; set; }
+        public int? ApprovalDecisionByUserId { get; set; }
+        public string ApprovalDecisionByUserName { get; set; } = string.Empty;
+        public string ApprovalComment { get; set; } = string.Empty;
+        public IReadOnlyList<ClientCaseWorkOrderItemDto> Items { get; set; } = [];
+
+        public static ClientCaseWorkOrderDto Empty(int clientCaseId) => new()
+        {
+            ClientCaseId = clientCaseId,
+            Title = "Предварительный расчет",
+            Status = "draft",
+            StatusLabel = "Черновик",
+            Currency = "RUB",
+            Items = [],
+        };
+    }
+
+    public sealed class ClientCaseWorkOrderItemDto
+    {
+        public int Id { get; set; }
+        public int ClientCaseWorkOrderId { get; set; }
+        public string ServiceName { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public int? ExecutorUserId { get; set; }
+        public string ExecutorName { get; set; } = string.Empty;
+        public DateTime? DueDate { get; set; }
+        public decimal Quantity { get; set; }
+        public decimal UnitPrice { get; set; }
+        public decimal TotalAmount { get; set; }
+        public int SortOrder { get; set; }
+    }
+
     public sealed class ClientCaseActivityDto
     {
         public DateTime? LastViewedAt { get; set; }
@@ -4434,6 +5594,7 @@ public class CasesV2Controller : ControllerBase
         public string CaseTitle { get; set; } = string.Empty;
         public string OwnerName { get; set; } = string.Empty;
         public ClientCaseFinanceTotalsDto Totals { get; set; } = new();
+        public ClientCaseFinanceCalendarDto Calendar { get; set; } = new();
         public IReadOnlyList<ClientCaseFinanceInvoiceDto> Invoices { get; set; } = [];
         public IReadOnlyList<ClientCaseFinancePaymentDto> Payments { get; set; } = [];
         public IReadOnlyList<ClientCaseFinanceContractDto> Contracts { get; set; } = [];
@@ -4453,6 +5614,20 @@ public class CasesV2Controller : ControllerBase
         public decimal PlannedMargin { get; set; }
         public decimal PaidMargin { get; set; }
         public decimal OutstandingBalance { get; set; }
+    }
+
+    public sealed class ClientCaseFinanceCalendarDto
+    {
+        public int PaymentCount { get; set; }
+        public decimal PlanTotal { get; set; }
+        public decimal PaidTotal { get; set; }
+        public decimal OutstandingTotal { get; set; }
+        public decimal OverdueTotal { get; set; }
+        public int PaidCount { get; set; }
+        public int PlannedCount { get; set; }
+        public int OverdueCount { get; set; }
+        public int CancelledCount { get; set; }
+        public DateTime? NextPaymentDate { get; set; }
     }
 
     public sealed class ClientCaseFinanceInvoiceDto

@@ -954,6 +954,13 @@ public class CasesV2ControllerTests
         Assert.Equal(25000m, dto.Totals.IncomePaid);
         Assert.Equal(0m, dto.Totals.OutstandingBalance);
         Assert.Equal(2, dto.Totals.IncomeCount);
+        Assert.Equal(2, dto.Calendar.PaymentCount);
+        Assert.Equal(25000m, dto.Calendar.PlanTotal);
+        Assert.Equal(25000m, dto.Calendar.PaidTotal);
+        Assert.Equal(0m, dto.Calendar.OutstandingTotal);
+        Assert.Equal(2, dto.Calendar.PaidCount);
+        Assert.Equal(0, dto.Calendar.OverdueCount);
+        Assert.Null(dto.Calendar.NextPaymentDate);
         var invoice = Assert.Single(dto.Invoices);
         Assert.Equal("8", invoice.Number);
         Assert.Equal(25000m, invoice.Amount);
@@ -1059,7 +1066,7 @@ public class CasesV2ControllerTests
             Claimant = " Земцов Виктор Александрович ",
             Defendant = " Банк Точка ",
             ThirdParties = " ФНС\nСРО ",
-            Representatives = " Кожеваткин А.В. ",
+            Representatives = " Кожеваткин А.Р'. ",
             JudgeName = " Иванова И.И. ",
             Courtroom = " зал 12 ",
             CourtSecretaryContacts = " secretary@example.test ",
@@ -1090,7 +1097,7 @@ public class CasesV2ControllerTests
         Assert.Equal("Земцов Виктор Александрович", createdCase.Claimant);
         Assert.Equal("Банк Точка", createdCase.Defendant);
         Assert.Equal("ФНС\nСРО", createdCase.ThirdParties);
-        Assert.Equal("Кожеваткин А.В.", createdCase.Representatives);
+        Assert.Equal("Кожеваткин А.Р'.", createdCase.Representatives);
         Assert.Equal("Иванова И.И.", createdCase.JudgeName);
         Assert.Equal("зал 12", createdCase.Courtroom);
         Assert.Equal("secretary@example.test", createdCase.CourtSecretaryContacts);
@@ -2595,11 +2602,15 @@ public class CasesV2ControllerTests
         var created = Assert.IsType<CreatedResult>(createdResult.Result);
         var createdDto = Assert.IsType<ClientCaseRelatedPartyDto>(created.Value);
         Assert.Equal("client", createdDto.SourceType);
+        Assert.Contains(await db.ObjectAuditEvents.AsNoTracking().ToListAsync(), auditEvent =>
+            auditEvent.ObjectType == "client-case-related-party" &&
+            auditEvent.ObjectId == createdDto.Id &&
+            auditEvent.Action == "Created");
         Assert.Equal(relatedClient.Id, createdDto.SourceId);
         Assert.Equal("Земцов Виктор Александрович", createdDto.DisplayName);
         Assert.Equal("Свидетель", createdDto.Role);
 
-        var listResult = await controller.GetRelatedParties(clientCase.Id, CancellationToken.None);
+        var listResult = await controller.GetRelatedParties(clientCase.Id, false, CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(listResult.Result);
         var items = Assert.IsAssignableFrom<IReadOnlyList<ClientCaseRelatedPartyDto>>(ok.Value);
         var item = Assert.Single(items);
@@ -2608,7 +2619,63 @@ public class CasesV2ControllerTests
         var deleteResult = await controller.DeleteRelatedParty(clientCase.Id, createdDto.Id, CancellationToken.None);
 
         Assert.IsType<NoContentResult>(deleteResult);
-        Assert.Empty(await db.ClientCaseRelatedParties.AsNoTracking().ToListAsync());
+        var archivedParty = Assert.Single(await db.ClientCaseRelatedParties.AsNoTracking().ToListAsync());
+        Assert.True(archivedParty.IsArchived);
+        Assert.NotNull(archivedParty.ArchivedAt);
+        Assert.Equal(owner.Id, archivedParty.ArchivedByUserId);
+        Assert.Equal("Archived from case card", archivedParty.ArchiveReason);
+
+        var activeListResult = await controller.GetRelatedParties(clientCase.Id, false, CancellationToken.None);
+        var activeListOk = Assert.IsType<OkObjectResult>(activeListResult.Result);
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<ClientCaseRelatedPartyDto>>(activeListOk.Value));
+
+        var archivedListResult = await controller.GetRelatedParties(clientCase.Id, true, CancellationToken.None);
+        var archivedListOk = Assert.IsType<OkObjectResult>(archivedListResult.Result);
+        var archivedItems = Assert.IsAssignableFrom<IReadOnlyList<ClientCaseRelatedPartyDto>>(archivedListOk.Value);
+        var archivedDto = Assert.Single(archivedItems);
+        Assert.True(archivedDto.IsArchived);
+        var archivedAuditEvent = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .OrderByDescending(auditEvent => auditEvent.Id)
+            .FirstAsync(auditEvent =>
+                auditEvent.ObjectType == "client-case-related-party" &&
+                auditEvent.ObjectId == createdDto.Id &&
+                auditEvent.Action == "Updated");
+        Assert.NotNull(archivedAuditEvent.MetadataJson);
+        Assert.Contains("IsArchived", archivedAuditEvent.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("ArchiveReason", archivedAuditEvent.MetadataJson, StringComparison.Ordinal);
+        using var archivedAuditMetadata = JsonDocument.Parse(archivedAuditEvent.MetadataJson!);
+        Assert.Contains("Связанное лицо архивировано", archivedAuditMetadata.RootElement.GetProperty("reason").GetString(), StringComparison.Ordinal);
+
+        var restoredResult = await controller.AddRelatedParty(clientCase.Id, new CasesV2Controller.UpsertClientCaseRelatedPartyRequest
+        {
+            SourceType = "client",
+            SourceId = relatedClient.Id,
+            Role = "Представитель",
+            Notes = "Повторно добавлен в дело",
+        }, CancellationToken.None);
+
+        var restoredOk = Assert.IsType<OkObjectResult>(restoredResult.Result);
+        var restoredDto = Assert.IsType<ClientCaseRelatedPartyDto>(restoredOk.Value);
+        Assert.Equal(createdDto.Id, restoredDto.Id);
+        Assert.False(restoredDto.IsArchived);
+        Assert.Equal("Представитель", restoredDto.Role);
+        Assert.Equal("Повторно добавлен в дело", restoredDto.Notes);
+        var restoredParty = Assert.Single(await db.ClientCaseRelatedParties.AsNoTracking().ToListAsync());
+        Assert.False(restoredParty.IsArchived);
+
+        var restoredAuditEvent = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .OrderByDescending(auditEvent => auditEvent.Id)
+            .FirstAsync(auditEvent =>
+                auditEvent.ObjectType == "client-case-related-party" &&
+                auditEvent.ObjectId == createdDto.Id &&
+                auditEvent.Action == "Updated");
+        Assert.NotNull(restoredAuditEvent.MetadataJson);
+        Assert.Contains("IsArchived", restoredAuditEvent.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("Role", restoredAuditEvent.MetadataJson, StringComparison.Ordinal);
+        using var restoredAuditMetadata = JsonDocument.Parse(restoredAuditEvent.MetadataJson!);
+        Assert.Contains("восстановлено", restoredAuditMetadata.RootElement.GetProperty("reason").GetString(), StringComparison.Ordinal);
         await db.Entry(clientCase).ReloadAsync();
         Assert.Contains("Связь с делом добавлена: Земцов Виктор Александрович (Свидетель).", clientCase.EventHistory, StringComparison.Ordinal);
         Assert.Contains("Связь с делом удалена: Земцов Виктор Александрович.", clientCase.EventHistory, StringComparison.Ordinal);
@@ -2657,7 +2724,7 @@ public class CasesV2ControllerTests
             Role = "Нотариус",
         }, CancellationToken.None);
 
-        var listResult = await controller.GetRelatedParties(clientCase.Id, CancellationToken.None);
+        var listResult = await controller.GetRelatedParties(clientCase.Id, false, CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(listResult.Result);
         var items = Assert.IsAssignableFrom<IReadOnlyList<ClientCaseRelatedPartyDto>>(ok.Value);
         Assert.Contains(items, item => item.SourceType == "client" && item.DisplayName == "Петров Петр Петрович");
@@ -2707,6 +2774,616 @@ public class CasesV2ControllerTests
 
         Assert.IsType<ForbidResult>(result.Result);
         Assert.Empty(await db.ClientCaseRelatedParties.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task WorkOrder_CreatesUpdatesAndDeletesServiceItems()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var executor = await CreateUserAsync(db, "executor@example.com", "Исполнитель");
+        var client = new Client
+        {
+            Name = "Клиент заказ-наряда",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с заказ-нарядом",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var createResult = await controller.CreateWorkOrder(clientCase.Id, new CasesV2Controller.UpsertClientCaseWorkOrderRequest
+        {
+            Title = "Предварительный расчет банкротства",
+            Status = "draft",
+            Currency = "rub",
+            Notes = "Первичная оценка",
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderDto>(created.Value);
+        Assert.Equal(clientCase.Id, createdDto.ClientCaseId);
+        Assert.Equal("RUB", createdDto.Currency);
+        Assert.Empty(createdDto.Items);
+
+        var addResult = await controller.AddWorkOrderItem(clientCase.Id, new CasesV2Controller.UpsertClientCaseWorkOrderItemRequest
+        {
+            ServiceName = "Подготовка заявления",
+            Description = "Документы первой очереди",
+            ExecutorUserId = executor.Id,
+            DueDate = new DateTime(2026, 06, 01),
+            Quantity = 2,
+            UnitPrice = 15000,
+        }, CancellationToken.None);
+
+        var addOk = Assert.IsType<OkObjectResult>(addResult.Result);
+        var addedDto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderDto>(addOk.Value);
+        var item = Assert.Single(addedDto.Items);
+        Assert.Equal(executor.Id, item.ExecutorUserId);
+        Assert.Equal("Исполнитель", item.ExecutorName);
+        Assert.Equal(30000, item.TotalAmount);
+        Assert.Equal(30000, addedDto.TotalAmount);
+
+        var updateResult = await controller.UpdateWorkOrderItem(clientCase.Id, item.Id, new CasesV2Controller.UpsertClientCaseWorkOrderItemRequest
+        {
+            ServiceName = "Подготовка заявления и приложений",
+            Quantity = 1,
+            UnitPrice = 22000,
+        }, CancellationToken.None);
+
+        var updateOk = Assert.IsType<OkObjectResult>(updateResult.Result);
+        var updatedDto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderDto>(updateOk.Value);
+        Assert.Equal(22000, updatedDto.TotalAmount);
+        Assert.Equal("Подготовка заявления и приложений", Assert.Single(updatedDto.Items).ServiceName);
+
+        var deleteResult = await controller.DeleteWorkOrderItem(clientCase.Id, item.Id, CancellationToken.None);
+
+        var deleteOk = Assert.IsType<OkObjectResult>(deleteResult.Result);
+        var emptyDto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderDto>(deleteOk.Value);
+        Assert.Empty(emptyDto.Items);
+        Assert.Equal(0, emptyDto.TotalAmount);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Contains("Предварительный", clientCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("Подготовка заявления", clientCase.EventHistory, StringComparison.Ordinal);
+
+        var auditEvents = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .Where(auditEvent =>
+                auditEvent.ObjectType == "client-case-work-order" ||
+                auditEvent.ObjectType == "client-case-work-order-item")
+            .ToListAsync();
+
+        static bool AuditReasonContains(ObjectAuditEvent auditEvent, string expected)
+        {
+            if (string.IsNullOrWhiteSpace(auditEvent.MetadataJson))
+            {
+                return false;
+            }
+
+            using var metadata = JsonDocument.Parse(auditEvent.MetadataJson);
+            return metadata.RootElement.TryGetProperty("reason", out var reason)
+                && reason.GetString()?.Contains(expected, StringComparison.OrdinalIgnoreCase) == true;
+        }
+
+        Assert.Contains(auditEvents, auditEvent =>
+            auditEvent.ObjectType == "client-case-work-order" &&
+            auditEvent.ObjectId == createdDto.Id &&
+            auditEvent.Action == "Created");
+        Assert.Contains(auditEvents, auditEvent =>
+            auditEvent.ObjectType == "client-case-work-order" &&
+            auditEvent.ObjectId == createdDto.Id &&
+            auditEvent.Action == "Updated" &&
+            AuditReasonContains(auditEvent, "добавлена услуга"));
+        Assert.Contains(auditEvents, auditEvent =>
+            auditEvent.ObjectType == "client-case-work-order-item" &&
+            auditEvent.ObjectId == item.Id &&
+            auditEvent.Action == "Created");
+        Assert.Contains(auditEvents, auditEvent =>
+            auditEvent.ObjectType == "client-case-work-order-item" &&
+            auditEvent.ObjectId == item.Id &&
+            auditEvent.Action == "Updated" &&
+            auditEvent.MetadataJson?.Contains("ServiceName", StringComparison.Ordinal) == true);
+        Assert.Contains(auditEvents, auditEvent =>
+            auditEvent.ObjectType == "client-case-work-order-item" &&
+            auditEvent.ObjectId == item.Id &&
+            auditEvent.Action == "Deleted");
+    }
+
+    [Fact]
+    public async Task WorkOrder_ForbidsUserWithoutEditPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "viewer@example.com", "Наблюдатель");
+        viewer.Role!.Permissions.Single().CanEdit = false;
+        await db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Клиент без прав редактирования",
+            IsActive = true,
+            ResponsibleUserId = viewer.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело без прав редактирования",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = viewer.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, viewer);
+
+        var result = await controller.CreateWorkOrder(clientCase.Id, new CasesV2Controller.UpsertClientCaseWorkOrderRequest
+        {
+            Title = "Недоступный расчет",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Empty(await db.ClientCaseWorkOrders.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task WorkOrder_CreatesInvoiceFromServices()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var executor = await CreateUserAsync(db, "executor@example.com", "Исполнитель");
+        var client = new Client
+        {
+            Name = "Клиент счета",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для счета",
+            CaseNumber = "CASE-77",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Расчет услуг",
+            Status = "approved",
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Подготовка заявления",
+                    ExecutorUserId = executor.Id,
+                    ExecutorName = executor.FullName,
+                    Quantity = 2,
+                    UnitPrice = 10000,
+                    TotalAmount = 20000,
+                    SortOrder = 1,
+                },
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Сопровождение заседания",
+                    Quantity = 1,
+                    UnitPrice = 15000,
+                    TotalAmount = 15000,
+                    SortOrder = 2,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.CreateInvoiceFromWorkOrder(clientCase.Id, new CasesV2Controller.CreateClientCaseWorkOrderInvoiceRequest
+        {
+            Number = "WO-TEST-77",
+            Date = new DateTime(2026, 06, 02),
+            DueDate = new DateTime(2026, 06, 12),
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderInvoiceDto>(created.Value);
+        Assert.Equal("WO-TEST-77", dto.Number);
+        Assert.Equal(35000, dto.Amount);
+        Assert.Equal("invoice_created", dto.WorkOrder.Status);
+
+        var payment = await db.Payments
+            .Include(item => item.Invoice)
+            .Include(item => item.InvoiceLineItems)
+            .Include(item => item.InvoiceClientCases)
+            .Include(item => item.Responsibles)
+            .SingleAsync(item => item.Id == dto.PaymentId);
+
+        Assert.Equal(DocumentKind.Invoice, payment.DocumentKind);
+        Assert.Equal(PaymentType.Income, payment.Type);
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Draft, payment.InvoiceWorkflowStatus);
+        Assert.Equal(client.Id, payment.ClientId);
+        Assert.Equal(clientCase.Id, payment.ClientCaseId);
+        Assert.Equal("CASE-77", payment.ClientCaseReference);
+        Assert.Equal(2, payment.InvoiceLineItems.Count);
+        Assert.Contains(payment.InvoiceLineItems, item => item.Name == "Подготовка заявления" && item.Quantity == 2 && item.Price == 10000);
+        Assert.Contains(payment.InvoiceClientCases, item => item.ClientCaseId == clientCase.Id);
+        Assert.Contains(payment.Responsibles, item => item.UserId == executor.Id);
+
+        await db.Entry(workOrder).ReloadAsync();
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal("invoice_created", workOrder.Status);
+        Assert.Contains("создан счет", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WorkOrder_PrintReturnsHtmlForVisibleCase()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var executor = await CreateUserAsync(db, "executor@example.com", "Исполнитель");
+        var client = new Client
+        {
+            Name = "Клиент печатной формы",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для печати",
+            CaseNumber = "PRINT-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Предварительный расчет",
+            Status = "approved",
+            Currency = "RUB",
+            Notes = "Печатная версия для согласования",
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Подготовка заявления",
+                    Description = "Пакет документов",
+                    ExecutorUserId = executor.Id,
+                    ExecutorName = executor.FullName,
+                    DueDate = new DateTime(2026, 06, 01),
+                    Quantity = 2,
+                    UnitPrice = 12000,
+                    TotalAmount = 24000,
+                    SortOrder = 1,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.PrintWorkOrder(clientCase.Id, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("<!doctype html>", content.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Заказ-наряд", content.Content, StringComparison.Ordinal);
+        Assert.Contains("PRINT-1", content.Content, StringComparison.Ordinal);
+        Assert.Contains("Подготовка заявления", content.Content, StringComparison.Ordinal);
+        Assert.Contains("24", content.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WorkOrder_ApprovalWorkflowSubmitsApprovesAndBlocksDraftInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент согласования заказ-наряда",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для согласования заказ-наряда",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Расчет услуг",
+            Status = "draft",
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Подготовка заявления",
+                    Quantity = 1,
+                    UnitPrice = 10000,
+                    TotalAmount = 10000,
+                    SortOrder = 1,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var draftInvoiceResult = await controller.CreateInvoiceFromWorkOrder(clientCase.Id, new CasesV2Controller.CreateClientCaseWorkOrderInvoiceRequest(), CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(draftInvoiceResult.Result);
+
+        var submitResult = await controller.SubmitWorkOrderApproval(clientCase.Id, new CasesV2Controller.ClientCaseWorkOrderApprovalRequest
+        {
+            Comment = "Проверьте расчет",
+        }, CancellationToken.None);
+
+        var submitOk = Assert.IsType<OkObjectResult>(submitResult.Result);
+        var submitted = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderDto>(submitOk.Value);
+        Assert.Equal("pending_approval", submitted.Status);
+        Assert.Equal(owner.Id, submitted.ApprovalRequestedByUserId);
+        Assert.Equal("Проверьте расчет", submitted.ApprovalComment);
+
+        var approveResult = await controller.ApproveWorkOrder(clientCase.Id, new CasesV2Controller.ClientCaseWorkOrderApprovalRequest
+        {
+            Comment = "Согласовано",
+        }, CancellationToken.None);
+
+        var approveOk = Assert.IsType<OkObjectResult>(approveResult.Result);
+        var approved = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderDto>(approveOk.Value);
+        Assert.Equal("approved", approved.Status);
+        Assert.Equal(owner.Id, approved.ApprovalDecisionByUserId);
+        Assert.Equal("Согласовано", approved.ApprovalComment);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Contains("отправлен на согласование", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("согласован", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WorkOrder_BlocksManualApprovalAndEditingLockedStatuses()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент блокировки заказ-наряда",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var draftCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для ручного статуса заказ-наряда",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var approvedCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для блокировки заказ-наряда",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var draftWorkOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = draftCase,
+            Title = "Черновой расчет",
+            Status = "draft",
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var approvedWorkOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = approvedCase,
+            Title = "Согласованный расчет",
+            Status = "approved",
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Подготовка заявления",
+                    Quantity = 1,
+                    UnitPrice = 10000,
+                    TotalAmount = 10000,
+                    SortOrder = 1,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.AddRange(draftCase, approvedCase);
+        db.ClientCaseWorkOrders.AddRange(draftWorkOrder, approvedWorkOrder);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var manualApproval = await controller.UpdateWorkOrder(draftCase.Id, new CasesV2Controller.UpsertClientCaseWorkOrderRequest
+        {
+            Status = "approved",
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(manualApproval.Result);
+
+        var updateHeader = await controller.UpdateWorkOrder(approvedCase.Id, new CasesV2Controller.UpsertClientCaseWorkOrderRequest
+        {
+            Title = "Исправленный расчет",
+        }, CancellationToken.None);
+        var addItem = await controller.AddWorkOrderItem(approvedCase.Id, new CasesV2Controller.UpsertClientCaseWorkOrderItemRequest
+        {
+            ServiceName = "Новая услуга",
+            UnitPrice = 5000,
+        }, CancellationToken.None);
+        var updateItem = await controller.UpdateWorkOrderItem(approvedCase.Id, approvedWorkOrder.Items.Single().Id, new CasesV2Controller.UpsertClientCaseWorkOrderItemRequest
+        {
+            ServiceName = "Измененная услуга",
+            UnitPrice = 12000,
+        }, CancellationToken.None);
+        var deleteItem = await controller.DeleteWorkOrderItem(approvedCase.Id, approvedWorkOrder.Items.Single().Id, CancellationToken.None);
+        var deleteHeader = await controller.DeleteWorkOrder(approvedCase.Id, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(updateHeader.Result);
+        Assert.IsType<BadRequestObjectResult>(addItem.Result);
+        Assert.IsType<BadRequestObjectResult>(updateItem.Result);
+        Assert.IsType<BadRequestObjectResult>(deleteItem.Result);
+        Assert.IsType<BadRequestObjectResult>(deleteHeader);
+
+        var reloaded = await db.ClientCaseWorkOrders
+            .Include(item => item.Items)
+            .SingleAsync(item => item.Id == approvedWorkOrder.Id);
+        Assert.Equal("approved", reloaded.Status);
+        Assert.Equal("Согласованный расчет", reloaded.Title);
+        var item = Assert.Single(reloaded.Items);
+        Assert.Equal("Подготовка заявления", item.ServiceName);
+        Assert.Equal(10000, item.TotalAmount);
+    }
+
+    [Fact]
+    public async Task WorkOrder_RevisionReturnsPendingApprovalToRework()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент доработки заказ-наряда",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для доработки заказ-наряда",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Расчет услуг",
+            Status = "pending_approval",
+            Currency = "RUB",
+            ApprovalRequestedAt = DateTime.UtcNow,
+            ApprovalRequestedByUserId = owner.Id,
+            ApprovalRequestedByUserName = owner.FullName,
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Подготовка заявления",
+                    Quantity = 1,
+                    UnitPrice = 10000,
+                    TotalAmount = 10000,
+                    SortOrder = 1,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.RequestWorkOrderRevision(clientCase.Id, new CasesV2Controller.ClientCaseWorkOrderApprovalRequest
+        {
+            Comment = "Уточнить сроки",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderDto>(ok.Value);
+        Assert.Equal("revision_required", dto.Status);
+        Assert.Equal("Уточнить сроки", dto.ApprovalComment);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Contains("возвращен на доработку", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WorkOrder_ApprovedCanReturnToRevisionButInvoiceCreatedCannot()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент возврата заказ-наряда",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var approvedCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с согласованным заказ-нарядом",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var invoicedCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с выставленным счетом",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.AddRange(approvedCase, invoicedCase);
+        db.ClientCaseWorkOrders.AddRange(
+            new ClientCaseWorkOrder
+            {
+                ClientCase = approvedCase,
+                Title = "Согласованный расчет",
+                Status = "approved",
+                Currency = "RUB",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new ClientCaseWorkOrder
+            {
+                ClientCase = invoicedCase,
+                Title = "Расчет со счетом",
+                Status = "invoice_created",
+                Currency = "RUB",
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var approvedResult = await controller.RequestWorkOrderRevision(approvedCase.Id, new CasesV2Controller.ClientCaseWorkOrderApprovalRequest
+        {
+            Comment = "Клиент попросил пересчитать",
+        }, CancellationToken.None);
+
+        var approvedOk = Assert.IsType<OkObjectResult>(approvedResult.Result);
+        var approvedDto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderDto>(approvedOk.Value);
+        Assert.Equal("revision_required", approvedDto.Status);
+        Assert.Equal("Клиент попросил пересчитать", approvedDto.ApprovalComment);
+
+        var invoicedResult = await controller.RequestWorkOrderRevision(invoicedCase.Id, new CasesV2Controller.ClientCaseWorkOrderApprovalRequest
+        {
+            Comment = "Поздний возврат",
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(invoicedResult.Result);
+
+        var invoicedWorkOrder = await db.ClientCaseWorkOrders.SingleAsync(item => item.ClientCaseId == invoicedCase.Id);
+        Assert.Equal("invoice_created", invoicedWorkOrder.Status);
     }
 
     [Fact]

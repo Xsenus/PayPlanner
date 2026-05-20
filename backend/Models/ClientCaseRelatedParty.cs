@@ -44,4 +44,14 @@ public class ClientCaseRelatedParty
 
     [MaxLength(256)]
     public string CreatedByUserName { get; set; } = string.Empty;
+
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
+    public int? ArchivedByUserId { get; set; }
+
+    [MaxLength(256)]
+    public string ArchivedByUserName { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string ArchiveReason { get; set; } = string.Empty;
 }

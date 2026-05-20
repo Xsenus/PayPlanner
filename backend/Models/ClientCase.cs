@@ -334,6 +334,11 @@ namespace PayPlanner.Api.Models
         public ICollection<ClientCaseRelatedParty> RelatedParties { get; set; } = new List<ClientCaseRelatedParty>();
 
         /// <summary>
+        /// Предварительные расчеты / заказ-наряды по делу.
+        /// </summary>
+        public ICollection<ClientCaseWorkOrder> WorkOrders { get; set; } = new List<ClientCaseWorkOrder>();
+
+        /// <summary>
         /// Статус дела (черновик/в работе/закрыто).
         /// </summary>
         public ClientCaseStatus Status { get; set; } = ClientCaseStatus.Open;

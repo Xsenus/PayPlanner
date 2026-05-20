@@ -1502,6 +1502,22 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("ArchiveReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("ArchivedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ArchivedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ArchivedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<int>("ClientCaseId")
                         .HasColumnType("integer");
 
@@ -1531,6 +1547,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<int?>("ExternalContactId")
                         .HasColumnType("integer");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
 
                     b.Property<int?>("LegalEntityId")
                         .HasColumnType("integer");
@@ -1577,7 +1596,172 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("SourceType")
                         .HasDatabaseName("IX_ClientCaseRelatedParties_SourceType");
 
+                    b.HasIndex("ClientCaseId", "IsArchived")
+                        .HasDatabaseName("IX_ClientCaseRelatedParties_ClientCaseId_IsArchived");
+
                     b.ToTable("ClientCaseRelatedParties");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseWorkOrder", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ApprovalComment")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("ApprovalDecisionAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ApprovalDecisionByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ApprovalDecisionByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("ApprovalRequestedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ApprovalRequestedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ApprovalRequestedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovalDecisionAt")
+                        .HasDatabaseName("IX_ClientCaseWorkOrders_ApprovalDecisionAt");
+
+                    b.HasIndex("ApprovalRequestedAt")
+                        .HasDatabaseName("IX_ClientCaseWorkOrders_ApprovalRequestedAt");
+
+                    b.HasIndex("ClientCaseId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ClientCaseWorkOrders_ClientCaseId");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_ClientCaseWorkOrders_CreatedAt");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_ClientCaseWorkOrders_Status");
+
+                    b.ToTable("ClientCaseWorkOrders");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseWorkOrderItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientCaseWorkOrderId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ExecutorName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("ExecutorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ServiceName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseWorkOrderId")
+                        .HasDatabaseName("IX_ClientCaseWorkOrderItems_WorkOrderId");
+
+                    b.HasIndex("DueDate")
+                        .HasDatabaseName("IX_ClientCaseWorkOrderItems_DueDate");
+
+                    b.HasIndex("ExecutorUserId")
+                        .HasDatabaseName("IX_ClientCaseWorkOrderItems_ExecutorUserId");
+
+                    b.ToTable("ClientCaseWorkOrderItems");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientContract", b =>
@@ -6127,6 +6311,35 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("LegalEntity");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseWorkOrder", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("WorkOrders")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ClientCase");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseWorkOrderItem", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseWorkOrder", "WorkOrder")
+                        .WithMany("Items")
+                        .HasForeignKey("ClientCaseWorkOrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "ExecutorUser")
+                        .WithMany()
+                        .HasForeignKey("ExecutorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ExecutorUser");
+
+                    b.Navigation("WorkOrder");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientContract", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.Client", "Client")
@@ -6790,6 +7003,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Payments");
 
                     b.Navigation("RelatedParties");
+
+                    b.Navigation("WorkOrders");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseWorkOrder", b =>
+                {
+                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientStatusEntity", b =>
