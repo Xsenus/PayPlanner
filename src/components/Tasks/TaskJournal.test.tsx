@@ -21,6 +21,7 @@ const apiMock = vi.hoisted(() => ({
   updateTaskJournalItem: vi.fn(),
   updateTaskJournalStatus: vi.fn(),
   bulkUpdateTaskJournalItems: vi.fn(),
+  bulkDeleteTaskJournalItems: vi.fn(),
   updateTaskJournalApproval: vi.fn(),
   getTaskJournalComments: vi.fn(),
   createTaskJournalComment: vi.fn(),
@@ -52,6 +53,10 @@ const legalEntitiesState = vi.hoisted(() => ({
 const authState = vi.hoisted((): { user: { id: number; fullName: string; email: string }; isAdmin: boolean } => ({
   user: { id: 7, fullName: 'Администратор', email: 'admin@example.com' },
   isAdmin: true,
+}));
+
+const permissionsState = vi.hoisted(() => ({
+  taskCanExport: true,
 }));
 
 vi.mock('../../services/api', () => ({
@@ -94,6 +99,36 @@ vi.mock('../../contexts/AuthContext', () => ({
     user: authState.user,
     isAdmin: () => authState.isAdmin,
   }),
+}));
+
+vi.mock('../../hooks/useRolePermissions', () => ({
+  useRolePermissions: () => {
+    const section = {
+      canView: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+      canExport: true,
+      viewScope: 'all',
+    };
+
+    return {
+      calendar: { ...section, canViewAnalytics: true },
+      tasks: { ...section, canExport: permissionsState.taskCanExport },
+      reports: { ...section },
+      calculator: { ...section },
+      legalEntities: { ...section },
+      clients: { ...section },
+      cases: { ...section },
+      accounts: { ...section },
+      acts: { ...section },
+      payments: { ...section },
+      contracts: { ...section },
+      dictionaries: { ...section },
+      roles: { ...section },
+      audit: { ...section },
+    };
+  },
 }));
 
 function todayAt(hours: number, minutes = 0) {
@@ -148,6 +183,7 @@ function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
     authorUserId: 8,
     authorName: 'Постановщик',
     dueAt: todayAt(11),
+    approvalDueAt: null,
     plannedDurationMinutes: 60,
     type: 'task',
     priority: 'normal',
@@ -186,6 +222,12 @@ async function renderJournal(
   apiMock.getTaskJournalSettings.mockResolvedValue({
     restrictExecutorEditing: true,
     allowExecutorDeadlineChangeRequests: true,
+    caseInactivityAutomationEnabled: true,
+    caseInactivityDays: 14,
+    caseInactivityLimit: 25,
+    caseInactivityDefaultAssigneeUserId: null,
+    caseInactivityEscalationDays: 30,
+    caseInactivityEscalationUserId: null,
   });
 
   function RoutedJournal() {
@@ -221,6 +263,7 @@ describe('TaskJournal', () => {
     window.localStorage.clear();
     authState.user = { id: 7, fullName: 'Администратор', email: 'admin@example.com' };
     authState.isAdmin = true;
+    permissionsState.taskCanExport = true;
     clientsState.clients = [
       { id: 10, name: 'Иванов Иван Иванович', phone: '+7 900 000-00-00', email: 'client@example.com' } as Client,
     ];
@@ -249,6 +292,7 @@ describe('TaskJournal', () => {
     apiMock.updateTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalStatus.mockResolvedValue(createTask({ status: 'done', result: 'Готово' }));
     apiMock.bulkUpdateTaskJournalItems.mockResolvedValue({ requested: 1, updated: 1, skipped: 0 });
+    apiMock.bulkDeleteTaskJournalItems.mockResolvedValue({ requested: 1, updated: 1, skipped: 0 });
     apiMock.updateTaskJournalApproval.mockResolvedValue(createTask({ status: 'approved' }));
     apiMock.getTaskJournalComments.mockResolvedValue([]);
     apiMock.createTaskJournalComment.mockResolvedValue({
@@ -299,6 +343,16 @@ describe('TaskJournal', () => {
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
   });
 
+  it('hides task export buttons when export permission is denied', async () => {
+    authState.isAdmin = false;
+    permissionsState.taskCanExport = false;
+
+    await renderJournal();
+
+    expect(screen.queryByRole('button', { name: 'CSV' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'ICS' })).toBeNull();
+  });
+
   it('updates selected tasks through the bulk actions panel', async () => {
     const firstTask = createTask({ id: 101, title: 'Первая задача' });
     const secondTask = createTask({ id: 102, title: 'Вторая задача' });
@@ -326,6 +380,20 @@ describe('TaskJournal', () => {
       priority: 'urgent',
     });
     expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Обновлено задач: 1'), 'Журнал задач');
+  });
+
+  it('deletes selected tasks through the bulk actions panel', async () => {
+    const firstTask = createTask({ id: 101, title: 'Первая задача' });
+    const secondTask = createTask({ id: 102, title: 'Вторая задача' });
+
+    await renderJournal([firstTask, secondTask], { waitForTitle: 'Первая задача' });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Первая задача' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить выбранные' }));
+
+    await waitFor(() => expect(apiMock.bulkDeleteTaskJournalItems).toHaveBeenCalledTimes(1));
+    expect(apiMock.bulkDeleteTaskJournalItems).toHaveBeenCalledWith([101]);
+    expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Удалено задач: 1'), 'Журнал задач');
   });
 
   it('opens client card from the counterparty link in the journal', async () => {
@@ -874,15 +942,18 @@ describe('TaskJournal', () => {
         activeTaskCount: 0,
         completedTaskCount: 2,
         daysWithoutActiveTask: 20,
+        isEscalated: true,
         lastTaskAt: todayAt(8),
         suggestedTitle: 'Проверить движение по делу',
         suggestedDescription: 'Автоконтроль: по делу нет активной задачи.',
         suggestedDueAt: todayAt(9),
+        suggestedPriority: 'urgent',
       },
     ]);
     await renderJournal();
 
     expect(screen.getByText('Автоконтроль дел')).toBeTruthy();
+    expect(screen.getByText('Эскалация')).toBeTruthy();
     fireEvent.click(screen.getByTestId('task-automation-create-100'));
 
     await waitFor(() => expect(apiMock.createTaskJournalCaseAutomationTask).toHaveBeenCalledWith(100));
@@ -950,9 +1021,33 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
       status: 'onApproval',
+      approvalDueAt: expect.any(String),
       participants: expect.arrayContaining([
         expect.objectContaining({ role: 'approver', userId: 8, approvalStatus: 'pending' }),
       ]),
+    }));
+  });
+
+  it('shows and saves approval due date in the task editor', async () => {
+    const approvalDueAt = todayAt(16, 30);
+    await renderJournal([createTask({ approvalDueAt })]);
+
+    fireEvent.click(screen.getByTitle('Редактировать'));
+    expect(await screen.findByRole('heading', { name: 'Редактировать задачу' })).toBeTruthy();
+
+    const approvalDueAtInput = screen.getByTestId('task-approval-due-at-input') as HTMLInputElement;
+    expect(approvalDueAtInput.value).toBe(toDatetimeLocalInputValue(new Date(approvalDueAt)));
+
+    const nextApprovalDueAt = new Date();
+    nextApprovalDueAt.setHours(18, 45, 0, 0);
+    fireEvent.change(approvalDueAtInput, {
+      target: { value: toDatetimeLocalInputValue(nextApprovalDueAt) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      approvalDueAt: nextApprovalDueAt.toISOString(),
     }));
   });
 

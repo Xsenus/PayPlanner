@@ -264,6 +264,21 @@ export interface SendNotificationTestResponseDto {
   error?: string | null;
 }
 
+export interface NotificationDeliveryDto {
+  id: number;
+  eventKey: string;
+  channel: string;
+  senderId?: number | null;
+  senderName: string;
+  recipientUserId?: number | null;
+  recipientAddress: string;
+  subject: string;
+  status: string;
+  error?: string | null;
+  createdAt: string;
+  sentAt?: string | null;
+}
+
 export interface TelegramWebhookSyncResultDto {
   success: boolean;
   message: string;
@@ -581,11 +596,39 @@ export interface InvoiceDocumentTemplateSettingsDto {
 export interface TaskJournalSettingsDto {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
+  caseInactivityAutomationEnabled: boolean;
+  caseInactivityDays: number;
+  caseInactivityLimit: number;
+  caseInactivityDefaultAssigneeUserId?: number | null;
+  caseInactivityEscalationDays: number;
+  caseInactivityEscalationUserId?: number | null;
+}
+
+export interface TaskJournalAutomationDiagnosticsDto {
+  enabled: boolean;
+  inactivityDays: number;
+  escalationDays: number;
+  limit: number;
+  defaultAssigneeUserId?: number | null;
+  defaultAssigneeName: string;
+  escalationUserId?: number | null;
+  escalationUserName: string;
+  visibleCandidateCount: number;
+  visibleEscalationCandidateCount: number;
+  createdTaskCountLast7Days: number;
+  lastCreatedAt?: string | null;
+  lastCreatedDescription?: string | null;
 }
 
 export interface UpdateTaskJournalSettingsRequest {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
+  caseInactivityAutomationEnabled: boolean;
+  caseInactivityDays: number;
+  caseInactivityLimit: number;
+  caseInactivityDefaultAssigneeUserId?: number | null;
+  caseInactivityEscalationDays: number;
+  caseInactivityEscalationUserId?: number | null;
 }
 
 export interface MainCompanySettingsDto {
@@ -1297,6 +1340,27 @@ export class ApiService {
     });
   }
 
+  async getNotificationDeliveries(params?: {
+    channel?: string | null;
+    status?: string | null;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const q = buildQuery({
+      channel: params?.channel,
+      status: params?.status,
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 20,
+    });
+    return this.request<PagedResult<NotificationDeliveryDto>>(`/notifications/deliveries${q}`);
+  }
+
+  async retryNotificationDelivery(id: number) {
+    return this.request<NotificationDeliveryDto[]>(`/notifications/deliveries/${id}/retry`, {
+      method: 'POST',
+    });
+  }
+
   async getDatabaseStatus() {
     return this.request<DatabaseStatusDto>('/database/status');
   }
@@ -1886,10 +1950,15 @@ export class ApiService {
     });
   }
 
-  async getTaskJournalCaseAutomationCandidates(params?: { inactiveDays?: number; limit?: number }) {
+  async getTaskJournalAutomationDiagnostics() {
+    return this.request<TaskJournalAutomationDiagnosticsDto>('/tasks/automation/case-control/diagnostics');
+  }
+
+  async getTaskJournalCaseAutomationCandidates(params?: { inactiveDays?: number; limit?: number; escalationDays?: number }) {
     const q = buildQuery({
       inactiveDays: params?.inactiveDays,
       limit: params?.limit,
+      escalationDays: params?.escalationDays,
     });
     return this.request<TaskJournalCaseAutomationCandidate[]>(`/tasks/automation/case-candidates${q}`);
   }
@@ -2018,6 +2087,13 @@ export class ApiService {
     return this.request<TaskJournalBulkUpdateResult>('/tasks/bulk', {
       method: 'POST',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async bulkDeleteTaskJournalItems(ids: number[]) {
+    return this.request<TaskJournalBulkUpdateResult>('/tasks/bulk/delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
     });
   }
 
@@ -2645,6 +2721,8 @@ export class ApiService {
     minFee?: number;
     maxFee?: number;
     scope?: 'all' | 'active' | 'archive' | 'mine' | string;
+    activity?: 'all' | 'active' | 'inactive' | string;
+    inactiveDays?: number;
     sortBy?:
       | 'createdAt'
       | 'title'
@@ -2673,8 +2751,133 @@ export class ApiService {
     return this.request<PagedResult<ClientCase>>(`/v2/cases${q}`);
   }
 
-  async bulkUpdateCases(payload: { ids: number[]; status?: string; responsibleUserId?: number; stage?: string; priority?: string }) {
+  async exportCasesRegistryCsv(params?: {
+    clientId?: number;
+    legalEntityId?: number;
+    status?: string;
+    search?: string;
+    responsibleUserId?: number;
+    caseType?: string;
+    priority?: string;
+    from?: string;
+    to?: string;
+    minFee?: number;
+    maxFee?: number;
+    scope?: 'all' | 'active' | 'archive' | 'mine' | string;
+    activity?: 'all' | 'active' | 'inactive' | string;
+    inactiveDays?: number;
+    sortBy?:
+      | 'createdAt'
+      | 'title'
+      | 'status'
+      | 'caseNumber'
+      | 'client'
+      | 'caseType'
+      | 'stage'
+      | 'responsible'
+      | 'startDate'
+      | 'dueDate'
+      | 'feeAmount'
+      | 'priority'
+      | 'court'
+      | 'nextHearingAt'
+      | 'lastViewedAt';
+    sortDir?: SortDir;
+  }) {
+    const q = buildQuery(params ?? {});
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/v2/cases/export.csv${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} at ${API_BASE_URL}/v2/cases/export.csv ${text ? `- ${text}` : ''}`,
+      );
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName:
+        parseContentDispositionFileName(response.headers.get('content-disposition')) ??
+        'cases-registry.csv',
+    };
+  }
+
+  async getCasesRegistryPrintHtml(params?: {
+    clientId?: number;
+    legalEntityId?: number;
+    status?: string;
+    search?: string;
+    responsibleUserId?: number;
+    caseType?: string;
+    priority?: string;
+    from?: string;
+    to?: string;
+    minFee?: number;
+    maxFee?: number;
+    scope?: 'all' | 'active' | 'archive' | 'mine' | string;
+    activity?: 'all' | 'active' | 'inactive' | string;
+    inactiveDays?: number;
+    sortBy?:
+      | 'createdAt'
+      | 'title'
+      | 'status'
+      | 'caseNumber'
+      | 'client'
+      | 'caseType'
+      | 'stage'
+      | 'responsible'
+      | 'startDate'
+      | 'dueDate'
+      | 'feeAmount'
+      | 'priority'
+      | 'court'
+      | 'nextHearingAt'
+      | 'lastViewedAt';
+    sortDir?: SortDir;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<string>(`/v2/cases/print${q}`);
+  }
+
+  async bulkUpdateCases(payload: {
+    ids: number[];
+    status?: string;
+    responsibleUserId?: number;
+    stage?: string;
+    priority?: string;
+    isHiddenFromExecutor?: boolean;
+    inactivityRemindersEnabled?: boolean;
+  }) {
     return this.request<{ updated: number; requested: number }>('/v2/cases/bulk-update', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async requestCaseAccess(caseId: number, payload?: { reason?: string }) {
+    return this.request<{
+      clientCaseId: number;
+      requestedAt: string;
+      requestedByUserId: number;
+      requestedByUserName: string;
+      reason: string;
+      isHiddenFromExecutor: boolean;
+    }>(`/v2/cases/${caseId}/access-request`, {
+      method: 'POST',
+      body: JSON.stringify(payload ?? {}),
+    });
+  }
+
+  async getCaseAccessRequests() {
+    return this.request<ClientCaseAccessRequest[]>('/v2/cases/access-requests');
+  }
+
+  async resolveCaseAccessRequest(caseId: number, payload: { grant: boolean; comment?: string }) {
+    return this.request<ClientCaseAccessRequestResolution>(`/v2/cases/${caseId}/access-request/resolve`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -3175,6 +3378,16 @@ export class ApiService {
   }) {
     const q = buildQuery(params ?? {});
     return this.request<LegalWorkReport>(`/reports/legal-work${q}`);
+  }
+
+  async getCaseActivityReport(params?: {
+    inactiveDays?: number;
+    escalationDays?: number;
+    activity?: 'all' | 'inactive' | 'active' | 'escalated' | 'disabled';
+    limit?: number;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<CaseActivityReport>(`/reports/case-activity${q}`);
   }
 
   async getDirectionReport(params?: {
@@ -3935,6 +4148,8 @@ import type {
   ClientStatus,
   MonthlyStats,
   ClientCase,
+  ClientCaseAccessRequest,
+  ClientCaseAccessRequestResolution,
   ClientCaseActivity,
   ClientCaseConversationEntry,
   ClientCaseCourtSyncLog,
@@ -3973,6 +4188,7 @@ import type {
   CounterpartyReport,
   ProjectReport,
   LegalWorkReport,
+  CaseActivityReport,
   DirectionReport,
   SalesPointReport,
   VatReport,

@@ -46,6 +46,7 @@ export interface TaskJournalItem {
   authorUserId?: number | null;
   authorName: string;
   dueAt: string;
+  approvalDueAt?: string | null;
   plannedDurationMinutes: number;
   type: TaskJournalType;
   priority: TaskJournalPriority;
@@ -75,6 +76,7 @@ export interface TaskJournalComment {
   authorName: string;
   kind: TaskJournalCommentKind;
   text: string;
+  metadataJson?: string | null;
   createdAt: string;
   updatedAt?: string | null;
 }
@@ -110,10 +112,12 @@ export interface TaskJournalCaseAutomationCandidate {
   activeTaskCount: number;
   completedTaskCount: number;
   daysWithoutActiveTask: number;
+  isEscalated?: boolean;
   lastTaskAt?: string | null;
   suggestedTitle: string;
   suggestedDescription: string;
   suggestedDueAt: string;
+  suggestedPriority?: TaskJournalPriority;
 }
 
 export interface TaskJournalAutomationCreateResult {

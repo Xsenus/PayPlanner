@@ -1,28 +1,75 @@
-import { useEffect, useState } from 'react';
-import { Save } from 'lucide-react';
-import { apiService, type TaskJournalSettingsDto } from '../../services/api';
+import { useCallback, useEffect, useState } from 'react';
+import { RefreshCcw, Save } from 'lucide-react';
+import { apiService, type TaskJournalAutomationDiagnosticsDto, type TaskJournalSettingsDto } from '../../services/api';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
 
 const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
   allowExecutorDeadlineChangeRequests: true,
+  caseInactivityAutomationEnabled: true,
+  caseInactivityDays: 14,
+  caseInactivityLimit: 25,
+  caseInactivityDefaultAssigneeUserId: null,
+  caseInactivityEscalationDays: 30,
+  caseInactivityEscalationUserId: null,
 };
+
+function formatDiagnosticDate(value?: string | null) {
+  if (!value) {
+    return 'Еще не было';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export function TaskJournalSettings() {
   const toast = useToast();
   const [settings, setSettings] = useState<TaskJournalSettingsDto>(DEFAULT_SETTINGS);
+  const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
+  const [diagnostics, setDiagnostics] = useState<TaskJournalAutomationDiagnosticsDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  const refreshDiagnostics = useCallback(async () => {
+    setDiagnosticsLoading(true);
+    try {
+      const response = await apiService.getTaskJournalAutomationDiagnostics();
+      setDiagnostics(response);
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось обновить диагностику автоконтроля дел.'), 'Автоконтроль дел');
+    } finally {
+      setDiagnosticsLoading(false);
+    }
+  }, [toast]);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    apiService.getTaskJournalSettings()
-      .then((response) => {
+    Promise.all([
+      apiService.getTaskJournalSettings(),
+      apiService.getTaskJournalAssignees().catch(() => [] as TaskJournalAssignee[]),
+      apiService.getTaskJournalAutomationDiagnostics().catch(() => null),
+    ])
+      .then(([response, nextAssignees, nextDiagnostics]) => {
         if (active) {
           setSettings(response);
+          setAssignees(nextAssignees);
+          setDiagnostics(nextDiagnostics);
         }
       })
       .catch((error) => {
@@ -47,6 +94,7 @@ export function TaskJournalSettings() {
     try {
       const response = await apiService.updateTaskJournalSettings(settings);
       setSettings(response);
+      void refreshDiagnostics();
       setMessage('Настройки сохранены.');
       toast.success('Настройки журнала задач сохранены.', 'Журнал задач');
     } catch (error) {
@@ -90,6 +138,186 @@ export function TaskJournalSettings() {
             <span className="mt-1 block text-gray-500">Запрос фиксируется в истории задачи для постановщика без прямого изменения срока.</span>
           </span>
         </label>
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h5 className="text-base font-semibold text-gray-900">Автоконтроль дел</h5>
+            <p className="mt-1 text-sm text-gray-500">Система сама создает контрольную задачу, если по делу давно не было задач, просмотра или ручного подтверждения активности.</p>
+          </div>
+          <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
+            <input
+              type="checkbox"
+              checked={settings.caseInactivityAutomationEnabled}
+              onChange={(event) => setSettings((prev) => ({ ...prev, caseInactivityAutomationEnabled: event.target.checked }))}
+              disabled={loading || saving}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            Включено
+          </label>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Период без движения, дней</span>
+            <input
+              type="number"
+              min={1}
+              max={365}
+              value={settings.caseInactivityDays}
+              onChange={(event) => setSettings((prev) => ({
+                ...prev,
+                caseInactivityDays: Math.min(365, Math.max(1, Number(event.target.value) || 1)),
+                caseInactivityEscalationDays: Math.max(
+                  prev.caseInactivityEscalationDays,
+                  Math.min(365, Math.max(1, Number(event.target.value) || 1)),
+                ),
+              }))}
+              disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Лимит задач за запуск</span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={settings.caseInactivityLimit}
+              onChange={(event) => setSettings((prev) => ({
+                ...prev,
+                caseInactivityLimit: Math.min(100, Math.max(1, Number(event.target.value) || 1)),
+              }))}
+              disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Резервный исполнитель</span>
+            <select
+              value={settings.caseInactivityDefaultAssigneeUserId ?? ''}
+              onChange={(event) => setSettings((prev) => ({
+                ...prev,
+                caseInactivityDefaultAssigneeUserId: event.target.value ? Number(event.target.value) : null,
+              }))}
+              disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+            >
+              <option value="">Ответственный по делу</option>
+              {assignees.map((assignee) => (
+                <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+              ))}
+            </select>
+            <span className="mt-1 block text-xs text-gray-500">Используется только если у дела, клиента или юрлица нет ответственного.</span>
+          </label>
+
+          <label className="block">
+            <span className="text-sm font-medium text-gray-700">Эскалация через, дней</span>
+            <input
+              type="number"
+              min={1}
+              max={365}
+              value={settings.caseInactivityEscalationDays}
+              onChange={(event) => setSettings((prev) => ({
+                ...prev,
+                caseInactivityEscalationDays: Math.min(365, Math.max(prev.caseInactivityDays, Number(event.target.value) || prev.caseInactivityDays)),
+              }))}
+              disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+            />
+            <span className="mt-1 block text-xs text-gray-500">После этого срока контрольная задача станет срочной.</span>
+          </label>
+
+          <label className="block md:col-span-2">
+            <span className="text-sm font-medium text-gray-700">Ответственный за эскалации</span>
+            <select
+              value={settings.caseInactivityEscalationUserId ?? ''}
+              onChange={(event) => setSettings((prev) => ({
+                ...prev,
+                caseInactivityEscalationUserId: event.target.value ? Number(event.target.value) : null,
+              }))}
+              disabled={loading || saving || !settings.caseInactivityAutomationEnabled}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+            >
+              <option value="">Без отдельного наблюдателя</option>
+              {assignees.map((assignee) => (
+                <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+              ))}
+            </select>
+            <span className="mt-1 block text-xs text-gray-500">Если дело превысило порог эскалации, этот пользователь добавится наблюдателем.</span>
+          </label>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h6 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Диагностика автоконтроля</h6>
+              <p className="mt-1 text-sm text-slate-500">
+                Проверяет, сколько дел сейчас попадает под автоматическую постановку задач и когда автоматика срабатывала в последний раз.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void refreshDiagnostics()}
+              disabled={loading || diagnosticsLoading}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCcw className={`h-4 w-4 ${diagnosticsLoading ? 'animate-spin' : ''}`} />
+              Обновить
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Состояние</div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">
+                {diagnostics ? (diagnostics.enabled ? 'Включен' : 'Выключен') : '—'}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Кандидаты</div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.visibleCandidateCount ?? '—'}</div>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Эскалации</div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.visibleEscalationCandidateCount ?? '—'}</div>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Создано за 7 дней</div>
+              <div className="mt-1 text-lg font-semibold text-slate-900">{diagnostics?.createdTaskCountLast7Days ?? '—'}</div>
+            </div>
+          </div>
+
+          <dl className="mt-4 grid gap-3 text-sm text-slate-600 md:grid-cols-2">
+            <div>
+              <dt className="font-medium text-slate-500">Последнее срабатывание</dt>
+              <dd className="mt-1 text-slate-900">{formatDiagnosticDate(diagnostics?.lastCreatedAt)}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-slate-500">Резервный исполнитель</dt>
+              <dd className="mt-1 text-slate-900">{diagnostics?.defaultAssigneeName || 'Ответственный по делу'}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-slate-500">Ответственный за эскалации</dt>
+              <dd className="mt-1 text-slate-900">{diagnostics?.escalationUserName || 'Не задан'}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-slate-500">Порог контроля</dt>
+              <dd className="mt-1 text-slate-900">
+                {diagnostics ? `${diagnostics.inactivityDays} дн., лимит ${diagnostics.limit}` : '—'}
+              </dd>
+            </div>
+          </dl>
+
+          {diagnostics?.lastCreatedDescription ? (
+            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+              {diagnostics.lastCreatedDescription}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-6 flex min-h-10 items-center justify-between gap-3">

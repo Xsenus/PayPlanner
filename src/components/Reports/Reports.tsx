@@ -29,6 +29,7 @@ import { useMoneyCategoryReport } from '../../hooks/useMoneyCategoryReport';
 import { useCounterpartyReport } from '../../hooks/useCounterpartyReport';
 import { useProjectReport } from '../../hooks/useProjectReport';
 import { useLegalWorkReport } from '../../hooks/useLegalWorkReport';
+import { useCaseActivityReport } from '../../hooks/useCaseActivityReport';
 import { useDirectionReport } from '../../hooks/useDirectionReport';
 import { useSalesPointReport } from '../../hooks/useSalesPointReport';
 import { useVatReport } from '../../hooks/useVatReport';
@@ -50,7 +51,7 @@ import { useBankStatementImportReport } from '../../hooks/useBankStatementImport
 import { useSpreadsheetImportReport } from '../../hooks/useSpreadsheetImportReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { formatCurrencySmart } from '../../utils/formatters';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -193,6 +194,30 @@ function exportLegalWorkReport(report: LegalWorkReport) {
   });
 
   downloadCsv('legal-work-report.csv', rows);
+}
+
+function exportCaseActivityReport(report: CaseActivityReport) {
+  const rows: unknown[][] = [
+    ['Раздел', 'Клиент / юрлицо', 'Дело', 'Ответственный', 'Статус активности', 'Дней без активности', 'Последняя активность', 'Активные задачи', 'Завершенные задачи', 'Причина'],
+    ['Сводка', 'Всего дел', '', '', '', '', '', report.activeCaseCount, report.finishedCaseCount, `Неактивные: ${report.inactiveCaseCount}; эскалации: ${report.escalatedCaseCount}; автоконтроль выключен: ${report.disabledCaseCount}`],
+  ];
+
+  report.items.forEach((item) => {
+    rows.push([
+      item.isEscalated ? 'Эскалация' : item.isInactive ? 'Неактивное дело' : 'Диагностика',
+      item.ownerName,
+      item.caseTitle || item.caseNumber || `Дело #${item.caseId}`,
+      item.responsibleName,
+      item.isInactive ? 'Неактивно' : 'Активно',
+      item.daysWithoutActivity,
+      item.lastActivityAt,
+      item.activeTaskCount,
+      item.completedTaskCount,
+      item.reason,
+    ]);
+  });
+
+  downloadCsv('case-activity-report.csv', rows);
 }
 
 function sourceLabel(source: MoneyOperationSource) {
@@ -1166,11 +1191,13 @@ function LegalWorkReportSection({
   loading,
   error,
   onReload,
+  onOpenCase,
 }: {
   report: LegalWorkReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  onOpenCase?: (caseId: number) => void;
 }) {
   const responsibleRows = (report?.responsibles ?? []).slice(0, 8);
   const overdueRows = report?.overdueDeadlines ?? [];
@@ -1189,14 +1216,25 @@ function LegalWorkReportSection({
             Сводка по текущим делам, процессуальным срокам, задачам и финансовому остатку с учетом прав видимости пользователя.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportLegalWorkReport(report)}
+            disabled={!report}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1288,7 +1326,14 @@ function LegalWorkReportSection({
                     <div key={`${row.caseId}-${row.deadlineType}-${row.dueAt}`} className="rounded-2xl bg-white p-4 shadow-sm">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="font-semibold text-slate-950">{row.deadlineLabel}</div>
+                          <button
+                            type="button"
+                            onClick={() => onOpenCase?.(row.caseId)}
+                            className="inline-flex items-center gap-1 text-left font-semibold text-blue-700 transition hover:text-blue-900 hover:underline"
+                          >
+                            {row.deadlineLabel}
+                            <ArrowUpRight className="h-3.5 w-3.5" />
+                          </button>
                           <div className="mt-1 text-sm text-slate-500">{row.clientName} · {row.caseTitle || row.caseNumber}</div>
                         </div>
                         <span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">
@@ -1311,7 +1356,14 @@ function LegalWorkReportSection({
                     <div key={`${row.caseId}-${row.deadlineType}-${row.dueAt}`} className="rounded-2xl bg-white p-4 shadow-sm">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="font-semibold text-slate-950">{row.deadlineLabel}</div>
+                          <button
+                            type="button"
+                            onClick={() => onOpenCase?.(row.caseId)}
+                            className="inline-flex items-center gap-1 text-left font-semibold text-blue-700 transition hover:text-blue-900 hover:underline"
+                          >
+                            {row.deadlineLabel}
+                            <ArrowUpRight className="h-3.5 w-3.5" />
+                          </button>
                           <div className="mt-1 text-sm text-slate-500">{formatDate(row.dueAt)} · {row.responsibleName}</div>
                         </div>
                         <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
@@ -1327,6 +1379,159 @@ function LegalWorkReportSection({
                 </div>
               </div>
             </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function CaseActivityReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+  onOpenCase,
+}: {
+  report: CaseActivityReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+  onOpenCase?: (caseId: number) => void;
+}) {
+  const rows = report?.items ?? [];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-amber-100 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Автоконтроль дел
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Диагностика активности и неактивности дел</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Отчет показывает, какие видимые пользователю дела попадут в автоконтроль, где отключены напоминания и почему дело не считается неактивным.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportCaseActivityReport(report)}
+            disabled={!report}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка диагностики активности дел...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить диагностику активности дел</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для отчета.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Неактивные дела"
+              value={String(report.inactiveCaseCount)}
+              icon={AlertTriangle}
+              tone="expense"
+              subtitle={`Правило: ${report.inactivityDays} дн.; эскалация: ${report.escalationDays} дн.`}
+            />
+            <MetricCard
+              title="Эскалации"
+              value={String(report.escalatedCaseCount)}
+              icon={Flag}
+              tone="rate"
+              subtitle="Дела без активности дольше порога эскалации"
+            />
+            <MetricCard
+              title="Есть активные задачи"
+              value={String(report.withActiveTasksCount)}
+              icon={CheckCircle2}
+              tone="income"
+              subtitle={`Активных дел всего: ${report.activeCaseCount}`}
+            />
+            <MetricCard
+              title="Автоконтроль выключен"
+              value={String(report.disabledCaseCount)}
+              icon={Clock3}
+              tone="profit"
+              subtitle={`Завершенных дел в видимости: ${report.finishedCaseCount}`}
+            />
+          </div>
+
+          <div className="mt-6 overflow-x-auto rounded-3xl border border-slate-100 bg-slate-50/70">
+            <table className="min-w-full text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Дело</th>
+                  <th className="px-4 py-3 font-semibold">Ответственный</th>
+                  <th className="px-4 py-3 font-semibold">Активность</th>
+                  <th className="px-4 py-3 font-semibold">Задачи</th>
+                  <th className="px-4 py-3 font-semibold">Причина</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white/80">
+                {rows.length > 0 ? rows.map((row) => (
+                  <tr key={row.caseId} className="align-top">
+                    <td className="px-4 py-3">
+                      <div className="font-semibold text-slate-950">{row.ownerName}</div>
+                      <button
+                        type="button"
+                        onClick={() => onOpenCase?.(row.caseId)}
+                        className="mt-1 inline-flex items-center gap-1 text-left text-xs font-medium text-blue-700 transition hover:text-blue-900 hover:underline"
+                      >
+                        {row.caseTitle || row.caseNumber || `Дело #${row.caseId}`}
+                        <ArrowUpRight className="h-3 w-3" />
+                      </button>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {row.isInactive ? (
+                          <span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">Неактивно</span>
+                        ) : (
+                          <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Активно</span>
+                        )}
+                        {row.isEscalated ? (
+                          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Эскалация</span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{row.responsibleName}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      <div>{row.daysWithoutActivity} дн. без активности</div>
+                      <div className="mt-1 text-xs text-slate-500">Последняя: {formatDate(row.lastActivityAt)}</div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      <div>{row.activeTaskCount} активных</div>
+                      <div className="mt-1 text-xs text-slate-500">{row.completedTaskCount} завершенных</div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{row.reason}</td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                      По текущим правилам диагностических строк нет.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </>
       )}
@@ -3744,7 +3949,11 @@ function SpreadsheetImportReportSection({
   );
 }
 
-export function Reports() {
+interface ReportsProps {
+  onOpenCase?: (caseId: number) => void;
+}
+
+export function Reports({ onOpenCase }: ReportsProps = {}) {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
   const [range, setRange] = useState<MonthRange>({ from: ymNow, to: ymNow });
@@ -3805,6 +4014,15 @@ export function Reports() {
     error: legalWorkReportError,
     reload: reloadLegalWorkReport,
   } = useLegalWorkReport(cashFlowDates);
+  const {
+    report: caseActivityReport,
+    loading: caseActivityReportLoading,
+    error: caseActivityReportError,
+    reload: reloadCaseActivityReport,
+  } = useCaseActivityReport({
+    activity: 'all',
+    limit: 50,
+  });
   const {
     report: directionReport,
     loading: directionReportLoading,
@@ -4280,6 +4498,15 @@ export function Reports() {
               loading={legalWorkReportLoading}
               error={legalWorkReportError}
               onReload={reloadLegalWorkReport}
+              onOpenCase={onOpenCase}
+            />
+
+            <CaseActivityReportSection
+              report={caseActivityReport}
+              loading={caseActivityReportLoading}
+              error={caseActivityReportError}
+              onReload={reloadCaseActivityReport}
+              onOpenCase={onOpenCase}
             />
 
             <DirectionReportSection

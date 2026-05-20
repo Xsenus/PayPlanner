@@ -46,6 +46,7 @@ vi.mock('./hooks/useRolePermissions', () => {
       calculator: section,
       legalEntities: section,
       clients: section,
+      cases: section,
       accounts: section,
       acts: section,
       payments: section,

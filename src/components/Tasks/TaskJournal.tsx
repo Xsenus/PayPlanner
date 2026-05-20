@@ -33,6 +33,7 @@ import { useDialog } from '../../hooks/useDialog';
 import { useClients } from '../../hooks/useClients';
 import { useClientCases } from '../../hooks/useClientCases';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type TaskJournalSettingsDto } from '../../services/api';
 import type { Client, ClientCase, LegalEntitySummary } from '../../types';
@@ -78,7 +79,7 @@ type TaskJournalProps = {
   onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
 };
 
-type TaskForm = TaskJournalUpsertPayload & { dueAt: string };
+type TaskForm = TaskJournalUpsertPayload & { dueAt: string; approvalDueAt: string | null };
 
 type TaskJournalFilterPreferences = {
   quickFilter: QuickFilter;
@@ -96,6 +97,12 @@ type TaskJournalFilterPreferences = {
 const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
   allowExecutorDeadlineChangeRequests: true,
+  caseInactivityAutomationEnabled: true,
+  caseInactivityDays: 14,
+  caseInactivityLimit: 25,
+  caseInactivityDefaultAssigneeUserId: null,
+  caseInactivityEscalationDays: 30,
+  caseInactivityEscalationUserId: null,
 };
 
 const STATUS_OPTIONS: Array<{ value: TaskJournalStatus; label: string }> = [
@@ -311,6 +318,7 @@ const emptyForm = (
     assigneeUserId,
     assigneeName,
     dueAt: toLocalInputValue(dueAt.toISOString()),
+    approvalDueAt: null,
     plannedDurationMinutes: 60,
     type: 'task',
     priority: 'normal',
@@ -416,6 +424,7 @@ function taskToPayload(task: TaskJournalItem, overrides: Partial<TaskJournalUpse
     assigneeUserId: task.assigneeUserId ?? null,
     assigneeName: task.assigneeName,
     dueAt: task.dueAt,
+    approvalDueAt: task.approvalDueAt ?? null,
     plannedDurationMinutes: normalizeTaskDuration(task.plannedDurationMinutes),
     type: task.type,
     priority: task.priority,
@@ -1089,6 +1098,8 @@ export function TaskJournal({
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
   const isAdminUser = isAdmin();
+  const permissions = useRolePermissions(user?.role?.id);
+  const canExportTasks = isAdminUser || permissions.tasks.canExport;
   const isApprovalsMode = mode === 'approvals';
   const initialPreferencesRef = useRef<TaskJournalFilterPreferences | null>(null);
   if (initialPreferencesRef.current === null) {
@@ -1128,6 +1139,7 @@ export function TaskJournal({
   const [bulkStatus, setBulkStatus] = useState<TaskJournalStatus | ''>('');
   const [bulkDueAt, setBulkDueAt] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const routeTaskRequestRef = useRef(0);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
   const skipNextFilterSaveRef = useRef(false);
@@ -1222,12 +1234,22 @@ export function TaskJournal({
   const refreshTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const [taskItems, assigneeResponse, automationResponse, settingsResponse, notificationDefaultsResponse] = await Promise.all([
+      const settingsPromise = apiService.getTaskJournalSettings();
+      const automationPromise = settingsPromise.then((settingsResponse) => (
+        settingsResponse.caseInactivityAutomationEnabled
+          ? apiService.getTaskJournalCaseAutomationCandidates({
+            inactiveDays: settingsResponse.caseInactivityDays,
+            limit: Math.min(settingsResponse.caseInactivityLimit, 20),
+            escalationDays: settingsResponse.caseInactivityEscalationDays,
+          })
+          : []
+      ));
+      const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, automationResponse] = await Promise.all([
         loadAllTaskJournalItems(),
         apiService.getTaskJournalAssignees(),
-        apiService.getTaskJournalCaseAutomationCandidates({ inactiveDays: 14, limit: 20 }),
-        apiService.getTaskJournalSettings(),
+        settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
+        automationPromise,
       ]);
       setTasks(taskItems);
       setAssignees(assigneeResponse);
@@ -1630,6 +1652,38 @@ export function TaskJournal({
     }
   };
 
+  const handleBulkDelete = async () => {
+    const ids = selectedTasksForBulk.map((task) => task.id);
+    if (ids.length === 0) {
+      toast.error('Выберите задачи для массового удаления.', 'Журнал задач');
+      return;
+    }
+
+    const accepted = await confirm({
+      title: 'Удалить выбранные задачи?',
+      description: `Будет удалено задач: ${ids.length}. Действие нельзя отменить.`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!accepted) return;
+
+    setBulkDeleting(true);
+    try {
+      const result = await apiService.bulkDeleteTaskJournalItems(ids);
+      const skippedText = result.skipped > 0 ? ` Пропущено без прав: ${result.skipped}.` : '';
+      toast.success(`Удалено задач: ${result.updated}.${skippedText}`, 'Журнал задач');
+      clearBulkSelection();
+      resetBulkFields();
+      await refreshTasks();
+      emitTaskChange();
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось удалить выбранные задачи.'), 'Журнал задач');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const handleSave = async (form: TaskForm, taskId?: number) => {
     if (!form.isInternal && !form.clientId && !form.legalEntityId) {
       toast.error('Укажите контрагента задачи.', 'Журнал задач');
@@ -1656,6 +1710,7 @@ export function TaskJournal({
       result: form.result.trim(),
       changeComment: form.changeComment?.trim() || null,
       dueAt: fromLocalInputValue(form.dueAt),
+      approvalDueAt: form.approvalDueAt ? fromLocalInputValue(form.approvalDueAt) : null,
       plannedDurationMinutes: normalizeTaskDuration(form.plannedDurationMinutes),
       tags: unique(form.tags),
       reminders: form.reminders.length ? form.reminders : ['atDue'],
@@ -1879,6 +1934,11 @@ export function TaskJournal({
   };
 
   const handleExport = () => {
+    if (!canExportTasks) {
+      toast.error('У роли нет права на выгрузку журнала задач.', 'Журнал задач');
+      return;
+    }
+
     const header = ['Контрагент', 'Дело', 'Наименование задачи', 'Исполнитель', 'Срок', 'Длительность', 'Тип', 'Приоритет', 'Статус', 'Результат'];
     const rows = filteredTasks.map((task) => [
       getTaskClientName(task),
@@ -1904,6 +1964,11 @@ export function TaskJournal({
   };
 
   const handleCalendarExport = async () => {
+    if (!canExportTasks) {
+      toast.error('У роли нет права на выгрузку календаря задач.', 'Календарь задач');
+      return;
+    }
+
     try {
       const response = await apiService.downloadTaskJournalCalendar();
       downloadBlob(response.fileName, response.blob);
@@ -1932,22 +1997,26 @@ export function TaskJournal({
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={handleExport}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-              >
-                <Download className="h-4 w-4" />
-                CSV
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleCalendarExport()}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-              >
-                <CalendarDays className="h-4 w-4" />
-                ICS
-              </button>
+              {canExportTasks ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleExport}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <Download className="h-4 w-4" />
+                    CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleCalendarExport()}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <CalendarDays className="h-4 w-4" />
+                    ICS
+                  </button>
+                </>
+              ) : null}
               {!isApprovalsMode ? (
                 <button
                   type="button"
@@ -2186,11 +2255,13 @@ export function TaskJournal({
             status={bulkStatus}
             dueAt={bulkDueAt}
             saving={bulkSaving}
+            deleting={bulkDeleting}
             onAssigneeChange={setBulkAssigneeUserId}
             onPriorityChange={setBulkPriority}
             onStatusChange={setBulkStatus}
             onDueAtChange={setBulkDueAt}
             onApply={handleBulkUpdate}
+            onDelete={handleBulkDelete}
             onClear={clearBulkSelection}
           />
         ) : null}
@@ -2359,6 +2430,11 @@ function TaskAutomationPanel({
                 {candidate.daysWithoutActiveTask} дн.
               </span>
             </div>
+            {candidate.isEscalated ? (
+              <div className="mt-3 inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                Эскалация
+              </div>
+            ) : null}
             <div className="mt-3 text-sm text-slate-600">{candidate.reason}</div>
             <div className="mt-2 text-xs text-slate-500">
               {candidate.lastTaskAt ? `Последняя задача: ${formatDateTime(candidate.lastTaskAt)}` : 'Задач по делу еще не было'}
@@ -2436,11 +2512,13 @@ function TaskBulkActionsPanel({
   status,
   dueAt,
   saving,
+  deleting,
   onAssigneeChange,
   onPriorityChange,
   onStatusChange,
   onDueAtChange,
   onApply,
+  onDelete,
   onClear,
 }: {
   selectedCount: number;
@@ -2450,13 +2528,17 @@ function TaskBulkActionsPanel({
   status: TaskJournalStatus | '';
   dueAt: string;
   saving: boolean;
+  deleting: boolean;
   onAssigneeChange: (value: string) => void;
   onPriorityChange: (value: TaskJournalPriority | '') => void;
   onStatusChange: (value: TaskJournalStatus | '') => void;
   onDueAtChange: (value: string) => void;
   onApply: () => void;
+  onDelete: () => void;
   onClear: () => void;
 }) {
+  const busy = saving || deleting;
+
   return (
     <section className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 shadow-sm" data-testid="task-bulk-actions">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
@@ -2522,15 +2604,24 @@ function TaskBulkActionsPanel({
           <button
             type="button"
             onClick={onClear}
-            disabled={saving}
+            disabled={busy}
             className="inline-flex h-10 items-center justify-center rounded-xl border border-blue-100 bg-white px-4 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Снять выбор
           </button>
           <button
             type="button"
+            onClick={onDelete}
+            disabled={busy}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Trash2 className="h-4 w-4" />
+            {deleting ? 'Удаляем...' : 'Удалить выбранные'}
+          </button>
+          <button
+            type="button"
             onClick={onApply}
-            disabled={saving}
+            disabled={busy}
             className="inline-flex h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving ? 'Сохраняем...' : 'Применить'}
@@ -3935,6 +4026,7 @@ function TaskModal({
         assigneeUserId: state.task.assigneeUserId,
         assigneeName: state.task.assigneeName,
         dueAt: state.task.dueAt,
+        approvalDueAt: state.task.approvalDueAt ?? null,
         type: state.task.type,
         priority: state.task.priority,
         status: state.task.status,
@@ -3945,7 +4037,11 @@ function TaskModal({
         tags: state.task.tags,
         participants: state.task.participants ?? [],
       };
-      return { ...rest, dueAt: toLocalInputValue(rest.dueAt) };
+      return {
+        ...rest,
+        dueAt: toLocalInputValue(rest.dueAt),
+        approvalDueAt: rest.approvalDueAt ? toLocalInputValue(rest.approvalDueAt) : null,
+      };
     }
     const next = emptyForm(currentUserName, currentUserId, notificationDefaults);
     return state?.dueAt ? { ...next, dueAt: toLocalInputValue(state.dueAt) } : next;
@@ -4184,7 +4280,10 @@ function TaskModal({
 
   const saveWithStatus = async (status: TaskJournalStatus) => {
     const task = state?.task;
-    const nextForm = withChangeComment({ ...form, status });
+    let nextForm = withChangeComment({ ...form, status });
+    if ((status === 'onApproval' || status === 'overdueApproval') && !nextForm.approvalDueAt) {
+      nextForm = { ...nextForm, approvalDueAt: nextForm.dueAt };
+    }
 
     if (status === 'done' && !nextForm.result.trim()) {
       toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
@@ -4606,6 +4705,16 @@ function TaskModal({
                 </button>
               </div>
             </Field>
+            <Field label="Срок согласования">
+              <input
+                type="datetime-local"
+                value={form.approvalDueAt ?? ''}
+                onChange={(event) => update('approvalDueAt', event.target.value || null)}
+                disabled={isReadOnly}
+                data-testid="task-approval-due-at-input"
+                className="form-input"
+              />
+            </Field>
             {scheduleOpen ? (
               <div className="lg:col-span-2">
                 <TaskDaySchedulePanel
@@ -4728,6 +4837,9 @@ function TaskModal({
             {state?.task && approverParticipants.length > 0 ? (
               <div className="mt-4 rounded-xl border border-violet-100 bg-white p-3">
                 <div className="text-sm font-semibold text-slate-800">Очередь согласования</div>
+                {form.approvalDueAt ? (
+                  <div className="mt-1 text-xs text-slate-500">Срок согласования: {formatDateTime(fromLocalInputValue(form.approvalDueAt))}</div>
+                ) : null}
                 <div className="mt-3 space-y-2">
                   {orderedApproverParticipants
                     .map((participant, index) => {

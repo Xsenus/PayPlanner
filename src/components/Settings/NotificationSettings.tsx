@@ -3,6 +3,7 @@ import { ArrowLeft, Bot, CheckCircle2, Link2, Mail, Pencil, Plus, RefreshCw, Sav
 import {
   apiService,
   type NotificationChannel,
+  type NotificationDeliveryDto,
   type TelegramBotCommandDto,
   type NotificationPurposeDto,
   type NotificationSenderDto,
@@ -194,6 +195,11 @@ export function NotificationSettings() {
   const [testSubject, setTestSubject] = useState('Тестовое уведомление PayPlanner');
   const [testMessage, setTestMessage] = useState('Проверка отправителя уведомлений.');
   const [message, setMessage] = useState<string | null>(null);
+  const [deliveries, setDeliveries] = useState<NotificationDeliveryDto[]>([]);
+  const [deliveriesTotal, setDeliveriesTotal] = useState(0);
+  const [deliveriesLoading, setDeliveriesLoading] = useState(false);
+  const [deliveryStatus, setDeliveryStatus] = useState('failed');
+  const [retryingDeliveryId, setRetryingDeliveryId] = useState<number | null>(null);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -213,6 +219,32 @@ export function NotificationSettings() {
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  const loadDeliveries = useCallback(async () => {
+    setDeliveriesLoading(true);
+    try {
+      const result = await apiService.getNotificationDeliveries({
+        status: deliveryStatus === 'all' ? null : deliveryStatus,
+        page: 1,
+        pageSize: 20,
+      });
+      setDeliveries(result.items);
+      setDeliveriesTotal(result.total);
+    } catch (error) {
+      const text = extractDisplayErrorMessage(error, 'Не удалось загрузить журнал доставки');
+      toast.error(text, 'Уведомления');
+      setDeliveries([]);
+      setDeliveriesTotal(0);
+    } finally {
+      setDeliveriesLoading(false);
+    }
+  }, [deliveryStatus, toast]);
+
+  useEffect(() => {
+    if (route.mode === 'list') {
+      void loadDeliveries();
+    }
+  }, [loadDeliveries, route.mode]);
 
   useEffect(() => {
     const handlePopState = () => setRoute(readNotificationRoute());
@@ -424,12 +456,35 @@ export function NotificationSettings() {
       } else {
         toast.error(text, 'Уведомления');
       }
+      void loadDeliveries();
     } catch (error) {
       const text = extractDisplayErrorMessage(error, 'Не удалось отправить тестовое уведомление');
       setMessage(text);
       toast.error(text, 'Уведомления');
     } finally {
       setTesting(false);
+    }
+  };
+
+  const retryDelivery = async (delivery: NotificationDeliveryDto) => {
+    setRetryingDeliveryId(delivery.id);
+    try {
+      const result = await apiService.retryNotificationDelivery(delivery.id);
+      const latest = result[result.length - 1];
+      const text = latest?.status === 'sent'
+        ? 'Уведомление повторно отправлено.'
+        : latest?.error || 'Повторная отправка завершилась без успешной доставки.';
+      if (latest?.status === 'sent') {
+        toast.success(text, 'Уведомления');
+      } else {
+        toast.error(text, 'Уведомления');
+      }
+      await loadDeliveries();
+    } catch (error) {
+      const text = extractDisplayErrorMessage(error, 'Не удалось повторить отправку уведомления');
+      toast.error(text, 'Уведомления');
+    } finally {
+      setRetryingDeliveryId(null);
     }
   };
 
@@ -578,6 +633,17 @@ export function NotificationSettings() {
               />
             </div>
           </div>
+
+          <DeliveryLogPanel
+            items={deliveries}
+            total={deliveriesTotal}
+            status={deliveryStatus}
+            loading={deliveriesLoading}
+            retryingId={retryingDeliveryId}
+            onStatusChange={setDeliveryStatus}
+            onRefresh={loadDeliveries}
+            onRetry={retryDelivery}
+          />
         </div>
       ) : (
         <div className="space-y-4">
@@ -766,6 +832,165 @@ function SummaryTile({ label, value, ready }: { label: string; value: number; re
         </div>
       </div>
     </div>
+  );
+}
+
+function formatDeliveryDate(value?: string | null) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function deliveryStatusLabel(status: string) {
+  switch (status) {
+    case 'sent':
+      return 'Отправлено';
+    case 'failed':
+      return 'Ошибка';
+    case 'skipped':
+      return 'Пропущено';
+    case 'pending':
+      return 'В обработке';
+    default:
+      return status || '—';
+  }
+}
+
+function deliveryStatusClass(status: string) {
+  switch (status) {
+    case 'sent':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'failed':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+    case 'skipped':
+      return 'border-amber-200 bg-amber-50 text-amber-700';
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+  }
+}
+
+function DeliveryLogPanel({
+  items,
+  total,
+  status,
+  loading,
+  retryingId,
+  onStatusChange,
+  onRefresh,
+  onRetry,
+}: {
+  items: NotificationDeliveryDto[];
+  total: number;
+  status: string;
+  loading: boolean;
+  retryingId: number | null;
+  onStatusChange: (status: string) => void;
+  onRefresh: () => void | Promise<void>;
+  onRetry: (delivery: NotificationDeliveryDto) => void | Promise<void>;
+}) {
+  return (
+    <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="text-base font-semibold text-gray-900">Журнал доставки</h4>
+          <p className="text-sm text-gray-500">Последние попытки отправки email и Telegram. Ошибочные и пропущенные можно повторить вручную.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={status}
+            onChange={(event) => onStatusChange(event.target.value)}
+            className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm"
+          >
+            <option value="failed">Ошибки</option>
+            <option value="skipped">Пропущенные</option>
+            <option value="sent">Отправленные</option>
+            <option value="all">Все</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => void onRefresh()}
+            disabled={loading}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 overflow-x-auto rounded-xl border border-gray-200">
+        <table className="min-w-full divide-y divide-gray-200 text-sm">
+          <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <tr>
+              <th className="px-4 py-3">Дата</th>
+              <th className="px-4 py-3">Канал</th>
+              <th className="px-4 py-3">Получатель</th>
+              <th className="px-4 py-3">Тема</th>
+              <th className="px-4 py-3">Статус</th>
+              <th className="px-4 py-3 text-right">Действия</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 bg-white">
+            {loading ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">Загружаем журнал доставки...</td>
+              </tr>
+            ) : items.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">Записей по выбранному фильтру нет.</td>
+              </tr>
+            ) : (
+              items.map((item) => {
+                const canRetry = item.status === 'failed' || item.status === 'skipped';
+                return (
+                  <tr key={item.id} className="align-top hover:bg-gray-50">
+                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatDeliveryDate(item.createdAt)}</td>
+                    <td className="px-4 py-3 text-gray-700">{channelLabel(item.channel as NotificationChannel)}</td>
+                    <td className="max-w-[220px] px-4 py-3 text-gray-700">
+                      <div className="truncate" title={item.recipientAddress}>{item.recipientAddress || '—'}</div>
+                      {item.senderName ? <div className="text-xs text-gray-500">{item.senderName}</div> : null}
+                    </td>
+                    <td className="max-w-[320px] px-4 py-3 text-gray-700">
+                      <div className="truncate" title={item.subject}>{item.subject || '—'}</div>
+                      {item.error ? <div className="mt-1 line-clamp-2 text-xs text-rose-600">{item.error}</div> : null}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${deliveryStatusClass(item.status)}`}>
+                        {deliveryStatusLabel(item.status)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {canRetry ? (
+                        <button
+                          type="button"
+                          onClick={() => void onRetry(item)}
+                          disabled={retryingId === item.id}
+                          className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          Повторить
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-3 text-xs text-gray-500">Показано {items.length} из {total}</div>
+    </section>
   );
 }
 

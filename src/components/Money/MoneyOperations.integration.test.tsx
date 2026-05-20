@@ -104,8 +104,42 @@ const {
   };
 });
 
+const permissionsState = vi.hoisted(() => ({
+  paymentsCanExport: true,
+}));
+
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 7 } }),
+}));
+
+vi.mock('../../hooks/useRolePermissions', () => ({
+  useRolePermissions: () => {
+    const section = {
+      canView: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+      canExport: true,
+      viewScope: 'all',
+    };
+
+    return {
+      calendar: { ...section, canViewAnalytics: true },
+      tasks: { ...section },
+      reports: { ...section },
+      calculator: { ...section },
+      legalEntities: { ...section },
+      clients: { ...section },
+      cases: { ...section },
+      accounts: { ...section },
+      acts: { ...section },
+      payments: { ...section, canExport: permissionsState.paymentsCanExport },
+      contracts: { ...section },
+      dictionaries: { ...section },
+      roles: { ...section },
+      audit: { ...section },
+    };
+  },
 }));
 
 vi.mock('../../contexts/TabContext', () => ({
@@ -343,6 +377,7 @@ describe('MoneyOperations integration', () => {
     updateCashOrderMock.mockReset();
     updateMoneyOperationMock.mockReset();
     upsertUserSettingMock.mockReset();
+    permissionsState.paymentsCanExport = true;
     window.localStorage.clear();
     if (!URL.createObjectURL) {
       Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(), configurable: true });
@@ -954,6 +989,16 @@ describe('MoneyOperations integration', () => {
 
     await user.click(searchButton);
     expect(screen.getByRole('button', { name: 'Скрыть расширенный поиск' })).toBeTruthy();
+  }, 15000);
+
+  it('hides journal export and print menu when payment export permission is denied', async () => {
+    permissionsState.paymentsCanExport = false;
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Поставщик А');
+
+    expect(screen.queryByRole('button', { name: 'Экспорт и печать' })).toBeNull();
   }, 15000);
 
   it('refreshes the money journal from the side panel', async () => {

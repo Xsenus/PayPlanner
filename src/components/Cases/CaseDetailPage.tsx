@@ -12,6 +12,7 @@ import {
   FilePlus2,
   FileText,
   Loader2,
+  LockKeyhole,
   Mail,
   MessageSquare,
   Phone,
@@ -274,6 +275,91 @@ function formatDocumentKind(value?: string | null) {
   return DOCUMENT_KIND_LABELS[value] ?? value;
 }
 
+type CaseFinancePayment = ClientCaseFinanceDetail['payments'][number];
+type PaymentCalendarState = 'paid' | 'planned' | 'overdue' | 'cancelled';
+
+const PAYMENT_CALENDAR_LABELS: Record<PaymentCalendarState, string> = {
+  paid: 'Оплачено',
+  planned: 'Ожидает',
+  overdue: 'Просрочено',
+  cancelled: 'Отменено',
+};
+
+const PAYMENT_CALENDAR_CLASSES: Record<PaymentCalendarState, string> = {
+  paid: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  planned: 'bg-blue-50 text-blue-700 border-blue-200',
+  overdue: 'bg-rose-50 text-rose-700 border-rose-200',
+  cancelled: 'bg-slate-100 text-slate-600 border-slate-200',
+};
+
+function getPaymentCalendarDate(payment: CaseFinancePayment) {
+  return payment.plannedDate || payment.date || payment.paidDate || '';
+}
+
+function getPaymentCalendarState(payment: CaseFinancePayment): PaymentCalendarState {
+  const status = String(payment.status ?? '').toLowerCase();
+  if (status.includes('cancel') || status.includes('отмен')) {
+    return 'cancelled';
+  }
+
+  if (status.includes('complete') || status.includes('paid') || status.includes('оплачен') || payment.outstandingAmount <= 0) {
+    return 'paid';
+  }
+
+  if (status.includes('overdue') || status.includes('проср')) {
+    return 'overdue';
+  }
+
+  const planned = Date.parse(getPaymentCalendarDate(payment));
+  if (Number.isFinite(planned)) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (planned < today.getTime()) {
+      return 'overdue';
+    }
+  }
+
+  return 'planned';
+}
+
+function getPaymentCalendarMonthKey(payment: CaseFinancePayment) {
+  const date = new Date(getPaymentCalendarDate(payment));
+  if (Number.isNaN(date.getTime())) {
+    return 'unknown';
+  }
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getPaymentCalendarMonthLabel(key: string) {
+  if (key === 'unknown') {
+    return 'Без даты';
+  }
+
+  const [year, month] = key.split('-').map(Number);
+  const date = new Date(year, month - 1, 1);
+  return new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(date);
+}
+
+function groupPaymentCalendar(payments: CaseFinancePayment[]) {
+  const groups = new Map<string, CaseFinancePayment[]>();
+
+  payments.forEach((payment) => {
+    const key = getPaymentCalendarMonthKey(payment);
+    groups.set(key, [...(groups.get(key) ?? []), payment]);
+  });
+
+  return Array.from(groups.entries()).map(([key, items]) => ({
+    key,
+    label: getPaymentCalendarMonthLabel(key),
+    items,
+    total: items.reduce((sum, payment) => sum + payment.amount, 0),
+    paid: items.reduce((sum, payment) => sum + payment.paidAmount, 0),
+    outstanding: items.reduce((sum, payment) => sum + payment.outstandingAmount, 0),
+    overdueCount: items.filter((payment) => getPaymentCalendarState(payment) === 'overdue').length,
+  }));
+}
+
 function getOwnerName(caseItem: ClientCase) {
   return caseItem.client?.name || caseItem.legalEntity?.shortName || caseItem.legalEntity?.fullName || '—';
 }
@@ -474,6 +560,7 @@ export function CaseDetailPage({
   const [reloadToken, setReloadToken] = useState(0);
   const [creatingTask, setCreatingTask] = useState(false);
   const [savingHeader, setSavingHeader] = useState(false);
+  const [requestingAccess, setRequestingAccess] = useState(false);
   const [generatingDocument, setGeneratingDocument] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [downloadingDocumentId, setDownloadingDocumentId] = useState<number | null>(null);
@@ -491,6 +578,8 @@ export function CaseDetailPage({
   const [priorityDraft, setPriorityDraft] = useState('normal');
   const [stageDraft, setStageDraft] = useState('');
   const [responsibleDraft, setResponsibleDraft] = useState('');
+  const [hiddenFromExecutorDraft, setHiddenFromExecutorDraft] = useState(false);
+  const [inactivityRemindersDraft, setInactivityRemindersDraft] = useState(true);
   const [taskFilter, setTaskFilter] = useState<CaseTaskFilter>(initialViewState.taskFilter ?? 'active');
   const [participantSourceType, setParticipantSourceType] = useState<ParticipantSourceType>(initialViewState.participantSourceType ?? 'client');
   const [participantSourceId, setParticipantSourceId] = useState('');
@@ -870,6 +959,8 @@ export function CaseDetailPage({
     setPriorityDraft(caseItem.priority || 'normal');
     setStageDraft(caseItem.stage || '');
     setResponsibleDraft(caseItem.responsibleUserId ? String(caseItem.responsibleUserId) : '');
+    setHiddenFromExecutorDraft(Boolean(caseItem.isHiddenFromExecutor));
+    setInactivityRemindersDraft(caseItem.inactivityRemindersEnabled !== false);
   }, [caseItem]);
 
   const filteredTasks = useMemo(() => {
@@ -903,6 +994,8 @@ export function CaseDetailPage({
         priority: priorityDraft,
         stage: stageDraft.trim(),
         responsibleUserId: responsibleDraft ? Number(responsibleDraft) : undefined,
+        isHiddenFromExecutor: hiddenFromExecutorDraft,
+        inactivityRemindersEnabled: inactivityRemindersDraft,
       });
       setReloadToken((value) => value + 1);
     } catch (err) {
@@ -925,6 +1018,23 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось архивировать дело.');
     } finally {
       setSavingHeader(false);
+    }
+  };
+
+  const requestCaseAccess = async () => {
+    setRequestingAccess(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const reason = typeof window !== 'undefined'
+        ? window.prompt('Причина запроса доступа к делу', 'Нужно посмотреть или продолжить работу по делу.') ?? ''
+        : '';
+      await apiService.requestCaseAccess(caseId, { reason: reason.trim() });
+      setNotice('Запрос доступа отправлен. Руководитель увидит его в истории дела.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось отправить запрос доступа.');
+    } finally {
+      setRequestingAccess(false);
     }
   };
 
@@ -1227,9 +1337,16 @@ export function CaseDetailPage({
       <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-[900px] rounded-xl border border-rose-200 bg-rose-50 p-5 text-rose-700">
           {error ?? 'Дело не найдено.'}
-          <button type="button" onClick={onBack} className="mt-4 block rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700">
-            Вернуться к реестру
-          </button>
+          {notice ? <div className="mt-3 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-cyan-800">{notice}</div> : null}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" onClick={() => void requestCaseAccess()} disabled={requestingAccess} className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
+              {requestingAccess ? <Loader2 className="h-4 w-4 animate-spin" /> : <LockKeyhole className="h-4 w-4" />}
+              Запросить доступ
+            </button>
+            <button type="button" onClick={onBack} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700">
+              Вернуться к реестру
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -1255,6 +1372,11 @@ export function CaseDetailPage({
                 </span>
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">{STATUS_LABELS[caseItem.status] ?? caseItem.status}</span>
                 <span className="rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700">{PRIORITY_LABELS[caseItem.priority ?? ''] ?? caseItem.priority ?? 'Обычный'}</span>
+                {caseItem.isHiddenFromExecutor ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-3 py-1 text-sm font-medium text-rose-700">
+                    <LockKeyhole className="h-3.5 w-3.5" /> Скрыто от исполнителя
+                  </span>
+                ) : null}
               </div>
               <h1 className="mt-3 text-3xl font-bold text-slate-900">{caseItem.title || 'Без названия'}</h1>
               <p className="mt-2 max-w-3xl text-sm text-slate-600">{caseItem.description || 'Описание по делу пока не заполнено.'}</p>
@@ -1293,7 +1415,7 @@ export function CaseDetailPage({
         {notice ? <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">{notice}</div> : null}
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[170px_1fr_170px_220px_auto]">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[160px_1fr_150px_210px_190px_190px_auto]">
             <label className="text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
               <select
@@ -1340,6 +1462,32 @@ export function CaseDetailPage({
                   <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>
                 ))}
               </select>
+            </label>
+            <label className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 xl:self-end">
+              <span className="mb-2 block text-xs uppercase tracking-[0.12em] text-slate-400">Доступ</span>
+              <span className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  aria-label="Скрыть дело от исполнителя"
+                  checked={hiddenFromExecutorDraft}
+                  onChange={(event) => setHiddenFromExecutorDraft(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                Скрыть от исполнителя
+              </span>
+            </label>
+            <label className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 xl:self-end">
+              <span className="mb-2 block text-xs uppercase tracking-[0.12em] text-slate-400">Автоконтроль</span>
+              <span className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  aria-label="Учитывать дело в автоконтроле"
+                  checked={inactivityRemindersDraft}
+                  onChange={(event) => setInactivityRemindersDraft(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                Включен
+              </span>
             </label>
             <button
               type="button"
@@ -1958,6 +2106,10 @@ function FinancePanel({
     const rightTime = Date.parse(right.plannedDate || right.date);
     return (Number.isFinite(leftTime) ? leftTime : 0) - (Number.isFinite(rightTime) ? rightTime : 0);
   });
+  const paymentCalendarGroups = groupPaymentCalendar(calendarPayments);
+  const paymentCalendarPlanTotal = calendarPayments.reduce((sum, payment) => sum + payment.amount, 0);
+  const paymentCalendarPaidTotal = calendarPayments.reduce((sum, payment) => sum + payment.paidAmount, 0);
+  const paymentCalendarOutstandingTotal = calendarPayments.reduce((sum, payment) => sum + payment.outstandingAmount, 0);
 
   return (
     <div className="space-y-4">
@@ -2081,20 +2233,87 @@ function FinancePanel({
         </section>
 
         <section className="rounded-xl border border-slate-200 p-4">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Календарь оплат</h3>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Календарь оплат</h3>
+              <div className="mt-1 text-sm text-slate-500">Плановые и фактические оплаты по делу, сгруппированные по месяцам.</div>
+            </div>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{calendarPayments.length} платежей</span>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <FinanceMiniStat label="План оплат" value={formatMoney(paymentCalendarPlanTotal)} />
+            <FinanceMiniStat label="Оплачено" value={formatMoney(paymentCalendarPaidTotal)} tone="emerald" />
+            <FinanceMiniStat label="Остаток" value={formatMoney(paymentCalendarOutstandingTotal)} tone={paymentCalendarOutstandingTotal > 0 ? 'rose' : 'emerald'} />
+          </div>
           {calendarPayments.length === 0 ? <FinanceEmpty label="Плановых дат оплат пока нет." /> : null}
-          <div className="mt-3 overflow-hidden rounded-lg border border-slate-100">
-            {calendarPayments.slice(0, 12).map((payment) => (
-              <div key={`calendar-${payment.id}`} className="grid gap-2 border-b border-slate-100 p-3 text-sm last:border-b-0 md:grid-cols-[120px_1fr_auto]">
-                <div className="font-semibold text-slate-900">{toRuDate(payment.plannedDate || payment.date)}</div>
-                <div className="text-slate-600">{payment.description || payment.invoiceNumber || `Платеж #${payment.id}`}</div>
-                <div className="text-right font-semibold text-slate-900">{formatMoney(payment.amount)}</div>
+          <div className="mt-3 space-y-3">
+            {paymentCalendarGroups.slice(0, 8).map((group) => (
+              <div key={group.key} className="overflow-hidden rounded-lg border border-slate-100">
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-3 py-2">
+                  <div className="font-semibold text-slate-800">{group.label}</div>
+                  <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                    <span>План: {formatMoney(group.total)}</span>
+                    <span>Оплачено: {formatMoney(group.paid)}</span>
+                    <span>Остаток: {formatMoney(group.outstanding)}</span>
+                    {group.overdueCount > 0 ? <span className="font-semibold text-rose-600">Просрочено: {group.overdueCount}</span> : null}
+                  </div>
+                </div>
+                {group.items.map((payment) => {
+                  const state = getPaymentCalendarState(payment);
+                  return (
+                    <div key={`calendar-${payment.id}`} className="grid gap-2 border-t border-slate-100 p-3 text-sm md:grid-cols-[120px_1fr_auto]">
+                      <div>
+                        <div className="font-semibold text-slate-900">{toRuDate(getPaymentCalendarDate(payment))}</div>
+                        {payment.paidDate ? <div className="mt-1 text-xs text-slate-500">Факт: {toRuDate(payment.paidDate)}</div> : null}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-700">{payment.description || payment.invoiceNumber || `Платеж #${payment.id}`}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {formatDocumentKind(payment.documentKind)} · {formatFinanceType(payment.type)}
+                          {payment.invoiceNumber ? ` · счет №${payment.invoiceNumber}` : ''}
+                          {payment.paymentSourceName ? ` · ${payment.paymentSourceName}` : ''}
+                          {payment.paymentOrderNumber ? ` · документ ${payment.paymentOrderNumber}` : ''}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-start gap-1 md:items-end">
+                        <div className="font-semibold text-slate-900">{formatMoney(payment.amount)}</div>
+                        {payment.outstandingAmount > 0 ? <div className="text-xs font-medium text-rose-600">остаток {formatMoney(payment.outstandingAmount)}</div> : null}
+                        <PaymentCalendarBadge state={state} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
         </section>
       </div>
     </div>
+  );
+}
+
+function FinanceMiniStat({ label, value, tone = 'slate' }: { label: string; value: string; tone?: SummaryTone }) {
+  const toneClass = tone === 'emerald'
+    ? 'bg-emerald-50 text-emerald-700'
+    : tone === 'rose'
+      ? 'bg-rose-50 text-rose-700'
+      : tone === 'amber'
+        ? 'bg-amber-50 text-amber-700'
+        : 'bg-slate-50 text-slate-700';
+
+  return (
+    <div className={`rounded-lg px-3 py-2 ${toneClass}`}>
+      <div className="text-xs font-semibold uppercase tracking-[0.12em] opacity-70">{label}</div>
+      <div className="mt-1 font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function PaymentCalendarBadge({ state }: { state: PaymentCalendarState }) {
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${PAYMENT_CALENDAR_CLASSES[state]}`}>
+      {PAYMENT_CALENDAR_LABELS[state]}
+    </span>
   );
 }
 
@@ -2408,6 +2627,162 @@ function TaskList({
   );
 }
 
+type CourtTimelineState = 'done' | 'today' | 'future' | 'unknown';
+type CourtTimelineKind = 'hearing' | 'deadline' | 'milestone' | 'sync';
+
+interface CourtTimelineEntry {
+  id: string;
+  label: string;
+  value?: string | null;
+  description?: string | null;
+  kind: CourtTimelineKind;
+  state: CourtTimelineState;
+}
+
+const COURT_TIMELINE_STATE_LABELS: Record<CourtTimelineState, string> = {
+  done: 'Прошло',
+  today: 'Сегодня',
+  future: 'Предстоит',
+  unknown: 'Без даты',
+};
+
+const COURT_TIMELINE_STATE_CLASSES: Record<CourtTimelineState, string> = {
+  done: 'bg-slate-100 text-slate-600',
+  today: 'bg-amber-50 text-amber-700',
+  future: 'bg-cyan-50 text-cyan-700',
+  unknown: 'bg-slate-50 text-slate-500',
+};
+
+function getCourtTimelineState(value?: string | null): CourtTimelineState {
+  if (!value) {
+    return 'unknown';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'unknown';
+  }
+
+  const day = new Date(date);
+  day.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dayTime = day.getTime();
+  const todayTime = today.getTime();
+
+  if (dayTime === todayTime) {
+    return 'today';
+  }
+
+  return dayTime < todayTime ? 'done' : 'future';
+}
+
+function buildCourtTimeline(caseItem: ClientCase, logs: ClientCaseCourtSyncLog[]): CourtTimelineEntry[] {
+  const entries: CourtTimelineEntry[] = [
+    {
+      id: 'claim-filed',
+      label: 'Подача заявления',
+      value: caseItem.claimFiledAt,
+      kind: 'milestone',
+      state: getCourtTimelineState(caseItem.claimFiledAt),
+    },
+    {
+      id: 'next-hearing',
+      label: 'Ближайшее заседание',
+      value: caseItem.nextHearingAt,
+      description: [caseItem.courtroom, caseItem.judgeName].filter(Boolean).join(' · '),
+      kind: 'hearing',
+      state: getCourtTimelineState(caseItem.nextHearingAt),
+    },
+    {
+      id: 'decision',
+      label: 'Решение суда',
+      value: caseItem.courtDecisionAt,
+      kind: 'milestone',
+      state: getCourtTimelineState(caseItem.courtDecisionAt),
+    },
+    {
+      id: 'appeal',
+      label: 'Апелляция',
+      value: caseItem.appealDeadlineAt,
+      kind: 'deadline',
+      state: getCourtTimelineState(caseItem.appealDeadlineAt),
+    },
+    {
+      id: 'cassation',
+      label: 'Кассация',
+      value: caseItem.cassationDeadlineAt,
+      kind: 'deadline',
+      state: getCourtTimelineState(caseItem.cassationDeadlineAt),
+    },
+    {
+      id: 'motion',
+      label: 'Ходатайства',
+      value: caseItem.motionDeadlineAt,
+      kind: 'deadline',
+      state: getCourtTimelineState(caseItem.motionDeadlineAt),
+    },
+    {
+      id: 'objection',
+      label: 'Возражения',
+      value: caseItem.objectionDeadlineAt,
+      kind: 'deadline',
+      state: getCourtTimelineState(caseItem.objectionDeadlineAt),
+    },
+    ...logs.map((log) => ({
+      id: `sync-${log.id}`,
+      label: COURT_SYNC_STATUS_LABELS[log.status] ?? log.status,
+      value: log.occurredAt,
+      description: log.message,
+      kind: 'sync' as CourtTimelineKind,
+      state: getCourtTimelineState(log.occurredAt),
+    })),
+  ].filter((entry) => Boolean(entry.value) || entry.kind === 'sync');
+
+  return entries.sort((left, right) => {
+    const leftTime = Date.parse(left.value ?? '');
+    const rightTime = Date.parse(right.value ?? '');
+    const normalizedLeft = Number.isFinite(leftTime) ? leftTime : Number.MAX_SAFE_INTEGER;
+    const normalizedRight = Number.isFinite(rightTime) ? rightTime : Number.MAX_SAFE_INTEGER;
+    return normalizedLeft - normalizedRight;
+  });
+}
+
+function CourtTimeline({ entries }: { entries: CourtTimelineEntry[] }) {
+  if (entries.length === 0) {
+    return (
+      <div className="mt-3 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+        Судебные даты и события по делу пока не заполнены.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 space-y-0">
+      {entries.map((entry, index) => (
+        <div key={entry.id} className="grid grid-cols-[28px_1fr] gap-3">
+          <div className="relative flex justify-center">
+            <span className={`mt-1 h-3 w-3 rounded-full border-2 border-white shadow ring-2 ${entry.state === 'future' ? 'bg-cyan-500 ring-cyan-100' : entry.state === 'today' ? 'bg-amber-500 ring-amber-100' : 'bg-slate-400 ring-slate-100'}`} />
+            {index < entries.length - 1 ? <span className="absolute top-5 bottom-0 w-px bg-slate-200" /> : null}
+          </div>
+          <article className="pb-4">
+            <div className="rounded-lg border border-slate-100 bg-white p-3 shadow-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${COURT_TIMELINE_STATE_CLASSES[entry.state]}`}>
+                  {COURT_TIMELINE_STATE_LABELS[entry.state]}
+                </span>
+                <span className="font-semibold text-slate-900">{entry.label}</span>
+                {entry.value ? <span className="text-xs text-slate-400">{formatRuDateTime(entry.value)}</span> : null}
+              </div>
+              {entry.description ? <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{entry.description}</p> : null}
+            </div>
+          </article>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CourtPanel({
   caseItem,
   logs,
@@ -2431,6 +2806,7 @@ function CourtPanel({
     ['Ходатайства', caseItem.motionDeadlineAt],
     ['Возражения', caseItem.objectionDeadlineAt],
   ].filter(([, value]) => Boolean(value)) as Array<[string, string]>;
+  const courtTimeline = buildCourtTimeline(caseItem, logs);
 
   return (
     <div className="space-y-4">
@@ -2475,6 +2851,14 @@ function CourtPanel({
           )}
         </section>
       </div>
+
+      <section className="rounded-xl border border-slate-200 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебная хронология</h2>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{courtTimeline.length} событий</span>
+        </div>
+        <CourtTimeline entries={courtTimeline} />
+      </section>
 
       <section className="rounded-xl border border-slate-200 p-4">
         <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Процессуальные сроки</h2>

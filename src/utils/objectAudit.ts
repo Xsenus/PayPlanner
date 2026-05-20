@@ -396,6 +396,8 @@ export function getObjectAuditActionLabel(action?: string | null): string {
       return 'Удаление';
     case 'restored':
       return 'Восстановление';
+    case 'automation':
+      return 'Автоконтроль';
     case 'datarepair':
     case 'data-repair':
       return 'Исправление данных';
@@ -414,6 +416,8 @@ export function getObjectAuditActionTone(action?: string | null): string {
       return 'border-rose-200 bg-rose-50 text-rose-700';
     case 'restored':
       return 'border-teal-200 bg-teal-50 text-teal-700';
+    case 'automation':
+      return 'border-amber-200 bg-amber-50 text-amber-700';
     case 'datarepair':
     case 'data-repair':
       return 'border-amber-200 bg-amber-50 text-amber-700';

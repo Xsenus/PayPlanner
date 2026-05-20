@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   Banknote,
+  Briefcase,
   Building2,
   Calculator,
   CalendarDays,
@@ -102,6 +103,12 @@ const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
     description: 'Доступ к списку клиентов, карточкам и связанным данным.',
     icon: Users,
   },
+  cases: {
+    key: 'cases',
+    title: 'Дела',
+    description: 'Доступ к реестру дел, карточкам дел и юридическому рабочему контуру.',
+    icon: Briefcase,
+  },
   accounts: {
     key: 'accounts',
     title: 'Счета',
@@ -157,7 +164,7 @@ const GROUPS: GroupConfig[] = [
     key: 'crm',
     title: 'Клиенты и документы',
     description: 'Карточки клиентов, юрлица, договоры и справочники.',
-    sections: ['legalEntities', 'clients', 'contracts', 'dictionaries'],
+    sections: ['legalEntities', 'clients', 'cases', 'contracts', 'dictionaries'],
   },
   {
     key: 'finance',
@@ -177,6 +184,7 @@ const DATA_SCOPE_SECTIONS = new Set<MenuSectionKey>([
   'tasks',
   'legalEntities',
   'clients',
+  'cases',
   'accounts',
   'acts',
   'payments',

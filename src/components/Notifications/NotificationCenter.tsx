@@ -10,6 +10,8 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Settings2,
+  Save,
   Trash2,
 } from 'lucide-react';
 import {
@@ -21,11 +23,21 @@ import {
 } from '../../services/api';
 import { useToast } from '../../hooks/useToast';
 import { emitUserNotificationsChanged } from '../../utils/userNotifications';
+import {
+  DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES,
+  USER_NOTIFICATION_TYPE_PREFERENCES_SETTING_KEY,
+  isUserNotificationTypeEnabled,
+  parseUserNotificationTypePreferences,
+  serializeUserNotificationTypePreferences,
+  toggleUserNotificationTypePreference,
+  type UserNotificationTypePreferences,
+} from '../../utils/userNotificationPreferences';
 
 type NotificationStatusFilter = NonNullable<UserNotificationsQuery['status']>;
 
 type NotificationCenterProps = {
   onOpenTask?: (taskId: number) => void;
+  onOpenCase?: (caseId: number) => void;
 };
 
 const STATUS_FILTERS: Array<{ value: NotificationStatusFilter; label: string }> = [
@@ -79,7 +91,7 @@ function formatDateTime(value?: string | null) {
   }).format(date);
 }
 
-export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
+export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCenterProps) {
   const toast = useToast();
   const [itemsPage, setItemsPage] = useState<PagedResult<UserNotificationDto>>(EMPTY_PAGE);
   const [types, setTypes] = useState<UserNotificationTypeDto[]>([]);
@@ -91,11 +103,20 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [preferences, setPreferences] = useState<UserNotificationTypePreferences>(DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES);
+  const [preferencesLoading, setPreferencesLoading] = useState(false);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(itemsPage.total / itemsPage.pageSize));
   const unreadCount = useMemo(
     () => itemsPage.items.reduce((count, item) => count + (item.isRead ? 0 : 1), 0),
     [itemsPage.items],
+  );
+  const knownTypeKeys = useMemo(() => types.map((item) => item.key), [types]);
+  const enabledTypesCount = useMemo(
+    () => types.filter((item) => isUserNotificationTypeEnabled(preferences, item.key)).length,
+    [preferences, types],
   );
 
   useEffect(() => {
@@ -116,6 +137,35 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (knownTypeKeys.length === 0) {
+      return;
+    }
+
+    let alive = true;
+    setPreferencesLoading(true);
+    apiService.getUserSetting(USER_NOTIFICATION_TYPE_PREFERENCES_SETTING_KEY)
+      .then((setting) => {
+        if (alive) {
+          setPreferences(parseUserNotificationTypePreferences(setting?.value, knownTypeKeys));
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setPreferences(DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES);
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setPreferencesLoading(false);
+        }
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [knownTypeKeys]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -203,6 +253,22 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
     }
   };
 
+  const handleOpenCase = async (item: UserNotificationDto) => {
+    if (item.objectType !== 'case' || !item.objectId || !onOpenCase) {
+      return;
+    }
+
+    try {
+      setBusyId(item.id);
+      await markRead(item);
+      onOpenCase(item.objectId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось открыть дело.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleArchive = async (item: UserNotificationDto) => {
     try {
       setBusyId(item.id);
@@ -269,6 +335,24 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
     }
   };
 
+  const handleSavePreferences = async () => {
+    try {
+      setPreferencesSaving(true);
+      await apiService.upsertUserSetting(
+        USER_NOTIFICATION_TYPE_PREFERENCES_SETTING_KEY,
+        serializeUserNotificationTypePreferences(preferences, knownTypeKeys),
+      );
+      emitUserNotificationsChanged();
+      setPage(1);
+      refresh();
+      toast.success('Настройки типов уведомлений сохранены.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось сохранить настройки уведомлений.');
+    } finally {
+      setPreferencesSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-5 p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -298,6 +382,15 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Обновить
+          </button>
+          <button
+            type="button"
+            onClick={() => setPreferencesOpen((value) => !value)}
+            disabled={preferencesLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Settings2 className="h-4 w-4" />
+            Типы
           </button>
         </div>
       </div>
@@ -367,6 +460,67 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
         </div>
       </section>
 
+      {preferencesOpen ? (
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-950">Типы уведомлений</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Включено {enabledTypesCount} из {types.length}. Отключенные типы не попадают в центр уведомлений и счетчик.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleSavePreferences()}
+              disabled={preferencesLoading || preferencesSaving}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Save className={`h-4 w-4 ${preferencesSaving ? 'animate-pulse' : ''}`} />
+              Сохранить
+            </button>
+          </div>
+
+          {preferencesLoading ? (
+            <div className="mt-4 flex items-center gap-2 text-sm text-slate-500">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              Загружаем настройки типов...
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {types.map((item) => {
+                const isEnabled = isUserNotificationTypeEnabled(preferences, item.key);
+                return (
+                  <label
+                    key={item.key}
+                    className={`flex min-h-28 cursor-pointer gap-3 rounded-lg border p-3 transition ${
+                      isEnabled
+                        ? 'border-blue-200 bg-blue-50/60 hover:bg-blue-50'
+                        : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isEnabled}
+                      onChange={(event) => {
+                        setPreferences((previous) => toggleUserNotificationTypePreference(previous, item.key, event.target.checked));
+                      }}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-900">{item.label}</span>
+                      <span className="mt-1 block text-xs leading-5 text-slate-500">{item.description}</span>
+                      <span className="mt-2 inline-flex rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-500">
+                        {item.priority === 'high' ? 'Высокий приоритет' : 'Обычный приоритет'}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      ) : null}
+
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="grid grid-cols-[minmax(0,1fr)_12rem_16rem] border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 max-xl:hidden">
           <div>Уведомление</div>
@@ -422,6 +576,7 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
                         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
                           <span>{formatDateTime(item.createdAt)}</span>
                           {item.taskId ? <span>Задача #{item.taskId}</span> : null}
+                          {item.objectType === 'case' && item.objectId ? <span>Дело #{item.objectId}</span> : null}
                           <span>{item.eventKey}</span>
                         </div>
                       </div>
@@ -447,6 +602,20 @@ export function NotificationCenter({ onOpenTask }: NotificationCenterProps) {
                       >
                         <ExternalLink className="h-4 w-4" />
                         К задаче
+                      </button>
+                    ) : null}
+                    {item.objectType === 'case' && item.objectId ? (
+                      <button
+                        type="button"
+                        disabled={itemBusy}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleOpenCase(item);
+                        }}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-medium text-violet-700 transition hover:bg-violet-100 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        К делу
                       </button>
                     ) : null}
                     <button

@@ -6,11 +6,29 @@ import { apiService } from '../../services/api';
 import type { ClientCase } from '../../types';
 import { CasesRegistry } from './CasesRegistry';
 
+const authState = vi.hoisted(() => ({
+  user: {
+    id: 7,
+    fullName: 'Администратор',
+    email: 'admin@example.com',
+    role: { id: 1, name: 'admin' },
+  },
+  isAdmin: true,
+}));
+
+const permissionsState = vi.hoisted(() => ({
+  casesCanExport: true,
+}));
+
 vi.mock('../../services/api', () => ({
   apiService: {
     getCasesV2: vi.fn(),
+    exportCasesRegistryCsv: vi.fn(),
+    getCasesRegistryPrintHtml: vi.fn(),
     getActResponsibles: vi.fn(),
     bulkUpdateCases: vi.fn(),
+    getCaseAccessRequests: vi.fn(),
+    resolveCaseAccessRequest: vi.fn(),
     createTaskJournalCaseAutomationTask: vi.fn(),
     runCaseCourtSync: vi.fn(),
     createCaseV2: vi.fn(),
@@ -19,6 +37,43 @@ vi.mock('../../services/api', () => ({
     getLegalEntities: vi.fn(),
     getUserSetting: vi.fn(),
     upsertUserSetting: vi.fn(),
+  },
+}));
+
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: authState.user,
+    isAdmin: () => authState.isAdmin,
+  }),
+}));
+
+vi.mock('../../hooks/useRolePermissions', () => ({
+  useRolePermissions: () => {
+    const section = {
+      canView: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+      canExport: true,
+      viewScope: 'all',
+    };
+
+    return {
+      calendar: { ...section, canViewAnalytics: true },
+      tasks: { ...section },
+      reports: { ...section },
+      calculator: { ...section },
+      legalEntities: { ...section },
+      clients: { ...section },
+      cases: { ...section, canExport: permissionsState.casesCanExport },
+      accounts: { ...section },
+      acts: { ...section },
+      payments: { ...section },
+      contracts: { ...section },
+      dictionaries: { ...section },
+      roles: { ...section },
+      audit: { ...section },
+    };
   },
 }));
 
@@ -69,6 +124,9 @@ function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
 
 describe('CasesRegistry', () => {
   beforeEach(() => {
+    authState.isAdmin = true;
+    permissionsState.casesCanExport = true;
+    window.localStorage.removeItem('pp.cases_registry_views.v1');
     vi.mocked(apiService.getCasesV2).mockReset();
     vi.mocked(apiService.getCasesV2).mockResolvedValue({
       items: [createCase()],
@@ -76,6 +134,13 @@ describe('CasesRegistry', () => {
       page: 1,
       pageSize: 25,
     });
+    vi.mocked(apiService.exportCasesRegistryCsv).mockReset();
+    vi.mocked(apiService.exportCasesRegistryCsv).mockResolvedValue({
+      blob: new Blob(['csv'], { type: 'text/csv' }),
+      fileName: 'cases-registry.csv',
+    });
+    vi.mocked(apiService.getCasesRegistryPrintHtml).mockReset();
+    vi.mocked(apiService.getCasesRegistryPrintHtml).mockResolvedValue('<html><body>cases</body></html>');
     vi.mocked(apiService.getActResponsibles).mockReset();
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([
       { id: 7, fullName: 'Кожеваткин Андрей Владимирович' },
@@ -83,6 +148,16 @@ describe('CasesRegistry', () => {
     ]);
     vi.mocked(apiService.bulkUpdateCases).mockReset();
     vi.mocked(apiService.bulkUpdateCases).mockResolvedValue({ updated: 1, requested: 1 });
+    vi.mocked(apiService.getCaseAccessRequests).mockReset();
+    vi.mocked(apiService.getCaseAccessRequests).mockResolvedValue([]);
+    vi.mocked(apiService.resolveCaseAccessRequest).mockReset();
+    vi.mocked(apiService.resolveCaseAccessRequest).mockResolvedValue({
+      clientCaseId: 1,
+      granted: true,
+      resolvedAt: '2026-05-19T10:00:00Z',
+      resolvedByUserName: 'Администратор',
+      isHiddenFromExecutor: false,
+    });
     vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockReset();
     vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockResolvedValue({ id: 501 });
     vi.mocked(apiService.runCaseCourtSync).mockReset();
@@ -176,6 +251,82 @@ describe('CasesRegistry', () => {
     });
   });
 
+  it('exports the filtered registry through the backend export endpoint', async () => {
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:cases-registry');
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    render(<CasesRegistry />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.change(screen.getByPlaceholderText('Поиск по делу, клиенту, суду'), {
+      target: { value: 'земцов' },
+    });
+    fireEvent.change(screen.getByDisplayValue('Все статусы'), {
+      target: { value: 'Open' },
+    });
+
+    await waitFor(() => {
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(expect.objectContaining({
+        search: 'земцов',
+        status: 'Open',
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^CSV$/u }));
+
+    await waitFor(() => {
+      expect(apiService.exportCasesRegistryCsv).toHaveBeenCalledWith(expect.objectContaining({
+        search: 'земцов',
+        status: 'Open',
+        sortBy: 'createdAt',
+        sortDir: 'desc',
+      }));
+    });
+    expect(createObjectUrl).toHaveBeenCalled();
+    expect(anchorClick).toHaveBeenCalled();
+
+    createObjectUrl.mockRestore();
+    revokeObjectUrl.mockRestore();
+    anchorClick.mockRestore();
+  });
+
+  it('opens the filtered registry print form through the backend endpoint', async () => {
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:cases-print');
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    render(<CasesRegistry />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Печать' }));
+
+    await waitFor(() => {
+      expect(apiService.getCasesRegistryPrintHtml).toHaveBeenCalledWith(expect.objectContaining({
+        sortBy: 'createdAt',
+        sortDir: 'desc',
+      }));
+    });
+    expect(createObjectUrl).toHaveBeenCalled();
+    expect(open).toHaveBeenCalledWith('blob:cases-print', '_blank', 'noopener,noreferrer');
+
+    createObjectUrl.mockRestore();
+    revokeObjectUrl.mockRestore();
+    open.mockRestore();
+  });
+
+  it('hides registry export actions when the role cannot export cases', async () => {
+    authState.isAdmin = false;
+    permissionsState.casesCanExport = false;
+
+    render(<CasesRegistry />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+
+    expect(screen.queryByRole('button', { name: /^CSV$/u })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Печать' })).toBeNull();
+  });
+
   it('opens the standalone case card when the registry callback is provided', async () => {
     const onOpenCase = vi.fn();
 
@@ -231,6 +382,67 @@ describe('CasesRegistry', () => {
         ids: [1],
         status: 'Closed',
       });
+    });
+  });
+
+  it('shows pending hidden case access requests and grants access', async () => {
+    const onOpenCase = vi.fn();
+    vi.mocked(apiService.getCaseAccessRequests).mockResolvedValueOnce([
+      {
+        clientCaseId: 15,
+        caseNumber: 'CASE-15',
+        title: 'Скрытое дело',
+        ownerName: 'Земцов Виктор Александрович',
+        responsibleUserId: 7,
+        responsibleName: 'Кожеваткин Андрей Владимирович',
+        requestedAt: '2026-05-19T09:00:00Z',
+        requestedByUserId: 8,
+        requestedByUserName: 'Диденко Анна Владимировна',
+        reason: 'Нужно проверить срок.',
+        isHiddenFromExecutor: true,
+      },
+    ]);
+
+    render(<CasesRegistry onOpenCase={onOpenCase} />);
+
+    await screen.findByText('Запросы доступа к скрытым делам');
+    expect(screen.getByText('Нужно проверить срок.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /№ CASE-15/u }));
+    expect(onOpenCase).toHaveBeenCalledWith(15);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Разрешить' }));
+
+    await waitFor(() => {
+      expect(apiService.resolveCaseAccessRequest).toHaveBeenCalledWith(15, { grant: true });
+    });
+    expect(await screen.findByText('Доступ к делу «Скрытое дело» открыт.')).toBeTruthy();
+  });
+
+  it('can deny a hidden case access request', async () => {
+    vi.mocked(apiService.getCaseAccessRequests).mockResolvedValueOnce([
+      {
+        clientCaseId: 16,
+        caseNumber: 'CASE-16',
+        title: 'Дело на проверке',
+        ownerName: 'Земцов Виктор Александрович',
+        responsibleUserId: 7,
+        responsibleName: 'Кожеваткин Андрей Владимирович',
+        requestedAt: '2026-05-19T09:00:00Z',
+        requestedByUserId: 8,
+        requestedByUserName: 'Диденко Анна Владимировна',
+        reason: '',
+        isHiddenFromExecutor: true,
+      },
+    ]);
+
+    render(<CasesRegistry />);
+
+    await screen.findByText(/Дело на проверке/u);
+    fireEvent.click(screen.getByRole('button', { name: 'Отклонить' }));
+
+    await waitFor(() => {
+      expect(apiService.resolveCaseAccessRequest).toHaveBeenCalledWith(16, { grant: false });
     });
   });
 
@@ -297,6 +509,57 @@ describe('CasesRegistry', () => {
       'cases_registry_table_settings_v1',
       expect.stringContaining('"visibleColumns"'),
     );
+  });
+
+  it('saves and applies registry filter views', async () => {
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('Активные Земцов');
+
+    render(<CasesRegistry />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.change(screen.getByPlaceholderText('Поиск по делу, клиенту, суду'), {
+      target: { value: 'земцов' },
+    });
+    fireEvent.change(screen.getByDisplayValue('Все статусы'), {
+      target: { value: 'Open' },
+    });
+
+    await waitFor(() => {
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(expect.objectContaining({
+        search: 'земцов',
+        status: 'Open',
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить вид' }));
+
+    const savedRaw = window.localStorage.getItem('pp.cases_registry_views.v1');
+    expect(savedRaw).not.toBeNull();
+    const savedViews = JSON.parse(savedRaw!);
+    expect(savedViews[0]).toEqual(expect.objectContaining({
+      name: 'Активные Земцов',
+    }));
+    expect(savedViews[0].filters).toEqual(expect.objectContaining({
+      search: 'земцов',
+      status: 'Open',
+      sortBy: 'createdAt',
+      sortDir: 'desc',
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сбросить' }));
+    fireEvent.change(screen.getByLabelText('Сохраненные представления'), {
+      target: { value: savedViews[0].id },
+    });
+
+    await waitFor(() => {
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(expect.objectContaining({
+        search: 'земцов',
+        status: 'Open',
+        page: 1,
+      }));
+    });
+
+    prompt.mockRestore();
   });
 
   it('runs row quick actions for task creation and case finance', async () => {

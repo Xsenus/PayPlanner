@@ -35,6 +35,7 @@ vi.mock('../../services/api', () => ({
     getCaseFinance: vi.fn(),
     addCaseRelatedParty: vi.fn(),
     deleteCaseRelatedParty: vi.fn(),
+    requestCaseAccess: vi.fn(),
   },
 }));
 
@@ -250,6 +251,15 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockResolvedValue(createTask());
     vi.mocked(apiService.bulkUpdateCases).mockReset();
     vi.mocked(apiService.bulkUpdateCases).mockResolvedValue({ requested: 1, updated: 1 });
+    vi.mocked(apiService.requestCaseAccess).mockReset();
+    vi.mocked(apiService.requestCaseAccess).mockResolvedValue({
+      clientCaseId: 15,
+      requestedAt: '2026-05-18T12:00:00Z',
+      requestedByUserId: 7,
+      requestedByUserName: 'Кожеваткин Андрей Владимирович',
+      reason: 'Нужно посмотреть или продолжить работу по делу.',
+      isHiddenFromExecutor: true,
+    });
     vi.mocked(apiService.generateCaseDocumentTemplate).mockReset();
     vi.mocked(apiService.generateCaseDocumentTemplate).mockResolvedValue({
       id: 8,
@@ -508,6 +518,10 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Договор №1-2026')).toBeTruthy();
     expect(screen.getByText('Счет №8')).toBeTruthy();
     expect(screen.getAllByText('Оплата по счету №8').length).toBeGreaterThan(0);
+    expect(screen.getByText('Календарь оплат')).toBeTruthy();
+    expect(screen.getByText(/май 2026/u)).toBeTruthy();
+    expect(screen.getByText('План оплат')).toBeTruthy();
+    expect(screen.getAllByText('Оплачено').length).toBeGreaterThan(0);
     expect(screen.getByText(/115\s*000\s*₽/u)).toBeTruthy();
   });
 
@@ -674,6 +688,7 @@ describe('CaseDetailPage', () => {
     fireEvent.change(screen.getByLabelText('Стадия дела'), { target: { value: 'Апелляция' } });
     fireEvent.change(screen.getByLabelText('Приоритет дела'), { target: { value: 'urgent' } });
     fireEvent.change(screen.getByLabelText('Ответственный по делу'), { target: { value: '8' } });
+    fireEvent.click(screen.getByLabelText('Скрыть дело от исполнителя'));
     fireEvent.click(screen.getByRole('button', { name: /Сохранить/u }));
 
     await waitFor(() => {
@@ -683,9 +698,27 @@ describe('CaseDetailPage', () => {
         priority: 'urgent',
         stage: 'Апелляция',
         responsibleUserId: 8,
+        isHiddenFromExecutor: true,
+        inactivityRemindersEnabled: true,
       });
       expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('offers an access request when the case is hidden or unavailable', async () => {
+    vi.mocked(apiService.getCaseV2).mockRejectedValueOnce(new Error('HTTP 403 Forbidden - Дело скрыто от исполнителя.'));
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Нужно проверить сроки');
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    expect(await screen.findByText(/Дело скрыто от исполнителя/u)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Запросить доступ/u }));
+
+    await waitFor(() => {
+      expect(apiService.requestCaseAccess).toHaveBeenCalledWith(15, { reason: 'Нужно проверить сроки' });
+    });
+    expect(await screen.findByText(/Запрос доступа отправлен/u)).toBeTruthy();
+    promptSpy.mockRestore();
   });
 
   it('archives the case through the header action', async () => {
@@ -988,10 +1021,12 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Судебный блок')).toBeTruthy();
     expect(screen.getAllByText('Арбитражный суд Самарской области').length).toBeGreaterThan(0);
     expect(screen.getByText('https://kad.arbitr.ru/card')).toBeTruthy();
-    expect(screen.getByText('Апелляция')).toBeTruthy();
+    expect(screen.getByText('Судебная хронология')).toBeTruthy();
+    expect(screen.getAllByText('Ближайшее заседание').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Апелляция').length).toBeGreaterThan(0);
     expect(screen.getByText('01.07.2026')).toBeTruthy();
     expect(await screen.findByText('Журнал судебных проверок')).toBeTruthy();
-    expect(screen.getByText('Проверка записана')).toBeTruthy();
+    expect(screen.getAllByText('Проверка записана').length).toBeGreaterThan(0);
     expect(screen.getByText('Инициатор: Администратор')).toBeTruthy();
     expect(apiService.getCaseCourtSyncLogs).toHaveBeenCalledWith(15);
 

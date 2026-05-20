@@ -30,6 +30,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useMoneyOperations } from '../../hooks/useMoneyOperations';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
@@ -2073,6 +2074,8 @@ export function MoneyOperations({
   onOpenInvoice?: (invoiceId: number, type?: 'Income' | 'Expense') => void;
 }) {
   const { user } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const canExportJournal = permissions.payments.canExport;
   const { setActiveTab } = useTabNavigation();
   const toast = useToast();
   const [showFilters, setShowFilters] = useState(false);
@@ -2960,6 +2963,11 @@ export function MoneyOperations({
   }, [journalActionsOpen]);
 
   const handleExportCsv = async () => {
+    if (!canExportJournal) {
+      toast.error('У роли нет права на выгрузку денежного журнала.', 'Журнал денег');
+      return;
+    }
+
     setMoneyOperationsExporting(true);
     try {
       const { blob, fileName } = await apiService.exportMoneyOperationsCsv({
@@ -2991,6 +2999,11 @@ export function MoneyOperations({
   };
 
   const handleExportPdf = async () => {
+    if (!canExportJournal) {
+      toast.error('У роли нет права на выгрузку денежного журнала.', 'Журнал денег');
+      return;
+    }
+
     setMoneyOperationsPdfExporting(true);
     try {
       const { blob, fileName } = await apiService.exportMoneyOperationsPdf({
@@ -3022,6 +3035,11 @@ export function MoneyOperations({
   };
 
   const handleExportExcel = async () => {
+    if (!canExportJournal) {
+      toast.error('У роли нет права на выгрузку денежного журнала.', 'Журнал денег');
+      return;
+    }
+
     setMoneyOperationsExcelExporting(true);
     try {
       const { blob, fileName } = await apiService.exportMoneyOperationsExcel({
@@ -3053,6 +3071,11 @@ export function MoneyOperations({
   };
 
   const handlePrintJournal = async () => {
+    if (!canExportJournal) {
+      toast.error('У роли нет права на печать денежного журнала.', 'Журнал денег');
+      return;
+    }
+
     setMoneyOperationsPrinting(true);
     try {
       const html = await apiService.getMoneyOperationsPrintHtml({
@@ -4595,73 +4618,75 @@ export function MoneyOperations({
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Обновить
           </button>
-          <div ref={journalActionsRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setJournalActionsOpen((prev) => !prev)}
-              disabled={journalActionBusy}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              aria-haspopup="menu"
-              aria-expanded={journalActionsOpen}>
-              {journalActionBusy ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4" />
+          {canExportJournal ? (
+            <div ref={journalActionsRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setJournalActionsOpen((prev) => !prev)}
+                disabled={journalActionBusy}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                aria-haspopup="menu"
+                aria-expanded={journalActionsOpen}>
+                {journalActionBusy ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                {journalActionBusy ? 'Выполняется...' : 'Экспорт и печать'}
+                <ChevronDown className={`h-4 w-4 transition-transform ${journalActionsOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {journalActionsOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-20 mt-2 w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setJournalActionsOpen(false);
+                      void handleExportCsv();
+                    }}
+                    disabled={moneyOperationsExporting}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                    <Download className={`h-4 w-4 ${moneyOperationsExporting ? 'animate-pulse' : ''}`} />
+                    {moneyOperationsExporting ? 'Экспорт CSV...' : 'CSV'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setJournalActionsOpen(false);
+                      void handleExportPdf();
+                    }}
+                    disabled={moneyOperationsPdfExporting}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                    <Download className={`h-4 w-4 ${moneyOperationsPdfExporting ? 'animate-pulse' : ''}`} />
+                    {moneyOperationsPdfExporting ? 'Экспорт PDF...' : 'PDF'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setJournalActionsOpen(false);
+                      void handleExportExcel();
+                    }}
+                    disabled={moneyOperationsExcelExporting}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                    <Download className={`h-4 w-4 ${moneyOperationsExcelExporting ? 'animate-pulse' : ''}`} />
+                    {moneyOperationsExcelExporting ? 'Экспорт Excel...' : 'Excel'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setJournalActionsOpen(false);
+                      void handlePrintJournal();
+                    }}
+                    disabled={moneyOperationsPrinting}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                    <Printer className={`h-4 w-4 ${moneyOperationsPrinting ? 'animate-pulse' : ''}`} />
+                    {moneyOperationsPrinting ? 'Подготовка печати...' : 'Печать'}
+                  </button>
+                </div>
               )}
-              {journalActionBusy ? 'Выполняется...' : 'Экспорт и печать'}
-              <ChevronDown className={`h-4 w-4 transition-transform ${journalActionsOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {journalActionsOpen && (
-              <div
-                role="menu"
-                className="absolute right-0 z-20 mt-2 w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setJournalActionsOpen(false);
-                    void handleExportCsv();
-                  }}
-                  disabled={moneyOperationsExporting}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
-                  <Download className={`h-4 w-4 ${moneyOperationsExporting ? 'animate-pulse' : ''}`} />
-                  {moneyOperationsExporting ? 'Экспорт CSV...' : 'CSV'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setJournalActionsOpen(false);
-                    void handleExportPdf();
-                  }}
-                  disabled={moneyOperationsPdfExporting}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
-                  <Download className={`h-4 w-4 ${moneyOperationsPdfExporting ? 'animate-pulse' : ''}`} />
-                  {moneyOperationsPdfExporting ? 'Экспорт PDF...' : 'PDF'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setJournalActionsOpen(false);
-                    void handleExportExcel();
-                  }}
-                  disabled={moneyOperationsExcelExporting}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
-                  <Download className={`h-4 w-4 ${moneyOperationsExcelExporting ? 'animate-pulse' : ''}`} />
-                  {moneyOperationsExcelExporting ? 'Экспорт Excel...' : 'Excel'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setJournalActionsOpen(false);
-                    void handlePrintJournal();
-                  }}
-                  disabled={moneyOperationsPrinting}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
-                  <Printer className={`h-4 w-4 ${moneyOperationsPrinting ? 'animate-pulse' : ''}`} />
-                  {moneyOperationsPrinting ? 'Подготовка печати...' : 'Печать'}
-                </button>
-              </div>
-            )}
-          </div>
+            </div>
+          ) : null}
         </div>
       </div>
 

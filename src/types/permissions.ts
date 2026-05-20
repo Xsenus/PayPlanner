@@ -5,6 +5,7 @@ export type MenuSectionKey =
   | 'calculator'
   | 'legalEntities'
   | 'clients'
+  | 'cases'
   | 'accounts'
   | 'acts'
   | 'payments'
@@ -50,6 +51,7 @@ export const MENU_SECTION_KEYS: MenuSectionKey[] = [
   'calculator',
   'legalEntities',
   'clients',
+  'cases',
   'accounts',
   'acts',
   'payments',
@@ -95,6 +97,7 @@ export const defaultRolePermissions: RolePermissions = {
   calculator: { ...defaultMenuPermissions },
   legalEntities: { ...defaultMenuPermissions },
   clients: { ...defaultMenuPermissions },
+  cases: { ...defaultMenuPermissions },
   accounts: { ...defaultMenuPermissions },
   acts: { ...defaultMenuPermissions },
   payments: { ...defaultMenuPermissions },

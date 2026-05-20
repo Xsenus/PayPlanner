@@ -547,6 +547,14 @@ export interface ClientCase {
   activityConfirmedByUserId?: number | null;
   activityConfirmedByUserName?: string | null;
   inactivityRemindersEnabled?: boolean;
+  isHiddenFromExecutor?: boolean;
+  hiddenFromExecutorAt?: string | null;
+  hiddenFromExecutorByUserId?: number | null;
+  hiddenFromExecutorByUserName?: string | null;
+  accessRequestedAt?: string | null;
+  accessRequestedByUserId?: number | null;
+  accessRequestedByUserName?: string | null;
+  accessRequestReason?: string | null;
   title: string;
   description?: string;
   status: string;
@@ -613,6 +621,28 @@ export interface ClientCaseSummary {
   debtAmount: number;
   lastTaskAt?: string | null;
   lastViewedAt?: string | null;
+}
+
+export interface ClientCaseAccessRequest {
+  clientCaseId: number;
+  caseNumber: string;
+  title: string;
+  ownerName: string;
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  requestedAt: string;
+  requestedByUserId?: number | null;
+  requestedByUserName: string;
+  reason: string;
+  isHiddenFromExecutor: boolean;
+}
+
+export interface ClientCaseAccessRequestResolution {
+  clientCaseId: number;
+  granted: boolean;
+  resolvedAt: string;
+  resolvedByUserName: string;
+  isHiddenFromExecutor: boolean;
 }
 
 export interface ClientCaseFinanceDetail {
@@ -1202,6 +1232,48 @@ export interface LegalWorkReport {
   responsibles: LegalWorkResponsibleItem[];
   overdueDeadlines: LegalWorkDeadlineItem[];
   upcomingDeadlines: LegalWorkDeadlineItem[];
+}
+
+export interface CaseActivityReportItem {
+  caseId: number;
+  caseNumber: string;
+  caseTitle: string;
+  caseType: string;
+  status: string;
+  statusLabel: string;
+  ownerId?: number | null;
+  ownerType: string;
+  ownerName: string;
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  createdAt: string;
+  lastActivityAt: string;
+  lastTaskAt?: string | null;
+  lastViewedAt?: string | null;
+  activityConfirmedAt?: string | null;
+  daysWithoutActivity: number;
+  activeTaskCount: number;
+  completedTaskCount: number;
+  inactivityRemindersEnabled: boolean;
+  isInactive: boolean;
+  isEscalated: boolean;
+  reason: string;
+}
+
+export interface CaseActivityReport {
+  generatedAt: string;
+  inactivityDays: number;
+  escalationDays: number;
+  activity: string;
+  totalVisibleCases: number;
+  activeCaseCount: number;
+  finishedCaseCount: number;
+  inactiveCaseCount: number;
+  escalatedCaseCount: number;
+  disabledCaseCount: number;
+  withActiveTasksCount: number;
+  withoutResponsibleCount: number;
+  items: CaseActivityReportItem[];
 }
 
 export interface DirectionReportItem {

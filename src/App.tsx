@@ -235,6 +235,7 @@ function AppContent() {
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(getInitialTaskId);
   const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(getPathCaseId);
+  const [caseReturnTab, setCaseReturnTab] = useState<Tab>('cases');
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [initialClientSection, setInitialClientSection] = useState<'payments' | 'accounts' | 'acts' | undefined>(undefined);
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -265,7 +266,7 @@ function AppContent() {
         { tab: 'reports' as Tab, allowed: permissions.reports.canView },
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
-        { tab: 'cases' as Tab, allowed: permissions.clients.canView },
+        { tab: 'cases' as Tab, allowed: permissions.cases.canView },
         { tab: 'clients' as Tab, allowed: permissions.clients.canView },
         { tab: 'contacts' as Tab, allowed: permissions.clients.canView || permissions.legalEntities.canView },
         { tab: 'contactsClients' as Tab, allowed: permissions.clients.canView },
@@ -317,7 +318,7 @@ function AppContent() {
           return permissions.legalEntities.canView;
         case 'cases':
         case 'caseDetail':
-          return permissions.clients.canView;
+          return permissions.cases.canView;
         case 'clients':
         case 'contacts':
           return permissions.clients.canView || permissions.legalEntities.canView;
@@ -560,8 +561,9 @@ function AppContent() {
 
   const openRelatedCase = useCallback(
     (caseId: number, clientId?: number | null) => {
-      if (caseId > 0 && permissions.clients.canView) {
+      if (caseId > 0 && permissions.cases.canView) {
         setSelectedCaseId(caseId);
+        setCaseReturnTab(activeTab === 'caseDetail' ? 'cases' : activeTab);
         setActiveTab('caseDetail');
         return;
       }
@@ -570,7 +572,7 @@ function AppContent() {
         handleOpenClient(clientId, caseId);
       }
     },
-    [handleOpenClient, permissions.clients.canView],
+    [activeTab, handleOpenClient, permissions.cases.canView],
   );
 
   const openTaskDetail = useCallback(
@@ -962,7 +964,7 @@ function AppContent() {
           : renderNoAccess('Раздел календаря недоступен для вашей роли.');
 
       case 'notifications':
-        return <NotificationCenter onOpenTask={openTaskDetail} />;
+        return <NotificationCenter onOpenTask={openTaskDetail} onOpenCase={openRelatedCase} />;
 
       case 'tasks':
         return permissions.tasks.canView
@@ -1004,7 +1006,15 @@ function AppContent() {
 
       case 'reports':
         return permissions.reports.canView
-          ? <Reports />
+          ? (
+              <Reports
+                onOpenCase={(caseId) => {
+                  setSelectedCaseId(caseId);
+                  setCaseReturnTab('reports');
+                  setActiveTab('caseDetail');
+                }}
+              />
+            )
           : renderNoAccess('Просмотр отчетов недоступен для вашей роли.');
 
       case 'calculator':
@@ -1030,12 +1040,13 @@ function AppContent() {
           : renderNoAccess('Раздел юридических лиц недоступен для вашей роли.');
 
       case 'cases':
-        return permissions.clients.canView
+        return permissions.cases.canView
           ? (
               <CasesRegistry
-                allowCreate={permissions.clients.canCreate}
+                allowCreate={permissions.cases.canCreate}
                 onOpenCase={(caseId) => {
                   setSelectedCaseId(caseId);
+                  setCaseReturnTab('cases');
                   setActiveTab('caseDetail');
                 }}
                 onOpenClient={(clientId, caseId) =>
@@ -1071,16 +1082,17 @@ function AppContent() {
           : renderNoAccess('Реестр дел недоступен для вашей роли.');
 
       case 'caseDetail':
-        if (!permissions.clients.canView) {
+        if (!permissions.cases.canView) {
           return renderNoAccess('Карточка дела недоступна для вашей роли.');
         }
 
         if (!selectedCaseId) {
           return (
             <CasesRegistry
-              allowCreate={permissions.clients.canCreate}
+              allowCreate={permissions.cases.canCreate}
               onOpenCase={(caseId) => {
                 setSelectedCaseId(caseId);
+                setCaseReturnTab('cases');
                 setActiveTab('caseDetail');
               }}
             />
@@ -1092,7 +1104,8 @@ function AppContent() {
             caseId={selectedCaseId}
             onBack={() => {
               setSelectedCaseId(null);
-              setActiveTab('cases');
+              setActiveTab(caseReturnTab === 'caseDetail' ? 'cases' : caseReturnTab);
+              setCaseReturnTab('cases');
             }}
             onOpenClient={(clientId, caseId) =>
               handleOpenClient(clientId, caseId, { returnTo: { tab: 'caseDetail' } })
@@ -1245,7 +1258,13 @@ function AppContent() {
             initialCaseId={initialCaseId}
             initialSection={initialClientSection}
             onOpenCasePage={(caseId) => {
+              if (!permissions.cases.canView) {
+                toast.error('Доступ к карточке дела запрещен.');
+                return;
+              }
+
               setSelectedCaseId(caseId);
+              setCaseReturnTab('clientDetail');
               setActiveTab('caseDetail');
             }}
             onOpenInvoicePage={(invoiceId) =>

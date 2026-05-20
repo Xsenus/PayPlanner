@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, ArrowUpDown, Briefcase, ClipboardPlus, Download, Loader2, Plus, RefreshCw, Search, Settings2, UserRound, WalletCards } from 'lucide-react';
+import { Archive, ArrowUpDown, Bookmark, Briefcase, ClipboardPlus, Download, Loader2, LockKeyhole, Plus, Printer, RefreshCw, Search, Settings2, Trash2, UserRound, WalletCards } from 'lucide-react';
 
+import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
-import type { ActResponsible, ClientCase } from '../../types';
+import type { ActResponsible, ClientCase, ClientCaseAccessRequest } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { CaseModal } from '../Clients/CaseModal';
 import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
@@ -29,6 +32,29 @@ type SortKey =
 
 type SortDir = 'asc' | 'desc';
 type CaseScope = 'all' | 'active' | 'mine' | 'archive';
+type CaseActivityFilter = 'all' | 'active' | 'inactive';
+type CaseRegistryViewState = {
+  search: string;
+  status: string;
+  caseScope: CaseScope;
+  activityFilter: CaseActivityFilter;
+  caseType: string;
+  responsibleUserId: string;
+  priority: string;
+  from: string;
+  to: string;
+  minFee: string;
+  maxFee: string;
+  sortBy: SortKey;
+  sortDir: SortDir;
+  pageSize: number;
+};
+type CaseRegistrySavedView = {
+  id: string;
+  name: string;
+  filters: CaseRegistryViewState;
+  updatedAt: string;
+};
 type CaseColumnKey =
   | 'caseNumber'
   | 'title'
@@ -83,6 +109,14 @@ const CASE_SCOPE_OPTIONS: Array<{ value: CaseScope; label: string }> = [
   { value: 'mine', label: 'Мои' },
   { value: 'archive', label: 'Архив' },
 ];
+const CASE_ACTIVITY_FILTER_OPTIONS: Array<{ value: CaseActivityFilter; label: string }> = [
+  { value: 'all', label: 'Любая активность' },
+  { value: 'active', label: 'Активные по движению' },
+  { value: 'inactive', label: 'Неактивные' },
+];
+const CASE_REGISTRY_VIEW_STORAGE_KEY = 'pp.cases_registry_views.v1';
+const INACTIVE_CASE_DAYS = 14;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const CASE_COLUMN_CONFIGS: Array<{
   key: CaseColumnKey;
@@ -164,6 +198,17 @@ function formatMoney(value?: number | null) {
   return typeof value === 'number' ? formatCurrencySmart(value).full : '—';
 }
 
+function downloadBlob(fileName: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 function getLatestCaseActivityAt(item: ClientCase) {
   const values = [item.lastTaskAt, item.activityConfirmedAt, item.lastViewedAt]
     .map((value) => {
@@ -180,17 +225,108 @@ function getLatestCaseActivityAt(item: ClientCase) {
   return new Date(Math.max(...values.map((value) => value.getTime()))).toISOString();
 }
 
+function getCaseActivityAgeDays(item: ClientCase) {
+  const latestActivity = getLatestCaseActivityAt(item) || item.createdAt;
+  const date = new Date(latestActivity);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return Math.max(0, Math.floor((Date.now() - date.getTime()) / DAY_MS));
+}
+
+function getCaseActivityBadge(item: ClientCase) {
+  if (item.status === 'Closed' || item.status === 'Lost') {
+    return {
+      label: 'Архив',
+      className: 'border-slate-200 bg-slate-100 text-slate-600',
+      hint: 'Дело завершено',
+    };
+  }
+
+  if (item.inactivityRemindersEnabled === false) {
+    return {
+      label: 'Контроль выключен',
+      className: 'border-slate-200 bg-slate-100 text-slate-600',
+      hint: 'Автоконтроль отключен',
+    };
+  }
+
+  const days = getCaseActivityAgeDays(item);
+  if (days !== null && days >= INACTIVE_CASE_DAYS) {
+    return {
+      label: `Нет движения ${days} дн.`,
+      className: 'border-amber-200 bg-amber-50 text-amber-700',
+      hint: 'Дело попадает под автоконтроль',
+    };
+  }
+
+  return {
+    label: 'Активно',
+    className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    hint: days === null ? 'Активность не рассчитана' : `Последнее движение ${days} дн. назад`,
+  };
+}
+
+function loadSavedRegistryViews(): CaseRegistrySavedView[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(CASE_REGISTRY_VIEW_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((item): item is CaseRegistrySavedView => (
+        Boolean(item)
+        && typeof item === 'object'
+        && typeof (item as CaseRegistrySavedView).id === 'string'
+        && typeof (item as CaseRegistrySavedView).name === 'string'
+        && Boolean((item as CaseRegistrySavedView).filters)
+      ))
+      .slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedRegistryViews(views: CaseRegistrySavedView[]) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(CASE_REGISTRY_VIEW_STORAGE_KEY, JSON.stringify(views.slice(0, 20)));
+}
+
 export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onOpenCaseFinance, allowCreate = true }: CasesRegistryProps) {
+  const { user, isAdmin } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const canExportCases = isAdmin() || permissions.cases.canExport;
+  const canManageCaseAccess = isAdmin() || permissions.cases.canEdit;
   const [items, setItems] = useState<ClientCase[]>([]);
+  const [accessRequests, setAccessRequests] = useState<ClientCaseAccessRequest[]>([]);
+  const [accessRequestsLoading, setAccessRequestsLoading] = useState(false);
+  const [resolvingAccessCaseId, setResolvingAccessCaseId] = useState<number | null>(null);
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [registryExporting, setRegistryExporting] = useState(false);
+  const [registryPrinting, setRegistryPrinting] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [caseScope, setCaseScope] = useState<CaseScope>('all');
+  const [activityFilter, setActivityFilter] = useState<CaseActivityFilter>('all');
   const [caseType, setCaseType] = useState('');
   const [responsibleUserId, setResponsibleUserId] = useState('');
   const [priority, setPriority] = useState('');
@@ -200,6 +336,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [maxFee, setMaxFee] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('createdAt');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [savedViews, setSavedViews] = useState<CaseRegistrySavedView[]>(() => loadSavedRegistryViews());
+  const [selectedSavedViewId, setSelectedSavedViewId] = useState('');
   const [reloadToken, setReloadToken] = useState(0);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [bulkStatus, setBulkStatus] = useState('');
@@ -244,6 +382,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setAccessRequestsLoading(canManageCaseAccess);
     setError(null);
 
     Promise.all([
@@ -258,37 +397,47 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
         minFee: minFee ? Number(minFee) : undefined,
         maxFee: maxFee ? Number(maxFee) : undefined,
         scope: caseScope === 'all' ? undefined : caseScope,
+        activity: activityFilter === 'all' ? undefined : activityFilter,
+        inactiveDays: INACTIVE_CASE_DAYS,
         sortBy,
         sortDir,
         page,
         pageSize,
       }),
       apiService.getActResponsibles().catch(() => [] as ActResponsible[]),
+      canManageCaseAccess
+        ? apiService.getCaseAccessRequests().catch(() => [] as ClientCaseAccessRequest[])
+        : Promise.resolve([] as ClientCaseAccessRequest[]),
     ])
-      .then(([casesResult, responsibleResult]) => {
+      .then(([casesResult, responsibleResult, accessRequestResult]) => {
         if (cancelled) return;
         setItems(casesResult.items ?? []);
         setTotal(casesResult.total ?? 0);
         setResponsibles(responsibleResult ?? []);
+        setAccessRequests(accessRequestResult ?? []);
       })
       .catch((err) => {
         if (cancelled) return;
         setItems([]);
         setTotal(0);
+        setAccessRequests([]);
         setError(err instanceof Error ? err.message : 'Не удалось загрузить реестр дел.');
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setAccessRequestsLoading(false);
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [caseScope, caseType, from, maxFee, minFee, page, pageSize, priority, reloadToken, responsibleUserId, search, sortBy, sortDir, status, to]);
+  }, [activityFilter, canManageCaseAccess, caseScope, caseType, from, maxFee, minFee, page, pageSize, priority, reloadToken, responsibleUserId, search, sortBy, sortDir, status, to]);
 
   useEffect(() => {
     setPage(1);
-  }, [caseScope, caseType, from, maxFee, minFee, pageSize, priority, responsibleUserId, search, status, to]);
+  }, [activityFilter, caseScope, caseType, from, maxFee, minFee, pageSize, priority, responsibleUserId, search, status, to]);
 
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
@@ -327,6 +476,85 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     }
   };
 
+  const captureRegistryViewState = (): CaseRegistryViewState => ({
+    search,
+    status,
+    caseScope,
+    activityFilter,
+    caseType,
+    responsibleUserId,
+    priority,
+    from,
+    to,
+    minFee,
+    maxFee,
+    sortBy,
+    sortDir,
+    pageSize,
+  });
+
+  const applyRegistryViewState = (filters: CaseRegistryViewState) => {
+    setSearch(filters.search ?? '');
+    setStatus(filters.status ?? '');
+    setCaseScope(filters.caseScope ?? 'all');
+    setActivityFilter(filters.activityFilter ?? 'all');
+    setCaseType(filters.caseType ?? '');
+    setResponsibleUserId(filters.responsibleUserId ?? '');
+    setPriority(filters.priority ?? '');
+    setFrom(filters.from ?? '');
+    setTo(filters.to ?? '');
+    setMinFee(filters.minFee ?? '');
+    setMaxFee(filters.maxFee ?? '');
+    setSortBy(filters.sortBy ?? 'createdAt');
+    setSortDir(filters.sortDir ?? 'desc');
+    setPageSize(filters.pageSize || 25);
+    setPage(1);
+  };
+
+  const saveCurrentView = () => {
+    const currentView = savedViews.find((view) => view.id === selectedSavedViewId);
+    const name = window.prompt('Название представления', currentView?.name ?? '')?.trim();
+    if (!name) {
+      return;
+    }
+
+    const viewId = currentView?.id ?? `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const nextView: CaseRegistrySavedView = {
+      id: viewId,
+      name,
+      filters: captureRegistryViewState(),
+      updatedAt: new Date().toISOString(),
+    };
+    const nextViews = [nextView, ...savedViews.filter((view) => view.id !== viewId)].slice(0, 20);
+    setSavedViews(nextViews);
+    setSelectedSavedViewId(viewId);
+    persistSavedRegistryViews(nextViews);
+    setNotice(`Представление «${name}» сохранено.`);
+  };
+
+  const selectSavedView = (viewId: string) => {
+    setSelectedSavedViewId(viewId);
+    const view = savedViews.find((item) => item.id === viewId);
+    if (!view) {
+      return;
+    }
+
+    applyRegistryViewState(view.filters);
+  };
+
+  const deleteSelectedView = () => {
+    if (!selectedSavedViewId) {
+      return;
+    }
+
+    const view = savedViews.find((item) => item.id === selectedSavedViewId);
+    const nextViews = savedViews.filter((item) => item.id !== selectedSavedViewId);
+    setSavedViews(nextViews);
+    setSelectedSavedViewId('');
+    persistSavedRegistryViews(nextViews);
+    setNotice(view ? `Представление «${view.name}» удалено.` : 'Представление удалено.');
+  };
+
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const selectedItems = useMemo(
     () => items.filter((item) => selectedIdSet.has(item.id)),
@@ -341,6 +569,81 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     { feeAmount: 0, incomePaid: 0, incomeOutstanding: 0 },
   ), [selectedItems]);
   const allPageSelected = items.length > 0 && items.every((item) => selectedIdSet.has(item.id));
+
+  const buildRegistryQueryParams = () => ({
+    search: search.trim() || undefined,
+    status: status || undefined,
+    caseType: caseType.trim() || undefined,
+    responsibleUserId: responsibleUserId ? Number(responsibleUserId) : undefined,
+    priority: priority || undefined,
+    from: from || undefined,
+    to: to || undefined,
+    minFee: minFee ? Number(minFee) : undefined,
+    maxFee: maxFee ? Number(maxFee) : undefined,
+    scope: caseScope === 'all' ? undefined : caseScope,
+    activity: activityFilter === 'all' ? undefined : activityFilter,
+    inactiveDays: INACTIVE_CASE_DAYS,
+    sortBy,
+    sortDir,
+  });
+
+  const exportRegistryCsv = async () => {
+    if (!canExportCases) {
+      setError('У роли нет права на выгрузку реестра дел.');
+      return;
+    }
+
+    setRegistryExporting(true);
+    setError(null);
+    try {
+      const { blob, fileName } = await apiService.exportCasesRegistryCsv(buildRegistryQueryParams());
+      downloadBlob(fileName || 'cases-registry.csv', blob);
+      setNotice('Реестр дел выгружен в CSV.');
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось выгрузить реестр дел в CSV.'));
+    } finally {
+      setRegistryExporting(false);
+    }
+  };
+
+  const printRegistry = async () => {
+    if (!canExportCases) {
+      setError('У роли нет права на печать реестра дел.');
+      return;
+    }
+
+    setRegistryPrinting(true);
+    setError(null);
+    try {
+      const html = await apiService.getCasesRegistryPrintHtml(buildRegistryQueryParams());
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось открыть печатную форму реестра дел.'));
+    } finally {
+      setRegistryPrinting(false);
+    }
+  };
+
+  const resolveAccessRequest = async (request: ClientCaseAccessRequest, grant: boolean) => {
+    setResolvingAccessCaseId(request.clientCaseId);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiService.resolveCaseAccessRequest(request.clientCaseId, { grant });
+      setAccessRequests((current) => current.filter((item) => item.clientCaseId !== request.clientCaseId));
+      setNotice(grant
+        ? `Доступ к делу «${request.title || request.caseNumber || request.clientCaseId}» открыт.`
+        : `Запрос доступа к делу «${request.title || request.caseNumber || request.clientCaseId}» отклонен.`);
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось обработать запрос доступа к делу.'));
+    } finally {
+      setResolvingAccessCaseId(null);
+    }
+  };
 
   const toggleSelected = (id: number) => {
     setSelectedIds((current) => (
@@ -459,6 +762,11 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   };
 
   const exportCsv = (sourceItems = items, fileName = 'cases-registry.csv') => {
+    if (!canExportCases) {
+      setError('У роли нет права на выгрузку реестра дел.');
+      return;
+    }
+
     if (sourceItems.length === 0) {
       return;
     }
@@ -600,8 +908,18 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
             </div>
           </div>
         );
-      case 'activity':
-        return toRuDate(getLatestCaseActivityAt(item)) || '—';
+      case 'activity': {
+        const activity = getCaseActivityBadge(item);
+        return (
+          <div>
+            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${activity.className}`}>
+              {activity.label}
+            </span>
+            <div className="mt-1 text-xs text-slate-500">{activity.hint}</div>
+            <div className="mt-1 text-xs text-slate-500">{toRuDate(getLatestCaseActivityAt(item)) || '—'}</div>
+          </div>
+        );
+      }
       case 'incomePaid':
         return <span className="font-semibold text-emerald-700">{formatMoney(item.incomePaid)}</span>;
       case 'incomeOutstanding':
@@ -814,13 +1132,24 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
               <RefreshCw className="h-4 w-4" /> Обновить
             </button>
-            <button
-              type="button"
-              onClick={() => exportCsv()}
-              disabled={items.length === 0}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
-              <Download className="h-4 w-4" /> CSV
-            </button>
+            {canExportCases ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void exportRegistryCsv()}
+                  disabled={loading || registryExporting}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  {registryExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void printRegistry()}
+                  disabled={loading || registryPrinting}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  {registryPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />} Печать
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               onClick={() => setColumnsOpen((value) => !value)}
@@ -849,16 +1178,44 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
         ) : null}
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 inline-flex rounded-lg bg-slate-100 p-1">
-            {CASE_SCOPE_OPTIONS.map((option) => (
+          <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="inline-flex w-fit rounded-lg bg-slate-100 p-1">
+              {CASE_SCOPE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => changeCaseScope(option.value)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${caseScope === option.value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <select
+                value={selectedSavedViewId}
+                onChange={(event) => selectSavedView(event.target.value)}
+                aria-label="Сохраненные представления"
+                className="h-10 min-w-[220px] rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700">
+                <option value="">Сохраненные представления</option>
+                {savedViews.map((view) => (
+                  <option key={view.id} value={view.id}>{view.name}</option>
+                ))}
+              </select>
               <button
-                key={option.value}
                 type="button"
-                onClick={() => changeCaseScope(option.value)}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${caseScope === option.value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
-                {option.label}
+                onClick={saveCurrentView}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-100">
+                <Bookmark className="h-4 w-4" /> Сохранить вид
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={deleteSelectedView}
+                disabled={!selectedSavedViewId}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Удалить сохраненное представление">
+                <Trash2 className="h-4 w-4" /> Удалить
+              </button>
+            </div>
           </div>
           <div className="mb-3 md:hidden">
             <button
@@ -899,6 +1256,9 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
             <select value={priority} onChange={(event) => setPriority(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
               {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
+            <select value={activityFilter} onChange={(event) => setActivityFilter(event.target.value as CaseActivityFilter)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
+              {CASE_ACTIVITY_FILTER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
           </div>
 
           <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
@@ -914,6 +1274,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
               onClick={() => {
                 setSearch('');
                 setCaseScope('all');
+                setActivityFilter('all');
                 setStatus('');
                 setCaseType('');
                 setResponsibleUserId('');
@@ -922,12 +1283,79 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                 setTo('');
                 setMinFee('');
                 setMaxFee('');
+                setSelectedSavedViewId('');
               }}
               className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-100">
               Сбросить
             </button>
           </div>
         </div>
+
+        {canManageCaseAccess && (accessRequestsLoading || accessRequests.length > 0) ? (
+          <section className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="inline-flex items-center gap-2 text-sm font-semibold text-amber-950">
+                  <LockKeyhole className="h-4 w-4" />
+                  Запросы доступа к скрытым делам
+                </div>
+                <div className="mt-1 text-xs text-amber-800">
+                  {accessRequestsLoading ? 'Проверяем ожидающие запросы...' : `Ожидает решения: ${accessRequests.length}`}
+                </div>
+              </div>
+            </div>
+            {accessRequests.length > 0 ? (
+              <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                {accessRequests.map((request) => {
+                  const caseLabel = request.caseNumber ? `№ ${request.caseNumber}` : `#${request.clientCaseId}`;
+                  return (
+                    <article key={request.clientCaseId} className="rounded-lg border border-amber-200 bg-white p-3">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => onOpenCase?.(request.clientCaseId)}
+                            className="text-left text-sm font-semibold text-blue-700 hover:underline">
+                            {caseLabel} · {request.title || 'Без названия'}
+                          </button>
+                          <div className="mt-1 text-xs text-slate-600">
+                            {request.ownerName || 'Владелец не указан'} · ответственный: {request.responsibleName || 'не указан'}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            Запросил: {request.requestedByUserName || 'пользователь'} · {toRuDate(request.requestedAt) || 'дата не указана'}
+                          </div>
+                          {request.reason ? <div className="mt-2 text-sm text-slate-700">{request.reason}</div> : null}
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onOpenCase?.(request.clientCaseId)}
+                            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-100">
+                            Открыть
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void resolveAccessRequest(request, true)}
+                            disabled={resolvingAccessCaseId === request.clientCaseId}
+                            className="h-9 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+                            Разрешить
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void resolveAccessRequest(request, false)}
+                            disabled={resolvingAccessCaseId === request.clientCaseId}
+                            className="h-9 rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50">
+                            Отклонить
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         {selectedIds.length > 0 ? (
           <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 shadow-sm">
@@ -983,13 +1411,15 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                 className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                 {bulkSaving ? 'Сохраняем...' : 'Применить'}
               </button>
-              <button
-                type="button"
-                onClick={() => exportCsv(selectedItems, 'cases-registry-selected.csv')}
-                disabled={selectedItems.length === 0 || bulkSaving}
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-blue-100 bg-white px-4 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50">
-                <Download className="h-4 w-4" /> CSV выбранных
-              </button>
+              {canExportCases ? (
+                <button
+                  type="button"
+                  onClick={() => exportCsv(selectedItems, 'cases-registry-selected.csv')}
+                  disabled={selectedItems.length === 0 || bulkSaving}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-blue-100 bg-white px-4 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Download className="h-4 w-4" /> CSV выбранных
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void archiveSelectedCases()}
