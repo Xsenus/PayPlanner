@@ -41,6 +41,84 @@ describe('extractResponseErrorMessage', () => {
 });
 
 describe('apiService auth handling', () => {
+  it('loads feature flags from the backend', async () => {
+    const payload = {
+      legal: {
+        externalCourtSync: false,
+        externalCalendarSync: false,
+        courtEvents: true,
+        documentTemplateLibrary: false,
+      },
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getFeatureFlags();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/features');
+  });
+
+  it('loads role permission audit from the backend', async () => {
+    const payload = {
+      generatedAtUtc: '2026-05-20T00:00:00Z',
+      totalRoles: 2,
+      readyRoles: 1,
+      rolesWithIssues: 1,
+      rolesWithBroadDataScope: 1,
+      catalogSections: ['cases'],
+      dataScopedSections: ['cases'],
+      roles: [
+        {
+          roleId: 7,
+          roleName: 'lawyer',
+          isSystemRole: false,
+          assignedUsersCount: 3,
+          configuredSectionsCount: 13,
+          totalSectionsCount: 14,
+          hasIssues: true,
+          missingSections: ['cases'],
+          unknownSections: [],
+          duplicateSections: [],
+          invalidViewScopeSections: [],
+          capabilityWithoutViewSections: [],
+          restrictedCapabilitySections: [],
+          broadDataScopeSections: ['clients'],
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getRolePermissionsAudit();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/role-permissions/audit');
+  });
+
+  it('downloads role permission audit csv from the backend', async () => {
+    const fetchMock = vi.fn(async () => new Response('RoleId;RoleName', {
+      headers: {
+        'content-type': 'text/csv',
+        'content-disposition': 'attachment; filename="roles-audit.csv"',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.exportRolePermissionsAuditCsv();
+
+    expect(await result.blob.text()).toBe('RoleId;RoleName');
+    expect(result.fileName).toBe('roles-audit.csv');
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/role-permissions/audit.csv');
+  });
+
   it('uses the primary pp_token storage key for API requests', async () => {
     localStorage.setItem('pp_token', 'main-token');
     const fetchMock = vi.fn(async () => new Response(JSON.stringify([]), {

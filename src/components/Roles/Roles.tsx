@@ -14,6 +14,7 @@ import { authService, type Role as AuthRole } from '../../services/authService';
 import { useAuth } from '../../contexts/AuthContext';
 import { RoleModal } from './RoleModal';
 import { RolePermissionsModal } from './RolePermissionsModal';
+import { RolePermissionAuditPanel } from './RolePermissionAuditPanel';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -364,6 +365,8 @@ export const Roles = () => {
             ) : null}
           </div>
         </div>
+
+        <RolePermissionAuditPanel />
 
         {settingsOpen ? (
           <div className="mb-6">

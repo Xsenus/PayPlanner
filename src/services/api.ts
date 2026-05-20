@@ -92,6 +92,43 @@ export interface UserSettingDto {
   updatedAt: string;
 }
 
+export interface AppFeatureFlagsDto {
+  legal: {
+    externalCourtSync: boolean;
+    externalCalendarSync: boolean;
+    courtEvents: boolean;
+    documentTemplateLibrary: boolean;
+  };
+}
+
+export interface RolePermissionAuditRoleDto {
+  roleId: number;
+  roleName: string;
+  isSystemRole: boolean;
+  assignedUsersCount: number;
+  configuredSectionsCount: number;
+  totalSectionsCount: number;
+  hasIssues: boolean;
+  missingSections: string[];
+  unknownSections: string[];
+  duplicateSections: string[];
+  invalidViewScopeSections: string[];
+  capabilityWithoutViewSections: string[];
+  restrictedCapabilitySections: string[];
+  broadDataScopeSections: string[];
+}
+
+export interface RolePermissionAuditReportDto {
+  generatedAtUtc: string;
+  totalRoles: number;
+  readyRoles: number;
+  rolesWithIssues: number;
+  rolesWithBroadDataScope: number;
+  catalogSections: string[];
+  dataScopedSections: string[];
+  roles: RolePermissionAuditRoleDto[];
+}
+
 export type NotificationChannel = 'email' | 'telegram';
 
 export interface NotificationPurposeDto {
@@ -1022,6 +1059,10 @@ export class ApiService {
     return (await response.json()) as T;
   }
 
+  async getFeatureFlags() {
+    return this.request<AppFeatureFlagsDto>('/features');
+  }
+
   // ===== Acts =====
   async getActs(params?: {
     from?: string;
@@ -1892,6 +1933,32 @@ export class ApiService {
   // ===== Role permissions =====
   async getRolePermissions(roleId: number) {
     return this.request<RolePermissions>(`/role-permissions/${roleId}`);
+  }
+
+  async getRolePermissionsAudit() {
+    return this.request<RolePermissionAuditReportDto>('/role-permissions/audit');
+  }
+
+  async exportRolePermissionsAuditCsv() {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/role-permissions/audit.csv`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} at ${API_BASE_URL}/role-permissions/audit.csv ${text ? `- ${text}` : ''}`,
+      );
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName:
+        parseContentDispositionFileName(response.headers.get('content-disposition')) ??
+        'role-permissions-audit.csv',
+    };
   }
 
   async updateRolePermissions(roleId: number, permissions: RolePermissions) {
