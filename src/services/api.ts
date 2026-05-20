@@ -2987,6 +2987,110 @@ export class ApiService {
     return this.request<ClientCaseFinanceDetail>(`/v2/cases/${caseId}/finance`);
   }
 
+  async getCaseWorkOrder(caseId: number) {
+    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order`);
+  }
+
+  async createCaseWorkOrder(caseId: number, payload: {
+    title?: string;
+    status?: string;
+    currency?: string;
+    notes?: string;
+  }) {
+    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCaseWorkOrder(caseId: number, payload: {
+    title?: string;
+    status?: string;
+    currency?: string;
+    notes?: string;
+  }) {
+    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteCaseWorkOrder(caseId: number) {
+    return this.request<void>(`/v2/cases/${caseId}/work-order`, { method: 'DELETE' });
+  }
+
+  async addCaseWorkOrderItem(caseId: number, payload: {
+    serviceName: string;
+    description?: string;
+    executorUserId?: number | null;
+    executorName?: string;
+    dueDate?: string | null;
+    quantity?: number;
+    unitPrice?: number;
+  }) {
+    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order/items`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCaseWorkOrderItem(caseId: number, itemId: number, payload: {
+    serviceName?: string;
+    description?: string;
+    executorUserId?: number | null;
+    executorName?: string;
+    dueDate?: string | null;
+    quantity?: number;
+    unitPrice?: number;
+    sortOrder?: number;
+  }) {
+    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order/items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteCaseWorkOrderItem(caseId: number, itemId: number) {
+    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order/items/${itemId}`, { method: 'DELETE' });
+  }
+
+  async createCaseWorkOrderInvoice(caseId: number, payload: {
+    number?: string;
+    date?: string | null;
+    dueDate?: string | null;
+    description?: string;
+  } = {}) {
+    return this.request<ClientCaseWorkOrderInvoice>(`/v2/cases/${caseId}/work-order/create-invoice`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async submitCaseWorkOrderApproval(caseId: number, payload: { comment?: string } = {}) {
+    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order/submit-approval`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async approveCaseWorkOrder(caseId: number, payload: { comment?: string } = {}) {
+    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order/approve`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async requestCaseWorkOrderRevision(caseId: number, payload: { comment?: string } = {}) {
+    return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order/request-revision`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getCaseWorkOrderPrintHtml(caseId: number) {
+    return this.request<string>(`/v2/cases/${caseId}/work-order/print`);
+  }
+
   async runCaseCourtSync(caseId: number) {
     return this.request<ClientCaseCourtSyncRun>(`/v2/cases/${caseId}/court-sync/run`, {
       method: 'POST',
@@ -2997,8 +3101,9 @@ export class ApiService {
     return this.request<ClientCaseCourtSyncLog[]>(`/v2/cases/${caseId}/court-sync/logs`);
   }
 
-  async getCaseRelatedParties(caseId: number) {
-    return this.request<ClientCaseRelatedParty[]>(`/v2/cases/${caseId}/related-parties`);
+  async getCaseRelatedParties(caseId: number, includeArchived = false) {
+    const query = includeArchived ? '?includeArchived=true' : '';
+    return this.request<ClientCaseRelatedParty[]>(`/v2/cases/${caseId}/related-parties${query}`);
   }
 
   async addCaseRelatedParty(caseId: number, payload: { sourceType: string; sourceId: number; role?: string; notes?: string }) {
@@ -4228,6 +4333,8 @@ import type {
   ClientCaseRelatedParty,
   ClientCaseSummary,
   ClientCaseTimelineEntry,
+  ClientCaseWorkOrder,
+  ClientCaseWorkOrderInvoice,
   AccountSuggestion,
   SummaryStats,
   PeriodKey,

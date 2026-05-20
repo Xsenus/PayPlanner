@@ -33,6 +33,19 @@ vi.mock('../../services/api', () => ({
     getCaseCourtSyncLogs: vi.fn(),
     getCaseTimeline: vi.fn(),
     getCaseFinance: vi.fn(),
+    getCaseWorkOrder: vi.fn(),
+    createCaseWorkOrder: vi.fn(),
+    updateCaseWorkOrder: vi.fn(),
+    deleteCaseWorkOrder: vi.fn(),
+    addCaseWorkOrderItem: vi.fn(),
+    updateCaseWorkOrderItem: vi.fn(),
+    deleteCaseWorkOrderItem: vi.fn(),
+    createCaseWorkOrderInvoice: vi.fn(),
+    submitCaseWorkOrderApproval: vi.fn(),
+    approveCaseWorkOrder: vi.fn(),
+    requestCaseWorkOrderRevision: vi.fn(),
+    getCaseWorkOrderPrintHtml: vi.fn(),
+    getObjectAuditHistory: vi.fn(),
     addCaseRelatedParty: vi.fn(),
     deleteCaseRelatedParty: vi.fn(),
     requestCaseAccess: vi.fn(),
@@ -417,6 +430,18 @@ describe('CaseDetailPage', () => {
         paidMargin: 30000,
         outstandingBalance: 115000,
       },
+      calendar: {
+        paymentCount: 1,
+        planTotal: 35000,
+        paidTotal: 35000,
+        outstandingTotal: 0,
+        overdueTotal: 0,
+        paidCount: 1,
+        plannedCount: 0,
+        overdueCount: 0,
+        cancelledCount: 0,
+        nextPaymentDate: null,
+      },
       invoices: [
         {
           id: 8,
@@ -459,6 +484,22 @@ describe('CaseDetailPage', () => {
         },
       ],
     });
+    vi.mocked(apiService.getCaseWorkOrder).mockReset();
+    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue(null);
+    vi.mocked(apiService.createCaseWorkOrder).mockReset();
+    vi.mocked(apiService.updateCaseWorkOrder).mockReset();
+    vi.mocked(apiService.deleteCaseWorkOrder).mockReset();
+    vi.mocked(apiService.addCaseWorkOrderItem).mockReset();
+    vi.mocked(apiService.updateCaseWorkOrderItem).mockReset();
+    vi.mocked(apiService.deleteCaseWorkOrderItem).mockReset();
+    vi.mocked(apiService.createCaseWorkOrderInvoice).mockReset();
+    vi.mocked(apiService.submitCaseWorkOrderApproval).mockReset();
+    vi.mocked(apiService.approveCaseWorkOrder).mockReset();
+    vi.mocked(apiService.requestCaseWorkOrderRevision).mockReset();
+    vi.mocked(apiService.getCaseWorkOrderPrintHtml).mockReset();
+    vi.mocked(apiService.getCaseWorkOrderPrintHtml).mockResolvedValue('<!doctype html><html><body>Заказ-наряд</body></html>');
+    vi.mocked(apiService.getObjectAuditHistory).mockReset();
+    vi.mocked(apiService.getObjectAuditHistory).mockResolvedValue([]);
     vi.mocked(apiService.addCaseRelatedParty).mockReset();
     vi.mocked(apiService.addCaseRelatedParty).mockResolvedValue({
       id: 2,
@@ -521,8 +562,184 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Календарь оплат')).toBeTruthy();
     expect(screen.getByText(/май 2026/u)).toBeTruthy();
     expect(screen.getByText('План оплат')).toBeTruthy();
+    expect(screen.getByText('Следующая дата')).toBeTruthy();
+    expect(screen.getByText('Просрочка')).toBeTruthy();
     expect(screen.getAllByText('Оплачено').length).toBeGreaterThan(0);
     expect(screen.getByText(/115\s*000\s*₽/u)).toBeTruthy();
+  });
+
+  it('opens the work order print form from the work order tab', async () => {
+    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue({
+      id: 31,
+      clientCaseId: 15,
+      title: 'Предварительный расчет',
+      status: 'approved',
+      statusLabel: 'Согласован',
+      currency: 'RUB',
+      notes: null,
+      totalAmount: 24000,
+      items: [
+        {
+          id: 41,
+          clientCaseWorkOrderId: 31,
+          serviceName: 'Подготовка заявления',
+          description: 'Пакет документов',
+          executorUserId: 7,
+          executorName: 'Кожеваткин Андрей Владимирович',
+          dueDate: '2026-06-01',
+          quantity: 2,
+          unitPrice: 12000,
+          totalAmount: 24000,
+          sortOrder: 1,
+        },
+      ],
+    });
+    vi.mocked(apiService.getObjectAuditHistory).mockImplementation(async (objectType, objectId) => [
+      {
+        id: objectType === 'client-case-work-order-item' ? 92 : 91,
+        objectType,
+        objectId,
+        action: 'Updated',
+        description: objectType === 'client-case-work-order-item' ? 'Обновлена услуга' : 'Обновлен заказ-наряд',
+        actorUserName: 'Администратор',
+        metadataJson: objectType === 'client-case-work-order-item'
+          ? '{"changedFields":["UnitPrice"],"reason":"Уточнена цена услуги"}'
+          : '{"changedFields":["Status"],"reason":"Отправлено на согласование"}',
+        createdAt: '2026-05-20T08:10:00Z',
+      },
+    ]);
+    const createObjectUrl = vi.fn(() => 'blob:case-work-order');
+    const revokeObjectUrl = vi.fn();
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(window);
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'workOrder' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => expect(apiService.getCaseWorkOrder).toHaveBeenCalledWith(15));
+    await waitFor(() => expect(apiService.getObjectAuditHistory).toHaveBeenCalledWith('client-case-work-order', 31));
+    expect(await screen.findByText('Причина: Отправлено на согласование')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'История услуги Подготовка заявления' }));
+    await waitFor(() => expect(apiService.getObjectAuditHistory).toHaveBeenCalledWith('client-case-work-order-item', 41));
+    expect(await screen.findByText('Причина: Уточнена цена услуги')).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Печать' }));
+
+    await waitFor(() => {
+      expect(apiService.getCaseWorkOrderPrintHtml).toHaveBeenCalledWith(15);
+      expect(createObjectUrl).toHaveBeenCalledTimes(1);
+      expect(openSpy).toHaveBeenCalledWith('blob:case-work-order', '_blank', 'noopener,noreferrer');
+    });
+  });
+
+  it('locks work order editing after approval', async () => {
+    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue({
+      id: 31,
+      clientCaseId: 15,
+      title: 'Предварительный расчет',
+      status: 'approved',
+      statusLabel: 'Согласован',
+      currency: 'RUB',
+      notes: 'Согласовано клиентом',
+      totalAmount: 24000,
+      items: [
+        {
+          id: 41,
+          clientCaseWorkOrderId: 31,
+          serviceName: 'Подготовка заявления',
+          description: 'Пакет документов',
+          executorUserId: 7,
+          executorName: 'Кожеваткин Андрей Владимирович',
+          dueDate: '2026-06-01',
+          quantity: 2,
+          unitPrice: 12000,
+          totalAmount: 24000,
+          sortOrder: 1,
+        },
+      ],
+    });
+
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'workOrder' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    expect(await screen.findByText('Согласованный заказ-наряд нельзя редактировать. Можно создать счет или вернуть расчет на доработку.')).toBeTruthy();
+
+    const saveButtons = screen.getAllByRole('button', { name: 'Сохранить' }) as HTMLButtonElement[];
+    expect(saveButtons.some((button) => button.disabled)).toBe(true);
+    expect((screen.getByRole('button', { name: 'Удалить' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Добавить' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Название') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getAllByLabelText('Услуга')[0] as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Сохранить услугу') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'На доработку' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Создать счет' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('submits and approves a work order from the work order tab', async () => {
+    const draftWorkOrder = {
+      id: 31,
+      clientCaseId: 15,
+      title: 'Предварительный расчет',
+      status: 'draft',
+      statusLabel: 'Черновик',
+      currency: 'RUB',
+      notes: null,
+      totalAmount: 24000,
+      items: [
+        {
+          id: 41,
+          clientCaseWorkOrderId: 31,
+          serviceName: 'Подготовка заявления',
+          description: 'Пакет документов',
+          executorUserId: 7,
+          executorName: 'Кожеваткин Андрей Владимирович',
+          dueDate: '2026-06-01',
+          quantity: 2,
+          unitPrice: 12000,
+          totalAmount: 24000,
+          sortOrder: 1,
+        },
+      ],
+    };
+    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue(draftWorkOrder);
+    vi.mocked(apiService.submitCaseWorkOrderApproval).mockResolvedValue({
+      ...draftWorkOrder,
+      status: 'pending_approval',
+      statusLabel: 'На согласовании',
+      approvalRequestedByUserName: 'Администратор',
+      approvalRequestedAt: '2026-05-20T08:00:00Z',
+      approvalComment: 'Проверить расчет',
+    });
+    vi.mocked(apiService.approveCaseWorkOrder).mockResolvedValue({
+      ...draftWorkOrder,
+      status: 'approved',
+      statusLabel: 'Согласован',
+      approvalDecisionByUserName: 'Администратор',
+      approvalDecisionAt: '2026-05-20T08:05:00Z',
+      approvalComment: 'Согласовано',
+    });
+
+    window.sessionStorage.setItem('pp.case-detail.15.view.v1', JSON.stringify({ activeTab: 'workOrder' }));
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.change(await screen.findByLabelText('Комментарий к согласованию'), { target: { value: 'Проверить расчет' } });
+    fireEvent.click(screen.getByRole('button', { name: 'На согласование' }));
+
+    await waitFor(() => {
+      expect(apiService.submitCaseWorkOrderApproval).toHaveBeenCalledWith(15, { comment: 'Проверить расчет' });
+      expect(screen.getByText('Заказ-наряд отправлен на согласование.')).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByLabelText('Комментарий к согласованию'), { target: { value: 'Согласовано' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Согласовать' }));
+
+    await waitFor(() => {
+      expect(apiService.approveCaseWorkOrder).toHaveBeenCalledWith(15, { comment: 'Согласовано' });
+      expect(screen.getByText('Заказ-наряд согласован.')).toBeTruthy();
+    });
   });
 
   it('starts invoice and payment creation from the finance tab', async () => {
@@ -961,6 +1178,18 @@ describe('CaseDetailPage', () => {
   it('opens a related participant from the participants tab', async () => {
     const onOpenClient = vi.fn();
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(apiService.getObjectAuditHistory).mockResolvedValue([
+      {
+        id: 92,
+        objectType: 'client-case-related-party',
+        objectId: 1,
+        action: 'Updated',
+        description: 'Связанное лицо архивировано',
+        actorUserName: 'Администратор',
+        metadataJson: '{"changedFields":["IsArchived","ArchiveReason"],"reason":"Связанное лицо архивировано"}',
+        createdAt: '2026-05-20T09:10:00Z',
+      },
+    ]);
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} onOpenClient={onOpenClient} />);
 
@@ -974,11 +1203,74 @@ describe('CaseDetailPage', () => {
     expect(screen.queryByText(/\+79991234567/u)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Показать контакты' }));
     expect(screen.getByText(/\+79991234567/u)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'История участника Земцов Виктор Александрович' }));
+
+    await waitFor(() => {
+      expect(apiService.getObjectAuditHistory).toHaveBeenCalledWith('client-case-related-party', 1);
+    });
+    expect(await screen.findByText('Причина: Связанное лицо архивировано')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' }));
 
     await waitFor(() => {
       expect(confirmSpy).toHaveBeenCalledWith('Удалить связь с участником «Земцов Виктор Александрович»?');
       expect(apiService.deleteCaseRelatedParty).toHaveBeenCalledWith(15, 1);
+    });
+  });
+
+  it('shows archived related participants on demand', async () => {
+    const activeParty = {
+      id: 1,
+      clientCaseId: 15,
+      sourceType: 'client' as const,
+      sourceId: 12,
+      clientId: 12,
+      displayName: 'Р—РµРјС†РѕРІ Р’РёРєС‚РѕСЂ РђР»РµРєСЃР°РЅРґСЂРѕРІРёС‡',
+      role: 'Р”РѕР»Р¶РЅРёРє',
+      phone: '+79991234567',
+      email: 'zemtsov@example.test',
+      notes: 'РџСЂРµРґСЃС‚Р°РІРёС‚РµР»СЊ РїРѕ РґРѕРІРµСЂРµРЅРЅРѕСЃС‚Рё',
+      createdAt: '2026-05-01T10:00:00Z',
+    };
+    const archivedParty = {
+      ...activeParty,
+      id: 2,
+      sourceId: 31,
+      clientId: 31,
+      displayName: 'Архивный участник',
+      isArchived: true,
+      archivedAt: '2026-05-02T10:00:00Z',
+      archivedByUserName: 'Администратор',
+      archiveReason: 'Дубль связи',
+    };
+    vi.mocked(apiService.getCaseRelatedParties).mockImplementation(async (_caseId, includeArchived) => (
+      includeArchived ? [activeParty, archivedParty] : [activeParty]
+    ));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText(/ЗЕМЦОВ/u);
+    fireEvent.click(screen.getByRole('button', { name: 'Участники' }));
+    await screen.findByText(activeParty.displayName);
+    expect(screen.queryByText('Архивный участник')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Показать архив' }));
+
+    await waitFor(() => {
+      expect(apiService.getCaseRelatedParties).toHaveBeenCalledWith(15, true);
+    });
+    expect(await screen.findByText('Архивный участник')).toBeTruthy();
+    expect(screen.getByText('Архивная связь')).toBeTruthy();
+    expect(screen.getByText(/Архивировано: 02\.05\.2026.*Администратор/u)).toBeTruthy();
+    expect(screen.getByText('Причина: Дубль связи')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Восстановить связь с участником Архивный участник' }));
+
+    await waitFor(() => {
+      expect(apiService.addCaseRelatedParty).toHaveBeenCalledWith(15, expect.objectContaining({
+        sourceType: 'client',
+        sourceId: 31,
+      }));
+      expect(screen.getByText('Связь с участником «Архивный участник» восстановлена.')).toBeTruthy();
     });
   });
 

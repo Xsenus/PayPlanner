@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Briefcase,
   Check,
+  Clock3,
   ClipboardPlus,
   Copy,
   Download,
@@ -26,6 +27,7 @@ import {
 } from 'lucide-react';
 
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
+import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 import type {
   ActResponsible,
   Client,
@@ -37,6 +39,8 @@ import type {
   ClientCaseFinanceDetail,
   ClientCaseRelatedParty,
   ClientCaseTimelineEntry,
+  ClientCaseWorkOrder,
+  ClientCaseWorkOrderItem,
   DocumentStatusEntity,
   LegalEntitySummary,
 } from '../../types';
@@ -54,7 +58,7 @@ interface CaseDetailPageProps {
   onCreatePayment?: (caseItem: ClientCase) => void;
 }
 
-type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'finance' | 'documents' | 'conversation' | 'history';
+type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
 type CaseTaskFilter = 'active' | 'all' | 'overdue' | 'done';
 type SummaryTone = 'slate' | 'emerald' | 'amber' | 'rose' | 'cyan';
 type ParticipantSourceType = 'client' | 'legalEntity' | 'externalContact';
@@ -105,6 +109,7 @@ const DETAIL_TABS: Array<{ key: CaseDetailTab; label: string }> = [
   { key: 'tasks', label: 'Задачи' },
   { key: 'court', label: 'Суд' },
   { key: 'finance', label: 'Финансы' },
+  { key: 'workOrder', label: 'Заказ-наряд' },
   { key: 'documents', label: 'Документы' },
   { key: 'conversation', label: 'Переписка' },
   { key: 'history', label: 'История' },
@@ -159,6 +164,15 @@ const CASE_TASK_FILTERS: Array<{ value: CaseTaskFilter; label: string }> = [
   { value: 'all', label: 'Все' },
 ];
 
+const WORK_ORDER_STATUS_OPTIONS = [
+  { value: 'draft', label: 'Черновик' },
+  { value: 'pending_approval', label: 'На согласовании' },
+  { value: 'revision_required', label: 'На доработке' },
+  { value: 'approved', label: 'Согласован' },
+  { value: 'invoice_created', label: 'Счет выставлен' },
+  { value: 'cancelled', label: 'Отменен' },
+];
+
 interface CaseDetailViewState {
   activeTab?: CaseDetailTab;
   taskFilter?: CaseTaskFilter;
@@ -174,6 +188,22 @@ interface DocumentPreviewState {
   url: string;
   contentType: string;
   fileName: string;
+}
+
+interface WorkOrderHeaderDraft {
+  title: string;
+  status: string;
+  currency: string;
+  notes: string;
+}
+
+interface WorkOrderItemDraft {
+  serviceName: string;
+  description: string;
+  executorUserId: string;
+  dueDate: string;
+  quantity: string;
+  unitPrice: string;
 }
 
 function getCaseDetailViewStateKey(caseId: number) {
@@ -239,6 +269,51 @@ function formatRuDateTime(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function toDateInputValue(value?: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+  return date.toISOString().slice(0, 10);
+}
+
+function parseMoneyInput(value: string, fallback = 0) {
+  const normalized = value.trim().replace(',', '.');
+  if (!normalized) return fallback;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function buildWorkOrderHeaderDraft(workOrder: ClientCaseWorkOrder | null): WorkOrderHeaderDraft {
+  return {
+    title: workOrder?.title ?? '',
+    status: workOrder?.status ?? 'draft',
+    currency: workOrder?.currency ?? 'RUB',
+    notes: workOrder?.notes ?? '',
+  };
+}
+
+function buildWorkOrderItemDraft(item?: ClientCaseWorkOrderItem | null): WorkOrderItemDraft {
+  return {
+    serviceName: item?.serviceName ?? '',
+    description: item?.description ?? '',
+    executorUserId: item?.executorUserId ? String(item.executorUserId) : '',
+    dueDate: toDateInputValue(item?.dueDate),
+    quantity: item ? String(item.quantity) : '1',
+    unitPrice: item ? String(item.unitPrice) : '0',
+  };
+}
+
+function buildWorkOrderItemPayload(draft: WorkOrderItemDraft) {
+  return {
+    serviceName: draft.serviceName.trim(),
+    description: draft.description.trim() || undefined,
+    executorUserId: draft.executorUserId ? Number(draft.executorUserId) : null,
+    dueDate: draft.dueDate || null,
+    quantity: parseMoneyInput(draft.quantity, 1),
+    unitPrice: parseMoneyInput(draft.unitPrice, 0),
+  };
 }
 
 const PAYMENT_STATUS_LABELS: Record<string, string> = {
@@ -536,11 +611,13 @@ export function CaseDetailPage({
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
   const [relatedParties, setRelatedParties] = useState<ClientCaseRelatedParty[]>([]);
+  const [showArchivedParties, setShowArchivedParties] = useState(false);
   const [documents, setDocuments] = useState<ClientCaseDocument[]>([]);
   const [courtSyncLogs, setCourtSyncLogs] = useState<ClientCaseCourtSyncLog[]>([]);
   const [timeline, setTimeline] = useState<ClientCaseTimelineEntry[]>([]);
   const [conversation, setConversation] = useState<ClientCaseConversationEntry[]>([]);
   const [financeDetail, setFinanceDetail] = useState<ClientCaseFinanceDetail | null>(null);
+  const [workOrder, setWorkOrder] = useState<ClientCaseWorkOrder | null>(null);
   const [participantClients, setParticipantClients] = useState<Client[]>([]);
   const [participantLegalEntities, setParticipantLegalEntities] = useState<LegalEntitySummary[]>([]);
   const [participantContacts, setParticipantContacts] = useState<ContactDirectoryItemDto[]>([]);
@@ -553,6 +630,7 @@ export function CaseDetailPage({
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [financeLoading, setFinanceLoading] = useState(false);
+  const [workOrderLoading, setWorkOrderLoading] = useState(false);
   const [participantDirectoryLoading, setParticipantDirectoryLoading] = useState(false);
   const [participantDirectoryError, setParticipantDirectoryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -573,6 +651,15 @@ export function CaseDetailPage({
   const [addingConversationEntry, setAddingConversationEntry] = useState(false);
   const [addingParticipant, setAddingParticipant] = useState(false);
   const [deletingParticipantId, setDeletingParticipantId] = useState<number | null>(null);
+  const [restoringParticipantId, setRestoringParticipantId] = useState<number | null>(null);
+  const [savingWorkOrder, setSavingWorkOrder] = useState(false);
+  const [deletingWorkOrder, setDeletingWorkOrder] = useState(false);
+  const [savingWorkOrderItem, setSavingWorkOrderItem] = useState(false);
+  const [deletingWorkOrderItemId, setDeletingWorkOrderItemId] = useState<number | null>(null);
+  const [creatingWorkOrderInvoice, setCreatingWorkOrderInvoice] = useState(false);
+  const [printingWorkOrder, setPrintingWorkOrder] = useState(false);
+  const [workOrderApprovalAction, setWorkOrderApprovalAction] = useState<'submit' | 'approve' | 'revision' | null>(null);
+  const [workOrderApprovalComment, setWorkOrderApprovalComment] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
   const [statusDraft, setStatusDraft] = useState('Open');
   const [priorityDraft, setPriorityDraft] = useState('normal');
@@ -595,6 +682,9 @@ export function CaseDetailPage({
   const [documentTemplateKey, setDocumentTemplateKey] = useState(initialViewState.documentTemplateKey ?? FALLBACK_DOCUMENT_TEMPLATE_OPTIONS[0].key);
   const [historyDraft, setHistoryDraft] = useState('');
   const [conversationDraft, setConversationDraft] = useState('');
+  const [workOrderDraft, setWorkOrderDraft] = useState<WorkOrderHeaderDraft>(() => buildWorkOrderHeaderDraft(null));
+  const [newWorkOrderItemDraft, setNewWorkOrderItemDraft] = useState<WorkOrderItemDraft>(() => buildWorkOrderItemDraft(null));
+  const [workOrderItemDrafts, setWorkOrderItemDrafts] = useState<Record<number, WorkOrderItemDraft>>({});
 
   const documentTypeOptions = useMemo(
     () => buildDocumentTypeOptions(documentTypeDirectoryOptions, documentTemplates, documents),
@@ -618,6 +708,10 @@ export function CaseDetailPage({
     setParticipantSourceId('');
     setParticipantSearch('');
     setDocumentFile(null);
+    setWorkOrder(null);
+    setWorkOrderDraft(buildWorkOrderHeaderDraft(null));
+    setNewWorkOrderItemDraft(buildWorkOrderItemDraft(null));
+    setWorkOrderItemDrafts({});
   }, [caseId]);
 
   useEffect(() => {
@@ -778,7 +872,7 @@ export function CaseDetailPage({
 
     let cancelled = false;
     setParticipantsLoading(true);
-    apiService.getCaseRelatedParties(caseId)
+    apiService.getCaseRelatedParties(caseId, showArchivedParties)
       .then((items) => {
         if (!cancelled) setRelatedParties(items);
       })
@@ -792,7 +886,7 @@ export function CaseDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [activeTab, caseId, reloadToken, showArchivedParties]);
 
   useEffect(() => {
     if (activeTab !== 'participants') return;
@@ -897,6 +991,35 @@ export function CaseDetailPage({
       })
       .finally(() => {
         if (!cancelled) setFinanceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, caseId, reloadToken]);
+
+  useEffect(() => {
+    if (activeTab !== 'workOrder') return;
+
+    let cancelled = false;
+    setWorkOrderLoading(true);
+    apiService.getCaseWorkOrder(caseId)
+      .then((loadedWorkOrder) => {
+        if (cancelled) return;
+        setWorkOrder(loadedWorkOrder);
+        setWorkOrderDraft(buildWorkOrderHeaderDraft(loadedWorkOrder?.id ? loadedWorkOrder : null));
+        setWorkOrderItemDrafts(Object.fromEntries(
+          (loadedWorkOrder?.items ?? []).map((item) => [item.id, buildWorkOrderItemDraft(item)]),
+        ));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setWorkOrder(null);
+        setWorkOrderDraft(buildWorkOrderHeaderDraft(null));
+        setWorkOrderItemDrafts({});
+      })
+      .finally(() => {
+        if (!cancelled) setWorkOrderLoading(false);
       });
 
     return () => {
@@ -1283,6 +1406,223 @@ export function CaseDetailPage({
     }
   };
 
+  const restoreParticipant = async (party: ClientCaseRelatedParty) => {
+    if (!caseItem) return;
+
+    const sourceId = getRelatedPartySourceId(party);
+    if (!sourceId) {
+      setError('Не удалось определить источник архивной связи для восстановления.');
+      return;
+    }
+
+    setRestoringParticipantId(party.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiService.addCaseRelatedParty(caseItem.id, {
+        sourceType: party.sourceType as ParticipantSourceType,
+        sourceId,
+        role: party.role?.trim() || undefined,
+        notes: party.notes?.trim() || undefined,
+      });
+      setNotice(`Связь с участником «${party.displayName}» восстановлена.`);
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось восстановить связь с участником дела.');
+    } finally {
+      setRestoringParticipantId(null);
+    }
+  };
+
+  const applyLoadedWorkOrder = (loadedWorkOrder: ClientCaseWorkOrder | null) => {
+    setWorkOrder(loadedWorkOrder);
+    setWorkOrderDraft(buildWorkOrderHeaderDraft(loadedWorkOrder?.id ? loadedWorkOrder : null));
+    setWorkOrderItemDrafts(Object.fromEntries(
+      (loadedWorkOrder?.items ?? []).map((item) => [item.id, buildWorkOrderItemDraft(item)]),
+    ));
+  };
+
+  const saveWorkOrderHeader = async () => {
+    if (!caseItem) return;
+
+    setSavingWorkOrder(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const payload = {
+        title: workOrderDraft.title.trim() || undefined,
+        status: workOrderDraft.status,
+        currency: workOrderDraft.currency.trim() || 'RUB',
+        notes: workOrderDraft.notes.trim() || undefined,
+      };
+      const savedWorkOrder = workOrder?.id
+        ? await apiService.updateCaseWorkOrder(caseItem.id, payload)
+        : await apiService.createCaseWorkOrder(caseItem.id, payload);
+      applyLoadedWorkOrder(savedWorkOrder);
+      setNotice(workOrder?.id ? 'Заказ-наряд обновлен.' : 'Заказ-наряд создан.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить заказ-наряд.');
+    } finally {
+      setSavingWorkOrder(false);
+    }
+  };
+
+  const deleteWorkOrder = async () => {
+    if (!caseItem || !workOrder?.id) return;
+    if (!window.confirm('Удалить заказ-наряд по делу?')) return;
+
+    setDeletingWorkOrder(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiService.deleteCaseWorkOrder(caseItem.id);
+      applyLoadedWorkOrder(null);
+      setNewWorkOrderItemDraft(buildWorkOrderItemDraft(null));
+      setNotice('Заказ-наряд удален.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось удалить заказ-наряд.');
+    } finally {
+      setDeletingWorkOrder(false);
+    }
+  };
+
+  const addWorkOrderItem = async () => {
+    if (!caseItem || !workOrder?.id) return;
+    const payload = buildWorkOrderItemPayload(newWorkOrderItemDraft);
+    if (!payload.serviceName) {
+      setError('Введите название услуги.');
+      return;
+    }
+
+    setSavingWorkOrderItem(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const savedWorkOrder = await apiService.addCaseWorkOrderItem(caseItem.id, payload);
+      applyLoadedWorkOrder(savedWorkOrder);
+      setNewWorkOrderItemDraft(buildWorkOrderItemDraft(null));
+      setNotice('Услуга добавлена в заказ-наряд.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось добавить услугу в заказ-наряд.');
+    } finally {
+      setSavingWorkOrderItem(false);
+    }
+  };
+
+  const updateWorkOrderItem = async (item: ClientCaseWorkOrderItem) => {
+    if (!caseItem || !workOrder?.id) return;
+    const draft = workOrderItemDrafts[item.id] ?? buildWorkOrderItemDraft(item);
+    const payload = buildWorkOrderItemPayload(draft);
+    if (!payload.serviceName) {
+      setError('Введите название услуги.');
+      return;
+    }
+
+    setSavingWorkOrderItem(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const savedWorkOrder = await apiService.updateCaseWorkOrderItem(caseItem.id, item.id, payload);
+      applyLoadedWorkOrder(savedWorkOrder);
+      setNotice('Услуга в заказ-наряде обновлена.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось обновить услугу в заказ-наряде.');
+    } finally {
+      setSavingWorkOrderItem(false);
+    }
+  };
+
+  const deleteWorkOrderItem = async (item: ClientCaseWorkOrderItem) => {
+    if (!caseItem || !workOrder?.id) return;
+    if (!window.confirm(`Удалить услугу «${item.serviceName}» из заказ-наряда?`)) return;
+
+    setDeletingWorkOrderItemId(item.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const savedWorkOrder = await apiService.deleteCaseWorkOrderItem(caseItem.id, item.id);
+      applyLoadedWorkOrder(savedWorkOrder);
+      setNotice('Услуга удалена из заказ-наряда.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось удалить услугу из заказ-наряда.');
+    } finally {
+      setDeletingWorkOrderItemId(null);
+    }
+  };
+
+  const createInvoiceFromWorkOrder = async () => {
+    if (!caseItem || !workOrder?.id) return;
+
+    setCreatingWorkOrderInvoice(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await apiService.createCaseWorkOrderInvoice(caseItem.id);
+      applyLoadedWorkOrder(result.workOrder);
+      setNotice(`Счет №${result.number} создан на сумму ${formatMoney(result.amount)}.`);
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось создать счет на основе заказ-наряда.');
+    } finally {
+      setCreatingWorkOrderInvoice(false);
+    }
+  };
+
+  const printWorkOrder = async () => {
+    if (!caseItem || !workOrder?.id) return;
+
+    setPrintingWorkOrder(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const html = await apiService.getCaseWorkOrderPrintHtml(caseItem.id);
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const opened = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!opened) {
+        const link = window.document.createElement('a');
+        link.href = url;
+        link.download = `case-${caseItem.id}-work-order.html`;
+        window.document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setNotice('Печатная форма заказ-наряда подготовлена.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось подготовить печатную форму заказ-наряда.');
+    } finally {
+      setPrintingWorkOrder(false);
+    }
+  };
+
+  const runWorkOrderApprovalAction = async (action: 'submit' | 'approve' | 'revision') => {
+    if (!caseItem || !workOrder?.id) return;
+
+    setWorkOrderApprovalAction(action);
+    setError(null);
+    setNotice(null);
+    try {
+      const payload = { comment: workOrderApprovalComment.trim() || undefined };
+      const savedWorkOrder = action === 'submit'
+        ? await apiService.submitCaseWorkOrderApproval(caseItem.id, payload)
+        : action === 'approve'
+          ? await apiService.approveCaseWorkOrder(caseItem.id, payload)
+          : await apiService.requestCaseWorkOrderRevision(caseItem.id, payload);
+      applyLoadedWorkOrder(savedWorkOrder);
+      setWorkOrderApprovalComment('');
+      setNotice(action === 'submit'
+        ? 'Заказ-наряд отправлен на согласование.'
+        : action === 'approve'
+          ? 'Заказ-наряд согласован.'
+          : 'Заказ-наряд возвращен на доработку.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось выполнить действие по согласованию заказ-наряда.');
+    } finally {
+      setWorkOrderApprovalAction(null);
+    }
+  };
+
   const copyCaseLink = async () => {
     if (!caseItem) return;
 
@@ -1645,10 +1985,14 @@ export function CaseDetailPage({
               ) : (
                 <RelatedParties
                   parties={relatedParties}
+                  showArchived={showArchivedParties}
+                  onToggleArchived={() => setShowArchivedParties((value) => !value)}
                   onOpenClient={(clientId) => onOpenClient?.(clientId, caseItem.id)}
                   onOpenLegalEntity={(legalEntityId) => onOpenLegalEntity?.(legalEntityId, caseItem.id)}
                   onDelete={(party) => void deleteParticipant(party)}
+                  onRestore={(party) => void restoreParticipant(party)}
                   deletingPartyId={deletingParticipantId}
+                  restoringPartyId={restoringParticipantId}
                 />
               )}
             </div>
@@ -1688,6 +2032,39 @@ export function CaseDetailPage({
               onOpenFinance={onOpenFinance}
               onCreateInvoice={onCreateInvoice}
               onCreatePayment={onCreatePayment}
+            />
+          ) : null}
+
+          {activeTab === 'workOrder' ? (
+            <WorkOrderPanel
+              workOrder={workOrder}
+              draft={workOrderDraft}
+              itemDrafts={workOrderItemDrafts}
+              newItemDraft={newWorkOrderItemDraft}
+              responsibles={responsibles}
+              loading={workOrderLoading}
+              savingHeader={savingWorkOrder}
+              deletingHeader={deletingWorkOrder}
+              savingItem={savingWorkOrderItem}
+              deletingItemId={deletingWorkOrderItemId}
+              creatingInvoice={creatingWorkOrderInvoice}
+              printing={printingWorkOrder}
+              approvalAction={workOrderApprovalAction}
+              approvalComment={workOrderApprovalComment}
+              onDraftChange={setWorkOrderDraft}
+              onItemDraftChange={(itemId, draft) => setWorkOrderItemDrafts((current) => ({ ...current, [itemId]: draft }))}
+              onNewItemDraftChange={setNewWorkOrderItemDraft}
+              onApprovalCommentChange={setWorkOrderApprovalComment}
+              onSaveHeader={() => void saveWorkOrderHeader()}
+              onDeleteHeader={() => void deleteWorkOrder()}
+              onCreateInvoice={() => void createInvoiceFromWorkOrder()}
+              onPrint={() => void printWorkOrder()}
+              onSubmitApproval={() => void runWorkOrderApprovalAction('submit')}
+              onApprove={() => void runWorkOrderApprovalAction('approve')}
+              onRequestRevision={() => void runWorkOrderApprovalAction('revision')}
+              onAddItem={() => void addWorkOrderItem()}
+              onUpdateItem={(item) => void updateWorkOrderItem(item)}
+              onDeleteItem={(item) => void deleteWorkOrderItem(item)}
             />
           ) : null}
 
@@ -2069,6 +2446,372 @@ function ClientSidebarRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function InfoPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-slate-50 px-3 py-2">
+      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{label}</div>
+      <div className="mt-1 break-words font-medium text-slate-800">{value}</div>
+    </div>
+  );
+}
+
+function WorkOrderPanel({
+  workOrder,
+  draft,
+  itemDrafts,
+  newItemDraft,
+  responsibles,
+  loading,
+  savingHeader,
+  deletingHeader,
+  savingItem,
+  deletingItemId,
+  creatingInvoice,
+  printing,
+  approvalAction,
+  approvalComment,
+  onDraftChange,
+  onItemDraftChange,
+  onNewItemDraftChange,
+  onApprovalCommentChange,
+  onSaveHeader,
+  onDeleteHeader,
+  onCreateInvoice,
+  onPrint,
+  onSubmitApproval,
+  onApprove,
+  onRequestRevision,
+  onAddItem,
+  onUpdateItem,
+  onDeleteItem,
+}: {
+  workOrder: ClientCaseWorkOrder | null;
+  draft: WorkOrderHeaderDraft;
+  itemDrafts: Record<number, WorkOrderItemDraft>;
+  newItemDraft: WorkOrderItemDraft;
+  responsibles: ActResponsible[];
+  loading: boolean;
+  savingHeader: boolean;
+  deletingHeader: boolean;
+  savingItem: boolean;
+  deletingItemId: number | null;
+  creatingInvoice: boolean;
+  printing: boolean;
+  approvalAction: 'submit' | 'approve' | 'revision' | null;
+  approvalComment: string;
+  onDraftChange: (draft: WorkOrderHeaderDraft) => void;
+  onItemDraftChange: (itemId: number, draft: WorkOrderItemDraft) => void;
+  onNewItemDraftChange: (draft: WorkOrderItemDraft) => void;
+  onApprovalCommentChange: (value: string) => void;
+  onSaveHeader: () => void;
+  onDeleteHeader: () => void;
+  onCreateInvoice: () => void;
+  onPrint: () => void;
+  onSubmitApproval: () => void;
+  onApprove: () => void;
+  onRequestRevision: () => void;
+  onAddItem: () => void;
+  onUpdateItem: (item: ClientCaseWorkOrderItem) => void;
+  onDeleteItem: (item: ClientCaseWorkOrderItem) => void;
+}) {
+  const [auditItemId, setAuditItemId] = useState<number | null>(null);
+  const items = workOrder?.items ?? [];
+  const auditItem = items.find((item) => item.id === auditItemId) ?? null;
+  const hasWorkOrder = Boolean(workOrder?.id);
+  const status = workOrder?.status ?? draft.status;
+  const isWorkOrderLocked = status === 'pending_approval' || status === 'approved' || status === 'invoice_created';
+  const canSubmitApproval = hasWorkOrder && items.length > 0 && (workOrder?.totalAmount ?? 0) > 0 && status !== 'pending_approval' && status !== 'approved' && status !== 'invoice_created';
+  const canApprove = hasWorkOrder && status === 'pending_approval';
+  const canRequestRevision = hasWorkOrder && (status === 'pending_approval' || status === 'approved');
+  const canCreateInvoice = hasWorkOrder && status === 'approved' && items.length > 0 && (workOrder?.totalAmount ?? 0) > 0;
+  const addDisabled = savingItem || !hasWorkOrder || isWorkOrderLocked || !newItemDraft.serviceName.trim();
+  const lockMessage = status === 'pending_approval'
+    ? 'Заказ-наряд на согласовании: редактирование доступно после возврата на доработку.'
+    : status === 'approved'
+      ? 'Согласованный заказ-наряд нельзя редактировать. Можно создать счет или вернуть расчет на доработку.'
+      : status === 'invoice_created'
+        ? 'По заказ-наряду уже создан счет: редактирование заблокировано.'
+        : '';
+
+  const renderExecutorOptions = () => (
+    <>
+      <option value="">Не назначен</option>
+      {responsibles.map((responsible) => (
+        <option key={responsible.id} value={responsible.id}>{responsible.name}</option>
+      ))}
+    </>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Заказ-наряд</h2>
+          <div className="mt-1 text-sm text-slate-500">Предварительный расчет услуг по делу с исполнителями, сроками и итоговой суммой.</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {hasWorkOrder ? (
+            <button
+              type="button"
+              onClick={onPrint}
+              disabled={printing}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              {printing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Печать
+            </button>
+          ) : null}
+          {hasWorkOrder ? (
+            <button
+              type="button"
+              onClick={onSubmitApproval}
+              disabled={!canSubmitApproval || approvalAction === 'submit'}
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+              {approvalAction === 'submit' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} На согласование
+            </button>
+          ) : null}
+          {canApprove ? (
+              <button
+                type="button"
+                onClick={onApprove}
+                disabled={approvalAction === 'approve'}
+                className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+                {approvalAction === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Согласовать
+              </button>
+          ) : null}
+          {canRequestRevision ? (
+            <button
+              type="button"
+              onClick={onRequestRevision}
+              disabled={approvalAction === 'revision'}
+              className="inline-flex items-center gap-2 rounded-lg border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50">
+              {approvalAction === 'revision' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} На доработку
+            </button>
+          ) : null}
+          {hasWorkOrder ? (
+            <button
+              type="button"
+              onClick={onCreateInvoice}
+              disabled={!canCreateInvoice || creatingInvoice}
+              className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+              {creatingInvoice ? <Loader2 className="h-4 w-4 animate-spin" /> : <WalletCards className="h-4 w-4" />} Создать счет
+            </button>
+          ) : null}
+          {hasWorkOrder ? (
+            <button
+              type="button"
+              onClick={onDeleteHeader}
+              disabled={deletingHeader || isWorkOrderLocked}
+              className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50">
+              {deletingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Удалить
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onSaveHeader}
+            disabled={savingHeader || isWorkOrderLocked}
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
+            {savingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {hasWorkOrder ? 'Сохранить' : 'Создать'}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <SummaryCard label="Статус" value={workOrder?.statusLabel || WORK_ORDER_STATUS_OPTIONS.find((item) => item.value === draft.status)?.label || 'Черновик'} />
+        <SummaryCard label="Услуги" value={`${items.length} шт.`} />
+        <SummaryCard label="Итого" value={formatMoney(workOrder?.totalAmount ?? 0)} tone={(workOrder?.totalAmount ?? 0) > 0 ? 'emerald' : 'slate'} />
+      </div>
+
+      {hasWorkOrder ? (
+        <section className="rounded-xl border border-slate-200 p-4">
+          <div className="grid gap-3 text-sm md:grid-cols-3">
+            <InfoPill label="Отправил" value={workOrder?.approvalRequestedByUserName || '—'} />
+            <InfoPill label="Отправлено" value={formatRuDateTime(workOrder?.approvalRequestedAt) || '—'} />
+            <InfoPill label="Решение" value={workOrder?.approvalDecisionByUserName ? `${workOrder.approvalDecisionByUserName}, ${formatRuDateTime(workOrder.approvalDecisionAt)}` : '—'} />
+          </div>
+          {workOrder?.approvalComment ? (
+            <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{workOrder.approvalComment}</div>
+          ) : null}
+          <label className="mt-3 block text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Комментарий к согласованию</span>
+            <textarea
+              value={approvalComment}
+              onChange={(event) => onApprovalCommentChange(event.target.value)}
+              rows={2}
+              maxLength={1000}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+        </section>
+      ) : null}
+
+      {loading ? <LoadingBlock label="Загрузка заказ-наряда..." /> : null}
+
+      {lockMessage ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+          {lockMessage}
+        </div>
+      ) : null}
+
+      <section className="rounded-xl border border-slate-200 p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Параметры</h3>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_180px_120px]">
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Название</span>
+            <input
+              value={draft.title}
+              onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
+              disabled={isWorkOrderLocked}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              placeholder="Предварительный расчет по делу"
+            />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
+            <select
+              value={draft.status}
+              onChange={(event) => onDraftChange({ ...draft, status: event.target.value })}
+              disabled={isWorkOrderLocked}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+              {WORK_ORDER_STATUS_OPTIONS.map((status) => (
+                <option key={status.value} value={status.value}>{status.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Валюта</span>
+            <input
+              value={draft.currency}
+              maxLength={3}
+              onChange={(event) => onDraftChange({ ...draft, currency: event.target.value.toUpperCase() })}
+              disabled={isWorkOrderLocked}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm uppercase focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+        </div>
+        <label className="mt-3 block text-sm font-medium text-slate-700">
+          <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Комментарий</span>
+          <textarea
+            value={draft.notes}
+            onChange={(event) => onDraftChange({ ...draft, notes: event.target.value })}
+            disabled={isWorkOrderLocked}
+            rows={3}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          />
+        </label>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Добавить услугу</h3>
+        {!hasWorkOrder ? (
+          <FinanceEmpty label="Сначала создайте заказ-наряд, затем добавьте услуги." />
+        ) : (
+          <div className="mt-4 grid gap-3 xl:grid-cols-[1.3fr_1fr_180px_140px_140px_auto]">
+            <WorkOrderTextInput label="Услуга" value={newItemDraft.serviceName} onChange={(value) => onNewItemDraftChange({ ...newItemDraft, serviceName: value })} disabled={isWorkOrderLocked} />
+            <WorkOrderTextInput label="Описание" value={newItemDraft.description} onChange={(value) => onNewItemDraftChange({ ...newItemDraft, description: value })} disabled={isWorkOrderLocked} />
+            <label className="text-sm font-medium text-slate-700">
+              <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Исполнитель</span>
+              <select value={newItemDraft.executorUserId} onChange={(event) => onNewItemDraftChange({ ...newItemDraft, executorUserId: event.target.value })} disabled={isWorkOrderLocked} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                {renderExecutorOptions()}
+              </select>
+            </label>
+            <WorkOrderTextInput label="Срок" type="date" value={newItemDraft.dueDate} onChange={(value) => onNewItemDraftChange({ ...newItemDraft, dueDate: value })} disabled={isWorkOrderLocked} />
+            <WorkOrderTextInput label="Стоимость" type="number" value={newItemDraft.unitPrice} onChange={(value) => onNewItemDraftChange({ ...newItemDraft, unitPrice: value })} disabled={isWorkOrderLocked} />
+            <button type="button" onClick={onAddItem} disabled={addDisabled} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 xl:self-end">
+              {savingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Добавить
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-slate-200 p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Услуги</h3>
+        {items.length === 0 ? <FinanceEmpty label="Услуги в заказ-наряде пока не добавлены." /> : null}
+        <div className="mt-3 space-y-3">
+          {items.map((item) => {
+            const itemDraft = itemDrafts[item.id] ?? buildWorkOrderItemDraft(item);
+            return (
+              <div key={item.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                <div className="grid gap-3 xl:grid-cols-[1.2fr_1fr_180px_140px_120px_120px_auto]">
+                  <WorkOrderTextInput label="Услуга" value={itemDraft.serviceName} onChange={(value) => onItemDraftChange(item.id, { ...itemDraft, serviceName: value })} disabled={isWorkOrderLocked} />
+                  <WorkOrderTextInput label="Описание" value={itemDraft.description} onChange={(value) => onItemDraftChange(item.id, { ...itemDraft, description: value })} disabled={isWorkOrderLocked} />
+                  <label className="text-sm font-medium text-slate-700">
+                    <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Исполнитель</span>
+                    <select value={itemDraft.executorUserId} onChange={(event) => onItemDraftChange(item.id, { ...itemDraft, executorUserId: event.target.value })} disabled={isWorkOrderLocked} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                      {renderExecutorOptions()}
+                    </select>
+                  </label>
+                  <WorkOrderTextInput label="Срок" type="date" value={itemDraft.dueDate} onChange={(value) => onItemDraftChange(item.id, { ...itemDraft, dueDate: value })} disabled={isWorkOrderLocked} />
+                  <WorkOrderTextInput label="Кол-во" type="number" value={itemDraft.quantity} onChange={(value) => onItemDraftChange(item.id, { ...itemDraft, quantity: value })} disabled={isWorkOrderLocked} />
+                  <WorkOrderTextInput label="Цена" type="number" value={itemDraft.unitPrice} onChange={(value) => onItemDraftChange(item.id, { ...itemDraft, unitPrice: value })} disabled={isWorkOrderLocked} />
+                  <div className="flex items-end gap-2">
+                    <button type="button" onClick={() => setAuditItemId((current) => (current === item.id ? null : item.id))} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-white" aria-label={`${auditItemId === item.id ? 'Скрыть историю услуги' : 'История услуги'} ${item.serviceName}`}>
+                      <Clock3 className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => onUpdateItem(item)} disabled={savingItem || isWorkOrderLocked} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50" aria-label="Сохранить услугу">
+                      {savingItem ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    </button>
+                    <button type="button" onClick={() => onDeleteItem(item)} disabled={deletingItemId === item.id || isWorkOrderLocked} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50" aria-label="Удалить услугу">
+                      {deletingItemId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                  <span>Текущая сумма: <b>{formatMoney(item.totalAmount)}</b></span>
+                  <span>Срок: {toRuDate(item.dueDate) || '—'}</span>
+                  <span>Исполнитель: {item.executorName || 'не назначен'}</span>
+                </div>
+                {auditItemId === item.id ? (
+                  <div className="mt-3">
+                    <ObjectAuditHistoryCard
+                      objectType="client-case-work-order-item"
+                      objectId={item.id}
+                      compact
+                    />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <ObjectAuditHistoryCard
+        objectType="client-case-work-order"
+        objectId={workOrder?.id ?? null}
+        compact
+      />
+    </div>
+  );
+}
+
+function WorkOrderTextInput({
+  label,
+  value,
+  onChange,
+  type = 'text',
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: 'text' | 'date' | 'number';
+  disabled?: boolean;
+}) {
+  return (
+    <label className="text-sm font-medium text-slate-700">
+      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">{label}</span>
+      <input
+        type={type}
+        step={type === 'number' ? '0.01' : undefined}
+        min={type === 'number' ? '0' : undefined}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+      />
+    </label>
+  );
+}
+
 function FinancePanel({
   caseItem,
   detail,
@@ -2107,9 +2850,16 @@ function FinancePanel({
     return (Number.isFinite(leftTime) ? leftTime : 0) - (Number.isFinite(rightTime) ? rightTime : 0);
   });
   const paymentCalendarGroups = groupPaymentCalendar(calendarPayments);
-  const paymentCalendarPlanTotal = calendarPayments.reduce((sum, payment) => sum + payment.amount, 0);
-  const paymentCalendarPaidTotal = calendarPayments.reduce((sum, payment) => sum + payment.paidAmount, 0);
-  const paymentCalendarOutstandingTotal = calendarPayments.reduce((sum, payment) => sum + payment.outstandingAmount, 0);
+  const calendarSummary = detail?.calendar;
+  const paymentCalendarPlanTotal = calendarSummary?.planTotal ?? calendarPayments.reduce((sum, payment) => sum + payment.amount, 0);
+  const paymentCalendarPaidTotal = calendarSummary?.paidTotal ?? calendarPayments.reduce((sum, payment) => sum + payment.paidAmount, 0);
+  const paymentCalendarOutstandingTotal = calendarSummary?.outstandingTotal ?? calendarPayments.reduce((sum, payment) => sum + payment.outstandingAmount, 0);
+  const paymentCalendarOverdueTotal = calendarSummary?.overdueTotal ?? calendarPayments
+    .filter((payment) => getPaymentCalendarState(payment) === 'overdue')
+    .reduce((sum, payment) => sum + payment.outstandingAmount, 0);
+  const paymentCalendarNextDate = calendarSummary?.nextPaymentDate ?? calendarPayments
+    .find((payment) => getPaymentCalendarState(payment) === 'planned')
+    ?.plannedDate;
 
   return (
     <div className="space-y-4">
@@ -2244,6 +2994,12 @@ function FinancePanel({
             <FinanceMiniStat label="План оплат" value={formatMoney(paymentCalendarPlanTotal)} />
             <FinanceMiniStat label="Оплачено" value={formatMoney(paymentCalendarPaidTotal)} tone="emerald" />
             <FinanceMiniStat label="Остаток" value={formatMoney(paymentCalendarOutstandingTotal)} tone={paymentCalendarOutstandingTotal > 0 ? 'rose' : 'emerald'} />
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-4">
+            <FinanceMiniStat label="Следующая дата" value={toRuDate(paymentCalendarNextDate) || '—'} />
+            <FinanceMiniStat label="Плановые" value={`${calendarSummary?.plannedCount ?? calendarPayments.filter((payment) => getPaymentCalendarState(payment) === 'planned').length}`} tone="cyan" />
+            <FinanceMiniStat label="Просроченные" value={`${calendarSummary?.overdueCount ?? calendarPayments.filter((payment) => getPaymentCalendarState(payment) === 'overdue').length}`} tone={paymentCalendarOverdueTotal > 0 ? 'rose' : 'emerald'} />
+            <FinanceMiniStat label="Просрочка" value={formatMoney(paymentCalendarOverdueTotal)} tone={paymentCalendarOverdueTotal > 0 ? 'rose' : 'emerald'} />
           </div>
           {calendarPayments.length === 0 ? <FinanceEmpty label="Плановых дат оплат пока нет." /> : null}
           <div className="mt-3 space-y-3">
@@ -2473,21 +3229,37 @@ function getRelatedPartyContactLine(party: ClientCaseRelatedParty, showContacts:
 
 function RelatedParties({
   parties,
+  showArchived,
+  onToggleArchived,
   onOpenClient,
   onOpenLegalEntity,
   onDelete,
+  onRestore,
   deletingPartyId,
+  restoringPartyId,
 }: {
   parties: ClientCaseRelatedParty[];
+  showArchived: boolean;
+  onToggleArchived: () => void;
   onOpenClient?: (clientId: number) => void;
   onOpenLegalEntity?: (legalEntityId: number) => void;
   onDelete?: (party: ClientCaseRelatedParty) => void;
+  onRestore?: (party: ClientCaseRelatedParty) => void;
   deletingPartyId?: number | null;
+  restoringPartyId?: number | null;
 }) {
   const [showContacts, setShowContacts] = useState(false);
+  const [auditPartyId, setAuditPartyId] = useState<number | null>(null);
+  const auditParty = parties.find((party) => party.id === auditPartyId) ?? null;
 
   return (
     <section className="rounded-xl border border-slate-200 p-4">
+      <button
+        type="button"
+        onClick={onToggleArchived}
+        className="mb-3 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+        {showArchived ? 'Скрыть архив' : 'Показать архив'}
+      </button>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Связанные лица</h2>
         {parties.some((party) => party.phone || party.email) ? (
@@ -2506,10 +3278,29 @@ function RelatedParties({
             <div className="font-semibold text-slate-900">{party.displayName}</div>
             <div className="mt-1 text-sm text-slate-500">{party.role || 'Участник'}</div>
             <div className="mt-1 text-xs text-slate-400">{getRelatedPartySourceLabel(party)}</div>
+            {party.isArchived ? (
+              <div className="mt-2 space-y-1 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <div className="inline-flex rounded-full bg-white/70 px-2 py-1 font-semibold text-amber-700">
+                  Архивная связь
+                </div>
+                <div>
+                  Архивировано: {formatRuDateTime(party.archivedAt) || 'дата не указана'}
+                  {party.archivedByUserName ? ` · ${party.archivedByUserName}` : ''}
+                </div>
+                {party.archiveReason ? <div>Причина: {party.archiveReason}</div> : null}
+              </div>
+            ) : null}
             {party.phone || party.email ? (
               <div className="mt-2 text-xs text-slate-500">{getRelatedPartyContactLine(party, showContacts)}</div>
             ) : null}
             {party.notes ? <div className="mt-2 text-xs text-slate-500">{party.notes}</div> : null}
+            <button
+              type="button"
+              onClick={() => setAuditPartyId((current) => (current === party.id ? null : party.id))}
+              aria-label={`${auditPartyId === party.id ? 'Скрыть историю' : 'История'} участника ${party.displayName}`}
+              className="mt-3 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white">
+              {auditPartyId === party.id ? 'Скрыть историю' : 'История'}
+            </button>
             {party.sourceType === 'client' && (party.clientId || party.sourceId) && onOpenClient ? (
               <button
                 type="button"
@@ -2528,7 +3319,18 @@ function RelatedParties({
                 Открыть
               </button>
             ) : null}
-            {onDelete ? (
+            {onRestore && party.isArchived ? (
+              <button
+                type="button"
+                onClick={() => onRestore(party)}
+                disabled={restoringPartyId === party.id}
+                aria-label={`Восстановить связь с участником ${party.displayName}`}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+                {restoringPartyId === party.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                Восстановить
+              </button>
+            ) : null}
+            {onDelete && !party.isArchived ? (
               <button
                 type="button"
                 onClick={() => onDelete(party)}
@@ -2542,6 +3344,15 @@ function RelatedParties({
           </div>
         ))}
       </div>
+      {auditParty ? (
+        <div className="mt-4">
+          <ObjectAuditHistoryCard
+            objectType="client-case-related-party"
+            objectId={auditParty.id}
+            compact
+          />
+        </div>
+      ) : null}
     </section>
   );
 }

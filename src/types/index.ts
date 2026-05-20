@@ -650,6 +650,7 @@ export interface ClientCaseFinanceDetail {
   caseTitle: string;
   ownerName: string;
   totals: ClientCaseFinanceTotals;
+  calendar?: ClientCaseFinanceCalendar | null;
   invoices: ClientCaseFinanceInvoice[];
   payments: ClientCaseFinancePayment[];
   contracts: ClientCaseFinanceContract[];
@@ -668,6 +669,19 @@ export interface ClientCaseFinanceTotals {
   plannedMargin: number;
   paidMargin: number;
   outstandingBalance: number;
+}
+
+export interface ClientCaseFinanceCalendar {
+  paymentCount: number;
+  planTotal: number;
+  paidTotal: number;
+  outstandingTotal: number;
+  overdueTotal: number;
+  paidCount: number;
+  plannedCount: number;
+  overdueCount: number;
+  cancelledCount: number;
+  nextPaymentDate?: string | null;
 }
 
 export interface ClientCaseFinanceInvoice {
@@ -714,6 +728,55 @@ export interface ClientCaseFinanceContract {
   status: ContractStatus | string;
 }
 
+export interface ClientCaseWorkOrder {
+  id?: number | null;
+  clientCaseId: number;
+  title: string;
+  status: string;
+  statusLabel: string;
+  currency: string;
+  notes?: string | null;
+  totalAmount: number;
+  createdAt?: string | null;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  updatedAt?: string | null;
+  updatedByUserId?: number | null;
+  updatedByUserName?: string | null;
+  approvalRequestedAt?: string | null;
+  approvalRequestedByUserId?: number | null;
+  approvalRequestedByUserName?: string | null;
+  approvalDecisionAt?: string | null;
+  approvalDecisionByUserId?: number | null;
+  approvalDecisionByUserName?: string | null;
+  approvalComment?: string | null;
+  items: ClientCaseWorkOrderItem[];
+}
+
+export interface ClientCaseWorkOrderInvoice {
+  paymentId: number;
+  invoiceEntityId?: number | null;
+  number: string;
+  date: string;
+  dueDate: string;
+  amount: number;
+  workOrder: ClientCaseWorkOrder;
+}
+
+export interface ClientCaseWorkOrderItem {
+  id: number;
+  clientCaseWorkOrderId: number;
+  serviceName: string;
+  description?: string | null;
+  executorUserId?: number | null;
+  executorName?: string | null;
+  dueDate?: string | null;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  sortOrder: number;
+}
+
 export interface ClientCaseCourtSyncRun {
   clientCaseId: number;
   status: 'manual-check-recorded' | 'binding-required' | string;
@@ -755,6 +818,11 @@ export interface ClientCaseRelatedParty {
   createdAt: string;
   createdByUserId?: number | null;
   createdByUserName?: string | null;
+  isArchived?: boolean;
+  archivedAt?: string | null;
+  archivedByUserId?: number | null;
+  archivedByUserName?: string | null;
+  archiveReason?: string | null;
 }
 
 export interface ClientCaseDocument {

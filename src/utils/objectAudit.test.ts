@@ -44,6 +44,10 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditFieldLabel('payment', 'Invoice Workflow Status')).toBe('Статус документа');
     expect(getObjectAuditFieldLabel('payment', 'System Notes')).toBe('Служебные заметки');
     expect(getObjectAuditFieldLabel('invoice-line-item', 'Sort Order')).toBe('Порядок строки');
+    expect(getObjectAuditFieldLabel('client-case-work-order', 'ApprovalDecisionByUserName')).toBe('Согласующий');
+    expect(getObjectAuditFieldLabel('client-case-work-order-item', 'Unit Price')).toBe('Цена');
+    expect(getObjectAuditFieldLabel('client-case-related-party', 'Archive Reason')).toBe('Причина архивирования');
+    expect(getObjectAuditFieldLabel('client-case-related-party', 'DisplayName')).toBe('Участник');
   });
 
   it('builds readable change summary', () => {
@@ -93,6 +97,11 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditActionLabel('Automation')).toBe('Автоконтроль');
     expect(getObjectAuditTypeLabel('task-journal-item')).toBe('Задача');
     expect(getObjectAuditTypeLabel('invoice-line-item')).toBe('Позиция счета');
+    expect(getObjectAuditTypeLabel('client-case-work-order')).toBe('Заказ-наряд');
+    expect(getObjectAuditTypeLabel('client-case-related-party')).toBe('Связанное лицо дела');
+    expect(formatAuditValue('pending_approval')).toBe('На согласовании');
+    expect(formatAuditValue('invoice_created')).toBe('Счет создан');
+    expect(formatAuditValue('legalEntity')).toBe('Юридическое лицо');
     expect(getObjectAuditTypeLabel('money-operation')).toBe('Денежная операция');
     expect(getObjectAuditActorLabel('Codex data repair')).toBe('Администратор');
     expect(getObjectAuditActorLabel('Codex maintenance')).toBe('Администратор');
