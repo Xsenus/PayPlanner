@@ -775,8 +775,10 @@ public class ContractsController : ControllerBase
             .Include(c => c.LegalEntityContracts).ThenInclude(link => link.LegalEntity)
             .Include(c => c.ContractActs).ThenInclude(link => link.Act)
             .Include(c => c.ContractInvoices).ThenInclude(link => link.Invoice).ThenInclude(invoice => invoice!.Acts)
+            .Include(c => c.ContractInvoices).ThenInclude(link => link.Invoice).ThenInclude(invoice => invoice!.InvoiceClientCases)
             .Include(c => c.ContractInvoices).ThenInclude(link => link.Invoice).ThenInclude(payment => payment.Invoice).ThenInclude(invoice => invoice!.Payments)
             .Include(c => c.ContractPayments).ThenInclude(link => link.Payment)
+            .Include(c => c.Payments).ThenInclude(payment => payment.InvoiceClientCases)
             .Include(c => c.Payments).ThenInclude(payment => payment.Acts)
             .Include(c => c.Payments).ThenInclude(payment => payment.Invoice).ThenInclude(invoice => invoice!.Payments);
 
@@ -1035,6 +1037,7 @@ public class ContractsController : ControllerBase
             invoice.InvoiceCancelledAt ??= now;
             invoice.InvoiceCancelledByUserId ??= actorId;
             invoice.InvoiceCancelledReason = reason;
+            ClearInvoiceCaseLinks(invoice);
             PaymentDomainService.AppendSystemNote(
                 invoice,
                 $"Счёт аннулирован вместе с договором № {contract.Number}. Причина: {reason}",
@@ -1047,6 +1050,14 @@ public class ContractsController : ControllerBase
         {
             _db.Acts.RemoveRange(draftActs);
         }
+    }
+
+    private static void ClearInvoiceCaseLinks(Payment invoice)
+    {
+        invoice.ClientCaseId = null;
+        invoice.ClientCase = null;
+        invoice.ClientCaseReference = null;
+        invoice.InvoiceClientCases.Clear();
     }
 
     private static List<Act> GetContractDraftActs(Contract contract)

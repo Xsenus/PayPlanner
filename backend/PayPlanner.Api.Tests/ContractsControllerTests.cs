@@ -416,6 +416,54 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task Cancel_ClearsInvoiceCaseLinksAndWritesHistory()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var clientCase = await CreateClientCaseAsync(db, client.Id);
+        var invoice = await CreateInvoicePaymentAsync(db, "INV-CANCEL-CASE", new DateTime(2026, 4, 24), 17_000m);
+        invoice.ClientCaseId = clientCase.Id;
+        invoice.ClientCaseReference = "CASE-CANCEL-1";
+        db.InvoiceClientCases.Add(new InvoiceClientCase
+        {
+            PaymentId = invoice.Id,
+            ClientCaseId = clientCase.Id,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateAdminController(db);
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-CANCEL-CASE-1",
+                Date = new DateTime(2026, 4, 24),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 17_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+                InvoiceIds = [invoice.Id],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var actionResult = await controller.Cancel(
+            createdDto.Id,
+            new CancelContractRequest { Reason = "Ошибочно созданный договор" },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(actionResult.Result);
+        db.ChangeTracker.Clear();
+        var storedInvoice = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == invoice.Id);
+        Assert.Null(storedInvoice.ClientCaseId);
+        Assert.Null(storedInvoice.ClientCaseReference);
+        Assert.False(await db.InvoiceClientCases.AsNoTracking().AnyAsync(link => link.PaymentId == invoice.Id));
+        var contractHistory = await db.ObjectAuditEvents.AsNoTracking()
+            .Where(item => item.ObjectType == "contract" && item.ObjectId == createdDto.Id && item.Action == "Updated")
+            .ToListAsync();
+        Assert.Contains(contractHistory, item => item.MetadataJson?.Contains("reason", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
     public async Task Cancel_RejectsConcludedContract()
     {
         await using var db = await CreateContextAsync();
@@ -1399,6 +1447,22 @@ public class ContractsControllerTests
         db.Clients.Add(client);
         await db.SaveChangesAsync();
         return client;
+    }
+
+    private static async Task<ClientCase> CreateClientCaseAsync(PaymentContext db, int clientId)
+    {
+        var clientCase = new ClientCase
+        {
+            ClientId = clientId,
+            CaseNumber = "CASE-CANCEL-1",
+            Title = "Дело для аннулирования договора",
+            CaseType = "Договор",
+            Stage = "Подготовка",
+        };
+
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        return clientCase;
     }
 
     private static ContractsController CreateAdminController(PaymentContext db, IEmailService? emailService = null)
