@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
@@ -47,6 +48,40 @@ public class InvoiceDeletionTests
         Assert.Empty(await db.Payments.Where(payment => payment.InvoiceId == invoiceEntityId).ToListAsync());
         Assert.Null(await db.Invoices.FindAsync(invoiceEntityId));
         Assert.NotNull(await db.Payments.FindAsync(unrelatedPaymentId));
+    }
+
+    [Fact]
+    public async Task Delete_ReturnsBadRequest_WhenInvoiceHasLinkedAct()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = await CreateInvoiceAggregateAsync(db);
+        var parentPaymentId = invoice.ParentPaymentId;
+        var invoiceEntityId = invoice.InvoiceEntityId;
+
+        db.Acts.Add(new Act
+        {
+            Number = "ACT-25",
+            Date = new DateTime(2026, 4, 8),
+            Amount = 25_000m,
+            InvoiceId = parentPaymentId,
+            InvoiceNumber = "25",
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new InvoicesController(db, new NoopEmailService(), new NoopFormRequirementsService());
+
+        var result = await controller.Delete(parentPaymentId, CancellationToken.None);
+        db.ChangeTracker.Clear();
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        var message = badRequest.Value?.GetType().GetProperty("message")?.GetValue(badRequest.Value)?.ToString();
+        Assert.False(string.IsNullOrWhiteSpace(message));
+        Assert.Contains("Нельзя удалить счёт", message!);
+        Assert.Contains("акты: 1", message!);
+        Assert.NotNull(await db.Payments.FindAsync(parentPaymentId));
+        Assert.NotNull(await db.Invoices.FindAsync(invoiceEntityId));
+        var act = await db.Acts.SingleAsync();
+        Assert.Equal(parentPaymentId, act.InvoiceId);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

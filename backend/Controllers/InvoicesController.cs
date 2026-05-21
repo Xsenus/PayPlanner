@@ -2101,6 +2101,12 @@ public class InvoicesController : ControllerBase
 
         var invoiceIdsToDelete = GetInvoiceEntityIdsToDelete(new[] { payment });
         var paymentsToDelete = await ExpandInvoiceAggregatePaymentsAsync(new[] { payment }, ct);
+        var deletionError = await ValidateInvoiceCanBeDeletedAsync(paymentsToDelete, ct);
+        if (deletionError is not null)
+        {
+            return deletionError;
+        }
+
         await DetachActsFromDeletedInvoicePaymentsAsync(paymentsToDelete, ct);
 
         _db.Payments.RemoveRange(paymentsToDelete);
@@ -2152,6 +2158,12 @@ public class InvoicesController : ControllerBase
 
         var invoiceIdsToDelete = GetInvoiceEntityIdsToDelete(payments);
         var paymentsToDelete = await ExpandInvoiceAggregatePaymentsAsync(payments, ct);
+        var deletionError = await ValidateInvoiceCanBeDeletedAsync(paymentsToDelete, ct);
+        if (deletionError is not null)
+        {
+            return deletionError;
+        }
+
         await DetachActsFromDeletedInvoicePaymentsAsync(paymentsToDelete, ct);
 
         _db.Payments.RemoveRange(paymentsToDelete);
@@ -2199,6 +2211,58 @@ public class InvoicesController : ControllerBase
         }
 
         return paymentsById.Values.ToList();
+    }
+
+    private async Task<IActionResult?> ValidateInvoiceCanBeDeletedAsync(IEnumerable<Payment> payments, CancellationToken ct)
+    {
+        var paymentList = payments.ToList();
+        var paymentIds = paymentList
+            .Select(payment => payment.Id)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+
+        if (paymentIds.Count == 0)
+        {
+            return null;
+        }
+
+        var invoiceEntityIds = GetInvoiceEntityIdsToDelete(paymentList);
+        var linkedActCount = await _db.Acts
+            .CountAsync(act => act.InvoiceId.HasValue && paymentIds.Contains(act.InvoiceId.Value), ct);
+        var linkedContractCount = await _db.ContractInvoices
+            .CountAsync(link => paymentIds.Contains(link.InvoiceId), ct);
+        linkedContractCount += paymentList.Count(payment => payment.ContractId.HasValue && payment.ContractId.Value > 0);
+        var linkedMoneyOperationCount = invoiceEntityIds.Count == 0
+            ? 0
+            : await _db.MoneyOperations
+                .CountAsync(operation => operation.LinkedInvoiceId.HasValue && invoiceEntityIds.Contains(operation.LinkedInvoiceId.Value), ct);
+
+        if (linkedActCount == 0 && linkedContractCount == 0 && linkedMoneyOperationCount == 0)
+        {
+            return null;
+        }
+
+        var linkedParts = new List<string>();
+        if (linkedActCount > 0)
+        {
+            linkedParts.Add($"акты: {linkedActCount}");
+        }
+
+        if (linkedContractCount > 0)
+        {
+            linkedParts.Add($"договоры: {linkedContractCount}");
+        }
+
+        if (linkedMoneyOperationCount > 0)
+        {
+            linkedParts.Add($"движения денег: {linkedMoneyOperationCount}");
+        }
+
+        return BadRequest(new
+        {
+            message = $"Нельзя удалить счёт, пока к нему привязаны документы ({string.Join(", ", linkedParts)}). Сначала отвяжите связанные документы или аннулируйте счёт.",
+        });
     }
 
     private async Task DetachActsFromDeletedInvoicePaymentsAsync(IEnumerable<Payment> payments, CancellationToken ct)
