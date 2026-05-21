@@ -1145,6 +1145,12 @@ export class ApiService {
     });
   }
 
+  async deleteAdminAppRelease(id: number) {
+    return this.request<void>(`/app-version/admin/releases/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   async markAppVersionSeen(releaseId: string) {
     return this.request<void>('/app-version/mark-seen', {
       method: 'POST',

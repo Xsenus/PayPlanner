@@ -114,6 +114,27 @@ public sealed class AppVersionControllerTests
     }
 
     [Fact]
+    public async Task DeleteRelease_RemovesReleaseItemsAndSeenMarks()
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "delete-release@example.test");
+        var release = Release("2026-05-22-delete");
+        var controller = CreateController(scope.Db, user.Id, release);
+        await controller.MarkSeen(new AppVersionMarkSeenRequest(release.ReleaseId), CancellationToken.None);
+        var releaseId = await scope.Db.AppReleases
+            .Where(item => item.ReleaseId == release.ReleaseId)
+            .Select(item => item.Id)
+            .SingleAsync();
+
+        var result = await controller.DeleteRelease(releaseId, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.False(await scope.Db.AppReleases.AnyAsync(item => item.Id == releaseId));
+        Assert.False(await scope.Db.AppReleaseItems.AnyAsync(item => item.AppReleaseId == releaseId));
+        Assert.False(await scope.Db.AppReleaseSeen.AnyAsync(item => item.AppReleaseId == releaseId));
+    }
+
+    [Fact]
     public async Task SeedService_SyncsAgentReleaseFileIntoDatabase()
     {
         await using var scope = await CreateScopeAsync();

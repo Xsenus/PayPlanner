@@ -183,6 +183,19 @@ public sealed class AppVersionController : ControllerBase
         return Ok(MapAdminRelease(release));
     }
 
+    [HttpDelete("admin/releases/{id:int}")]
+    [Authorize(Policy = "Admin")]
+    public async Task<IActionResult> DeleteRelease(int id, CancellationToken ct)
+    {
+        var release = await _db.AppReleases
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (release is null) return NotFound();
+
+        _db.AppReleases.Remove(release);
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     private IQueryable<AppRelease> GetActiveReleaseQuery()
         => _db.AppReleases
             .AsNoTracking()

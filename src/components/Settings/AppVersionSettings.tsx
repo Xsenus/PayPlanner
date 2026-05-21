@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { History, Loader2, Plus, Save } from 'lucide-react';
+import { History, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { apiService, type AppReleaseAdminDto, type AppReleaseItemDto, type SaveAppReleaseRequest } from '../../services/api';
 import { useToast } from '../../hooks/useToast';
+import { useDialog } from '../../hooks/useDialog';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 type ItemType = 'new' | 'improved' | 'fixed' | 'important';
@@ -100,10 +101,12 @@ function toPayload(form: FormState): SaveAppReleaseRequest {
 
 export function AppVersionSettings() {
   const toast = useToast();
+  const { confirm } = useDialog();
   const [releases, setReleases] = useState<AppReleaseAdminDto[]>([]);
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedRelease = useMemo(
@@ -166,6 +169,41 @@ export function AppVersionSettings() {
       toast.error(extractDisplayErrorMessage(e, 'Не удалось сохранить релиз.'), 'Версия приложения');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!selectedRelease) {
+      return;
+    }
+
+    const agentNote = selectedRelease.source === 'agent'
+      ? ' Релиз пришел из agent-файла: если он останется в releases.json, он может появиться снова после следующего деплоя или перезапуска.'
+      : '';
+    const accepted = await confirm({
+      title: 'Удаление релиза',
+      description: `Удалить релиз «${selectedRelease.title}»?${agentNote}`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+
+    if (!accepted) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await apiService.deleteAdminAppRelease(selectedRelease.id);
+      toast.success('Релиз удален.', 'Версия приложения');
+      const nextReleases = releases.filter((release) => release.id !== selectedRelease.id);
+      setReleases(nextReleases);
+      setForm(nextReleases[0] ? toForm(nextReleases[0]) : emptyForm());
+      await load();
+    } catch (e) {
+      toast.error(extractDisplayErrorMessage(e, 'Не удалось удалить релиз.'), 'Версия приложения');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -241,10 +279,21 @@ export function AppVersionSettings() {
               <p className="mt-1 text-sm text-slate-500">Источник: {selectedRelease.source}</p>
             ) : null}
           </div>
+          {selectedRelease ? (
+            <button
+              type="button"
+              onClick={() => void remove()}
+              disabled={deleting || saving}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Удалить
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void save()}
-            disabled={saving}
+            disabled={saving || deleting}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

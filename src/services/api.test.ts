@@ -125,6 +125,17 @@ describe('apiService auth handling', () => {
     expect(init?.body).toBe(JSON.stringify(payload));
   });
 
+  it('deletes app release through admin API', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.deleteAdminAppRelease(7);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/app-version/admin/releases/7');
+    expect(init?.method).toBe('DELETE');
+  });
+
   it('loads role permission audit from the backend', async () => {
     const payload = {
       generatedAtUtc: '2026-05-20T00:00:00Z',
