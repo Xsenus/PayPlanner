@@ -43,6 +43,8 @@ import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallme
 import { getContractBillingModeLabel, getContractEffectiveAmount } from '../../utils/contracts';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
+import { getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import {
   filterRepresentativeInvoiceWhenInstallmentsExist,
   getStatusSourcePaymentsForInvoice,
@@ -92,6 +94,38 @@ type DraftActForm = {
   date: string;
   amount: string;
   comment: string;
+};
+
+const DEFAULT_INVOICE_WORKFLOW_STATUS_LABELS: Record<InvoiceWorkflowStatus, string> = {
+  Draft: 'Черновик',
+  NotSigned: 'Не подписан',
+  RequiresClientSignature: 'Требуется подпись клиента',
+  OnApproval: 'На согласовании',
+  Approved: 'Согласован',
+  ApprovalRejected: 'Отказ в согласовании',
+  NeedsCorrection: 'Требует исправления',
+  OnSigning: 'На подписании',
+  SignedByClient: 'Подписан клиентом',
+  Paid: 'Оплачен',
+  PartiallyPaid: 'Частично оплачен',
+  Overdue: 'Просрочен',
+  Cancelled: 'Аннулирован',
+};
+
+const INVOICE_WORKFLOW_STATUS_CLASSES: Record<InvoiceWorkflowStatus, string> = {
+  Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
+  NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+  RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
+  OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
+  Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
+  NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
+  OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
+  SignedByClient: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  Paid: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  PartiallyPaid: 'bg-blue-100 text-blue-700 border border-blue-200',
+  Overdue: 'bg-rose-100 text-rose-700 border border-rose-200',
+  Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
 };
 
 type InvoiceCounterpartyPickerMode = 'main' | 'expense';
@@ -983,6 +1017,11 @@ export function InvoiceModal({
   );
 
   const { invoiceUnits, services, serviceCategories } = useDictionaries();
+  const documentStatusSettings = useDocumentStatusSettings();
+  const invoiceWorkflowStatusLabels = useMemo(
+    () => getDocumentStatusLabels(documentStatusSettings, 'invoice', DEFAULT_INVOICE_WORKFLOW_STATUS_LABELS),
+    [documentStatusSettings],
+  );
   const unitOptions = useMemo(() => invoiceUnits.map((item) => item.name).filter((name) => Boolean(name?.trim())), [invoiceUnits]);
   const sortedServiceCategories = useMemo(
     () => [...serviceCategories].sort((left, right) => left.name.localeCompare(right.name, 'ru')),
@@ -3319,6 +3358,11 @@ export function InvoiceModal({
     Overdue: t('overdue') ?? 'Просрочен',
   };
   const currentStatusMeta = invoiceStatusMeta[effectiveInvoiceStatus] ?? invoiceStatusMeta.Pending;
+  const currentWorkflowStatus = form.workflowStatus;
+  const currentWorkflowStatusMeta = {
+    label: invoiceWorkflowStatusLabels[currentWorkflowStatus] ?? DEFAULT_INVOICE_WORKFLOW_STATUS_LABELS[currentWorkflowStatus],
+    className: INVOICE_WORKFLOW_STATUS_CLASSES[currentWorkflowStatus] ?? INVOICE_WORKFLOW_STATUS_CLASSES.Draft,
+  };
   void statusMeta;
   void relatedPaymentStatusLabel;
   const canManageRelatedPayments = mode === 'edit' && !!invoice?.invoiceEntityId;
@@ -3773,6 +3817,13 @@ export function InvoiceModal({
         {isPageMode && mode === 'edit' && (
           <div className="flex items-center gap-2">
             <span className={`rounded-full px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>{currentStatusMeta.label}</span>
+            <span
+              data-testid="invoice-header-workflow-status-badge"
+              title="Статус документа"
+              className={`rounded-full px-3 py-1 text-sm font-semibold ${currentWorkflowStatusMeta.className}`}
+            >
+              {currentWorkflowStatusMeta.label}
+            </span>
             {pageViewMode ? (
               <button
                 type="button"
@@ -3855,9 +3906,12 @@ export function InvoiceModal({
 
             <aside className="space-y-3">
               <div className="rounded-lg border border-slate-300 bg-white p-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xl font-semibold">{printableAmount}</span>
-                  <span data-testid="invoice-page-status-badge" className={`rounded px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>{currentStatusMeta.label}</span>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <span data-testid="invoice-page-status-badge" title="Статус оплаты" className={`rounded px-3 py-1 text-sm font-semibold ${currentStatusMeta.className}`}>{currentStatusMeta.label}</span>
+                    <span data-testid="invoice-page-workflow-status-badge" title="Статус документа" className={`rounded px-3 py-1 text-sm font-semibold ${currentWorkflowStatusMeta.className}`}>{currentWorkflowStatusMeta.label}</span>
+                  </div>
                 </div>
                 <div data-testid="invoice-page-payment-summary" className="mt-3 grid grid-cols-2 gap-2">
                   <div className={`rounded-lg border px-3 py-2 text-center ${statusSnapshot.outstandingAmount > 0 ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-slate-50'}`}>

@@ -1568,6 +1568,43 @@ describe('InvoiceModal integration', () => {
     expect(screen.getByTestId('invoice-page-debt-amount').textContent).toMatch(/2\s500/);
   });
 
+  it('keeps the invoice document workflow status visible next to the payment status', async () => {
+    const invoice = {
+      id: 573,
+      invoiceEntityId: 573,
+      number: '573',
+      date: '2026-04-29',
+      dueDate: '2026-06-08',
+      amount: 2500,
+      paidAmount: 0,
+      outstandingAmount: 2500,
+      type: 'Income',
+      status: 'Processing',
+      workflowStatus: 'SignedByClient',
+      lineItems: [{ name: 'Service', quantity: 1, unit: 'pcs', price: 2500 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[]}
+      />,
+    );
+
+    expect((await screen.findByTestId('invoice-page-status-badge')).textContent).toContain('Не оплачен');
+    expect(screen.getByTestId('invoice-page-workflow-status-badge').textContent).toContain('Подписан клиентом');
+    expect(screen.getByTestId('invoice-header-workflow-status-badge').textContent).toContain('Подписан клиентом');
+  });
+
   it('shows full payment and zero debt in the invoice page summary for a completed invoice without related payments', async () => {
     const invoice = {
       id: 571,
