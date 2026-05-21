@@ -374,6 +374,23 @@ describe('TaskJournal', () => {
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
   });
 
+  it('shows who assigned the task in the journal and task card', async () => {
+    await renderJournal([
+      createTask({
+        assigneeName: 'Кожеваткин Андрей Владимирович',
+        authorName: 'Диденко Анна Владимировна',
+      }),
+    ]);
+
+    expect(screen.getByText('Поручил')).toBeTruthy();
+    expect(screen.getByText('Диденко Анна Владимировна')).toBeTruthy();
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    await screen.findByRole('heading', { name: 'Просмотр задачи' });
+
+    expect((screen.getByTestId('task-author-display') as HTMLInputElement).value).toBe('Диденко Анна Владимировна');
+  });
+
   it('hides task export buttons when export permission is denied', async () => {
     authState.isAdmin = false;
     permissionsState.taskCanExport = false;
@@ -1372,7 +1389,9 @@ describe('TaskJournal', () => {
     const calendarTask = screen.getByTestId('task-calendar-task-101');
     expect(calendarTask.getAttribute('title')).toContain('Статус: Новая');
     expect(calendarTask.getAttribute('title')).toContain('Исполнитель: Администратор');
+    expect(calendarTask.getAttribute('title')).toContain('Поручил: Постановщик');
     expect(screen.getByTestId('task-calendar-tooltip-101').textContent).toContain('Дело: БАНКРОТСТВО');
+    expect(screen.getByTestId('task-calendar-tooltip-101').textContent).toContain('Поручил: Постановщик');
   });
 
   it('can open directly in calendar mode from the journal submenu', async () => {

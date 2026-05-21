@@ -581,6 +581,10 @@ function getTaskCaseTitle(task: TaskJournalItem) {
   return task.clientCaseTitle?.trim() || '';
 }
 
+function getTaskAuthorName(task: Pick<TaskJournalItem, 'authorName'>) {
+  return task.authorName?.trim() || 'Не указан';
+}
+
 function buildTaskTooltipLines(task: TaskJournalItem) {
   const due = new Date(task.dueAt);
   const duration = normalizeTaskDuration(task.plannedDurationMinutes);
@@ -599,6 +603,7 @@ function buildTaskTooltipLines(task: TaskJournalItem) {
   lines.push(
     `Время: ${formatDateOnly(due)} ${formatTimeOnly(due)}-${formatTimeOnly(end)}`,
     `Исполнитель: ${assignees}`,
+    `Поручил: ${getTaskAuthorName(task)}`,
     `Статус: ${getStatusLabel(task.status)}`,
     `Приоритет: ${getPriorityLabel(task.priority)}`,
     `Длительность: ${formatDuration(duration)}`,
@@ -2039,12 +2044,13 @@ export function TaskJournal({
       return;
     }
 
-    const header = ['Контрагент', 'Дело', 'Наименование задачи', 'Исполнитель', 'Срок', 'Длительность', 'Тип', 'Приоритет', 'Статус', 'Результат'];
+    const header = ['Контрагент', 'Дело', 'Наименование задачи', 'Исполнитель', 'Поручил', 'Срок', 'Длительность', 'Тип', 'Приоритет', 'Статус', 'Результат'];
     const rows = filteredTasks.map((task) => [
       getTaskClientName(task),
       getTaskCaseTitle(task),
       task.title,
       task.assigneeName,
+      getTaskAuthorName(task),
       formatDateTime(task.dueAt),
       formatDuration(task.plannedDurationMinutes),
       getTypeMeta(task.type).label,
@@ -2784,7 +2790,7 @@ function TaskTable({
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <table className="min-w-[1180px] w-full">
+        <table className="min-w-[1280px] w-full">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <th className="w-12 px-4 py-4">
@@ -2800,6 +2806,7 @@ function TaskTable({
               <th className="px-4 py-4">Контрагент / дело</th>
               <th className="px-4 py-4">Наименование задачи</th>
               <th className="px-4 py-4">Исполнитель</th>
+              <th className="px-4 py-4">Поручил</th>
               <th className="px-4 py-4">Дата исполнения</th>
               <th className="px-4 py-4">Тип</th>
               <th className="px-4 py-4">Результат</th>
@@ -2810,7 +2817,7 @@ function TaskTable({
           <tbody className="divide-y divide-slate-100">
             {tasks.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-500">
+                <td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-500">
                   По текущим фильтрам задач нет.
                 </td>
               </tr>
@@ -2898,6 +2905,9 @@ function TaskTable({
                         Наблюдают: {taskObservers.map(getParticipantDisplayName).filter(Boolean).join(', ')}
                       </div>
                     ) : null}
+                  </td>
+                  <td className="px-4 py-4 text-sm text-slate-600">
+                    <div className="font-semibold text-slate-700">{getTaskAuthorName(task)}</div>
                   </td>
                   <td className="px-4 py-4">
                     <div className={isOverdue ? 'font-semibold text-rose-600' : 'font-medium text-slate-800'}>{formatDateTime(task.dueAt)}</div>
@@ -3016,8 +3026,12 @@ function TaskBoard({
                   <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
                     <TypeIcon className="h-3.5 w-3.5" />
                     {getTypeMeta(task.type).label}
-                    <span>•</span>
-                    {task.assigneeName}
+                  </div>
+                  <div className="mt-2 text-xs text-slate-500">
+                    Исполнитель: {getTaskAssigneeNames(task).join(', ') || task.assigneeName}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Поручил: {getTaskAuthorName(task)}
                   </div>
                   <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
                     <Clock3 className="h-3.5 w-3.5" />
@@ -3476,7 +3490,7 @@ function TaskTimelineCalendar({
                               movingTaskId === task.id ? 'opacity-60' : ''
                             } ${highlightedTaskId === task.id ? 'ring-2 ring-blue-300' : ''}`}
                             style={{ top, height, left, width }}
-                            title={`${task.title}\n${formatTimeOnly(start)}-${formatTimeOnly(end)}\n${getTaskAssigneeNames(task).join(', ')}`}
+                            title={`${task.title}\n${formatTimeOnly(start)}-${formatTimeOnly(end)}\nИсполнитель: ${getTaskAssigneeNames(task).join(', ') || task.assigneeName}\nПоручил: ${getTaskAuthorName(task)}`}
                           >
                             <div className="flex h-full items-start justify-between gap-1">
                               <button type="button" onClick={() => onEdit(task)} className="min-w-0 flex-1 text-left">
@@ -4376,6 +4390,7 @@ function TaskModal({
   const isLockedViewWithEditAccess = Boolean(isReadOnly && canSwitchToEdit);
   const canRequestDeadlineChange = Boolean(taskId && isReadOnly && !canSwitchToEdit && taskSettings.allowExecutorDeadlineChangeRequests);
   const canManageFiles = Boolean(taskId && !isReadOnly);
+  const taskAuthorLabel = state?.task ? getTaskAuthorName(state.task) : currentUserName || 'Текущий пользователь';
 
   const update = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
     if (isReadOnly && key !== 'result') return;
@@ -4921,6 +4936,14 @@ function TaskModal({
                   <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                 ))}
               </select>
+            </Field>
+            <Field label="Поручил">
+              <input
+                value={taskAuthorLabel}
+                disabled
+                data-testid="task-author-display"
+                className="form-input bg-slate-50 text-slate-600"
+              />
             </Field>
             <Field label="Имя исполнителя">
               <input value={form.assigneeName} onChange={(event) => update('assigneeName', event.target.value)} disabled={isReadOnly} className="form-input" />
