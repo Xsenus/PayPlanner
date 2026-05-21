@@ -369,6 +369,53 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task Cancel_CancelsUnpaidInvoicesAndDeletesDraftActs()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var unpaidInvoice = await CreateInvoicePaymentAsync(db, "INV-CANCEL-UNPAID", new DateTime(2026, 4, 22), 14_000m);
+        var paidInvoice = await CreateInvoicePaymentAsync(db, "INV-CANCEL-PAID", new DateTime(2026, 4, 22), 9_000m);
+        paidInvoice.Status = PaymentStatus.Completed;
+        paidInvoice.IsPaid = true;
+        paidInvoice.PaidAmount = paidInvoice.Amount;
+        paidInvoice.LastPaymentDate = paidInvoice.Date;
+        await db.SaveChangesAsync();
+        var draftAct = await CreateActAsync(db, unpaidInvoice.Id, new DateTime(2026, 4, 23), 5_000m);
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-CANCEL-SIDE-1",
+                Date = new DateTime(2026, 4, 22),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 23_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+                InvoiceIds = [unpaidInvoice.Id, paidInvoice.Id],
+                ActIds = [draftAct.Id],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var actionResult = await controller.Cancel(
+            createdDto.Id,
+            new CancelContractRequest { Reason = "Ошибочно созданный договор" },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(actionResult.Result);
+        db.ChangeTracker.Clear();
+        var storedUnpaidInvoice = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == unpaidInvoice.Id);
+        var storedPaidInvoice = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == paidInvoice.Id);
+        Assert.Equal(PaymentStatus.Cancelled, storedUnpaidInvoice.Status);
+        Assert.Equal(InvoiceWorkflowStatus.Cancelled, storedUnpaidInvoice.InvoiceWorkflowStatus);
+        Assert.Equal("Ошибочно созданный договор", storedUnpaidInvoice.InvoiceCancelledReason);
+        Assert.Contains("аннулирован вместе с договором № CT-CANCEL-SIDE-1", storedUnpaidInvoice.SystemNotes);
+        Assert.Equal(PaymentStatus.Completed, storedPaidInvoice.Status);
+        Assert.False(await db.Acts.AsNoTracking().AnyAsync(act => act.Id == draftAct.Id));
+    }
+
+    [Fact]
     public async Task Cancel_RejectsConcludedContract()
     {
         await using var db = await CreateContextAsync();

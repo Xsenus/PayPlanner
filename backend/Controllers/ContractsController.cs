@@ -508,7 +508,7 @@ public class ContractsController : ControllerBase
         if (reason is null) return ValidationError(nameof(request.Reason), "Причина аннулирования обязательна.");
         ApplyAuditReason(reason);
 
-        var contract = await LoadEditableContractAsync(id, ct);
+        var contract = await LoadEditableContractDetailAsync(id, ct);
         if (contract is null) return NotFound();
         if (!string.Equals(contract.Status, ContractStatus.Draft, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.NotSigned, StringComparison.OrdinalIgnoreCase)
@@ -526,6 +526,7 @@ public class ContractsController : ControllerBase
         contract.CancelledAt ??= DateTime.UtcNow.Date;
         contract.CancelledReason = reason;
         contract.UpdatedAt = DateTime.UtcNow;
+        ApplyContractCancellationSideEffects(contract, reason, DateTime.UtcNow);
 
         await _db.SaveChangesAsync(ct);
 
@@ -1015,6 +1016,56 @@ public class ContractsController : ControllerBase
             $"Договор № {contract.Number} расторгнут",
             string.Join(Environment.NewLine + Environment.NewLine, lines),
             cancellationToken: ct);
+    }
+
+    private void ApplyContractCancellationSideEffects(Contract contract, string reason, DateTime now)
+    {
+        var actorId = User?.GetUserId();
+        var actorName = User?.Identity?.Name;
+
+        foreach (var invoice in GetContractInvoicePayments(contract)
+                     .Where(payment => payment.Status is not PaymentStatus.Completed and not PaymentStatus.Cancelled
+                                       && payment.PaidAmount <= 0m))
+        {
+            invoice.Status = PaymentStatus.Cancelled;
+            invoice.InvoiceWorkflowStatus = InvoiceWorkflowStatus.Cancelled;
+            invoice.IsPaid = false;
+            invoice.PaidAmount = 0m;
+            invoice.LastPaymentDate = null;
+            invoice.InvoiceCancelledAt ??= now;
+            invoice.InvoiceCancelledByUserId ??= actorId;
+            invoice.InvoiceCancelledReason = reason;
+            PaymentDomainService.AppendSystemNote(
+                invoice,
+                $"Счёт аннулирован вместе с договором № {contract.Number}. Причина: {reason}",
+                now,
+                actorName);
+        }
+
+        var draftActs = GetContractDraftActs(contract);
+        if (draftActs.Count > 0)
+        {
+            _db.Acts.RemoveRange(draftActs);
+        }
+    }
+
+    private static List<Act> GetContractDraftActs(Contract contract)
+    {
+        var directActs = contract.ContractActs
+            .Where(link => link.Act != null)
+            .Select(link => link.Act!);
+        var invoiceActs = GetContractInvoicePayments(contract)
+            .SelectMany(invoice => invoice.Acts);
+        var canonicalPaymentActs = contract.Payments
+            .SelectMany(payment => payment.Acts);
+
+        return directActs
+            .Concat(invoiceActs)
+            .Concat(canonicalPaymentActs)
+            .Where(act => string.Equals(act.WorkflowStatus, ActWorkflowStatus.Draft, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(act => act.Id)
+            .Select(group => group.First())
+            .ToList();
     }
 
     private ContractDto MapToDto(Contract contract)
