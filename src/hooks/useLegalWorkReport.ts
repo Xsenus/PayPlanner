@@ -5,6 +5,9 @@ import type { LegalWorkReport } from '../types';
 export interface LegalWorkReportFilters {
   from?: string;
   to?: string;
+  status?: string;
+  responsibleUserId?: number;
+  caseType?: string;
 }
 
 export function useLegalWorkReport(filters: LegalWorkReportFilters) {
@@ -17,8 +20,11 @@ export function useLegalWorkReport(filters: LegalWorkReportFilters) {
     () => ({
       from: filters.from,
       to: filters.to,
+      status: filters.status,
+      responsibleUserId: filters.responsibleUserId,
+      caseType: filters.caseType,
     }),
-    [filters.from, filters.to],
+    [filters.from, filters.to, filters.status, filters.responsibleUserId, filters.caseType],
   );
 
   const load = useCallback(async () => {

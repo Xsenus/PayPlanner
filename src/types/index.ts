@@ -570,6 +570,227 @@ export interface ClientCase {
   auditDeletedByUserName?: string | null;
 }
 
+export interface CaseCalendarEvent {
+  id: string;
+  kind: 'task' | 'case-deadline' | 'procedural-deadline' | 'court' | string;
+  sourceType: string;
+  sourceId?: number | null;
+  title: string;
+  startAt: string;
+  endAt: string;
+  allDay: boolean;
+  clientCaseId: number;
+  caseTitle: string;
+  clientName?: string | null;
+  legalEntityName?: string | null;
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  status: string;
+  priority: string;
+  deadlineType?: string | null;
+  isOverdue: boolean;
+  isWarning: boolean;
+  courtName?: string | null;
+  courtCaseNumber?: string | null;
+}
+
+export interface CaseCalendarSummary {
+  from: string;
+  to: string;
+  totalEventCount: number;
+  overdueCount: number;
+  warningCount: number;
+  courtEventCount: number;
+  proceduralDeadlineCount: number;
+  caseDeadlineCount: number;
+  taskCount: number;
+  nearestEvent?: CaseCalendarEvent | null;
+}
+
+export interface ClientCaseProceduralDeadline {
+  id: number;
+  clientCaseId: number;
+  deadlineType: string;
+  deadlineTypeLabel: string;
+  title: string;
+  description?: string | null;
+  dueAt: string;
+  allDay: boolean;
+  status: string;
+  statusLabel: string;
+  warningDaysBefore: number;
+  taskJournalItemId?: number | null;
+  clientCaseDocumentId?: number | null;
+  sourceType: string;
+  sourceId?: number | null;
+  notes?: string | null;
+  createdAt: string;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  updatedAt?: string | null;
+  updatedByUserId?: number | null;
+  updatedByUserName?: string | null;
+  closedAt?: string | null;
+  closedByUserId?: number | null;
+  closedByUserName?: string | null;
+  closeReason?: string | null;
+  isOverdue: boolean;
+  isWarning: boolean;
+}
+
+export interface UpsertClientCaseProceduralDeadlinePayload {
+  deadlineType?: string;
+  title?: string;
+  description?: string;
+  dueAt?: string;
+  allDay?: boolean;
+  status?: string;
+  warningDaysBefore?: number;
+  taskJournalItemId?: number | null;
+  clientCaseDocumentId?: number | null;
+  sourceType?: string;
+  sourceId?: number | null;
+  notes?: string;
+  closeReason?: string;
+}
+
+export interface ProceduralDeadlineCalculationPayload {
+  startAt?: string;
+  rule?: 'calendarMonths' | 'calendarDays' | 'workingDays' | string;
+  monthsToAdd?: number;
+  daysToAdd?: number;
+  rollForwardToWorkingDay?: boolean;
+}
+
+export interface ProceduralDeadlineCalculationResult {
+  deadlineAt?: string | null;
+  rule: string;
+  monthsToAdd: number;
+  daysToAdd: number;
+  rollForwardToWorkingDay: boolean;
+}
+
+export interface ClientCaseCourtEvent {
+  id: number;
+  clientCaseId: number;
+  eventType: string;
+  eventTypeLabel: string;
+  title: string;
+  description?: string | null;
+  scheduledAt: string;
+  allDay: boolean;
+  courtInstance: string;
+  courtInstanceLabel: string;
+  courtId?: number | null;
+  courtName?: string | null;
+  courtCaseNumber?: string | null;
+  courtroom?: string | null;
+  judgeName?: string | null;
+  secretaryName?: string | null;
+  movementStatus: string;
+  movementStatusLabel: string;
+  resultSummary?: string | null;
+  sourceType: string;
+  clientCaseDocumentId?: number | null;
+  proceduralDeadlineId?: number | null;
+  createdAt: string;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  updatedAt?: string | null;
+  updatedByUserId?: number | null;
+  updatedByUserName?: string | null;
+  isOverdue: boolean;
+}
+
+export interface ClientCaseCourtEventHistory {
+  id: number;
+  clientCaseCourtEventId: number;
+  clientCaseId: number;
+  action: string;
+  summary: string;
+  occurredAt: string;
+  actorUserId?: number | null;
+  actorUserName?: string | null;
+}
+
+export interface UpsertClientCaseCourtEventPayload {
+  eventType?: string;
+  title?: string;
+  description?: string;
+  scheduledAt?: string;
+  allDay?: boolean;
+  courtInstance?: string;
+  courtId?: number | null;
+  courtName?: string;
+  courtCaseNumber?: string;
+  courtroom?: string;
+  judgeName?: string;
+  secretaryName?: string;
+  movementStatus?: string;
+  resultSummary?: string;
+  sourceType?: string;
+  clientCaseDocumentId?: number | null;
+  proceduralDeadlineId?: number | null;
+}
+
+export interface ClientCaseCourt {
+  id: number;
+  name: string;
+  instance: string;
+  instanceLabel: string;
+  code?: string | null;
+  url?: string | null;
+  address?: string | null;
+  contacts?: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  updatedAt?: string | null;
+  updatedByUserId?: number | null;
+  updatedByUserName?: string | null;
+}
+
+export interface UpsertClientCaseCourtPayload {
+  name?: string;
+  instance?: string;
+  code?: string;
+  url?: string;
+  address?: string;
+  contacts?: string;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
+export interface ClientCaseCourtParty {
+  id: number;
+  clientCaseId: number;
+  relatedPartyId?: number | null;
+  displayName: string;
+  side: string;
+  sideLabel: string;
+  processRole: string;
+  representativeName?: string | null;
+  notes?: string | null;
+  isArchived: boolean;
+  createdAt: string;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  updatedAt?: string | null;
+  updatedByUserId?: number | null;
+  updatedByUserName?: string | null;
+}
+
+export interface UpsertClientCaseCourtPartyPayload {
+  relatedPartyId?: number | null;
+  displayName?: string;
+  side?: string;
+  processRole?: string;
+  representativeName?: string;
+  notes?: string;
+}
+
 export interface ClientCaseActivity {
   lastViewedAt?: string | null;
   lastViewedByUserId?: number | null;
@@ -760,6 +981,7 @@ export interface ClientCaseWorkOrderInvoice {
   date: string;
   dueDate: string;
   amount: number;
+  documentId?: number | null;
   workOrder: ClientCaseWorkOrder;
 }
 
@@ -833,6 +1055,9 @@ export interface ClientCaseDocument {
   templateLabel?: string | null;
   sourceTaskId?: number | null;
   sourceEventId?: number | null;
+  sourceWorkOrderId?: number | null;
+  sourceInvoiceId?: number | null;
+  sourceStage?: string | null;
   version: number;
   documentType: string;
   status: string;
@@ -850,11 +1075,19 @@ export interface ClientCaseDocumentTemplate {
   label: string;
   documentType: string;
   heading: string;
+  caseTypes?: string[];
   description?: string | null;
   content?: string | null;
   version?: number;
   isActive?: boolean;
   updatedAt?: string | null;
+}
+
+export interface ClientCaseDocumentTemplateToken {
+  key: string;
+  category: string;
+  description: string;
+  placeholder: string;
 }
 
 export interface RenderedCaseDocumentTemplate {
@@ -1266,6 +1499,46 @@ export interface LegalWorkResponsibleItem {
   outstandingTotal: number;
 }
 
+export interface LegalWorkFinanceItem {
+  status: string;
+  statusLabel: string;
+  caseCount: number;
+  feeTotal: number;
+  paidTotal: number;
+  outstandingTotal: number;
+}
+
+export interface LegalWorkDeadlineSummaryItem {
+  deadlineType: string;
+  deadlineLabel: string;
+  totalCount: number;
+  overdueCount: number;
+  upcomingCount: number;
+}
+
+export interface LegalWorkCaseItem {
+  caseId: number;
+  caseNumber: string;
+  caseTitle: string;
+  caseType: string;
+  clientName: string;
+  status: string;
+  statusLabel: string;
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  createdAt: string;
+  startDate?: string | null;
+  dueDate?: string | null;
+  feeAmount: number;
+  paidTotal: number;
+  outstandingTotal: number;
+  openTasks: number;
+  overdueTasks: number;
+  onApprovalTasks: number;
+  overdueDeadlines: number;
+  upcomingDeadlines: number;
+}
+
 export interface LegalWorkDeadlineItem {
   caseId: number;
   caseNumber: string;
@@ -1282,6 +1555,9 @@ export interface LegalWorkDeadlineItem {
 export interface LegalWorkReport {
   from: string;
   to: string;
+  statusFilter: string;
+  responsibleUserIdFilter?: number | null;
+  caseTypeFilter: string;
   totalCases: number;
   activeCases: number;
   closedCases: number;
@@ -1298,6 +1574,9 @@ export interface LegalWorkReport {
   casesByStatus: LegalWorkCaseStatusItem[];
   casesByType: LegalWorkCaseTypeItem[];
   responsibles: LegalWorkResponsibleItem[];
+  financeByStatus: LegalWorkFinanceItem[];
+  deadlinesByType: LegalWorkDeadlineSummaryItem[];
+  cases: LegalWorkCaseItem[];
   overdueDeadlines: LegalWorkDeadlineItem[];
   upcomingDeadlines: LegalWorkDeadlineItem[];
 }

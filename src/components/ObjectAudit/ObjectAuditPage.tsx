@@ -25,6 +25,7 @@ const OBJECT_TYPE_OPTIONS = [
   'all',
   'client',
   'client-case',
+  'client-case-document',
   'payment',
   'invoice',
   'invoice-line-item',

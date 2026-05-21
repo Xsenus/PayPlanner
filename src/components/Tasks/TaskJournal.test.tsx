@@ -16,6 +16,8 @@ const apiMock = vi.hoisted(() => ({
   createTaskJournalCaseAutomationTask: vi.fn(),
   createTaskJournalCaseAutomationTasks: vi.fn(),
   downloadTaskJournalCalendar: vi.fn(),
+  getCaseCalendarEvents: vi.fn(),
+  getCaseCalendarSummary: vi.fn(),
   getTaskJournalItem: vi.fn(),
   createTaskJournalItem: vi.fn(),
   updateTaskJournalItem: vi.fn(),
@@ -288,6 +290,19 @@ describe('TaskJournal', () => {
       skippedCount: 0,
     });
     apiMock.downloadTaskJournalCalendar.mockResolvedValue({ blob: new Blob(['ics']), fileName: 'task-calendar.ics' });
+    apiMock.getCaseCalendarEvents.mockResolvedValue([]);
+    apiMock.getCaseCalendarSummary.mockResolvedValue({
+      from: todayAt(0),
+      to: todayAt(23),
+      totalEventCount: 0,
+      overdueCount: 0,
+      warningCount: 0,
+      courtEventCount: 0,
+      proceduralDeadlineCount: 0,
+      caseDeadlineCount: 0,
+      taskCount: 0,
+      nearestEvent: null,
+    });
     apiMock.createTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalStatus.mockResolvedValue(createTask({ status: 'done', result: 'Готово' }));
@@ -351,6 +366,74 @@ describe('TaskJournal', () => {
 
     expect(screen.queryByRole('button', { name: 'CSV' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'ICS' })).toBeNull();
+  });
+
+  it('shows case deadlines and court events in calendar mode', async () => {
+    apiMock.getCaseCalendarSummary.mockResolvedValue({
+      from: todayAt(0),
+      to: todayAt(23),
+      totalEventCount: 2,
+      overdueCount: 0,
+      warningCount: 1,
+      courtEventCount: 1,
+      proceduralDeadlineCount: 1,
+      caseDeadlineCount: 0,
+      taskCount: 0,
+      nearestEvent: null,
+    });
+    apiMock.getCaseCalendarEvents.mockResolvedValue([
+      {
+        id: 'procedural-deadline:appeal:100',
+        kind: 'procedural-deadline',
+        sourceType: 'appeal',
+        sourceId: null,
+        title: 'Срок апелляции',
+        startAt: todayAt(9),
+        endAt: todayAt(10),
+        allDay: true,
+        clientCaseId: 100,
+        caseTitle: 'БАНКРОТСТВО',
+        clientName: 'Иванов Иван Иванович',
+        legalEntityName: null,
+        responsibleUserId: 7,
+        responsibleName: 'Администратор',
+        status: 'Open',
+        priority: 'high',
+        deadlineType: 'appeal',
+        isOverdue: false,
+        isWarning: true,
+        courtName: 'Арбитражный суд',
+        courtCaseNumber: 'А55-100/2026',
+      },
+    ]);
+
+    await renderJournal([createTask()], { initialView: 'calendar' });
+
+    expect(await screen.findByText('Сроки и суд')).toBeTruthy();
+    expect(await screen.findByText('Срок апелляции')).toBeTruthy();
+    expect(screen.getByText('Процессуальный срок')).toBeTruthy();
+    expect(screen.getByText('2 событий')).toBeTruthy();
+    expect(screen.getByText('Сроков: 1')).toBeTruthy();
+    expect(screen.getByText('Судов: 1')).toBeTruthy();
+    expect(apiMock.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({ includeTasks: false }));
+    expect(apiMock.getCaseCalendarSummary).toHaveBeenCalledWith(expect.objectContaining({ includeTasks: false }));
+  });
+
+  it('filters case calendar events by selected assignee', async () => {
+    await renderJournal([createTask()], { initialView: 'calendar' });
+
+    fireEvent.change(screen.getByLabelText('Исполнитель'), { target: { value: '7' } });
+
+    await waitFor(() => {
+      expect(apiMock.getCaseCalendarEvents).toHaveBeenLastCalledWith(expect.objectContaining({
+        includeTasks: false,
+        responsibleUserId: 7,
+      }));
+      expect(apiMock.getCaseCalendarSummary).toHaveBeenLastCalledWith(expect.objectContaining({
+        includeTasks: false,
+        responsibleUserId: 7,
+      }));
+    });
   });
 
   it('updates selected tasks through the bulk actions panel', async () => {

@@ -12,12 +12,14 @@ import {
   Eye,
   FilePlus2,
   FileText,
+  Gavel,
   Loader2,
   LockKeyhole,
   Mail,
   MessageSquare,
   Phone,
   RefreshCw,
+  RotateCw,
   Save,
   Send,
   Trash2,
@@ -33,10 +35,14 @@ import type {
   Client,
   ClientCase,
   ClientCaseConversationEntry,
+  ClientCaseCourt,
+  ClientCaseCourtEvent,
+  ClientCaseCourtParty,
   ClientCaseCourtSyncLog,
   ClientCaseDocument,
   ClientCaseDocumentTemplate,
   ClientCaseFinanceDetail,
+  ClientCaseProceduralDeadline,
   ClientCaseRelatedParty,
   ClientCaseTimelineEntry,
   ClientCaseWorkOrder,
@@ -62,6 +68,7 @@ type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'finance'
 type CaseTaskFilter = 'active' | 'all' | 'overdue' | 'done';
 type SummaryTone = 'slate' | 'emerald' | 'amber' | 'rose' | 'cyan';
 type ParticipantSourceType = 'client' | 'legalEntity' | 'externalContact';
+type DocumentSourceType = 'case' | 'task' | 'courtEvent' | 'workOrder' | 'invoice' | 'stage';
 
 interface ParticipantDirectoryOption {
   key: string;
@@ -121,6 +128,9 @@ const FALLBACK_DOCUMENT_TEMPLATE_OPTIONS: ClientCaseDocumentTemplate[] = [
   { key: 'motion', label: 'Ходатайство', documentType: 'Ходатайство' },
   { key: 'objection', label: 'Возражение', documentType: 'Возражение' },
   { key: 'court-letter', label: 'Письмо в суд', documentType: 'Переписка' },
+  { key: 'power-of-attorney', label: 'Доверенность', documentType: 'Доверенность' },
+  { key: 'application', label: 'Заявление', documentType: 'Заявление' },
+  { key: 'procedural-document', label: 'Процессуальный документ', documentType: 'Процессуальный документ' },
 ].map((template) => ({ ...template, heading: template.label }));
 
 const FALLBACK_DOCUMENT_TYPE_OPTIONS = [
@@ -129,7 +139,9 @@ const FALLBACK_DOCUMENT_TYPE_OPTIONS = [
   'Ходатайство',
   'Возражение',
   'Переписка',
+  'Доверенность',
   'Заявление',
+  'Процессуальный документ',
   'Доказательство',
 ];
 
@@ -491,6 +503,101 @@ function buildDocumentTypeOptions(
   ).sort((a, b) => a.localeCompare(b, 'ru'));
 }
 
+function buildDocumentSourceOptions(
+  sourceType: DocumentSourceType,
+  tasks: TaskJournalItem[],
+  courtEvents: ClientCaseCourtEvent[],
+  workOrder: ClientCaseWorkOrder | null,
+  financeDetail: ClientCaseFinanceDetail | null,
+) {
+  if (sourceType === 'task') {
+    return tasks
+      .filter((task) => task.id)
+      .map((task) => ({ value: String(task.id), label: task.title || `Задача #${task.id}` }));
+  }
+
+  if (sourceType === 'courtEvent') {
+    return courtEvents.map((event) => ({
+      value: String(event.id),
+      label: `${event.title || `Событие #${event.id}`} · ${toRuDate(event.scheduledAt) || 'без даты'}`,
+    }));
+  }
+
+  if (sourceType === 'workOrder' && workOrder?.id) {
+    return [{ value: String(workOrder.id), label: workOrder.title || `Заказ-наряд #${workOrder.id}` }];
+  }
+
+  if (sourceType === 'invoice') {
+    return (financeDetail?.invoices ?? []).map((invoice) => ({
+      value: String(invoice.id),
+      label: `Счет №${invoice.number || invoice.id}`,
+    }));
+  }
+
+  return [];
+}
+
+function toDocumentKeySegment(value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9а-яё]+/giu, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || 'document';
+}
+
+function buildDocumentSourceKey({
+  sourceType,
+  sourceId,
+  sourceStage,
+  fileName,
+  workOrderId,
+}: {
+  sourceType: DocumentSourceType;
+  sourceId: string;
+  sourceStage: string;
+  fileName: string;
+  workOrderId: number | null;
+}) {
+  const fileSegment = toDocumentKeySegment(fileName.replace(/\.[^.]+$/u, ''));
+  const numericSourceId = Number(sourceId);
+
+  if (sourceType === 'task' && Number.isInteger(numericSourceId) && numericSourceId > 0) {
+    return `task-${numericSourceId}-${fileSegment}`;
+  }
+
+  if (sourceType === 'courtEvent' && Number.isInteger(numericSourceId) && numericSourceId > 0) {
+    return `court-event-${numericSourceId}`;
+  }
+
+  if (sourceType === 'workOrder' && workOrderId) {
+    return `work-order-${workOrderId}`;
+  }
+
+  if (sourceType === 'invoice' && Number.isInteger(numericSourceId) && numericSourceId > 0) {
+    return `invoice-${numericSourceId}`;
+  }
+
+  if (sourceType === 'stage') {
+    return `stage-${toDocumentKeySegment(sourceStage)}-${fileSegment}`;
+  }
+
+  return undefined;
+}
+
+function filterCaseDocumentTemplatesByCaseType(
+  templates: ClientCaseDocumentTemplate[],
+  caseType: string | null | undefined,
+) {
+  const normalizedCaseType = (caseType ?? '').trim().toLocaleLowerCase('ru');
+  return templates.filter((template) => {
+    const caseTypes = template.caseTypes ?? [];
+    if (caseTypes.length === 0) return true;
+    if (!normalizedCaseType) return false;
+    return caseTypes.some((item) => item.trim().toLocaleLowerCase('ru') === normalizedCaseType);
+  });
+}
+
 function getOwnerStatus(caseItem: ClientCase) {
   return caseItem.client?.clientStatus?.name
     || caseItem.legalEntity?.clientStatus?.name
@@ -613,6 +720,10 @@ export function CaseDetailPage({
   const [relatedParties, setRelatedParties] = useState<ClientCaseRelatedParty[]>([]);
   const [showArchivedParties, setShowArchivedParties] = useState(false);
   const [documents, setDocuments] = useState<ClientCaseDocument[]>([]);
+  const [courtEvents, setCourtEvents] = useState<ClientCaseCourtEvent[]>([]);
+  const [courtDirectory, setCourtDirectory] = useState<ClientCaseCourt[]>([]);
+  const [courtParties, setCourtParties] = useState<ClientCaseCourtParty[]>([]);
+  const [proceduralDeadlines, setProceduralDeadlines] = useState<ClientCaseProceduralDeadline[]>([]);
   const [courtSyncLogs, setCourtSyncLogs] = useState<ClientCaseCourtSyncLog[]>([]);
   const [timeline, setTimeline] = useState<ClientCaseTimelineEntry[]>([]);
   const [conversation, setConversation] = useState<ClientCaseConversationEntry[]>([]);
@@ -626,6 +737,10 @@ export function CaseDetailPage({
   const [tasksLoading, setTasksLoading] = useState(false);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [courtEventsLoading, setCourtEventsLoading] = useState(false);
+  const [courtDirectoryLoading, setCourtDirectoryLoading] = useState(false);
+  const [courtPartiesLoading, setCourtPartiesLoading] = useState(false);
+  const [proceduralDeadlinesLoading, setProceduralDeadlinesLoading] = useState(false);
   const [courtSyncLogsLoading, setCourtSyncLogsLoading] = useState(false);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [conversationLoading, setConversationLoading] = useState(false);
@@ -641,12 +756,19 @@ export function CaseDetailPage({
   const [requestingAccess, setRequestingAccess] = useState(false);
   const [generatingDocument, setGeneratingDocument] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [uploadingDocumentVersionId, setUploadingDocumentVersionId] = useState<number | null>(null);
   const [downloadingDocumentId, setDownloadingDocumentId] = useState<number | null>(null);
   const [previewingDocumentId, setPreviewingDocumentId] = useState<number | null>(null);
   const [documentPreview, setDocumentPreview] = useState<DocumentPreviewState | null>(null);
   const [updatingDocumentId, setUpdatingDocumentId] = useState<number | null>(null);
   const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
   const [syncingCourt, setSyncingCourt] = useState(false);
+  const [savingCourtEvent, setSavingCourtEvent] = useState(false);
+  const [savingCourtParty, setSavingCourtParty] = useState(false);
+  const [archivingCourtPartyId, setArchivingCourtPartyId] = useState<number | null>(null);
+  const [savingProceduralDeadline, setSavingProceduralDeadline] = useState(false);
+  const [calculatingProceduralDeadline, setCalculatingProceduralDeadline] = useState(false);
+  const [closingProceduralDeadlineId, setClosingProceduralDeadlineId] = useState<number | null>(null);
   const [addingHistoryEntry, setAddingHistoryEntry] = useState(false);
   const [addingConversationEntry, setAddingConversationEntry] = useState(false);
   const [addingParticipant, setAddingParticipant] = useState(false);
@@ -658,6 +780,7 @@ export function CaseDetailPage({
   const [deletingWorkOrderItemId, setDeletingWorkOrderItemId] = useState<number | null>(null);
   const [creatingWorkOrderInvoice, setCreatingWorkOrderInvoice] = useState(false);
   const [printingWorkOrder, setPrintingWorkOrder] = useState(false);
+  const [generatingWorkOrderDocument, setGeneratingWorkOrderDocument] = useState(false);
   const [workOrderApprovalAction, setWorkOrderApprovalAction] = useState<'submit' | 'approve' | 'revision' | null>(null);
   const [workOrderApprovalComment, setWorkOrderApprovalComment] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -676,23 +799,53 @@ export function CaseDetailPage({
   const [documentTypeDraft, setDocumentTypeDraft] = useState(initialViewState.documentTypeDraft ?? '');
   const [documentStatusDraft, setDocumentStatusDraft] = useState(initialViewState.documentStatusDraft ?? '');
   const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentSourceType, setDocumentSourceType] = useState<DocumentSourceType>('case');
+  const [documentSourceId, setDocumentSourceId] = useState('');
+  const [documentSourceStage, setDocumentSourceStage] = useState('');
   const [documentTemplates, setDocumentTemplates] = useState<ClientCaseDocumentTemplate[]>(FALLBACK_DOCUMENT_TEMPLATE_OPTIONS);
   const [documentTypeDirectoryOptions, setDocumentTypeDirectoryOptions] = useState<string[]>(FALLBACK_DOCUMENT_TYPE_OPTIONS);
   const [documentStatusDirectoryOptions, setDocumentStatusDirectoryOptions] = useState<DocumentStatusEntity[]>([]);
   const [documentTemplateKey, setDocumentTemplateKey] = useState(initialViewState.documentTemplateKey ?? FALLBACK_DOCUMENT_TEMPLATE_OPTIONS[0].key);
   const [historyDraft, setHistoryDraft] = useState('');
   const [conversationDraft, setConversationDraft] = useState('');
+  const [deadlineTypeDraft, setDeadlineTypeDraft] = useState('motion');
+  const [deadlineTitleDraft, setDeadlineTitleDraft] = useState('');
+  const [deadlineDueAtDraft, setDeadlineDueAtDraft] = useState('');
+  const [deadlineWarningDaysDraft, setDeadlineWarningDaysDraft] = useState('7');
+  const [deadlineDocumentIdDraft, setDeadlineDocumentIdDraft] = useState('');
+  const [deadlineCourtEventIdDraft, setDeadlineCourtEventIdDraft] = useState('');
+  const [deadlineNotesDraft, setDeadlineNotesDraft] = useState('');
+  const [courtEventTypeDraft, setCourtEventTypeDraft] = useState('hearing');
+  const [courtEventTitleDraft, setCourtEventTitleDraft] = useState('');
+  const [courtEventScheduledAtDraft, setCourtEventScheduledAtDraft] = useState('');
+  const [courtEventStatusDraft, setCourtEventStatusDraft] = useState('scheduled');
+  const [courtEventCourtIdDraft, setCourtEventCourtIdDraft] = useState('');
+  const [courtEventResultDraft, setCourtEventResultDraft] = useState('');
+  const [courtEventDocumentIdDraft, setCourtEventDocumentIdDraft] = useState('');
+  const [courtPartyNameDraft, setCourtPartyNameDraft] = useState('');
+  const [courtPartySideDraft, setCourtPartySideDraft] = useState('claimant');
+  const [courtPartyRoleDraft, setCourtPartyRoleDraft] = useState('');
+  const [courtPartyRepresentativeDraft, setCourtPartyRepresentativeDraft] = useState('');
+  const [courtPartyNotesDraft, setCourtPartyNotesDraft] = useState('');
   const [workOrderDraft, setWorkOrderDraft] = useState<WorkOrderHeaderDraft>(() => buildWorkOrderHeaderDraft(null));
   const [newWorkOrderItemDraft, setNewWorkOrderItemDraft] = useState<WorkOrderItemDraft>(() => buildWorkOrderItemDraft(null));
   const [workOrderItemDrafts, setWorkOrderItemDrafts] = useState<Record<number, WorkOrderItemDraft>>({});
 
   const documentTypeOptions = useMemo(
-    () => buildDocumentTypeOptions(documentTypeDirectoryOptions, documentTemplates, documents),
-    [documentTypeDirectoryOptions, documentTemplates, documents],
+    () => buildDocumentTypeOptions(documentTypeDirectoryOptions, filterCaseDocumentTemplatesByCaseType(documentTemplates, caseItem?.caseType), documents),
+    [documentTypeDirectoryOptions, documentTemplates, caseItem?.caseType, documents],
+  );
+  const availableDocumentTemplates = useMemo(
+    () => filterCaseDocumentTemplatesByCaseType(documentTemplates, caseItem?.caseType),
+    [documentTemplates, caseItem?.caseType],
   );
   const documentStatusOptions = useMemo(
     () => buildDocumentStatusOptions(documentStatusDirectoryOptions, documents),
     [documentStatusDirectoryOptions, documents],
+  );
+  const documentSourceOptions = useMemo(
+    () => buildDocumentSourceOptions(documentSourceType, tasks, courtEvents, workOrder, financeDetail),
+    [courtEvents, documentSourceType, financeDetail, tasks, workOrder],
   );
   const documentTypeListId = useMemo(() => `case-document-types-${caseId}`, [caseId]);
 
@@ -708,10 +861,36 @@ export function CaseDetailPage({
     setParticipantSourceId('');
     setParticipantSearch('');
     setDocumentFile(null);
+    setDocumentSourceType('case');
+    setDocumentSourceId('');
+    setDocumentSourceStage('');
     setWorkOrder(null);
+    setCourtEvents([]);
+    setCourtDirectory([]);
+    setCourtParties([]);
+    setProceduralDeadlines([]);
     setWorkOrderDraft(buildWorkOrderHeaderDraft(null));
     setNewWorkOrderItemDraft(buildWorkOrderItemDraft(null));
     setWorkOrderItemDrafts({});
+    setDeadlineTypeDraft('motion');
+    setDeadlineTitleDraft('');
+    setDeadlineDueAtDraft('');
+    setDeadlineWarningDaysDraft('7');
+    setDeadlineDocumentIdDraft('');
+    setDeadlineCourtEventIdDraft('');
+    setDeadlineNotesDraft('');
+    setCourtEventTypeDraft('hearing');
+    setCourtEventTitleDraft('');
+    setCourtEventScheduledAtDraft('');
+    setCourtEventStatusDraft('scheduled');
+    setCourtEventCourtIdDraft('');
+    setCourtEventResultDraft('');
+    setCourtEventDocumentIdDraft('');
+    setCourtPartyNameDraft('');
+    setCourtPartySideDraft('claimant');
+    setCourtPartyRoleDraft('');
+    setCourtPartyRepresentativeDraft('');
+    setCourtPartyNotesDraft('');
   }, [caseId]);
 
   useEffect(() => {
@@ -814,6 +993,14 @@ export function CaseDetailPage({
   }, []);
 
   useEffect(() => {
+    setDocumentTemplateKey((current) => (
+      current && availableDocumentTemplates.some((item) => item.key === current)
+        ? current
+        : availableDocumentTemplates[0]?.key ?? ''
+    ));
+  }, [availableDocumentTemplates]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const loadDocumentDictionaries = async () => {
@@ -847,7 +1034,7 @@ export function CaseDetailPage({
   }, []);
 
   useEffect(() => {
-    if (activeTab !== 'tasks') return;
+    if (activeTab !== 'tasks' && activeTab !== 'documents') return;
 
     let cancelled = false;
     setTasksLoading(true);
@@ -936,7 +1123,7 @@ export function CaseDetailPage({
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab !== 'documents') return;
+    if (activeTab !== 'documents' && activeTab !== 'court') return;
 
     let cancelled = false;
     setDocumentsLoading(true);
@@ -949,6 +1136,90 @@ export function CaseDetailPage({
       })
       .finally(() => {
         if (!cancelled) setDocumentsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, caseId, reloadToken]);
+
+  useEffect(() => {
+    if (activeTab !== 'court' && activeTab !== 'documents') return;
+
+    let cancelled = false;
+    setCourtPartiesLoading(true);
+    apiService.getCaseCourtParties(caseId)
+      .then((items) => {
+        if (!cancelled) setCourtParties(items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCourtParties([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCourtPartiesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, caseId, reloadToken]);
+
+  useEffect(() => {
+    if (activeTab !== 'court' && activeTab !== 'documents') return;
+
+    let cancelled = false;
+    setCourtDirectoryLoading(true);
+    apiService.getCaseCourtDirectory()
+      .then((items) => {
+        if (!cancelled) setCourtDirectory(items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCourtDirectory([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCourtDirectoryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, reloadToken]);
+
+  useEffect(() => {
+    if (activeTab !== 'court' && activeTab !== 'documents') return;
+
+    let cancelled = false;
+    setCourtEventsLoading(true);
+    apiService.getCaseCourtEvents(caseId)
+      .then((items) => {
+        if (!cancelled) setCourtEvents(items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCourtEvents([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCourtEventsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, caseId, reloadToken]);
+
+  useEffect(() => {
+    if (activeTab !== 'court') return;
+
+    let cancelled = false;
+    setProceduralDeadlinesLoading(true);
+    apiService.getCaseProceduralDeadlines(caseId)
+      .then((items) => {
+        if (!cancelled) setProceduralDeadlines(items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setProceduralDeadlines([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProceduralDeadlinesLoading(false);
       });
 
     return () => {
@@ -978,7 +1249,7 @@ export function CaseDetailPage({
   }, [activeTab, caseId, reloadToken]);
 
   useEffect(() => {
-    if (activeTab !== 'finance') return;
+    if (activeTab !== 'finance' && activeTab !== 'documents') return;
 
     let cancelled = false;
     setFinanceLoading(true);
@@ -999,7 +1270,7 @@ export function CaseDetailPage({
   }, [activeTab, caseId, reloadToken]);
 
   useEffect(() => {
-    if (activeTab !== 'workOrder') return;
+    if (activeTab !== 'workOrder' && activeTab !== 'documents') return;
 
     let cancelled = false;
     setWorkOrderLoading(true);
@@ -1167,9 +1438,12 @@ export function CaseDetailPage({
     setGeneratingDocument(true);
     setError(null);
     try {
-      const selectedTemplate = documentTemplates.find((item) => item.key === documentTemplateKey)
-        ?? documentTemplates[0]
-        ?? FALLBACK_DOCUMENT_TEMPLATE_OPTIONS[0];
+      const selectedTemplate = availableDocumentTemplates.find((item) => item.key === documentTemplateKey)
+        ?? availableDocumentTemplates[0];
+      if (!selectedTemplate) {
+        throw new Error('Нет доступных шаблонов документов для типа этого дела.');
+      }
+
       await apiService.generateCaseDocumentTemplate(caseItem.id, {
         templateKey: selectedTemplate.key,
         documentType: selectedTemplate.documentType,
@@ -1194,13 +1468,27 @@ export function CaseDetailPage({
     setUploadingDocument(true);
     setError(null);
     try {
-      await apiService.uploadCaseDocument(caseItem.id, documentFile, {
+      const documentKey = buildDocumentSourceKey({
+        sourceType: documentSourceType,
+        sourceId: documentSourceId,
+        sourceStage: documentSourceStage || caseItem.stage,
+        fileName: documentFile.name,
+        workOrderId: workOrder?.id ?? null,
+      });
+      const payload: { documentType?: string; status?: string; documentKey?: string } = {
         documentType: documentTypeDraft.trim() || undefined,
         status: documentStatusDraft.trim() || undefined,
-      });
+      };
+      if (documentKey) {
+        payload.documentKey = documentKey;
+      }
+      await apiService.uploadCaseDocument(caseItem.id, documentFile, payload);
       setDocumentTypeDraft('');
       setDocumentStatusDraft('');
       setDocumentFile(null);
+      if (documentSourceType !== 'stage') {
+        setDocumentSourceId('');
+      }
       setActiveTab('documents');
       setReloadToken((value) => value + 1);
     } catch (err) {
@@ -1273,6 +1561,26 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось обновить документ по делу.');
     } finally {
       setUpdatingDocumentId(null);
+    }
+  };
+
+  const uploadDocumentVersion = async (caseDocument: ClientCaseDocument, file: File | null | undefined) => {
+    if (!caseItem || !file) return;
+
+    setUploadingDocumentVersionId(caseDocument.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiService.uploadCaseDocumentVersion(caseDocument.id, file, {
+        documentType: caseDocument.documentType,
+        status: caseDocument.status,
+      });
+      setNotice(`Новая версия документа «${caseDocument.originalFileName}» загружена.`);
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить новую версию документа по делу.');
+    } finally {
+      setUploadingDocumentVersionId(null);
     }
   };
 
@@ -1355,6 +1663,183 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось запустить проверку судебного источника.');
     } finally {
       setSyncingCourt(false);
+    }
+  };
+
+  const addCourtEvent = async () => {
+    if (!caseItem) return;
+    if (!courtEventScheduledAtDraft) {
+      setError('Укажите дату судебного события.');
+      return;
+    }
+
+    setSavingCourtEvent(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const item = await apiService.createCaseCourtEvent(caseItem.id, {
+        eventType: courtEventTypeDraft,
+        title: courtEventTitleDraft.trim() || undefined,
+        scheduledAt: courtEventScheduledAtDraft,
+        allDay: courtEventTypeDraft !== 'hearing',
+        courtId: courtEventCourtIdDraft ? Number(courtEventCourtIdDraft) : undefined,
+        courtInstance: 'first',
+        courtName: caseItem.courtName || undefined,
+        courtCaseNumber: caseItem.courtCaseNumber || undefined,
+        courtroom: caseItem.courtroom || undefined,
+        movementStatus: courtEventStatusDraft,
+        resultSummary: courtEventResultDraft.trim() || undefined,
+        clientCaseDocumentId: courtEventDocumentIdDraft ? Number(courtEventDocumentIdDraft) : undefined,
+      });
+      setCourtEvents((current) => [...current, item].sort((left, right) => Date.parse(left.scheduledAt) - Date.parse(right.scheduledAt)));
+      setCourtEventTitleDraft('');
+      setCourtEventScheduledAtDraft('');
+      setCourtEventCourtIdDraft('');
+      setCourtEventResultDraft('');
+      setCourtEventDocumentIdDraft('');
+      setNotice('Судебное событие добавлено.');
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось добавить судебное событие.');
+    } finally {
+      setSavingCourtEvent(false);
+    }
+  };
+
+  const addCourtParty = async () => {
+    if (!caseItem) return;
+    if (!courtPartyNameDraft.trim()) {
+      setError('Укажите сторону процесса.');
+      return;
+    }
+
+    setSavingCourtParty(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const item = await apiService.createCaseCourtParty(caseItem.id, {
+        displayName: courtPartyNameDraft.trim(),
+        side: courtPartySideDraft,
+        processRole: courtPartyRoleDraft.trim() || undefined,
+        representativeName: courtPartyRepresentativeDraft.trim() || undefined,
+        notes: courtPartyNotesDraft.trim() || undefined,
+      });
+      setCourtParties((current) => [...current, item].sort((left, right) => left.displayName.localeCompare(right.displayName, 'ru')));
+      setCourtPartyNameDraft('');
+      setCourtPartyRoleDraft('');
+      setCourtPartyRepresentativeDraft('');
+      setCourtPartyNotesDraft('');
+      setNotice('Сторона процесса добавлена.');
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось добавить сторону процесса.');
+    } finally {
+      setSavingCourtParty(false);
+    }
+  };
+
+  const archiveCourtParty = async (party: ClientCaseCourtParty) => {
+    if (!caseItem) return;
+    setArchivingCourtPartyId(party.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiService.archiveCaseCourtParty(caseItem.id, party.id);
+      setCourtParties((current) => current.filter((item) => item.id !== party.id));
+      setNotice('Сторона процесса архивирована.');
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось архивировать сторону процесса.');
+    } finally {
+      setArchivingCourtPartyId(null);
+    }
+  };
+
+  const addProceduralDeadline = async () => {
+    if (!caseItem) return;
+    if (!deadlineDueAtDraft) {
+      setError('Укажите дату процессуального срока.');
+      return;
+    }
+
+    setSavingProceduralDeadline(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const item = await apiService.createCaseProceduralDeadline(caseItem.id, {
+        deadlineType: deadlineTypeDraft,
+        title: deadlineTitleDraft.trim() || undefined,
+        dueAt: deadlineDueAtDraft,
+        allDay: true,
+        status: 'active',
+        warningDaysBefore: Number(deadlineWarningDaysDraft) || 7,
+        clientCaseDocumentId: deadlineDocumentIdDraft ? Number(deadlineDocumentIdDraft) : undefined,
+        sourceType: deadlineCourtEventIdDraft ? 'court-event' : undefined,
+        sourceId: deadlineCourtEventIdDraft ? Number(deadlineCourtEventIdDraft) : undefined,
+        notes: deadlineNotesDraft.trim() || undefined,
+      });
+      setProceduralDeadlines((current) => [...current, item].sort((left, right) => Date.parse(left.dueAt) - Date.parse(right.dueAt)));
+      setDeadlineTitleDraft('');
+      setDeadlineDueAtDraft('');
+      setDeadlineDocumentIdDraft('');
+      setDeadlineCourtEventIdDraft('');
+      setDeadlineNotesDraft('');
+      setNotice('Процессуальный срок добавлен.');
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось добавить процессуальный срок.');
+    } finally {
+      setSavingProceduralDeadline(false);
+    }
+  };
+
+  const calculateProceduralDeadline = async () => {
+    if (!caseItem) return;
+    const startAt = caseItem.courtDecisionAt || caseItem.claimFiledAt || caseItem.nextHearingAt || new Date().toISOString();
+    const preset = deadlineTypeDraft === 'appeal'
+      ? { rule: 'calendarMonths', monthsToAdd: 1, daysToAdd: 0 }
+      : deadlineTypeDraft === 'cassation'
+        ? { rule: 'calendarMonths', monthsToAdd: 3, daysToAdd: 0 }
+        : { rule: 'workingDays', monthsToAdd: 0, daysToAdd: 5 };
+
+    setCalculatingProceduralDeadline(true);
+    setError(null);
+    try {
+      const result = await apiService.calculateCaseProceduralDeadline({
+        startAt,
+        rule: preset.rule,
+        monthsToAdd: preset.monthsToAdd,
+        daysToAdd: preset.daysToAdd,
+        rollForwardToWorkingDay: true,
+      });
+      if (result.deadlineAt) {
+        setDeadlineDueAtDraft(result.deadlineAt.slice(0, 10));
+        setNotice('Дата процессуального срока рассчитана.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось рассчитать процессуальный срок.');
+    } finally {
+      setCalculatingProceduralDeadline(false);
+    }
+  };
+
+  const closeProceduralDeadline = async (deadline: ClientCaseProceduralDeadline) => {
+    if (!caseItem) return;
+    const reason = window.prompt('Причина закрытия срока', deadline.closeReason || '');
+    if (reason === null) return;
+
+    setClosingProceduralDeadlineId(deadline.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await apiService.closeCaseProceduralDeadline(caseItem.id, deadline.id, reason.trim() || undefined);
+      setProceduralDeadlines((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setNotice('Процессуальный срок закрыт.');
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось закрыть процессуальный срок.');
+    } finally {
+      setClosingProceduralDeadlineId(null);
     }
   };
 
@@ -1593,6 +2078,24 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось подготовить печатную форму заказ-наряда.');
     } finally {
       setPrintingWorkOrder(false);
+    }
+  };
+
+  const generateWorkOrderDocument = async () => {
+    if (!caseItem || !workOrder?.id) return;
+
+    setGeneratingWorkOrderDocument(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const document = await apiService.generateCaseWorkOrderDocument(caseItem.id);
+      await loadDocuments(caseItem.id);
+      setNotice(`Заказ-наряд сохранен в документы дела: ${document.originalFileName}.`);
+      setActiveTab('documents');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить заказ-наряд в документы дела.');
+    } finally {
+      setGeneratingWorkOrderDocument(false);
     }
   };
 
@@ -2017,10 +2520,69 @@ export function CaseDetailPage({
           {activeTab === 'court' ? (
             <CourtPanel
               caseItem={caseItem}
+              courtDirectory={courtDirectory}
+              courtEvents={courtEvents}
+              courtDirectoryLoading={courtDirectoryLoading}
+              courtEventsLoading={courtEventsLoading}
+              documents={documents}
+              courtParties={courtParties}
+              courtPartiesLoading={courtPartiesLoading}
+              courtEventTypeDraft={courtEventTypeDraft}
+              courtEventTitleDraft={courtEventTitleDraft}
+              courtEventScheduledAtDraft={courtEventScheduledAtDraft}
+              courtEventStatusDraft={courtEventStatusDraft}
+              courtEventCourtIdDraft={courtEventCourtIdDraft}
+              courtEventResultDraft={courtEventResultDraft}
+              courtEventDocumentIdDraft={courtEventDocumentIdDraft}
+              courtPartyNameDraft={courtPartyNameDraft}
+              courtPartySideDraft={courtPartySideDraft}
+              courtPartyRoleDraft={courtPartyRoleDraft}
+              courtPartyRepresentativeDraft={courtPartyRepresentativeDraft}
+              courtPartyNotesDraft={courtPartyNotesDraft}
+              proceduralDeadlines={proceduralDeadlines}
+              proceduralDeadlinesLoading={proceduralDeadlinesLoading}
+              deadlineTypeDraft={deadlineTypeDraft}
+              deadlineTitleDraft={deadlineTitleDraft}
+              deadlineDueAtDraft={deadlineDueAtDraft}
+              deadlineWarningDaysDraft={deadlineWarningDaysDraft}
+              deadlineDocumentIdDraft={deadlineDocumentIdDraft}
+              deadlineCourtEventIdDraft={deadlineCourtEventIdDraft}
+              deadlineNotesDraft={deadlineNotesDraft}
               logs={courtSyncLogs}
               logsLoading={courtSyncLogsLoading}
+              savingCourtEvent={savingCourtEvent}
+              savingCourtParty={savingCourtParty}
+              archivingCourtPartyId={archivingCourtPartyId}
+              savingProceduralDeadline={savingProceduralDeadline}
+              calculatingProceduralDeadline={calculatingProceduralDeadline}
+              closingProceduralDeadlineId={closingProceduralDeadlineId}
               onRunCourtSync={runCourtSync}
               syncingCourt={syncingCourt}
+              onCourtEventTypeChange={setCourtEventTypeDraft}
+              onCourtEventTitleChange={setCourtEventTitleDraft}
+              onCourtEventScheduledAtChange={setCourtEventScheduledAtDraft}
+              onCourtEventStatusChange={setCourtEventStatusDraft}
+              onCourtEventCourtIdChange={setCourtEventCourtIdDraft}
+              onCourtEventResultChange={setCourtEventResultDraft}
+              onCourtEventDocumentIdChange={setCourtEventDocumentIdDraft}
+              onAddCourtEvent={() => void addCourtEvent()}
+              onCourtPartyNameChange={setCourtPartyNameDraft}
+              onCourtPartySideChange={setCourtPartySideDraft}
+              onCourtPartyRoleChange={setCourtPartyRoleDraft}
+              onCourtPartyRepresentativeChange={setCourtPartyRepresentativeDraft}
+              onCourtPartyNotesChange={setCourtPartyNotesDraft}
+              onAddCourtParty={() => void addCourtParty()}
+              onArchiveCourtParty={(party) => void archiveCourtParty(party)}
+              onDeadlineTypeChange={setDeadlineTypeDraft}
+              onDeadlineTitleChange={setDeadlineTitleDraft}
+              onDeadlineDueAtChange={setDeadlineDueAtDraft}
+              onDeadlineWarningDaysChange={setDeadlineWarningDaysDraft}
+              onDeadlineDocumentIdChange={setDeadlineDocumentIdDraft}
+              onDeadlineCourtEventIdChange={setDeadlineCourtEventIdDraft}
+              onDeadlineNotesChange={setDeadlineNotesDraft}
+              onCalculateProceduralDeadline={() => void calculateProceduralDeadline()}
+              onAddProceduralDeadline={() => void addProceduralDeadline()}
+              onCloseProceduralDeadline={(deadline) => void closeProceduralDeadline(deadline)}
             />
           ) : null}
 
@@ -2049,6 +2611,7 @@ export function CaseDetailPage({
               deletingItemId={deletingWorkOrderItemId}
               creatingInvoice={creatingWorkOrderInvoice}
               printing={printingWorkOrder}
+              generatingDocument={generatingWorkOrderDocument}
               approvalAction={workOrderApprovalAction}
               approvalComment={workOrderApprovalComment}
               onDraftChange={setWorkOrderDraft}
@@ -2059,6 +2622,7 @@ export function CaseDetailPage({
               onDeleteHeader={() => void deleteWorkOrder()}
               onCreateInvoice={() => void createInvoiceFromWorkOrder()}
               onPrint={() => void printWorkOrder()}
+              onGenerateDocument={() => void generateWorkOrderDocument()}
               onSubmitApproval={() => void runWorkOrderApprovalAction('submit')}
               onApprove={() => void runWorkOrderApprovalAction('approve')}
               onRequestRevision={() => void runWorkOrderApprovalAction('revision')}
@@ -2083,12 +2647,12 @@ export function CaseDetailPage({
                       value={documentTemplateKey}
                       onChange={(event) => setDocumentTemplateKey(event.target.value)}
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 sm:w-56">
-                      {documentTemplates.map((template) => (
+                      {availableDocumentTemplates.map((template) => (
                         <option key={template.key} value={template.key}>{template.label}</option>
                       ))}
                     </select>
                   </label>
-                  <button type="button" onClick={() => void generateDocument()} disabled={generatingDocument} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                  <button type="button" onClick={() => void generateDocument()} disabled={generatingDocument || availableDocumentTemplates.length === 0} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
                     {generatingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Сформировать
                   </button>
                 </div>
@@ -2100,7 +2664,7 @@ export function CaseDetailPage({
                     <option key={type} value={type} />
                   ))}
                 </datalist>
-                <div className="mt-4 grid gap-3 md:grid-cols-[1fr_180px_180px_auto]">
+                <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_180px_180px_220px_220px_auto]">
                   <label className="text-sm font-medium text-slate-700">
                     <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Файл</span>
                     <input
@@ -2135,6 +2699,53 @@ export function CaseDetailPage({
                       ))}
                     </select>
                   </label>
+                  <label className="text-sm font-medium text-slate-700">
+                    <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Источник</span>
+                    <select
+                      aria-label="Источник документа"
+                      value={documentSourceType}
+                      onChange={(event) => {
+                        setDocumentSourceType(event.target.value as DocumentSourceType);
+                        setDocumentSourceId('');
+                      }}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    >
+                      <option value="case">Только дело</option>
+                      <option value="task">Задача</option>
+                      <option value="courtEvent">Судебное событие</option>
+                      <option value="workOrder">Заказ-наряд</option>
+                      <option value="invoice">Счет</option>
+                      <option value="stage">Этап дела</option>
+                    </select>
+                  </label>
+                  {documentSourceType === 'stage' ? (
+                    <label className="text-sm font-medium text-slate-700">
+                      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Этап</span>
+                      <input
+                        aria-label="Этап документа"
+                        value={documentSourceStage}
+                        onChange={(event) => setDocumentSourceStage(event.target.value)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                        placeholder={caseItem.stage || 'pretrial'}
+                      />
+                    </label>
+                  ) : (
+                    <label className="text-sm font-medium text-slate-700">
+                      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Объект</span>
+                      <select
+                        aria-label="Объект документа"
+                        value={documentSourceId}
+                        onChange={(event) => setDocumentSourceId(event.target.value)}
+                        disabled={documentSourceType === 'case' || documentSourceType === 'workOrder' || documentSourceOptions.length === 0}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400"
+                      >
+                        <option value="">{documentSourceType === 'case' ? 'Не требуется' : 'Выберите объект'}</option>
+                        {documentSourceOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   <button
                     type="button"
                     onClick={() => void uploadDocument()}
@@ -2151,12 +2762,14 @@ export function CaseDetailPage({
                   documents={documents}
                   downloadingDocumentId={downloadingDocumentId}
                   previewingDocumentId={previewingDocumentId}
+                  uploadingDocumentVersionId={uploadingDocumentVersionId}
                   updatingDocumentId={updatingDocumentId}
                   deletingDocumentId={deletingDocumentId}
                   documentTypeOptions={documentTypeOptions}
                   documentStatusOptions={documentStatusOptions}
                   onPreview={(caseDocument) => void previewDocument(caseDocument)}
                   onDownload={(caseDocument) => void downloadDocument(caseDocument)}
+                  onUploadVersion={(caseDocument, file) => void uploadDocumentVersion(caseDocument, file)}
                   onUpdate={(caseDocument, payload) => void updateDocument(caseDocument, payload)}
                   onDelete={(caseDocument) => void deleteDocument(caseDocument)}
                 />
@@ -2468,6 +3081,7 @@ function WorkOrderPanel({
   deletingItemId,
   creatingInvoice,
   printing,
+  generatingDocument,
   approvalAction,
   approvalComment,
   onDraftChange,
@@ -2478,6 +3092,7 @@ function WorkOrderPanel({
   onDeleteHeader,
   onCreateInvoice,
   onPrint,
+  onGenerateDocument,
   onSubmitApproval,
   onApprove,
   onRequestRevision,
@@ -2497,6 +3112,7 @@ function WorkOrderPanel({
   deletingItemId: number | null;
   creatingInvoice: boolean;
   printing: boolean;
+  generatingDocument: boolean;
   approvalAction: 'submit' | 'approve' | 'revision' | null;
   approvalComment: string;
   onDraftChange: (draft: WorkOrderHeaderDraft) => void;
@@ -2507,6 +3123,7 @@ function WorkOrderPanel({
   onDeleteHeader: () => void;
   onCreateInvoice: () => void;
   onPrint: () => void;
+  onGenerateDocument: () => void;
   onSubmitApproval: () => void;
   onApprove: () => void;
   onRequestRevision: () => void;
@@ -2557,6 +3174,15 @@ function WorkOrderPanel({
               disabled={printing}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               {printing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Печать
+            </button>
+          ) : null}
+          {hasWorkOrder ? (
+            <button
+              type="button"
+              onClick={onGenerateDocument}
+              disabled={generatingDocument}
+              className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
+              {generatingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} В документы
             </button>
           ) : null}
           {hasWorkOrder ? (
@@ -3596,16 +4222,134 @@ function CourtTimeline({ entries }: { entries: CourtTimelineEntry[] }) {
 
 function CourtPanel({
   caseItem,
+  courtDirectory,
+  courtEvents,
+  courtDirectoryLoading,
+  courtEventsLoading,
+  documents,
+  courtParties,
+  courtPartiesLoading,
+  courtEventTypeDraft,
+  courtEventTitleDraft,
+  courtEventScheduledAtDraft,
+  courtEventStatusDraft,
+  courtEventCourtIdDraft,
+  courtEventResultDraft,
+  courtEventDocumentIdDraft,
+  courtPartyNameDraft,
+  courtPartySideDraft,
+  courtPartyRoleDraft,
+  courtPartyRepresentativeDraft,
+  courtPartyNotesDraft,
+  proceduralDeadlines,
+  proceduralDeadlinesLoading,
+  deadlineTypeDraft,
+  deadlineTitleDraft,
+  deadlineDueAtDraft,
+  deadlineWarningDaysDraft,
+  deadlineDocumentIdDraft,
+  deadlineCourtEventIdDraft,
+  deadlineNotesDraft,
   logs,
   logsLoading,
+  savingCourtEvent,
+  savingCourtParty,
+  archivingCourtPartyId,
+  savingProceduralDeadline,
+  calculatingProceduralDeadline,
+  closingProceduralDeadlineId,
   onRunCourtSync,
   syncingCourt,
+  onCourtEventTypeChange,
+  onCourtEventTitleChange,
+  onCourtEventScheduledAtChange,
+  onCourtEventStatusChange,
+  onCourtEventCourtIdChange,
+  onCourtEventResultChange,
+  onCourtEventDocumentIdChange,
+  onAddCourtEvent,
+  onCourtPartyNameChange,
+  onCourtPartySideChange,
+  onCourtPartyRoleChange,
+  onCourtPartyRepresentativeChange,
+  onCourtPartyNotesChange,
+  onAddCourtParty,
+  onArchiveCourtParty,
+  onDeadlineTypeChange,
+  onDeadlineTitleChange,
+  onDeadlineDueAtChange,
+  onDeadlineWarningDaysChange,
+  onDeadlineDocumentIdChange,
+  onDeadlineCourtEventIdChange,
+  onDeadlineNotesChange,
+  onCalculateProceduralDeadline,
+  onAddProceduralDeadline,
+  onCloseProceduralDeadline,
 }: {
   caseItem: ClientCase;
+  courtDirectory: ClientCaseCourt[];
+  courtEvents: ClientCaseCourtEvent[];
+  courtDirectoryLoading: boolean;
+  courtEventsLoading: boolean;
+  documents: ClientCaseDocument[];
+  courtParties: ClientCaseCourtParty[];
+  courtPartiesLoading: boolean;
+  courtEventTypeDraft: string;
+  courtEventTitleDraft: string;
+  courtEventScheduledAtDraft: string;
+  courtEventStatusDraft: string;
+  courtEventCourtIdDraft: string;
+  courtEventResultDraft: string;
+  courtEventDocumentIdDraft: string;
+  courtPartyNameDraft: string;
+  courtPartySideDraft: string;
+  courtPartyRoleDraft: string;
+  courtPartyRepresentativeDraft: string;
+  courtPartyNotesDraft: string;
+  proceduralDeadlines: ClientCaseProceduralDeadline[];
+  proceduralDeadlinesLoading: boolean;
+  deadlineTypeDraft: string;
+  deadlineTitleDraft: string;
+  deadlineDueAtDraft: string;
+  deadlineWarningDaysDraft: string;
+  deadlineDocumentIdDraft: string;
+  deadlineCourtEventIdDraft: string;
+  deadlineNotesDraft: string;
   logs: ClientCaseCourtSyncLog[];
   logsLoading: boolean;
+  savingCourtEvent: boolean;
+  savingCourtParty: boolean;
+  archivingCourtPartyId: number | null;
+  savingProceduralDeadline: boolean;
+  calculatingProceduralDeadline: boolean;
+  closingProceduralDeadlineId: number | null;
   onRunCourtSync: () => void;
   syncingCourt: boolean;
+  onCourtEventTypeChange: (value: string) => void;
+  onCourtEventTitleChange: (value: string) => void;
+  onCourtEventScheduledAtChange: (value: string) => void;
+  onCourtEventStatusChange: (value: string) => void;
+  onCourtEventCourtIdChange: (value: string) => void;
+  onCourtEventResultChange: (value: string) => void;
+  onCourtEventDocumentIdChange: (value: string) => void;
+  onAddCourtEvent: () => void;
+  onCourtPartyNameChange: (value: string) => void;
+  onCourtPartySideChange: (value: string) => void;
+  onCourtPartyRoleChange: (value: string) => void;
+  onCourtPartyRepresentativeChange: (value: string) => void;
+  onCourtPartyNotesChange: (value: string) => void;
+  onAddCourtParty: () => void;
+  onArchiveCourtParty: (party: ClientCaseCourtParty) => void;
+  onDeadlineTypeChange: (value: string) => void;
+  onDeadlineTitleChange: (value: string) => void;
+  onDeadlineDueAtChange: (value: string) => void;
+  onDeadlineWarningDaysChange: (value: string) => void;
+  onDeadlineDocumentIdChange: (value: string) => void;
+  onDeadlineCourtEventIdChange: (value: string) => void;
+  onDeadlineNotesChange: (value: string) => void;
+  onCalculateProceduralDeadline: () => void;
+  onAddProceduralDeadline: () => void;
+  onCloseProceduralDeadline: (deadline: ClientCaseProceduralDeadline) => void;
 }) {
   const hasCourtBinding = Boolean(caseItem.courtName || caseItem.courtCaseNumber || caseItem.courtUrl);
   const deadlines = [
@@ -3617,6 +4361,8 @@ function CourtPanel({
     ['Ходатайства', caseItem.motionDeadlineAt],
     ['Возражения', caseItem.objectionDeadlineAt],
   ].filter(([, value]) => Boolean(value)) as Array<[string, string]>;
+  const activeProceduralDeadlines = proceduralDeadlines.filter((item) => item.status !== 'closed' && item.status !== 'cancelled');
+  const closedProceduralDeadlines = proceduralDeadlines.filter((item) => item.status === 'closed' || item.status === 'cancelled');
   const courtTimeline = buildCourtTimeline(caseItem, logs);
 
   return (
@@ -3672,6 +4418,246 @@ function CourtPanel({
       </section>
 
       <section className="rounded-xl border border-slate-200 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебные события</h2>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{courtEvents.length} записей</span>
+        </div>
+        <div className="mt-5 rounded-lg border border-slate-100 bg-slate-50 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-slate-800">Стороны процесса</h3>
+            <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500">{courtParties.length} активных</span>
+          </div>
+          <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_150px_160px_1fr_1fr_auto]">
+            <label className="text-sm font-medium text-slate-700">
+              <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Сторона</span>
+              <input value={courtPartyNameDraft} onChange={(event) => onCourtPartyNameChange(event.target.value)} placeholder="Например, ООО Ответчик" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Позиция</span>
+              <select value={courtPartySideDraft} onChange={(event) => onCourtPartySideChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                <option value="claimant">Истец</option>
+                <option value="respondent">Ответчик</option>
+                <option value="thirdParty">Третье лицо</option>
+                <option value="applicant">Заявитель</option>
+                <option value="other">Иная</option>
+              </select>
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Роль</span>
+              <input value={courtPartyRoleDraft} onChange={(event) => onCourtPartyRoleChange(event.target.value)} placeholder="Ответчик" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Представитель</span>
+              <input value={courtPartyRepresentativeDraft} onChange={(event) => onCourtPartyRepresentativeChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Заметка</span>
+              <input value={courtPartyNotesDraft} onChange={(event) => onCourtPartyNotesChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            </label>
+            <button type="button" onClick={() => void onAddCourtParty()} disabled={savingCourtParty} className="inline-flex items-center justify-center gap-2 self-end rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
+              {savingCourtParty ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRound className="h-4 w-4" />} Добавить
+            </button>
+          </div>
+          {courtPartiesLoading ? (
+            <LoadingBlock label="Загрузка сторон процесса..." />
+          ) : courtParties.length === 0 ? (
+            <div className="mt-3 rounded-lg border border-dashed border-slate-200 bg-white p-3 text-sm text-slate-500">
+              Стороны процесса пока не добавлены.
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {courtParties.map((party) => (
+                <div key={party.id} className="rounded-lg border border-slate-100 bg-white p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{party.sideLabel}</div>
+                      <div className="mt-1 font-semibold text-slate-900">{party.displayName}</div>
+                    </div>
+                    <button type="button" onClick={() => void onArchiveCourtParty(party)} disabled={archivingCourtPartyId === party.id} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                      {archivingCourtPartyId === party.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Archive className="h-3 w-3" />} Архив
+                    </button>
+                  </div>
+                  <div className="mt-1 text-sm text-slate-600">{party.processRole || 'Участник процесса'}</div>
+                  {party.representativeName ? <div className="mt-1 text-sm text-slate-500">Представитель: {party.representativeName}</div> : null}
+                  {party.notes ? <div className="mt-2 text-sm text-slate-500">{party.notes}</div> : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[150px_1fr_180px_150px_1fr_1fr_1fr_auto]">
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Тип</span>
+            <select value={courtEventTypeDraft} onChange={(event) => onCourtEventTypeChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <option value="hearing">Заседание</option>
+              <option value="decision">Решение</option>
+              <option value="postponement">Перенос</option>
+              <option value="suspension">Приостановление</option>
+              <option value="movement">Движение дела</option>
+            </select>
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Название</span>
+            <input value={courtEventTitleDraft} onChange={(event) => onCourtEventTitleChange(event.target.value)} placeholder="Например, предварительное заседание" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Дата и время</span>
+            <input type="datetime-local" value={courtEventScheduledAtDraft} onChange={(event) => onCourtEventScheduledAtChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
+            <select value={courtEventStatusDraft} onChange={(event) => onCourtEventStatusChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <option value="scheduled">Назначено</option>
+              <option value="held">Проведено</option>
+              <option value="postponed">Отложено</option>
+              <option value="suspended">Приостановлено</option>
+              <option value="completed">Завершено</option>
+              <option value="cancelled">Отменено</option>
+            </select>
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Итог</span>
+            <input value={courtEventResultDraft} onChange={(event) => onCourtEventResultChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Документ</span>
+            <select value={courtEventDocumentIdDraft} onChange={(event) => onCourtEventDocumentIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <option value="">Без документа</option>
+              {documents.map((document) => (
+                <option key={document.id} value={document.id}>
+                  {document.originalFileName || document.documentType || `Документ #${document.id}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">РЎСѓРґ</span>
+            <select value={courtEventCourtIdDraft} onChange={(event) => onCourtEventCourtIdChange(event.target.value)} disabled={courtDirectoryLoading} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50">
+              <option value="">{courtDirectoryLoading ? 'Р—Р°РіСЂСѓР·РєР°...' : 'РР· РєР°СЂС‚РѕС‡РєРё'}</option>
+              {courtDirectory.map((court) => (
+                <option key={court.id} value={court.id}>
+                  {court.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" onClick={() => void onAddCourtEvent()} disabled={savingCourtEvent} className="inline-flex items-center justify-center gap-2 self-end rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
+            {savingCourtEvent ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gavel className="h-4 w-4" />} Добавить
+          </button>
+        </div>
+        {courtEventsLoading ? (
+          <LoadingBlock label="Загрузка судебных событий..." />
+        ) : courtEvents.length === 0 ? (
+          <div className="mt-3 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+            Судебные события пока не добавлены.
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {courtEvents.map((event) => (
+              <div key={event.id} className={`rounded-lg border p-3 ${event.isOverdue ? 'border-rose-200 bg-rose-50' : 'border-slate-100 bg-slate-50'}`}>
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{event.eventTypeLabel || event.eventType} · {event.movementStatusLabel || event.movementStatus}</div>
+                <div className="mt-2 font-semibold text-slate-900">{event.title}</div>
+                <div className="mt-1 text-sm text-slate-600">{toRuDate(event.scheduledAt) || '—'} · {event.courtInstanceLabel}</div>
+                {event.courtName ? <div className="mt-2 text-sm text-slate-500">{event.courtName}{event.courtCaseNumber ? ` · ${event.courtCaseNumber}` : ''}</div> : null}
+                {event.clientCaseDocumentId ? <div className="mt-2 text-sm text-slate-500">Документ #{event.clientCaseDocumentId}</div> : null}
+                {event.resultSummary ? <div className="mt-2 text-sm text-slate-500">{event.resultSummary}</div> : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-slate-200 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Процессуальные сроки 2.0</h2>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{activeProceduralDeadlines.length} активных</span>
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-[160px_1fr_150px_120px_1fr_1fr_auto_auto]">
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Тип</span>
+            <select value={deadlineTypeDraft} onChange={(event) => onDeadlineTypeChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <option value="appeal">Апелляция</option>
+              <option value="cassation">Кассация</option>
+              <option value="motion">Ходатайство</option>
+              <option value="objection">Возражения</option>
+              <option value="document">Документ</option>
+              <option value="manual">Ручной срок</option>
+            </select>
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Название</span>
+            <input value={deadlineTitleDraft} onChange={(event) => onDeadlineTitleChange(event.target.value)} placeholder="Например, подать жалобу" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Дата</span>
+            <input type="date" value={deadlineDueAtDraft} onChange={(event) => onDeadlineDueAtChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Предупр.</span>
+            <input type="number" min="0" max="365" value={deadlineWarningDaysDraft} onChange={(event) => onDeadlineWarningDaysChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Заметка</span>
+            <input value={deadlineNotesDraft} onChange={(event) => onDeadlineNotesChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">РЎРѕР±С‹С‚РёРµ</span>
+            <select value={deadlineCourtEventIdDraft} onChange={(event) => onDeadlineCourtEventIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <option value="">Р‘РµР· СЃРІСЏР·Рё</option>
+              {courtEvents.map((event) => (
+                <option key={event.id} value={event.id}>
+                  {event.title || `РЎРѕР±С‹С‚РёРµ #${event.id}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Р”РѕРєСѓРјРµРЅС‚</span>
+            <select value={deadlineDocumentIdDraft} onChange={(event) => onDeadlineDocumentIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <option value="">Р‘РµР· РґРѕРєСѓРјРµРЅС‚Р°</option>
+              {documents.map((document) => (
+                <option key={document.id} value={document.id}>
+                  {document.originalFileName || document.documentType || `Р”РѕРєСѓРјРµРЅС‚ #${document.id}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" onClick={() => void onAddProceduralDeadline()} disabled={savingProceduralDeadline} className="inline-flex items-center justify-center gap-2 self-end rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+            {savingProceduralDeadline ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock3 className="h-4 w-4" />} Добавить
+          </button>
+          <button type="button" onClick={() => void onCalculateProceduralDeadline()} disabled={calculatingProceduralDeadline} className="inline-flex items-center justify-center gap-2 self-end rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            {calculatingProceduralDeadline ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Рассчитать
+          </button>
+        </div>
+        {proceduralDeadlinesLoading ? (
+          <LoadingBlock label="Загрузка процессуальных сроков..." />
+        ) : activeProceduralDeadlines.length === 0 ? (
+          <div className="mt-3 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+            Отдельные процессуальные сроки пока не добавлены.
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {activeProceduralDeadlines.map((deadline) => (
+              <div key={deadline.id} className={`rounded-lg border p-3 ${deadline.isOverdue ? 'border-rose-200 bg-rose-50' : deadline.isWarning ? 'border-amber-200 bg-amber-50' : 'border-slate-100 bg-slate-50'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{deadline.deadlineTypeLabel || deadline.deadlineType}</div>
+                  <button type="button" onClick={() => void onCloseProceduralDeadline(deadline)} disabled={closingProceduralDeadlineId === deadline.id} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-white disabled:opacity-50">
+                    {closingProceduralDeadlineId === deadline.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />} Закрыть
+                  </button>
+                </div>
+                <div className="mt-2 font-semibold text-slate-900">{deadline.title}</div>
+                <div className="mt-1 text-sm text-slate-600">{toRuDate(deadline.dueAt) || '—'} · {deadline.statusLabel}</div>
+                {deadline.notes ? <div className="mt-2 text-sm text-slate-500">{deadline.notes}</div> : null}
+              </div>
+            ))}
+          </div>
+        )}
+        {closedProceduralDeadlines.length > 0 ? (
+          <div className="mt-4 text-sm text-slate-500">Закрыто: {closedProceduralDeadlines.length}</div>
+        ) : null}
+      </section>
+
+      <section className="rounded-xl border border-slate-200 p-4">
         <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Процессуальные сроки</h2>
         {deadlines.length === 0 ? (
           <div className="mt-3 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
@@ -3722,24 +4708,28 @@ function DocumentList({
   documents,
   downloadingDocumentId,
   previewingDocumentId,
+  uploadingDocumentVersionId,
   updatingDocumentId,
   deletingDocumentId,
   documentTypeOptions,
   documentStatusOptions,
   onPreview,
   onDownload,
+  onUploadVersion,
   onUpdate,
   onDelete,
 }: {
   documents: ClientCaseDocument[];
   downloadingDocumentId: number | null;
   previewingDocumentId: number | null;
+  uploadingDocumentVersionId: number | null;
   updatingDocumentId: number | null;
   deletingDocumentId: number | null;
   documentTypeOptions: string[];
   documentStatusOptions: string[];
   onPreview: (caseDocument: ClientCaseDocument) => void;
   onDownload: (caseDocument: ClientCaseDocument) => void;
+  onUploadVersion: (caseDocument: ClientCaseDocument, file: File | null | undefined) => void;
   onUpdate: (caseDocument: ClientCaseDocument, payload: { documentType: string; status: string }) => void;
   onDelete: (caseDocument: ClientCaseDocument) => void;
 }) {
@@ -3747,6 +4737,7 @@ function DocumentList({
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [latestOnly, setLatestOnly] = useState(false);
+  const versionSummaries = useMemo(() => buildDocumentVersionSummaries(documents), [documents]);
 
   const documentTypes = useMemo(
     () => Array.from(new Set(documents.map((document) => document.documentType).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru')),
@@ -3844,14 +4835,17 @@ function DocumentList({
             <DocumentCard
               key={document.id}
               document={document}
+              versionSummary={versionSummaries.get(document.documentKey)}
               downloading={downloadingDocumentId === document.id}
               previewing={previewingDocumentId === document.id}
+              uploadingVersion={uploadingDocumentVersionId === document.id}
               updating={updatingDocumentId === document.id}
               deleting={deletingDocumentId === document.id}
               documentTypeOptions={documentTypeOptions}
               documentStatusOptions={documentStatusOptions}
               onPreview={onPreview}
               onDownload={onDownload}
+              onUploadVersion={onUploadVersion}
               onUpdate={onUpdate}
               onDelete={onDelete}
             />
@@ -3866,28 +4860,63 @@ function normalizeDocumentFilter(value?: string | null) {
   return (value ?? '').trim().toLowerCase();
 }
 
+type DocumentVersionSummary = {
+  count: number;
+  latestVersion: number;
+  versions: number[];
+};
+
+function buildDocumentVersionSummaries(documents: ClientCaseDocument[]) {
+  const groups = new Map<string, ClientCaseDocument[]>();
+  documents.forEach((document) => {
+    const key = document.documentKey || `document-${document.id}`;
+    const group = groups.get(key) ?? [];
+    group.push(document);
+    groups.set(key, group);
+  });
+
+  const result = new Map<string, DocumentVersionSummary>();
+  groups.forEach((group, key) => {
+    const versions = Array.from(new Set(group.map((document) => document.version)))
+      .sort((a, b) => a - b);
+    result.set(key, {
+      count: versions.length,
+      latestVersion: Math.max(...versions),
+      versions,
+    });
+  });
+
+  return result;
+}
+
 function DocumentCard({
   document,
+  versionSummary,
   downloading,
   previewing,
+  uploadingVersion,
   updating,
   deleting,
   documentTypeOptions,
   documentStatusOptions,
   onPreview,
   onDownload,
+  onUploadVersion,
   onUpdate,
   onDelete,
 }: {
   document: ClientCaseDocument;
+  versionSummary?: DocumentVersionSummary;
   downloading: boolean;
   previewing: boolean;
+  uploadingVersion: boolean;
   updating: boolean;
   deleting: boolean;
   documentTypeOptions: string[];
   documentStatusOptions: string[];
   onPreview: (caseDocument: ClientCaseDocument) => void;
   onDownload: (caseDocument: ClientCaseDocument) => void;
+  onUploadVersion: (caseDocument: ClientCaseDocument, file: File | null | undefined) => void;
   onUpdate: (caseDocument: ClientCaseDocument, payload: { documentType: string; status: string }) => void;
   onDelete: (caseDocument: ClientCaseDocument) => void;
 }) {
@@ -3901,6 +4930,9 @@ function DocumentCard({
 
   const documentTypeListId = `case-document-card-types-${document.id}`;
   const statusOptions = mergeDirectoryOptions([document.status], documentStatusOptions);
+  const versionLabel = versionSummary && versionSummary.count > 1
+    ? `История версий: ${versionSummary.versions.map((version) => `v${version}`).join(', ')} · последняя v${versionSummary.latestVersion}`
+    : null;
 
   return (
     <div className="rounded-xl border border-slate-200 p-4">
@@ -3911,6 +4943,19 @@ function DocumentCard({
           <div className="mt-1 text-sm text-slate-500">
             {document.documentType} · v{document.version} · {document.status}
           </div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
+              Версия {document.version}
+            </span>
+            {document.isLatestVersion ? (
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700">Актуальная</span>
+            ) : (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">Не актуальная версия</span>
+            )}
+          </div>
+          {versionLabel ? (
+            <div className="mt-2 text-xs text-slate-500">{versionLabel}</div>
+          ) : null}
           {document.templateLabel ? (
             <div className="mt-1 text-xs text-blue-600">Шаблон: {document.templateLabel}</div>
           ) : null}
@@ -3949,7 +4994,7 @@ function DocumentCard({
           </select>
         </label>
       </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
         <button
           type="button"
           onClick={() => onUpdate(document, { documentType, status })}
@@ -3974,6 +5019,21 @@ function DocumentCard({
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
           {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Скачать
         </button>
+        <label
+          className={`inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 ${uploadingVersion || updating || deleting ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+        >
+          {uploadingVersion ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />} Новая версия
+          <input
+            aria-label={`Загрузить новую версию документа ${document.originalFileName}`}
+            type="file"
+            className="sr-only"
+            disabled={uploadingVersion || updating || deleting}
+            onChange={(event) => {
+              onUploadVersion(document, event.currentTarget.files?.[0]);
+              event.currentTarget.value = '';
+            }}
+          />
+        </label>
         <button
           type="button"
           onClick={() => onDelete(document)}

@@ -1202,6 +1202,9 @@ function LegalWorkReportSection({
   const responsibleRows = (report?.responsibles ?? []).slice(0, 8);
   const overdueRows = report?.overdueDeadlines ?? [];
   const upcomingRows = report?.upcomingDeadlines ?? [];
+  const caseRows = report?.cases ?? [];
+  const financeRows = report?.financeByStatus ?? [];
+  const deadlineSummaryRows = report?.deadlinesByType ?? [];
 
   return (
     <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
@@ -1378,6 +1381,129 @@ function LegalWorkReportSection({
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1fr_1fr]">
+            <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-lg font-semibold text-slate-950">Финансы по статусам дел</h3>
+                <span className="text-xs text-slate-500">{financeRows.length} статусов</span>
+              </div>
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">Статус</th>
+                      <th className="px-3 py-2 text-right font-semibold">Дел</th>
+                      <th className="px-3 py-2 text-right font-semibold">Гонорар</th>
+                      <th className="px-3 py-2 text-right font-semibold">Остаток</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {financeRows.length > 0 ? financeRows.map((row) => (
+                      <tr key={row.status}>
+                        <td className="px-3 py-3 font-medium text-slate-900">{row.statusLabel}</td>
+                        <td className="px-3 py-3 text-right text-slate-600">{row.caseCount}</td>
+                        <td className="px-3 py-3 text-right text-slate-600">{formatCurrency(row.feeTotal)}</td>
+                        <td className="px-3 py-3 text-right font-semibold text-slate-900">{formatCurrency(row.outstandingTotal)}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-8 text-center text-slate-500">Финансовые срезы не найдены.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-lg font-semibold text-slate-950">Сроки по типам</h3>
+                <span className="text-xs text-slate-500">{deadlineSummaryRows.length} типов</span>
+              </div>
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">Тип</th>
+                      <th className="px-3 py-2 text-right font-semibold">Всего</th>
+                      <th className="px-3 py-2 text-right font-semibold">Просрочено</th>
+                      <th className="px-3 py-2 text-right font-semibold">7 дней</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {deadlineSummaryRows.length > 0 ? deadlineSummaryRows.map((row) => (
+                      <tr key={row.deadlineType}>
+                        <td className="px-3 py-3 font-medium text-slate-900">{row.deadlineLabel}</td>
+                        <td className="px-3 py-3 text-right text-slate-600">{row.totalCount}</td>
+                        <td className="px-3 py-3 text-right text-rose-600">{row.overdueCount}</td>
+                        <td className="px-3 py-3 text-right text-amber-700">{row.upcomingCount}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-8 text-center text-slate-500">Сроки не найдены.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold text-slate-950">Детализация дел</h3>
+              <span className="text-xs text-slate-500">{caseRows.length} строк</span>
+            </div>
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 font-semibold">Дело</th>
+                    <th className="px-3 py-2 font-semibold">Клиент</th>
+                    <th className="px-3 py-2 font-semibold">Ответственный</th>
+                    <th className="px-3 py-2 font-semibold">Статус</th>
+                    <th className="px-3 py-2 text-right font-semibold">Задачи</th>
+                    <th className="px-3 py-2 text-right font-semibold">Сроки</th>
+                    <th className="px-3 py-2 text-right font-semibold">Остаток</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {caseRows.length > 0 ? caseRows.map((row) => (
+                    <tr key={row.caseId} className="align-top">
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => onOpenCase?.(row.caseId)}
+                          className="inline-flex items-center gap-1 text-left font-semibold text-blue-700 transition hover:text-blue-900 hover:underline"
+                        >
+                          {row.caseNumber ? `${row.caseNumber} · ` : ''}{row.caseTitle}
+                          <ArrowUpRight className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="mt-1 text-xs text-slate-500">{row.caseType}</div>
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">{row.clientName}</td>
+                      <td className="px-3 py-3 text-slate-600">{row.responsibleName}</td>
+                      <td className="px-3 py-3 text-slate-600">{row.statusLabel}</td>
+                      <td className="px-3 py-3 text-right text-slate-600">
+                        {row.openTasks}
+                        {row.overdueTasks > 0 ? <span className="ml-1 text-rose-600">/ {row.overdueTasks}</span> : null}
+                      </td>
+                      <td className="px-3 py-3 text-right text-slate-600">
+                        {row.upcomingDeadlines}
+                        {row.overdueDeadlines > 0 ? <span className="ml-1 text-rose-600">/ {row.overdueDeadlines}</span> : null}
+                      </td>
+                      <td className="px-3 py-3 text-right font-semibold text-slate-900">{formatCurrency(row.outstandingTotal)}</td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-8 text-center text-slate-500">Дела по выбранным условиям не найдены.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </>

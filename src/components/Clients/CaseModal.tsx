@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, ExternalLink, FileText, Link2, Plus, RotateCw, Trash2, Upload, X } from 'lucide-react';
 import type { ActResponsible, ClientCase, ClientCaseActivity, ClientCaseDocument, ClientCaseDocumentTemplate, ClientCaseFinanceSummary, ClientCaseRelatedParty, LegalEntitySummary } from '../../types';
@@ -61,6 +61,19 @@ const FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS: ClientCaseDocumentTemplate[] = [
   { key: 'objection', label: 'Возражение', documentType: 'Возражение' },
   { key: 'court-letter', label: 'Письмо в суд', documentType: 'Переписка' },
 ].map((template) => ({ ...template, heading: template.label }));
+
+function filterCaseDocumentTemplatesByCaseType(
+  templates: ClientCaseDocumentTemplate[],
+  caseType: string | null | undefined,
+) {
+  const normalizedCaseType = (caseType ?? '').trim().toLocaleLowerCase('ru');
+  return templates.filter((template) => {
+    const caseTypes = template.caseTypes ?? [];
+    if (caseTypes.length === 0) return true;
+    if (!normalizedCaseType) return false;
+    return caseTypes.some((item) => item.trim().toLocaleLowerCase('ru') === normalizedCaseType);
+  });
+}
 
 const CASE_TASK_STATUS_LABELS: Record<TaskJournalStatus, string> = {
   new: 'Новая',
@@ -282,6 +295,10 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
   const [documentStatus, setDocumentStatus] = useState(DOCUMENT_STATUS_OPTIONS[0]);
   const [documentTemplates, setDocumentTemplates] = useState<ClientCaseDocumentTemplate[]>(FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS);
   const [documentTemplateKey, setDocumentTemplateKey] = useState(FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS[0].key);
+  const availableDocumentTemplates = useMemo(
+    () => filterCaseDocumentTemplatesByCaseType(documentTemplates, caseType),
+    [documentTemplates, caseType],
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activity, setActivity] = useState<ClientCaseActivity>({
@@ -413,6 +430,14 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
       cancelled = true;
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    setDocumentTemplateKey((current) => (
+      current && availableDocumentTemplates.some((item) => item.key === current)
+        ? current
+        : availableDocumentTemplates[0]?.key ?? ''
+    ));
+  }, [availableDocumentTemplates]);
 
   const refreshCaseTasks = useCallback(async () => {
     if (!isOpen || !caseData.id || caseData.id <= 0) {
@@ -690,9 +715,12 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
 
     if (!caseData.id || caseData.id <= 0) return;
 
-    const template = documentTemplates.find((item) => item.key === documentTemplateKey)
-      ?? documentTemplates[0]
-      ?? FALLBACK_CASE_DOCUMENT_TEMPLATE_OPTIONS[0];
+    const template = availableDocumentTemplates.find((item) => item.key === documentTemplateKey)
+      ?? availableDocumentTemplates[0];
+    if (!template) {
+      setDocumentsError('Нет доступных шаблонов документов для типа этого дела.');
+      return;
+    }
 
     setDocumentsSaving(true);
     setDocumentsError(null);
@@ -1540,7 +1568,7 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
                     value={documentTemplateKey}
                     onChange={(e) => setDocumentTemplateKey(e.target.value)}
                     disabled={documentsSaving || saving || !allowEdit}>
-                    {documentTemplates.map((item) => (
+                    {availableDocumentTemplates.map((item) => (
                       <option key={item.key} value={item.key}>{item.label}</option>
                     ))}
                   </select>
@@ -1548,7 +1576,7 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
                     type="button"
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
                     onClick={() => void handleGenerateDocumentTemplate()}
-                    disabled={documentsSaving || saving || !allowEdit}>
+                    disabled={documentsSaving || saving || !allowEdit || availableDocumentTemplates.length === 0}>
                     <FileText size={16} /> Сформировать
                   </button>
                 </div>

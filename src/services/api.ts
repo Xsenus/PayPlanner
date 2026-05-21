@@ -101,6 +101,22 @@ export interface AppFeatureFlagsDto {
   };
 }
 
+export interface LegalIntegrationDiagnosticsDto {
+  generatedAt: string;
+  hasEnabledExternalLegalFlags: boolean;
+  items: LegalIntegrationDiagnosticItemDto[];
+}
+
+export interface LegalIntegrationDiagnosticItemDto {
+  key: string;
+  label: string;
+  featureFlagPath: string;
+  enabled: boolean;
+  status: string;
+  safeToRun: boolean;
+  message: string;
+}
+
 export interface RolePermissionAuditRoleDto {
   roleId: number;
   roleName: string;
@@ -1061,6 +1077,10 @@ export class ApiService {
 
   async getFeatureFlags() {
     return this.request<AppFeatureFlagsDto>('/features');
+  }
+
+  async getLegalIntegrationDiagnostics() {
+    return this.request<LegalIntegrationDiagnosticsDto>('/features/legal-integrations/diagnostics');
   }
 
   // ===== Acts =====
@@ -3091,6 +3111,12 @@ export class ApiService {
     return this.request<string>(`/v2/cases/${caseId}/work-order/print`);
   }
 
+  async generateCaseWorkOrderDocument(caseId: number) {
+    return this.request<ClientCaseDocument>(`/v2/cases/${caseId}/work-order/generate-document`, {
+      method: 'POST',
+    });
+  }
+
   async runCaseCourtSync(caseId: number) {
     return this.request<ClientCaseCourtSyncRun>(`/v2/cases/${caseId}/court-sync/run`, {
       method: 'POST',
@@ -3099,6 +3125,63 @@ export class ApiService {
 
   async getCaseCourtSyncLogs(caseId: number) {
     return this.request<ClientCaseCourtSyncLog[]>(`/v2/cases/${caseId}/court-sync/logs`);
+  }
+
+  async getCaseCourtDirectory(includeInactive = false) {
+    const query = includeInactive ? '?includeInactive=true' : '';
+    return this.request<ClientCaseCourt[]>(`/v2/cases/court-directory${query}`);
+  }
+
+  async createCaseCourtDirectoryItem(payload: UpsertClientCaseCourtPayload) {
+    return this.request<ClientCaseCourt>('/v2/cases/court-directory', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCaseCourtDirectoryItem(courtId: number, payload: UpsertClientCaseCourtPayload) {
+    return this.request<ClientCaseCourt>(`/v2/cases/court-directory/${courtId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getCaseCourtEvents(caseId: number) {
+    return this.request<ClientCaseCourtEvent[]>(`/v2/cases/${caseId}/court-events`);
+  }
+
+  async createCaseCourtEvent(caseId: number, payload: UpsertClientCaseCourtEventPayload) {
+    return this.request<ClientCaseCourtEvent>(`/v2/cases/${caseId}/court-events`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCaseCourtEvent(caseId: number, courtEventId: number, payload: UpsertClientCaseCourtEventPayload) {
+    return this.request<ClientCaseCourtEvent>(`/v2/cases/${caseId}/court-events/${courtEventId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getCaseCourtEventHistory(caseId: number, courtEventId: number) {
+    return this.request<ClientCaseCourtEventHistory[]>(`/v2/cases/${caseId}/court-events/${courtEventId}/history`);
+  }
+
+  async getCaseCourtParties(caseId: number, includeArchived = false) {
+    const query = includeArchived ? '?includeArchived=true' : '';
+    return this.request<ClientCaseCourtParty[]>(`/v2/cases/${caseId}/court-parties${query}`);
+  }
+
+  async createCaseCourtParty(caseId: number, payload: UpsertClientCaseCourtPartyPayload) {
+    return this.request<ClientCaseCourtParty>(`/v2/cases/${caseId}/court-parties`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async archiveCaseCourtParty(caseId: number, courtPartyId: number) {
+    return this.request<void>(`/v2/cases/${caseId}/court-parties/${courtPartyId}`, { method: 'DELETE' });
   }
 
   async getCaseRelatedParties(caseId: number, includeArchived = false) {
@@ -3127,6 +3210,10 @@ export class ApiService {
     documentType?: string;
     status?: string;
     sourceTaskId?: number;
+    sourceEventId?: number;
+    sourceWorkOrderId?: number;
+    sourceInvoiceId?: number;
+    sourceStage?: string;
     latestOnly?: boolean;
     page?: number;
     pageSize?: number;
@@ -3137,6 +3224,10 @@ export class ApiService {
       documentType: params?.documentType,
       status: params?.status,
       sourceTaskId: params?.sourceTaskId,
+      sourceEventId: params?.sourceEventId,
+      sourceWorkOrderId: params?.sourceWorkOrderId,
+      sourceInvoiceId: params?.sourceInvoiceId,
+      sourceStage: params?.sourceStage,
       latestOnly: params?.latestOnly,
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 50,
@@ -3146,6 +3237,10 @@ export class ApiService {
 
   async getCaseDocumentTemplates() {
     return this.request<ClientCaseDocumentTemplate[]>('/v2/cases/document-templates');
+  }
+
+  async getCaseDocumentTemplateTokens() {
+    return this.request<ClientCaseDocumentTemplateToken[]>('/v2/cases/document-template-tokens');
   }
 
   async createCaseDocumentTemplate(payload: Partial<ClientCaseDocumentTemplate> & { key?: string; label?: string; name?: string; content?: string; html?: string }) {
@@ -3171,6 +3266,72 @@ export class ApiService {
 
   async getCaseDocumentTypes() {
     return this.request<string[]>('/v2/cases/document-types');
+  }
+
+  async getCaseCalendarEvents(params?: {
+    from?: string;
+    to?: string;
+    clientCaseId?: number;
+    responsibleUserId?: number;
+    includeTasks?: boolean;
+  }) {
+    const q = buildQuery({
+      from: params?.from,
+      to: params?.to,
+      clientCaseId: params?.clientCaseId,
+      responsibleUserId: params?.responsibleUserId,
+      includeTasks: params?.includeTasks,
+    });
+    return this.request<CaseCalendarEvent[]>(`/case-calendar/events${q}`);
+  }
+
+  async getCaseCalendarSummary(params?: {
+    from?: string;
+    to?: string;
+    clientCaseId?: number;
+    responsibleUserId?: number;
+    includeTasks?: boolean;
+  }) {
+    const q = buildQuery({
+      from: params?.from,
+      to: params?.to,
+      clientCaseId: params?.clientCaseId,
+      responsibleUserId: params?.responsibleUserId,
+      includeTasks: params?.includeTasks,
+    });
+    return this.request<CaseCalendarSummary>(`/case-calendar/summary${q}`);
+  }
+
+  async getCaseProceduralDeadlines(caseId: number) {
+    return this.request<ClientCaseProceduralDeadline[]>(`/v2/cases/${caseId}/procedural-deadlines`);
+  }
+
+  async createCaseProceduralDeadline(caseId: number, payload: UpsertClientCaseProceduralDeadlinePayload) {
+    return this.request<ClientCaseProceduralDeadline>(`/v2/cases/${caseId}/procedural-deadlines`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCaseProceduralDeadline(caseId: number, deadlineId: number, payload: UpsertClientCaseProceduralDeadlinePayload) {
+    return this.request<ClientCaseProceduralDeadline>(`/v2/cases/${caseId}/procedural-deadlines/${deadlineId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async closeCaseProceduralDeadline(caseId: number, deadlineId: number, reason?: string) {
+    return this.request<ClientCaseProceduralDeadline>(`/v2/cases/${caseId}/procedural-deadlines/${deadlineId}/close`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async calculateCaseProceduralDeadline(payload: ProceduralDeadlineCalculationPayload) {
+    return this.request<ProceduralDeadlineCalculationResult>('/v2/cases/procedural-deadlines/calculate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   async getCaseDocument(documentId: number) {
@@ -3547,6 +3708,9 @@ export class ApiService {
   async getLegalWorkReport(params?: {
     from?: string;
     to?: string;
+    status?: string;
+    responsibleUserId?: number;
+    caseType?: string;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<LegalWorkReport>(`/reports/legal-work${q}`);
@@ -4317,6 +4481,19 @@ import type {
   ServiceCategoryDictionaryItem,
   PaymentStatusEntity,
   DocumentStatusEntity,
+  CaseCalendarEvent,
+  CaseCalendarSummary,
+  ClientCaseCourt,
+  ClientCaseCourtEvent,
+  ClientCaseCourtEventHistory,
+  ClientCaseCourtParty,
+  ClientCaseProceduralDeadline,
+  ProceduralDeadlineCalculationPayload,
+  ProceduralDeadlineCalculationResult,
+  UpsertClientCaseCourtEventPayload,
+  UpsertClientCaseCourtPayload,
+  UpsertClientCaseCourtPartyPayload,
+  UpsertClientCaseProceduralDeadlinePayload,
   ClientStatus,
   MonthlyStats,
   ClientCase,
@@ -4328,6 +4505,7 @@ import type {
   ClientCaseCourtSyncRun,
   ClientCaseDocument,
   ClientCaseDocumentTemplate,
+  ClientCaseDocumentTemplateToken,
   RenderedCaseDocumentTemplate,
   ClientCaseFinanceDetail,
   ClientCaseRelatedParty,

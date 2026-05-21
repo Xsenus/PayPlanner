@@ -36,7 +36,7 @@ import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type TaskJournalSettingsDto } from '../../services/api';
-import type { Client, ClientCase, LegalEntitySummary } from '../../types';
+import type { CaseCalendarEvent, CaseCalendarSummary, Client, ClientCase, LegalEntitySummary } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import {
   isTaskJournalActive,
@@ -540,6 +540,20 @@ function endOfDay(date: Date) {
   const next = new Date(date);
   next.setHours(23, 59, 59, 999);
   return next;
+}
+
+function getCaseCalendarRange(anchorDate: Date, mode: PeriodMode) {
+  if (mode === 'day') {
+    return { from: startOfDay(anchorDate), to: endOfDay(anchorDate) };
+  }
+
+  if (mode === 'week') {
+    const from = startOfWeek(anchorDate);
+    return { from, to: endOfDay(addDays(from, 6)) };
+  }
+
+  const from = startOfMonth(anchorDate);
+  return { from, to: endOfDay(addDays(addMonths(from, 1), -1)) };
 }
 
 function getTypeMeta(type: TaskJournalType) {
@@ -1108,6 +1122,9 @@ export function TaskJournal({
 
   const initialPreferences = initialPreferencesRef.current;
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
+  const [caseCalendarEvents, setCaseCalendarEvents] = useState<CaseCalendarEvent[]>([]);
+  const [caseCalendarSummary, setCaseCalendarSummary] = useState<CaseCalendarSummary | null>(null);
+  const [caseCalendarLoading, setCaseCalendarLoading] = useState(false);
   const [taskSettings, setTaskSettings] = useState<TaskJournalSettingsDto>(DEFAULT_TASK_JOURNAL_SETTINGS);
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
@@ -1269,6 +1286,42 @@ export function TaskJournal({
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
     return () => window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
   }, [refreshTasks]);
+
+  const refreshCaseCalendarEvents = useCallback(async () => {
+    if (viewMode !== 'calendar' && viewMode !== 'timeline') {
+      return;
+    }
+
+    const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
+    const responsibleUserId = assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)
+      ? Number(assigneeFilter)
+      : undefined;
+    const params = {
+      from: range.from.toISOString(),
+      to: range.to.toISOString(),
+      responsibleUserId,
+      includeTasks: false,
+    };
+    setCaseCalendarLoading(true);
+    try {
+      const [events, summary] = await Promise.all([
+        apiService.getCaseCalendarEvents(params),
+        apiService.getCaseCalendarSummary(params),
+      ]);
+      setCaseCalendarEvents(events.filter((event) => event.kind !== 'task'));
+      setCaseCalendarSummary(summary);
+    } catch {
+      setCaseCalendarEvents([]);
+      setCaseCalendarSummary(null);
+      toast.error('Не удалось загрузить сроки и судебные события.', 'Календарь дел');
+    } finally {
+      setCaseCalendarLoading(false);
+    }
+  }, [assigneeFilter, calendarAnchorDate, periodMode, toast, viewMode]);
+
+  useEffect(() => {
+    void refreshCaseCalendarEvents();
+  }, [refreshCaseCalendarEvents]);
 
   const createAutomationTask = useCallback(async (candidate: TaskJournalCaseAutomationCandidate) => {
     setCreatingAutomationCaseId(candidate.clientCaseId);
@@ -2312,47 +2365,53 @@ export function TaskJournal({
             onDone={(task) => setTaskStatus(task, 'done')}
           />
         ) : viewMode === 'calendar' ? (
-          <TaskCalendar
-            tasks={filteredTasks}
-            mode={periodMode}
-            anchorDate={calendarAnchorDate}
-            selectedDate={calendarSelectedDate}
-            highlightedTaskId={highlightedTaskId}
-            loading={loading}
-            onPrevious={() => shiftCalendarPeriod(-1)}
-            onNext={() => shiftCalendarPeriod(1)}
-            onToday={resetCalendarPeriod}
-            onSelectDate={setCalendarSelectedDate}
-            onCreateDate={openTaskCreateForDate}
-            onMoveTask={handleCalendarTaskMove}
-            onResizeTask={handleCalendarTaskResize}
-            onEdit={openTaskEditor}
-            onDone={(task) => setTaskStatus(task, 'done')}
-            currentUserId={currentUserId}
-            isAdminUser={isAdminUser}
-            taskSettings={taskSettings}
-            movingTaskId={calendarMovingTaskId}
-            resizingTaskId={calendarResizingTaskId}
-          />
+          <>
+            <CaseCalendarEventsPanel events={caseCalendarEvents} summary={caseCalendarSummary} loading={caseCalendarLoading} />
+            <TaskCalendar
+              tasks={filteredTasks}
+              mode={periodMode}
+              anchorDate={calendarAnchorDate}
+              selectedDate={calendarSelectedDate}
+              highlightedTaskId={highlightedTaskId}
+              loading={loading}
+              onPrevious={() => shiftCalendarPeriod(-1)}
+              onNext={() => shiftCalendarPeriod(1)}
+              onToday={resetCalendarPeriod}
+              onSelectDate={setCalendarSelectedDate}
+              onCreateDate={openTaskCreateForDate}
+              onMoveTask={handleCalendarTaskMove}
+              onResizeTask={handleCalendarTaskResize}
+              onEdit={openTaskEditor}
+              onDone={(task) => setTaskStatus(task, 'done')}
+              currentUserId={currentUserId}
+              isAdminUser={isAdminUser}
+              taskSettings={taskSettings}
+              movingTaskId={calendarMovingTaskId}
+              resizingTaskId={calendarResizingTaskId}
+            />
+          </>
         ) : (
-          <TaskTimelineCalendar
-            tasks={filteredTasks}
-            anchorDate={calendarAnchorDate}
-            highlightedTaskId={highlightedTaskId}
-            loading={loading}
-            assigneeFilter={assigneeFilter}
-            onPrevious={() => shiftTimelineWeek(-1)}
-            onNext={() => shiftTimelineWeek(1)}
-            onToday={resetCalendarPeriod}
-            onCreateDate={openTaskCreateForDate}
-            onMoveTask={handleTimelineTaskMove}
-            onEdit={openTaskEditor}
-            onDone={(task) => setTaskStatus(task, 'done')}
-            currentUserId={currentUserId}
-            isAdminUser={isAdminUser}
-            taskSettings={taskSettings}
-            movingTaskId={calendarMovingTaskId}
-          />
+          <>
+            <CaseCalendarEventsPanel events={caseCalendarEvents} summary={caseCalendarSummary} loading={caseCalendarLoading} />
+            <TaskTimelineCalendar
+              tasks={filteredTasks}
+              anchorDate={calendarAnchorDate}
+              highlightedTaskId={highlightedTaskId}
+              loading={loading}
+              assigneeFilter={assigneeFilter}
+              onPrevious={() => shiftTimelineWeek(-1)}
+              onNext={() => shiftTimelineWeek(1)}
+              onToday={resetCalendarPeriod}
+              onCreateDate={openTaskCreateForDate}
+              onMoveTask={handleTimelineTaskMove}
+              onEdit={openTaskEditor}
+              onDone={(task) => setTaskStatus(task, 'done')}
+              currentUserId={currentUserId}
+              isAdminUser={isAdminUser}
+              taskSettings={taskSettings}
+              movingTaskId={calendarMovingTaskId}
+            />
+          </>
         )}
       </div>
 
@@ -2927,6 +2986,117 @@ function TaskBoard({
       ))}
     </div>
   );
+}
+
+function CaseCalendarEventsPanel({
+  events,
+  summary,
+  loading,
+}: {
+  events: CaseCalendarEvent[];
+  summary: CaseCalendarSummary | null;
+  loading: boolean;
+}) {
+  const visibleEvents = events.slice(0, 12);
+  const totalEventCount = summary?.totalEventCount ?? events.length;
+  const overdueCount = summary?.overdueCount ?? events.filter((event) => event.isOverdue).length;
+  const warningCount = summary?.warningCount ?? events.filter((event) => event.isWarning).length;
+  const courtEventCount = summary?.courtEventCount ?? events.filter((event) => event.kind === 'court').length;
+  const proceduralDeadlineCount = summary?.proceduralDeadlineCount ?? events.filter((event) => event.kind === 'procedural-deadline').length;
+
+  return (
+    <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            <CalendarClock className="h-4 w-4" />
+            Сроки и суд
+          </div>
+          <h2 className="mt-1 text-lg font-semibold text-slate-900">Календарь дел</h2>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">{totalEventCount} событий</span>
+          {proceduralDeadlineCount > 0 ? <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-sky-700">Сроков: {proceduralDeadlineCount}</span> : null}
+          {courtEventCount > 0 ? <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-indigo-700">Судов: {courtEventCount}</span> : null}
+          {warningCount > 0 ? <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700">Близко: {warningCount}</span> : null}
+          {overdueCount > 0 ? <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-700">Просрочено: {overdueCount}</span> : null}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+          Загружаем сроки и судебные события...
+        </div>
+      ) : visibleEvents.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+          На выбранный период сроков и судебных событий нет.
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-2 lg:grid-cols-2 2xl:grid-cols-3">
+          {visibleEvents.map((event) => (
+            <article key={event.id} className={`rounded-xl border px-3 py-3 ${getCaseCalendarEventTone(event)}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold">{event.title}</div>
+                  <div className="mt-1 truncate text-xs opacity-80">{event.caseTitle}</div>
+                </div>
+                <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-xs font-semibold text-slate-700">
+                  {formatCaseCalendarEventDate(event)}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-xs font-semibold">
+                <span className="rounded-full bg-white/70 px-2 py-1 text-slate-700">{getCaseCalendarEventKindLabel(event.kind)}</span>
+                {event.courtName ? <span className="rounded-full bg-white/70 px-2 py-1 text-slate-700">{event.courtName}</span> : null}
+                {event.responsibleName ? <span className="rounded-full bg-white/70 px-2 py-1 text-slate-700">{event.responsibleName}</span> : null}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function getCaseCalendarEventKindLabel(kind: string) {
+  switch (kind) {
+    case 'court':
+      return 'Суд';
+    case 'procedural-deadline':
+      return 'Процессуальный срок';
+    case 'case-deadline':
+      return 'Срок дела';
+    default:
+      return kind;
+  }
+}
+
+function getCaseCalendarEventTone(event: CaseCalendarEvent) {
+  if (event.isOverdue) {
+    return 'border-rose-200 bg-rose-50 text-rose-900';
+  }
+
+  if (event.isWarning) {
+    return 'border-amber-200 bg-amber-50 text-amber-900';
+  }
+
+  if (event.kind === 'court') {
+    return 'border-indigo-200 bg-indigo-50 text-indigo-900';
+  }
+
+  return 'border-slate-200 bg-slate-50 text-slate-900';
+}
+
+function formatCaseCalendarEventDate(event: CaseCalendarEvent) {
+  const start = new Date(event.startAt);
+  if (Number.isNaN(start.getTime())) {
+    return 'Дата не задана';
+  }
+
+  if (event.allDay) {
+    return start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+  }
+
+  return `${start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })} ${formatTimeOnly(start)}`;
 }
 
 function TaskTimelineCalendar({

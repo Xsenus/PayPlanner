@@ -134,6 +134,20 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     Description: 'Описание дела',
     Status: 'Статус дела',
   },
+  'client-case-document': {
+    DocumentKey: 'Ключ документа',
+    Version: 'Версия',
+    DocumentType: 'Тип документа',
+    Status: 'Статус документа',
+    OriginalFileName: 'Файл',
+    StoredFileName: 'Файл в хранилище',
+    StoragePath: 'Путь хранения',
+    ContentType: 'Тип файла',
+    SizeBytes: 'Размер',
+    UploadedByUserId: 'Кто загрузил',
+    UploadedByName: 'Кто загрузил',
+    UploadedAt: 'Дата загрузки',
+  },
   'client-case-work-order': {
     Title: 'Заказ-наряд',
     Status: 'Статус заказ-наряда',
@@ -237,6 +251,7 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
 const OBJECT_TYPE_LABELS: Record<string, string> = {
   client: 'Клиент',
   'client-case': 'Дело',
+  'client-case-document': 'Документ дела',
   'client-case-work-order': 'Заказ-наряд',
   'client-case-work-order-item': 'Услуга заказ-наряда',
   'client-case-related-party': 'Связанное лицо дела',

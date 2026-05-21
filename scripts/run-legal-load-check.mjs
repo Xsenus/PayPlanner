@@ -84,6 +84,36 @@ const scenarios = [
     description: 'inactive cases registry filter',
   },
   {
+    name: 'case-document-types',
+    path: '/v2/cases/document-types',
+    auth: true,
+    description: 'case document type dictionary',
+  },
+  {
+    name: 'case-document-templates',
+    path: '/document-templates',
+    auth: true,
+    description: 'case document template library',
+  },
+  {
+    name: 'case-document-template-tokens',
+    path: '/document-template-tokens',
+    auth: true,
+    description: 'case document template token registry',
+  },
+  {
+    name: 'case-calendar-events',
+    path: `/case-calendar/events?from=${from}&to=${to}&includeTasks=false`,
+    auth: true,
+    description: 'case calendar legal deadlines and court events',
+  },
+  {
+    name: 'case-calendar-summary',
+    path: `/case-calendar/summary?from=${from}&to=${to}&includeTasks=false`,
+    auth: true,
+    description: 'case calendar summary counters',
+  },
+  {
     name: 'legal-work-report',
     path: `/reports/legal-work?from=${from}&to=${to}`,
     auth: true,

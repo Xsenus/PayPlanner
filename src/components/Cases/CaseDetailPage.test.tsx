@@ -23,6 +23,7 @@ vi.mock('../../services/api', () => ({
     bulkUpdateCases: vi.fn(),
     generateCaseDocumentTemplate: vi.fn(),
     uploadCaseDocument: vi.fn(),
+    uploadCaseDocumentVersion: vi.fn(),
     downloadCaseDocument: vi.fn(),
     updateCaseDocument: vi.fn(),
     deleteCaseDocument: vi.fn(),
@@ -31,6 +32,19 @@ vi.mock('../../services/api', () => ({
     addCaseConversationEntry: vi.fn(),
     runCaseCourtSync: vi.fn(),
     getCaseCourtSyncLogs: vi.fn(),
+    getCaseCourtDirectory: vi.fn(),
+    getCaseCourtEvents: vi.fn(),
+    createCaseCourtEvent: vi.fn(),
+    updateCaseCourtEvent: vi.fn(),
+    getCaseCourtEventHistory: vi.fn(),
+    getCaseCourtParties: vi.fn(),
+    createCaseCourtParty: vi.fn(),
+    archiveCaseCourtParty: vi.fn(),
+    getCaseProceduralDeadlines: vi.fn(),
+    calculateCaseProceduralDeadline: vi.fn(),
+    createCaseProceduralDeadline: vi.fn(),
+    updateCaseProceduralDeadline: vi.fn(),
+    closeCaseProceduralDeadline: vi.fn(),
     getCaseTimeline: vi.fn(),
     getCaseFinance: vi.fn(),
     getCaseWorkOrder: vi.fn(),
@@ -45,6 +59,7 @@ vi.mock('../../services/api', () => ({
     approveCaseWorkOrder: vi.fn(),
     requestCaseWorkOrderRevision: vi.fn(),
     getCaseWorkOrderPrintHtml: vi.fn(),
+    generateCaseWorkOrderDocument: vi.fn(),
     getObjectAuditHistory: vi.fn(),
     addCaseRelatedParty: vi.fn(),
     deleteCaseRelatedParty: vi.fn(),
@@ -231,6 +246,153 @@ describe('CaseDetailPage', () => {
     ]);
     vi.mocked(apiService.getCaseDocumentTypes).mockReset();
     vi.mocked(apiService.getCaseDocumentTypes).mockResolvedValue(['Акт сверки', 'Иск', 'Ходатайство']);
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockReset();
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockResolvedValue([
+      {
+        id: 31,
+        clientCaseId: 15,
+        deadlineType: 'appeal',
+        deadlineTypeLabel: 'Апелляция',
+        title: 'Апелляционная жалоба',
+        dueAt: '2026-07-01',
+        allDay: true,
+        status: 'active',
+        statusLabel: 'Активен',
+        warningDaysBefore: 7,
+        sourceType: 'manual',
+        notes: '',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+        isWarning: false,
+      },
+    ]);
+    vi.mocked(apiService.getCaseCourtEvents).mockReset();
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
+      {
+        id: 41,
+        clientCaseId: 15,
+        eventType: 'hearing',
+        eventTypeLabel: 'Заседание',
+        title: 'Предварительное заседание',
+        scheduledAt: '2026-06-12T09:30:00Z',
+        allDay: false,
+        courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция',
+        courtName: 'Арбитражный суд Самарской области',
+        courtCaseNumber: 'А55-12345/2026',
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+        sourceType: 'manual',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+      },
+    ]);
+    vi.mocked(apiService.getCaseCourtDirectory).mockReset();
+    vi.mocked(apiService.getCaseCourtDirectory).mockResolvedValue([
+      {
+        id: 71,
+        name: 'Арбитражный суд города Москвы',
+        instance: 'first',
+        instanceLabel: 'Первая инстанция',
+        code: 'msk-arbitrage',
+        isActive: true,
+        sortOrder: 1,
+        createdAt: '2026-05-21T00:00:00Z',
+      },
+    ]);
+    vi.mocked(apiService.createCaseCourtEvent).mockReset();
+    vi.mocked(apiService.createCaseCourtEvent).mockResolvedValue({
+      id: 42,
+      clientCaseId: 15,
+      eventType: 'hearing',
+      eventTypeLabel: 'Заседание',
+      title: 'Новое заседание',
+      scheduledAt: '2026-06-20T10:00:00Z',
+      allDay: false,
+      courtInstance: 'first',
+      courtInstanceLabel: 'Первая инстанция',
+      movementStatus: 'scheduled',
+      movementStatusLabel: 'Назначено',
+      sourceType: 'manual',
+      createdAt: '2026-05-21T00:00:00Z',
+      isOverdue: false,
+    });
+    vi.mocked(apiService.getCaseCourtParties).mockReset();
+    vi.mocked(apiService.getCaseCourtParties).mockResolvedValue([
+      {
+        id: 51,
+        clientCaseId: 15,
+        displayName: 'ООО Ответчик',
+        side: 'respondent',
+        sideLabel: 'Ответчик',
+        processRole: 'Ответчик',
+        representativeName: 'Петров Петр',
+        notes: '',
+        isArchived: false,
+        createdAt: '2026-05-21T00:00:00Z',
+      },
+    ]);
+    vi.mocked(apiService.createCaseCourtParty).mockReset();
+    vi.mocked(apiService.createCaseCourtParty).mockResolvedValue({
+      id: 52,
+      clientCaseId: 15,
+      displayName: 'АО Истец',
+      side: 'claimant',
+      sideLabel: 'Истец',
+      processRole: 'Истец',
+      representativeName: '',
+      notes: '',
+      isArchived: false,
+      createdAt: '2026-05-21T00:00:00Z',
+    });
+    vi.mocked(apiService.archiveCaseCourtParty).mockReset();
+    vi.mocked(apiService.archiveCaseCourtParty).mockResolvedValue(undefined);
+    vi.mocked(apiService.createCaseProceduralDeadline).mockReset();
+    vi.mocked(apiService.createCaseProceduralDeadline).mockResolvedValue({
+      id: 32,
+      clientCaseId: 15,
+      deadlineType: 'motion',
+      deadlineTypeLabel: 'Ходатайство',
+      title: 'Подать ходатайство',
+      dueAt: '2026-06-10',
+      allDay: true,
+      status: 'active',
+      statusLabel: 'Активен',
+      warningDaysBefore: 7,
+      sourceType: 'manual',
+      notes: '',
+      createdAt: '2026-05-21T00:00:00Z',
+      isOverdue: false,
+      isWarning: false,
+    });
+    vi.mocked(apiService.calculateCaseProceduralDeadline).mockReset();
+    vi.mocked(apiService.calculateCaseProceduralDeadline).mockResolvedValue({
+      deadlineAt: '2026-06-10T00:00:00Z',
+      rule: 'workingDays',
+      monthsToAdd: 0,
+      daysToAdd: 5,
+      rollForwardToWorkingDay: true,
+    });
+    vi.mocked(apiService.closeCaseProceduralDeadline).mockReset();
+    vi.mocked(apiService.closeCaseProceduralDeadline).mockResolvedValue({
+      id: 31,
+      clientCaseId: 15,
+      deadlineType: 'appeal',
+      deadlineTypeLabel: 'Апелляция',
+      title: 'Апелляционная жалоба',
+      dueAt: '2026-07-01',
+      allDay: true,
+      status: 'closed',
+      statusLabel: 'Закрыт',
+      warningDaysBefore: 7,
+      sourceType: 'manual',
+      notes: '',
+      createdAt: '2026-05-21T00:00:00Z',
+      closedAt: '2026-05-22T00:00:00Z',
+      closeReason: 'Подано',
+      isOverdue: false,
+      isWarning: false,
+    });
     vi.mocked(apiService.getDocumentStatuses).mockReset();
     vi.mocked(apiService.getDocumentStatuses).mockResolvedValue([
       {
@@ -301,6 +463,21 @@ describe('CaseDetailPage', () => {
       sizeBytes: 512,
       uploadedByName: 'Администратор',
       uploadedAt: '2026-05-05T10:00:00Z',
+      isLatestVersion: true,
+    });
+    vi.mocked(apiService.uploadCaseDocumentVersion).mockReset();
+    vi.mocked(apiService.uploadCaseDocumentVersion).mockResolvedValue({
+      id: 10,
+      clientCaseId: 15,
+      documentKey: 'claim',
+      version: 2,
+      documentType: 'Заявление',
+      status: 'Подготовлен',
+      originalFileName: 'claim-v2.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 1024,
+      uploadedByName: 'Администратор',
+      uploadedAt: '2026-05-06T10:00:00Z',
       isLatestVersion: true,
     });
     vi.mocked(apiService.downloadCaseDocument).mockReset();
@@ -498,6 +675,22 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.requestCaseWorkOrderRevision).mockReset();
     vi.mocked(apiService.getCaseWorkOrderPrintHtml).mockReset();
     vi.mocked(apiService.getCaseWorkOrderPrintHtml).mockResolvedValue('<!doctype html><html><body>Заказ-наряд</body></html>');
+    vi.mocked(apiService.generateCaseWorkOrderDocument).mockReset();
+    vi.mocked(apiService.generateCaseWorkOrderDocument).mockResolvedValue({
+      id: 91,
+      clientCaseId: 15,
+      documentKey: 'work-order-31',
+      sourceWorkOrderId: 31,
+      version: 1,
+      documentType: 'Заказ-наряд',
+      status: 'Подготовлен',
+      originalFileName: 'case-15-work-order.html',
+      contentType: 'text/html; charset=utf-8',
+      sizeBytes: 1200,
+      uploadedByName: 'Владелец',
+      uploadedAt: '2026-05-21T00:00:00Z',
+      isLatestVersion: true,
+    });
     vi.mocked(apiService.getObjectAuditHistory).mockReset();
     vi.mocked(apiService.getObjectAuditHistory).mockResolvedValue([]);
     vi.mocked(apiService.addCaseRelatedParty).mockReset();
@@ -1035,6 +1228,8 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Иск v1.docx')).toBeTruthy();
     expect(screen.getByText('Иск v2.pdf')).toBeTruthy();
     expect(screen.getByText('Фото.jpg')).toBeTruthy();
+    expect(screen.getAllByText('История версий: v1, v2 · последняя v2')).toHaveLength(2);
+    expect(screen.getByText('Не актуальная версия')).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText('Только актуальные версии'));
     expect(screen.queryByText('Иск v1.docx')).toBeNull();
@@ -1075,6 +1270,25 @@ describe('CaseDetailPage', () => {
         status: 'Подготовлен',
       });
       expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('uploads a new case document version from the documents tab', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+
+    const file = new File(['claim-v2'], 'claim-v2.pdf', { type: 'application/pdf' });
+    fireEvent.change(await screen.findByLabelText('Загрузить новую версию документа Заявление.docx'), { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(apiService.uploadCaseDocumentVersion).toHaveBeenCalledWith(7, file, {
+        documentType: 'Заявление',
+        status: 'Готово',
+      });
+      expect(apiService.getCaseDocuments).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('Новая версия документа «Заявление.docx» загружена.')).toBeTruthy();
     });
   });
 

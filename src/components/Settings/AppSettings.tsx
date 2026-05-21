@@ -10,6 +10,7 @@ import { TablePagination } from '../ui/TablePagination';
 import { AuthProviderSettings } from './AuthProviderSettings';
 import { BankDirectorySettings } from './BankDirectorySettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
+import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
 import { FeatureFlagSettings } from './FeatureFlagSettings';
 import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
 import { MainCompanySettings } from './MainCompanySettings';
@@ -41,7 +42,7 @@ type SettingsSection =
   | 'db-import'
   | 'db-operations'
   | 'form-requirements';
-type FinancialRulesSubsection = 'invoices' | 'contracts';
+type FinancialRulesSubsection = 'invoices' | 'contracts' | 'case-documents';
 type DatabaseOperationsSubsection = 'invoices' | 'addresses' | 'dictionary-merge' | 'users-merge';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 const DETAILS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -900,6 +901,17 @@ export function AppSettings() {
                     >
                       Договоры
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFinancialRulesSubsection('case-documents')}
+                      className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                        activeFinancialRulesSubsection === 'case-documents'
+                          ? 'border-blue-200 bg-blue-50 text-blue-900'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      Документы дел
+                    </button>
                   </div>
                 </div>
 
@@ -1017,6 +1029,8 @@ export function AppSettings() {
                 )}
 
                 {activeFinancialRulesSubsection === 'invoices' && <InvoiceDocumentTemplateSettings />}
+
+                {activeFinancialRulesSubsection === 'case-documents' && <CaseDocumentTemplateSettings />}
 
                 {activeFinancialRulesSubsection === 'contracts' && (
                   <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">

@@ -97,8 +97,10 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditActionLabel('Automation')).toBe('Автоконтроль');
     expect(getObjectAuditTypeLabel('task-journal-item')).toBe('Задача');
     expect(getObjectAuditTypeLabel('invoice-line-item')).toBe('Позиция счета');
+    expect(getObjectAuditTypeLabel('client-case-document')).toBe('Документ дела');
     expect(getObjectAuditTypeLabel('client-case-work-order')).toBe('Заказ-наряд');
     expect(getObjectAuditTypeLabel('client-case-related-party')).toBe('Связанное лицо дела');
+    expect(getObjectAuditFieldLabel('client-case-document', 'DocumentType')).toBe('Тип документа');
     expect(formatAuditValue('pending_approval')).toBe('На согласовании');
     expect(formatAuditValue('invoice_created')).toBe('Счет создан');
     expect(formatAuditValue('legalEntity')).toBe('Юридическое лицо');

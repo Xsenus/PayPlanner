@@ -40,6 +40,22 @@ const scenarios = [
     }),
   },
   {
+    name: 'legal-integrations-diagnostics',
+    auth: false,
+    run: () => checkJsonEndpoint('/features/legal-integrations/diagnostics', 'legal integrations diagnostics', (payload) => {
+      assertObject(payload, 'legal integrations diagnostics response');
+      assertArray(payload.items, 'legal integrations diagnostics items');
+      assertBoolean(payload.hasEnabledExternalLegalFlags, 'legal integrations diagnostics enabled flag');
+      for (const item of payload.items) {
+        assertObject(item, 'legal integration diagnostic item');
+        assertNonEmptyString(item.key, 'legal integration diagnostic item key');
+        assertNonEmptyString(item.status, 'legal integration diagnostic item status');
+        assertBoolean(item.enabled, 'legal integration diagnostic item enabled');
+        assertBoolean(item.safeToRun, 'legal integration diagnostic item safeToRun');
+      }
+    }),
+  },
+  {
     name: 'profile',
     auth: true,
     run: () => checkJsonEndpoint('/auth/me', 'current user profile', (payload) => {
@@ -127,10 +143,59 @@ const scenarios = [
     ),
   },
   {
+    name: 'case-document-types',
+    auth: true,
+    run: () => checkJsonEndpoint('/v2/cases/document-types', 'case document types', (payload) => {
+      assertArray(payload, 'case document types response');
+    }),
+  },
+  {
+    name: 'case-document-templates',
+    auth: true,
+    run: () => checkJsonEndpoint('/document-templates', 'case document templates', (payload) => {
+      assertArray(payload, 'case document templates response');
+    }),
+  },
+  {
+    name: 'case-document-template-tokens',
+    auth: true,
+    run: () => checkJsonEndpoint('/document-template-tokens', 'case document template tokens', (payload) => {
+      assertArray(payload, 'case document template tokens response');
+    }),
+  },
+  {
+    name: 'case-calendar-events',
+    auth: true,
+    run: () => checkJsonEndpoint(
+      `/case-calendar/events?from=${from}&to=${to}&includeTasks=false`,
+      'case calendar events',
+      (payload) => {
+        assertArray(payload, 'case calendar events response');
+      },
+    ),
+  },
+  {
+    name: 'case-calendar-summary',
+    auth: true,
+    run: () => checkJsonEndpoint(
+      `/case-calendar/summary?from=${from}&to=${to}&includeTasks=false`,
+      'case calendar summary',
+      (payload) => {
+        assertObject(payload, 'case calendar summary response');
+        assertNumber(payload.totalEventCount, 'caseCalendarSummary.totalEventCount');
+        assertNumber(payload.proceduralDeadlineCount, 'caseCalendarSummary.proceduralDeadlineCount');
+        assertNumber(payload.courtEventCount, 'caseCalendarSummary.courtEventCount');
+      },
+    ),
+  },
+  {
     name: 'legal-work-report',
     auth: true,
     run: () => checkJsonEndpoint(`/reports/legal-work?from=${from}&to=${to}`, 'legal work report', (payload) => {
       assertObject(payload, 'legal work report response');
+      assertArray(payload.cases, 'legal work report cases');
+      assertArray(payload.financeByStatus, 'legal work report financeByStatus');
+      assertArray(payload.deadlinesByType, 'legal work report deadlinesByType');
     }),
   },
   {
@@ -400,6 +465,7 @@ function knownScenarioNames() {
   return [
     'frontend-shell',
     'features',
+    'legal-integrations-diagnostics',
     'profile',
     'role-permissions-audit',
     'role-permissions-audit-csv',
@@ -419,6 +485,12 @@ function knownScenarioNames() {
 function assertObject(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
+  }
+}
+
+function assertBoolean(value, label) {
+  if (typeof value !== 'boolean') {
+    throw new Error(`${label} must be a boolean`);
   }
 }
 
