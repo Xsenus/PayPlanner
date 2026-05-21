@@ -80,6 +80,33 @@ vi.mock('./components/Calendar/Calendar', () => ({
   ),
 }));
 
+vi.mock('./components/Notifications/NotificationCenter', () => ({
+  NotificationCenter: ({ onOpenTask }: { onOpenTask?: (taskId: number) => void }) => (
+    <section data-testid="notification-center">
+      <button type="button" onClick={() => onOpenTask?.(101)}>
+        open notification task
+      </button>
+    </section>
+  ),
+}));
+
+vi.mock('./components/Tasks/TaskJournal', () => ({
+  TaskJournal: ({
+    routeTaskId,
+    onRouteTaskChange,
+  }: {
+    routeTaskId?: number | null;
+    onRouteTaskChange?: (taskId: number | null) => void;
+  }) => (
+    <section data-testid="task-journal">
+      <span>task {routeTaskId}</span>
+      <button type="button" onClick={() => onRouteTaskChange?.(null)}>
+        save task
+      </button>
+    </section>
+  ),
+}));
+
 vi.mock('./components/Clients/ClientDetail', () => ({
   ClientDetail: ({ clientId, onBack }: { clientId: number; onBack: () => void }) => (
     <section data-testid="client-detail">
@@ -116,6 +143,24 @@ describe('App calendar client navigation', () => {
       expect(screen.queryByTestId('client-detail')).toBeNull();
       expect(screen.queryByTestId('clients-view')).toBeNull();
       expect(screen.getByTestId('calendar-view')).toBeTruthy();
+    });
+  });
+
+  it('returns to notifications after saving a task opened from notifications', async () => {
+    window.history.replaceState({}, '', '/notifications');
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'open notification task' }));
+
+    expect(await screen.findByTestId('task-journal')).toBeTruthy();
+    expect(screen.getByText('task 101')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'save task' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-journal')).toBeNull();
+      expect(screen.getByTestId('notification-center')).toBeTruthy();
     });
   });
 });

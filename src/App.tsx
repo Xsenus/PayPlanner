@@ -234,6 +234,7 @@ function AppContent() {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(getInitialPaymentId);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(getInitialTaskId);
+  const [taskReturnTab, setTaskReturnTab] = useState<Tab | null>(null);
   const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(getPathCaseId);
   const [caseReturnTab, setCaseReturnTab] = useState<Tab>('cases');
@@ -578,16 +579,25 @@ function AppContent() {
   );
 
   const openTaskDetail = useCallback(
-    (taskId: number) => {
+    (taskId: number, options?: { returnTo?: Tab | null }) => {
       if (!permissions.tasks.canView || !(taskId > 0)) {
         return;
       }
 
+      setTaskReturnTab(options?.returnTo ?? null);
       setSelectedTaskId(taskId);
       setActiveTab('tasks');
     },
     [permissions.tasks.canView],
   );
+
+  const handleRouteTaskChange = useCallback((taskId: number | null) => {
+    setSelectedTaskId(taskId);
+    if (taskId === null && taskReturnTab) {
+      setActiveTab(taskReturnTab);
+      setTaskReturnTab(null);
+    }
+  }, [taskReturnTab]);
 
   const applyActReturnContext = useCallback((context: ActReturnContext) => {
     setActReturnContext(context);
@@ -715,8 +725,10 @@ function AppContent() {
 
       if (tab !== 'tasks' && tab !== 'tasksApprovals') {
         setSelectedTaskId(null);
+        setTaskReturnTab(null);
       } else if (tab !== activeTab) {
         setSelectedTaskId(null);
+        setTaskReturnTab(null);
       }
 
       if (tab !== 'contractDetail') {
@@ -970,7 +982,7 @@ function AppContent() {
           : renderNoAccess('Раздел календаря недоступен для вашей роли.');
 
       case 'notifications':
-        return <NotificationCenter onOpenTask={openTaskDetail} onOpenCase={openRelatedCase} />;
+        return <NotificationCenter onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: 'notifications' })} onOpenCase={openRelatedCase} />;
 
       case 'tasks':
         return permissions.tasks.canView
@@ -978,7 +990,7 @@ function AppContent() {
               <TaskJournal
                 key="tasks-list"
                 routeTaskId={selectedTaskId}
-                onRouteTaskChange={setSelectedTaskId}
+                onRouteTaskChange={handleRouteTaskChange}
                 onOpenClient={handleOpenTaskClient}
                 onOpenLegalEntity={handleOpenTaskLegalEntity}
               />
@@ -1003,7 +1015,7 @@ function AppContent() {
               <TaskJournal
                 key="tasks-calendar"
                 initialView="calendar"
-                onRouteTaskChange={setSelectedTaskId}
+                onRouteTaskChange={handleRouteTaskChange}
                 onOpenClient={handleOpenTaskClient}
                 onOpenLegalEntity={handleOpenTaskLegalEntity}
               />
