@@ -622,6 +622,46 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task Terminate_SendsClientEmailNotification_WhenEmailServiceConfigured()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db, email: "client@example.com");
+        var emailService = new CapturingEmailService();
+        var controller = CreateAdminController(db, emailService);
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-NOTIFY-1",
+                Date = new DateTime(2026, 5, 1),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 18_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var terminateResult = await controller.Terminate(
+            createdDto.Id,
+            new TerminateContractRequest
+            {
+                TerminationDate = new DateTime(2026, 5, 22),
+                Terms = "Стороны прекращают обязательства.",
+                Reason = "Соглашение сторон",
+                FinancialTerms = "Возвратов нет.",
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(terminateResult.Result);
+        Assert.Equal("client@example.com", emailService.ToEmail);
+        Assert.Equal("Договор № CT-NOTIFY-1 расторгнут", emailService.Subject);
+        Assert.Contains("Дата расторжения: 22.05.2026", emailService.Body);
+        Assert.Contains("Стороны прекращают обязательства", emailService.Body);
+        Assert.Contains("Возвратов нет", emailService.Body);
+    }
+
+    [Fact]
     public async Task Update_ClearsAmountAndValidUntil_WhenSwitchingToActualOpenEndedContract()
     {
         await using var db = await CreateContextAsync();
@@ -1314,9 +1354,9 @@ public class ContractsControllerTests
         return client;
     }
 
-    private static ContractsController CreateAdminController(PaymentContext db)
+    private static ContractsController CreateAdminController(PaymentContext db, IEmailService? emailService = null)
     {
-        var controller = new ContractsController(db, new NoopFormRequirementsService())
+        var controller = new ContractsController(db, new NoopFormRequirementsService(), emailService: emailService)
         {
             ControllerContext = new ControllerContext
             {
@@ -1437,6 +1477,20 @@ public class ContractsControllerTests
         public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
         public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason) => Task.CompletedTask;
         public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail) => Task.CompletedTask;
+
+        public Task SendEmailAsync(
+            string toEmail,
+            string subject,
+            string body,
+            bool isHtml = false,
+            CancellationToken cancellationToken = default,
+            PayPlanner.Api.Services.Notifications.EmailSendSettings? settings = null)
+        {
+            ToEmail = toEmail;
+            Subject = subject;
+            Body = body;
+            return Task.CompletedTask;
+        }
 
         public Task SendEmailWithAttachmentAsync(
             string toEmail,

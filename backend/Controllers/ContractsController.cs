@@ -494,6 +494,7 @@ public class ContractsController : ControllerBase
         ApplyAuditReason(terminationReason);
 
         await _db.SaveChangesAsync(ct);
+        await SendContractTerminationNotificationAsync(contract, ct);
 
         var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
         return Ok(dto);
@@ -972,6 +973,48 @@ public class ContractsController : ControllerBase
             .GroupBy(payment => payment.Id)
             .Select(group => group.First())
             .ToList();
+    }
+
+    private async Task SendContractTerminationNotificationAsync(Contract contract, CancellationToken ct)
+    {
+        if (_emailService is null)
+        {
+            return;
+        }
+
+        var email = ResolveContractRecipientEmail(contract);
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return;
+        }
+
+        var terminationDate = contract.TerminationDate?.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU")) ?? "не указана";
+        var lines = new List<string>
+        {
+            $"Договор № {contract.Number} расторгнут.",
+            $"Дата расторжения: {terminationDate}.",
+        };
+
+        if (!string.IsNullOrWhiteSpace(contract.TerminationReason))
+        {
+            lines.Add($"Причина: {contract.TerminationReason.Trim()}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(contract.TerminationTerms))
+        {
+            lines.Add($"Условия расторжения: {contract.TerminationTerms.Trim()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(contract.TerminationFinancialTerms))
+        {
+            lines.Add($"Финансовые условия: {contract.TerminationFinancialTerms.Trim()}");
+        }
+
+        await _emailService.SendEmailAsync(
+            email,
+            $"Договор № {contract.Number} расторгнут",
+            string.Join(Environment.NewLine + Environment.NewLine, lines),
+            cancellationToken: ct);
     }
 
     private ContractDto MapToDto(Contract contract)
