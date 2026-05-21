@@ -4531,9 +4531,9 @@ function CourtPanel({
             </select>
           </label>
           <label className="text-sm font-medium text-slate-700">
-            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">РЎСѓРґ</span>
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Суд</span>
             <select value={courtEventCourtIdDraft} onChange={(event) => onCourtEventCourtIdChange(event.target.value)} disabled={courtDirectoryLoading} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50">
-              <option value="">{courtDirectoryLoading ? 'Р—Р°РіСЂСѓР·РєР°...' : 'РР· РєР°СЂС‚РѕС‡РєРё'}</option>
+              <option value="">{courtDirectoryLoading ? 'Загрузка...' : 'Из карточки'}</option>
               {courtDirectory.map((court) => (
                 <option key={court.id} value={court.id}>
                   {court.name}
@@ -4601,23 +4601,23 @@ function CourtPanel({
             <input value={deadlineNotesDraft} onChange={(event) => onDeadlineNotesChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           </label>
           <label className="text-sm font-medium text-slate-700">
-            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">РЎРѕР±С‹С‚РёРµ</span>
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Событие</span>
             <select value={deadlineCourtEventIdDraft} onChange={(event) => onDeadlineCourtEventIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-              <option value="">Р‘РµР· СЃРІСЏР·Рё</option>
+              <option value="">Без связи</option>
               {courtEvents.map((event) => (
                 <option key={event.id} value={event.id}>
-                  {event.title || `РЎРѕР±С‹С‚РёРµ #${event.id}`}
+                  {event.title || `Событие #${event.id}`}
                 </option>
               ))}
             </select>
           </label>
           <label className="text-sm font-medium text-slate-700">
-            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Р”РѕРєСѓРјРµРЅС‚</span>
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Документ</span>
             <select value={deadlineDocumentIdDraft} onChange={(event) => onDeadlineDocumentIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-              <option value="">Р‘РµР· РґРѕРєСѓРјРµРЅС‚Р°</option>
+              <option value="">Без документа</option>
               {documents.map((document) => (
                 <option key={document.id} value={document.id}>
-                  {document.originalFileName || document.documentType || `Р”РѕРєСѓРјРµРЅС‚ #${document.id}`}
+                  {document.originalFileName || document.documentType || `Документ #${document.id}`}
                 </option>
               ))}
             </select>

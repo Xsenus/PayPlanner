@@ -1438,11 +1438,11 @@ describe('CaseDetailPage', () => {
       sourceType: 'client' as const,
       sourceId: 12,
       clientId: 12,
-      displayName: 'Р—РµРјС†РѕРІ Р’РёРєС‚РѕСЂ РђР»РµРєСЃР°РЅРґСЂРѕРІРёС‡',
-      role: 'Р”РѕР»Р¶РЅРёРє',
+      displayName: 'Земцов Виктор Александрович',
+      role: 'Должник',
       phone: '+79991234567',
       email: 'zemtsov@example.test',
-      notes: 'РџСЂРµРґСЃС‚Р°РІРёС‚РµР»СЊ РїРѕ РґРѕРІРµСЂРµРЅРЅРѕСЃС‚Рё',
+      notes: 'Представитель по доверенности',
       createdAt: '2026-05-01T10:00:00Z',
     };
     const archivedParty = {
@@ -1464,7 +1464,7 @@ describe('CaseDetailPage', () => {
 
     await screen.findByText(/ЗЕМЦОВ/u);
     fireEvent.click(screen.getByRole('button', { name: 'Участники' }));
-    await screen.findByText(activeParty.displayName);
+    expect((await screen.findAllByText(activeParty.displayName)).length).toBeGreaterThan(0);
     expect(screen.queryByText('Архивный участник')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Показать архив' }));

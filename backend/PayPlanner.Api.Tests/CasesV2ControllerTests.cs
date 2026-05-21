@@ -1695,7 +1695,7 @@ public class CasesV2ControllerTests
         var clientCase = new ClientCase
         {
             Client = client,
-            Title = "Р”РµР»Рѕ СЃРѕ СЃСЂРѕРєРѕРј Рё СЃРѕР±С‹С‚РёРµРј",
+            Title = "Дело со сроком и событием",
             Status = ClientCaseStatus.Open,
             Priority = "normal",
             ResponsibleUserId = owner.Id,
@@ -1708,7 +1708,7 @@ public class CasesV2ControllerTests
         {
             ClientCaseId = clientCase.Id,
             EventType = "hearing",
-            Title = "Р—Р°СЃРµРґР°РЅРёРµ РґР»СЏ СЃСЂРѕРєР°",
+            Title = "Заседание для срока",
             ScheduledAt = new DateTime(2026, 8, 10, 10, 0, 0, DateTimeKind.Utc),
             CourtInstance = "first",
             MovementStatus = "scheduled",
@@ -1726,7 +1726,7 @@ public class CasesV2ControllerTests
             new CasesV2Controller.UpsertClientCaseProceduralDeadlineRequest
             {
                 DeadlineType = "motion",
-                Title = "РџРѕРґР°С‚СЊ РїРѕР·РёС†РёСЋ Рє Р·Р°СЃРµРґР°РЅРёСЋ",
+                Title = "Подать позицию к заседанию",
                 DueAt = new DateTime(2026, 8, 8, 0, 0, 0, DateTimeKind.Utc),
                 SourceType = "court-event",
                 SourceId = courtEvent.Id,

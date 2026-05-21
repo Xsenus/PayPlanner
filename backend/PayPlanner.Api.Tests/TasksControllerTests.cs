@@ -137,13 +137,13 @@ public class TasksControllerTests
     public async Task CreateTask_AllowsInternalTaskWithoutClient()
     {
         await using var db = await CreateContextAsync();
-        var author = await CreateAdminUserAsync(db, "author@example.com", "РђРІС‚РѕСЂ");
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
         {
             IsInternal = true,
-            Title = "РџСЂРѕРІРµСЂРёС‚СЊ РІРЅСѓС‚СЂРµРЅРЅРёР№ РїСЂРѕС†РµСЃСЃ",
+            Title = "Проверить внутренний процесс",
             DueAt = DateTime.UtcNow.AddHours(2),
         }, CancellationToken.None);
 

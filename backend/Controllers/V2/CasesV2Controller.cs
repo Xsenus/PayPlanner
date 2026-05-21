@@ -7078,7 +7078,7 @@ public class CasesV2Controller : ControllerBase
                 .AnyAsync(item => item.Id == documentId && item.ClientCaseId == clientCaseId, ct);
             if (!documentExists)
             {
-                return "Р”РѕРєСѓРјРµРЅС‚ СЃСѓРґРµР±РЅРѕРіРѕ СЃРѕР±С‹С‚РёСЏ РЅРµ РЅР°Р№РґРµРЅ РІ СЌС‚РѕРј РґРµР»Рµ.";
+                return "Документ судебного события не найден в этом деле.";
             }
         }
 
@@ -7089,7 +7089,7 @@ public class CasesV2Controller : ControllerBase
                 .AnyAsync(item => item.Id == deadlineId && item.ClientCaseId == clientCaseId, ct);
             if (!deadlineExists)
             {
-                return "РџСЂРѕС†РµСЃСЃСѓР°Р»СЊРЅС‹Р№ СЃСЂРѕРє СЃСѓРґРµР±РЅРѕРіРѕ СЃРѕР±С‹С‚РёСЏ РЅРµ РЅР°Р№РґРµРЅ РІ СЌС‚РѕРј РґРµР»Рµ.";
+                return "Процессуальный срок судебного события не найден в этом деле.";
             }
         }
 
@@ -7105,7 +7105,7 @@ public class CasesV2Controller : ControllerBase
                 .AnyAsync(item => item.Id == taskId && item.ClientCaseId == clientCaseId, ct);
             if (!taskExists)
             {
-                return "Р—Р°РґР°С‡Р° РїСЂРѕС†РµСЃСЃСѓР°Р»СЊРЅРѕРіРѕ СЃСЂРѕРєР° РЅРµ РЅР°Р№РґРµРЅР° РІ СЌС‚РѕРј РґРµР»Рµ.";
+                return "Задача процессуального срока не найдена в этом деле.";
             }
         }
 
@@ -7116,7 +7116,7 @@ public class CasesV2Controller : ControllerBase
                 .AnyAsync(item => item.Id == documentId && item.ClientCaseId == clientCaseId, ct);
             if (!documentExists)
             {
-                return "Р”РѕРєСѓРјРµРЅС‚ РїСЂРѕС†РµСЃСЃСѓР°Р»СЊРЅРѕРіРѕ СЃСЂРѕРєР° РЅРµ РЅР°Р№РґРµРЅ РІ СЌС‚РѕРј РґРµР»Рµ.";
+                return "Документ процессуального срока не найден в этом деле.";
             }
         }
 
@@ -7127,7 +7127,7 @@ public class CasesV2Controller : ControllerBase
                 .AnyAsync(item => item.Id == courtEventId && item.ClientCaseId == clientCaseId, ct);
             if (!courtEventExists)
             {
-                return "РЎСѓРґРµР±РЅРѕРµ СЃРѕР±С‹С‚РёРµ РїСЂРѕС†РµСЃСЃСѓР°Р»СЊРЅРѕРіРѕ СЃСЂРѕРєР° РЅРµ РЅР°Р№РґРµРЅРѕ РІ СЌС‚РѕРј РґРµР»Рµ.";
+                return "Судебное событие процессуального срока не найдено в этом деле.";
             }
         }
 
