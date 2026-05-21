@@ -1796,7 +1796,11 @@ public sealed class NotificationService : INotificationService
         if (changeLabels.Count > 0)
         {
             lines.Add(string.Empty);
-            lines.Add($"Изменения: {string.Join(", ", changeLabels)}.");
+            lines.Add("Изменения:");
+            foreach (var changeLabel in changeLabels)
+            {
+                lines.Add($"- {changeLabel}");
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(comment))

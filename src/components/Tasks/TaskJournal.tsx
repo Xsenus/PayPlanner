@@ -18,7 +18,6 @@ import {
   Mail,
   MessageSquare,
   MoreHorizontal,
-  Pencil,
   Phone,
   Plus,
   Search,
@@ -1228,7 +1227,7 @@ export function TaskJournal({
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
       setModal({
-        mode: isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, permissions.tasks) ? 'view' : 'edit',
+        mode: 'view',
         task,
       });
       setHighlightedTaskId(task.id);
@@ -1238,7 +1237,7 @@ export function TaskJournal({
         onRouteTaskChange?.(task.id);
       }
     },
-    [currentUserId, isAdminUser, onRouteTaskChange, permissions.tasks, taskSettings],
+    [onRouteTaskChange],
   );
 
   const openTaskCreate = useCallback(() => {
@@ -1545,6 +1544,13 @@ export function TaskJournal({
   const selectableTasks = useMemo(
     () => filteredTasks.filter((task) => !isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, permissions.tasks)),
     [currentUserId, filteredTasks, isAdminUser, permissions.tasks, taskSettings],
+  );
+  const canEditModalTask = useMemo(
+    () => Boolean(
+      modal?.task &&
+      !isTaskReadOnlyForCurrentUser(modal.task, currentUserId, isAdminUser, taskSettings, permissions.tasks),
+    ),
+    [currentUserId, isAdminUser, modal?.task, permissions.tasks, taskSettings],
   );
   const selectableTaskIds = useMemo(() => new Set(selectableTasks.map((task) => task.id)), [selectableTasks]);
   const selectedTasksForBulk = useMemo(
@@ -2473,7 +2479,9 @@ export function TaskJournal({
           currentUserName={currentUserName}
           taskSettings={taskSettings}
           notificationDefaults={taskNotificationDefaults}
+          canSwitchToEdit={canEditModalTask}
           onClose={closeTaskModal}
+          onEnableEdit={() => setModal((current) => current?.task ? { ...current, mode: 'edit' } : current)}
           onSave={handleSave}
           onResultSave={handleResultSave}
           onApprovalDecision={handleApprovalDecision}
@@ -2927,8 +2935,8 @@ function TaskTable({
                           <CheckCircle2 className="h-4 w-4" />
                         </button>
                       ) : null}
-                      <button type="button" onClick={() => onEdit(task)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" title={isReadOnly ? 'Просмотр' : 'Редактировать'}>
-                        {isReadOnly ? <Eye className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                      <button type="button" onClick={() => onEdit(task)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" title="Просмотр">
+                        <Eye className="h-4 w-4" />
                       </button>
                       {!isReadOnly ? (
                         <button type="button" onClick={() => onDelete(task)} className="rounded-xl p-2 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700" title="Удалить">
@@ -2996,8 +3004,8 @@ function TaskBoard({
                     <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${priorityClass(task.priority)}`}>
                       {getPriorityLabel(task.priority)}
                     </span>
-                    <button type="button" onClick={() => onEdit(task)} className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" title={isReadOnly ? 'Просмотр' : 'Редактировать'}>
-                      {isReadOnly ? <Eye className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                    <button type="button" onClick={() => onEdit(task)} className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" title="Просмотр">
+                      <Eye className="h-4 w-4" />
                     </button>
                   </div>
                   <div className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{getTaskClientName(task)}</div>
@@ -4201,7 +4209,9 @@ function TaskModal({
   currentUserName,
   taskSettings,
   notificationDefaults,
+  canSwitchToEdit,
   onClose,
+  onEnableEdit,
   onSave,
   onResultSave,
   onApprovalDecision,
@@ -4218,7 +4228,9 @@ function TaskModal({
   currentUserName: string;
   taskSettings: TaskJournalSettingsDto;
   notificationDefaults: TaskNotificationDefaults;
+  canSwitchToEdit: boolean;
   onClose: () => void;
+  onEnableEdit: () => void;
   onSave: (form: TaskForm, taskId?: number) => void | Promise<void>;
   onResultSave: (task: TaskJournalItem, status: TaskJournalStatus, result: string) => void | Promise<void>;
   onApprovalDecision: (
@@ -4360,7 +4372,8 @@ function TaskModal({
     [clientCases, form.clientCaseId],
   );
   const isReadOnly = state?.mode === 'view';
-  const canRequestDeadlineChange = Boolean(taskId && isReadOnly && taskSettings.allowExecutorDeadlineChangeRequests);
+  const isLockedViewWithEditAccess = Boolean(isReadOnly && canSwitchToEdit);
+  const canRequestDeadlineChange = Boolean(taskId && isReadOnly && !canSwitchToEdit && taskSettings.allowExecutorDeadlineChangeRequests);
   const canManageFiles = Boolean(taskId && !isReadOnly);
 
   const update = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
@@ -4738,20 +4751,32 @@ function TaskModal({
           <div className="flex shrink-0 flex-wrap items-start justify-end gap-2">
             {state?.task ? (
               <>
-                <button
-                  type="button"
-                  onClick={() => void saveWithStatus('inProgress')}
-                  className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
-                >
-                  В работу
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleCompletionAction()}
-                  className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
-                >
-                  {completionButtonLabel}
-                </button>
+                {isLockedViewWithEditAccess ? (
+                  <button
+                    type="button"
+                    onClick={onEnableEdit}
+                    className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                  >
+                    Редактировать задачу
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void saveWithStatus('inProgress')}
+                      className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+                    >
+                      В работу
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleCompletionAction()}
+                      className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                    >
+                      {completionButtonLabel}
+                    </button>
+                  </>
+                )}
                 {!isReadOnly ? (
                   <div className="relative">
                     <button
@@ -5511,7 +5536,11 @@ function TaskModal({
 
         <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-4 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Отмена</button>
-          {isReadOnly && state?.task ? (
+          {isLockedViewWithEditAccess ? (
+            <button type="button" onClick={onEnableEdit} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+              Редактировать задачу
+            </button>
+          ) : isReadOnly && state?.task ? (
             <button type="button" onClick={() => void onResultSave(state.task!, form.status, form.result)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               Сохранить результат
             </button>

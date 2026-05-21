@@ -266,6 +266,13 @@ async function renderJournal(
   await screen.findAllByText(options.waitForTitle ?? tasks[0]?.title ?? 'Тестовая задача');
 }
 
+async function openFirstTaskForEdit() {
+  fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+  await screen.findByRole('heading', { name: 'Просмотр задачи' });
+  fireEvent.click(screen.getAllByRole('button', { name: 'Редактировать задачу' })[0]);
+  await screen.findByRole('heading', { name: 'Редактировать задачу' });
+}
+
 describe('TaskJournal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -572,8 +579,7 @@ describe('TaskJournal', () => {
       }),
     ]);
 
-    fireEvent.click(screen.getByTitle('Редактировать'));
-    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+    await openFirstTaskForEdit();
 
     expect(screen.queryByRole('button', { name: 'Согласовать' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'На доработку' })).toBeNull();
@@ -654,7 +660,7 @@ describe('TaskJournal', () => {
     const rowButtons = within(row as HTMLTableRowElement).getAllByRole('button');
     fireEvent.click(rowButtons[1]);
 
-    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+    await screen.findByRole('heading', { name: 'Просмотр задачи' });
 
     expect(searchInput.value).toBe('EGOROV');
     expect(screen.getByText('Egor task')).toBeTruthy();
@@ -1082,7 +1088,7 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.createTaskJournalCaseAutomationTask).toHaveBeenCalledWith(100));
     expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
     expect(toastMock.success).toHaveBeenCalledWith('Контрольная задача создана.', 'Автоконтроль дел');
-    expect(await screen.findByRole('heading', { name: 'Редактировать задачу' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
   });
 
   it('creates control tasks for all automation candidates', async () => {
@@ -1117,7 +1123,7 @@ describe('TaskJournal', () => {
 
     expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
     expect(toastMock.error).toHaveBeenCalledWith('Перед завершением задачи заполните результат.', 'Журнал задач');
-    expect(await screen.findByRole('heading', { name: 'Редактировать задачу' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
     expect(screen.getAllByText('Результат').length).toBeGreaterThan(0);
   });
 
@@ -1136,8 +1142,7 @@ describe('TaskJournal', () => {
       ],
     });
 
-    fireEvent.click(screen.getByTitle('Редактировать'));
-    expect(await screen.findByRole('heading', { name: 'Редактировать задачу' })).toBeTruthy();
+    await openFirstTaskForEdit();
 
     fireEvent.click(screen.getByRole('button', { name: 'На согласование' }));
 
@@ -1155,8 +1160,7 @@ describe('TaskJournal', () => {
     const approvalDueAt = todayAt(16, 30);
     await renderJournal([createTask({ approvalDueAt })]);
 
-    fireEvent.click(screen.getByTitle('Редактировать'));
-    expect(await screen.findByRole('heading', { name: 'Редактировать задачу' })).toBeTruthy();
+    await openFirstTaskForEdit();
 
     const approvalDueAtInput = screen.getByTestId('task-approval-due-at-input') as HTMLInputElement;
     expect(approvalDueAtInput.value).toBe(toDatetimeLocalInputValue(new Date(approvalDueAt)));
@@ -1182,8 +1186,7 @@ describe('TaskJournal', () => {
       ],
     });
 
-    fireEvent.click(screen.getByTitle('Редактировать'));
-    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+    await openFirstTaskForEdit();
 
     fireEvent.click(screen.getByRole('button', { name: 'Действия с задачей' }));
     fireEvent.click(screen.getByRole('button', { name: 'Добавить подписчика-наблюдателя' }));
@@ -1212,8 +1215,7 @@ describe('TaskJournal', () => {
       ],
     });
 
-    fireEvent.click(screen.getByTitle('Редактировать'));
-    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+    await openFirstTaskForEdit();
 
     const extraExecutorSelect = screen.getByLabelText('Добавить: Дополнительные исполнители');
     expect(within(extraExecutorSelect).queryByRole('option', { name: /Администратор/ })).toBeNull();
@@ -1235,8 +1237,7 @@ describe('TaskJournal', () => {
   it('sends a change comment with task edits', async () => {
     await renderJournal();
 
-    fireEvent.click(screen.getByTitle('Редактировать'));
-    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+    await openFirstTaskForEdit();
 
     fireEvent.change(screen.getByPlaceholderText('Что изменили по задаче'), { target: { value: 'Поменяли уведомления и срок.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
@@ -1251,8 +1252,7 @@ describe('TaskJournal', () => {
     apiMock.createTaskJournalItem.mockResolvedValue(createTask({ id: 202, title: 'Тестовая задача (копия)' }));
     await renderJournal();
 
-    fireEvent.click(screen.getByTitle('Редактировать'));
-    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+    await openFirstTaskForEdit();
 
     fireEvent.click(screen.getByRole('button', { name: 'Действия с задачей' }));
     fireEvent.click(screen.getByRole('button', { name: 'Дублировать' }));
@@ -1507,8 +1507,7 @@ describe('TaskJournal', () => {
 
     await renderJournal();
 
-    fireEvent.click(screen.getAllByTitle('Редактировать')[0]);
-    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+    await openFirstTaskForEdit();
 
     expect(await screen.findByText('Задача создана.')).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText('Введите комментарий'), { target: { value: 'Комментарий по задаче' } });
@@ -1537,8 +1536,7 @@ describe('TaskJournal', () => {
 
     await renderJournal();
 
-    fireEvent.click(screen.getAllByTitle('Редактировать')[0]);
-    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+    await openFirstTaskForEdit();
     expect((await screen.findAllByText('document.pdf')).length).toBeGreaterThan(0);
 
     const fileInputs = document.querySelectorAll('input[type="file"]');

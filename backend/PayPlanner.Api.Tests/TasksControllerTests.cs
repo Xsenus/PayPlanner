@@ -394,6 +394,8 @@ public class TasksControllerTests
         Assert.Equal(task.Id, notification.TaskId);
         Assert.Equal("Поменяли срок и передали в работу.", notification.Comment);
         Assert.Contains(notification.ChangeLabels, item => item.Contains("Наименование", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(notification.ChangeLabels, item => item.Contains("Срок:", StringComparison.OrdinalIgnoreCase) && item.Contains("->", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(notification.ChangeLabels, item => item.Contains("Статус:", StringComparison.OrdinalIgnoreCase) && item.Contains("В работе", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

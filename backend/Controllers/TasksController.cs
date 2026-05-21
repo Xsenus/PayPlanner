@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
@@ -3534,54 +3535,60 @@ public class TasksController : ControllerBase
     {
         var changes = new List<string>();
 
-        AddIfChanged(changes, "Клиент", entity.ClientId, binding.ClientId);
-        AddIfChanged(changes, "Юрлицо", entity.LegalEntityId, binding.LegalEntityId);
-        AddIfChanged(changes, "Дело", entity.ClientCaseId, binding.ClientCaseId);
+        var nextObjectName = BuildObjectName(binding.OwnerName, binding.ClientCaseTitle);
+        AddIfChanged(changes, "Клиент/дело", entity.ObjectName, nextObjectName);
         AddIfChanged(changes, "Наименование", entity.Title, request.Title.Trim());
         AddIfChanged(changes, "Описание", NormalizeOptional(entity.Description), NormalizeOptional(request.Description));
-        AddIfChanged(changes, "Исполнитель", entity.AssigneeUserId, participants.PrimaryAssigneeUserId);
-        AddIfChanged(changes, "Имя исполнителя", entity.AssigneeName, participants.PrimaryAssigneeName);
+        AddIfChanged(changes, "Исполнитель", entity.AssigneeName, participants.PrimaryAssigneeName);
         if (entity.DueAt != request.DueAt)
         {
-            changes.Add("Срок");
+            changes.Add($"Срок: {FormatHistoryDateTime(entity.DueAt)} -> {FormatHistoryDateTime(request.DueAt)}");
         }
-        if (entity.ApprovalDueAt != NormalizeApprovalDueAt(request.ApprovalDueAt))
+        var nextApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt);
+        if (entity.ApprovalDueAt != nextApprovalDueAt)
         {
-            changes.Add("Срок согласования");
+            changes.Add($"Срок согласования: {FormatOptionalDateTime(entity.ApprovalDueAt)} -> {FormatOptionalDateTime(nextApprovalDueAt)}");
         }
-        if (entity.PlannedDurationMinutes != NormalizeTaskDuration(request.PlannedDurationMinutes))
+        var nextDuration = NormalizeTaskDuration(request.PlannedDurationMinutes);
+        if (entity.PlannedDurationMinutes != nextDuration)
         {
-            changes.Add("Длительность");
+            changes.Add($"Длительность: {FormatDurationMinutes(entity.PlannedDurationMinutes)} -> {FormatDurationMinutes(nextDuration)}");
         }
 
-        AddIfChanged(changes, "Тип", entity.Type, NormalizeEnumValue(request.Type, AllowedTypes, "task"));
-        AddIfChanged(changes, "Приоритет", entity.Priority, NormalizeEnumValue(request.Priority, AllowedPriorities, "normal"));
-        AddIfChanged(changes, "Статус", entity.Status, nextStatus);
+        AddIfChanged(changes, "Тип", TaskTypeLabel(entity.Type), TaskTypeLabel(NormalizeEnumValue(request.Type, AllowedTypes, "task")));
+        AddIfChanged(changes, "Приоритет", TaskPriorityLabel(entity.Priority), TaskPriorityLabel(NormalizeEnumValue(request.Priority, AllowedPriorities, "normal")));
+        AddIfChanged(changes, "Статус", TaskStatusLabel(entity.Status), TaskStatusLabel(nextStatus));
         AddIfChanged(changes, "Результат", NormalizeOptional(entity.Result), NormalizeOptional(request.Result));
-        if (!SameStringSet(DeserializeList(entity.RemindersJson), SerializeListForCompare(request.Reminders, AllowedReminders, ["atDue"])))
+        var currentReminders = DeserializeList(entity.RemindersJson);
+        var nextReminders = SerializeListForCompare(request.Reminders, AllowedReminders, ["atDue"]);
+        if (!SameStringSet(currentReminders, nextReminders))
         {
-            changes.Add("Напоминания");
+            changes.Add($"Напоминания: {FormatReminderList(currentReminders)} -> {FormatReminderList(nextReminders)}");
         }
 
-        if (!SameStringSet(DeserializeList(entity.ChannelsJson), SerializeListForCompare(request.Channels, AllowedChannels, ["inApp"])))
+        var currentChannels = DeserializeList(entity.ChannelsJson);
+        var nextChannels = SerializeListForCompare(request.Channels, AllowedChannels, ["inApp"]);
+        if (!SameStringSet(currentChannels, nextChannels))
         {
-            changes.Add("Каналы уведомлений");
+            changes.Add($"Каналы уведомлений: {FormatChannelList(currentChannels)} -> {FormatChannelList(nextChannels)}");
         }
 
-        if (!SameStringSet(DeserializeList(entity.TagsJson), SerializeFreeListForCompare(request.Tags)))
+        var currentTags = DeserializeList(entity.TagsJson);
+        var nextTags = SerializeFreeListForCompare(request.Tags);
+        if (!SameStringSet(currentTags, nextTags))
         {
-            changes.Add("Теги");
+            changes.Add($"Теги: {FormatStringList(currentTags)} -> {FormatStringList(nextTags)}");
         }
 
         if (!SameParticipants(entity.Participants, participants.Items))
         {
-            changes.Add("Участники");
+            changes.Add("Участники: список обновлен");
         }
 
-        AddIfChanged(changes, "Оплата исполнителю", entity.ContractorPaymentEnabled, request.ContractorPaymentEnabled);
-        AddIfChanged(changes, "Сумма оплаты исполнителю", NormalizeMoneyAmount(entity.ContractorPaymentAmount), NormalizeMoneyAmount(request.ContractorPaymentAmount));
-        AddIfChanged(changes, "Дата оплаты исполнителю", NormalizeDateOnly(entity.ContractorPaymentDueDate), NormalizeDateOnly(request.ContractorPaymentDueDate));
-        AddIfChanged(changes, "Оплата по результату", entity.ContractorPaymentOnResult, request.ContractorPaymentOnResult);
+        AddIfChanged(changes, "Оплата исполнителю", FormatYesNo(entity.ContractorPaymentEnabled), FormatYesNo(request.ContractorPaymentEnabled));
+        AddIfChanged(changes, "Сумма оплаты исполнителю", FormatMoney(NormalizeMoneyAmount(entity.ContractorPaymentAmount)), FormatMoney(NormalizeMoneyAmount(request.ContractorPaymentAmount)));
+        AddIfChanged(changes, "Дата оплаты исполнителю", FormatOptionalDate(NormalizeDateOnly(entity.ContractorPaymentDueDate)), FormatOptionalDate(NormalizeDateOnly(request.ContractorPaymentDueDate)));
+        AddIfChanged(changes, "Оплата по результату", FormatYesNo(entity.ContractorPaymentOnResult), FormatYesNo(request.ContractorPaymentOnResult));
 
         return changes;
     }
@@ -3590,9 +3597,44 @@ public class TasksController : ControllerBase
     {
         if (!EqualityComparer<T>.Default.Equals(current, next))
         {
-            changes.Add(label);
+            changes.Add($"{label}: {FormatChangeValue(current)} -> {FormatChangeValue(next)}");
         }
     }
+
+    private static string FormatChangeValue<T>(T value)
+    {
+        if (value is null)
+        {
+            return "не указано";
+        }
+
+        var text = value.ToString();
+        return string.IsNullOrWhiteSpace(text) ? "не указано" : text.Trim();
+    }
+
+    private static string FormatOptionalDateTime(DateTime? value)
+        => value.HasValue ? FormatHistoryDateTime(value.Value) : "не указано";
+
+    private static string FormatOptionalDate(DateTime? value)
+        => value.HasValue ? value.Value.ToString("dd.MM.yyyy") : "не указано";
+
+    private static string FormatDurationMinutes(int minutes)
+        => minutes <= 0 ? "не указано" : $"{minutes} мин.";
+
+    private static string FormatMoney(decimal? value)
+        => value.HasValue ? value.Value.ToString("N2", CultureInfo.GetCultureInfo("ru-RU")) + " ₽" : "не указано";
+
+    private static string FormatYesNo(bool value)
+        => value ? "да" : "нет";
+
+    private static string FormatStringList(IReadOnlyList<string> values)
+        => values.Count == 0 ? "не указано" : string.Join(", ", values);
+
+    private static string FormatReminderList(IReadOnlyList<string> values)
+        => values.Count == 0 ? "не указано" : string.Join(", ", values.Select(TaskReminderLabel));
+
+    private static string FormatChannelList(IReadOnlyList<string> values)
+        => values.Count == 0 ? "не указано" : string.Join(", ", values.Select(TaskChannelLabel));
 
     private static IReadOnlyList<string> SerializeListForCompare(
         IEnumerable<string>? values,
@@ -3661,6 +3703,51 @@ public class TasksController : ControllerBase
             "done" => "Готово",
             "cancelled" => "Отменена",
             _ => status ?? "—",
+        };
+
+    private static string TaskTypeLabel(string? type)
+        => type switch
+        {
+            "task" => "Задача",
+            "budget" => "Бюджет",
+            "contact" => "Связаться",
+            "document" => "Документ",
+            "reminder" => "Не забыть",
+            "control" => "Контроль",
+            _ => type ?? "—",
+        };
+
+    private static string TaskPriorityLabel(string? priority)
+        => priority switch
+        {
+            "low" => "Низкий",
+            "normal" => "Обычный",
+            "high" => "Высокий",
+            "urgent" => "Срочно",
+            _ => priority ?? "—",
+        };
+
+    private static string TaskReminderLabel(string? reminder)
+        => reminder switch
+        {
+            "before15m" => "за 15 минут",
+            "before1h" => "за 1 час",
+            "before3h" => "за 3 часа",
+            "before1d" => "за 1 день",
+            "before3d" => "за 3 дня",
+            "before7d" => "за 7 дней",
+            "atDue" => "в срок задачи",
+            "dailyOverdue" => "ежедневно после просрочки",
+            _ => reminder ?? "—",
+        };
+
+    private static string TaskChannelLabel(string? channel)
+        => channel switch
+        {
+            "inApp" => "в системе",
+            "email" => "Email",
+            "telegram" => "Telegram",
+            _ => channel ?? "—",
         };
 
     private static int ParticipantRoleOrder(TaskJournalParticipant participant)
