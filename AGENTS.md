@@ -6,6 +6,8 @@ When implementing a user-facing mechanism, changing business rules, permissions,
 
 Release notes must be written for end users, not as an internal checklist. Describe what is now available, improved, or fixed, and where the user can see it in the product. Do not include deployment steps, testing instructions, internal file names, or notes about what agents should do.
 
+Write release notes in clear, natural language that is easy for non-technical users to understand. Include enough detail for the user to understand what changed, how it affects their work, and where to find the updated behavior in the product. Avoid programming terms, internal architecture details, commit references, and vague phrases like "minor fixes" when a visible result can be described.
+
 After each user-visible change, add a new entry to `backend/AppReleases/releases.json` when the change should be shown in "Что нового". If one task contains several changes, ask the user whether to publish one combined release note or separate release notes for each change, unless the user has already specified the format.
 
 Use the existing structure:

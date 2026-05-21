@@ -8,6 +8,8 @@ const {
   getActMock,
   getClientsMock,
   getActResponsiblesMock,
+  getDocumentStatusesMock,
+  updateActWorkflowStatusMock,
   downloadActDocumentMock,
   sendActByEmailMock,
 } = vi.hoisted(() => ({
@@ -15,6 +17,8 @@ const {
   getActMock: vi.fn(),
   getClientsMock: vi.fn(),
   getActResponsiblesMock: vi.fn(),
+  getDocumentStatusesMock: vi.fn(),
+  updateActWorkflowStatusMock: vi.fn(),
   downloadActDocumentMock: vi.fn(),
   sendActByEmailMock: vi.fn(),
 }));
@@ -56,7 +60,9 @@ vi.mock('../../services/api', () => ({
     getAct: getActMock,
     getClients: getClientsMock,
     getActResponsibles: getActResponsiblesMock,
+    getDocumentStatuses: getDocumentStatusesMock,
     updateAct: vi.fn(),
+    updateActWorkflowStatus: updateActWorkflowStatusMock,
     deleteAct: vi.fn(),
     downloadActDocument: downloadActDocumentMock,
     sendActByEmail: sendActByEmailMock,
@@ -81,6 +87,7 @@ vi.mock('../ui/ObjectAuditModal', () => ({
 describe('ActDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getDocumentStatusesMock.mockResolvedValue([]);
     downloadActDocumentMock.mockResolvedValue(new Blob(['<html><body><div>Preview</div></body></html>'], { type: 'text/html' }));
     sendActByEmailMock.mockResolvedValue({
       sent: true,
@@ -231,6 +238,67 @@ describe('ActDetailPage', () => {
         format: 'word',
         email: 'client@example.com',
       });
+    });
+  });
+
+  it('opens status change modal from the status badge and updates act status', async () => {
+    getActMock.mockResolvedValue({
+      id: 33,
+      number: '33',
+      date: '2026-04-11',
+      amount: 26_000,
+      status: 'Created',
+      workflowStatus: 'Draft',
+      type: 'Income',
+      clientId: 7,
+      lineItems: [],
+    });
+    getClientsMock.mockResolvedValue({
+      items: [
+        {
+          id: 7,
+          name: 'Клиент для статуса',
+          email: '',
+          phone: '',
+          company: '',
+          address: '',
+          notes: '',
+          createdAt: '2026-04-01T00:00:00Z',
+          isActive: true,
+        },
+      ],
+    });
+    getActResponsiblesMock.mockResolvedValue({ items: [] });
+    updateActWorkflowStatusMock.mockResolvedValue({
+      id: 33,
+      number: '33',
+      date: '2026-04-11',
+      amount: 26_000,
+      status: 'Transferred',
+      workflowStatus: 'OnSigning',
+      type: 'Income',
+      clientId: 7,
+      lineItems: [],
+    });
+
+    render(<ActDetailPage actId={33} onBack={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Клиент для статуса')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Изменить статус документа акта №33' })[0]);
+
+    expect(screen.getByRole('heading', { name: 'Смена статуса документа' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /На подписании/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Изменить статус акта на «На подписании»/ }));
+
+    await waitFor(() => {
+      expect(updateActWorkflowStatusMock).toHaveBeenCalledWith(33, 'OnSigning', null);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Смена статуса документа' })).toBeNull();
     });
   });
 });

@@ -2,6 +2,7 @@ import { ArrowLeft, Ban, Check, ChevronDown, Download, Link2, List, Loader2, Pen
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
+import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -9,9 +10,11 @@ import { apiService } from '../../services/api';
 import type { Act, ActInput, ActResponsible, ActStatus, ActWorkflowStatus, Client, PaymentKind } from '../../types';
 import { normalizeAct, normalizeActResponsibleArray, normalizeClientArray } from '../../utils/acts';
 import { toDateInputValue } from '../../utils/dateUtils';
+import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
+import { StatusChangeModal, type StatusChangeOption } from '../ui/StatusChangeModal';
 import { ActModal } from './ActModal';
 
 interface ActDetailPageProps {
@@ -23,6 +26,58 @@ interface ActDetailPageProps {
 
 type DocumentFormat = 'word' | 'pdf';
 type PageAction = 'send' | 'notSigned' | 'transferred' | 'signed' | 'cancel' | 'delete';
+
+const ACT_WORKFLOW_STATUS_ORDER: ActWorkflowStatus[] = [
+  'Draft',
+  'NotSigned',
+  'RequiresClientSignature',
+  'OnApproval',
+  'Approved',
+  'ApprovalRejected',
+  'NeedsCorrection',
+  'OnSigning',
+  'Signed',
+  'Cancelled',
+];
+
+const DEFAULT_ACT_WORKFLOW_STATUS_LABELS: Record<ActWorkflowStatus, string> = {
+  Draft: 'Черновик',
+  NotSigned: 'Не подписан',
+  RequiresClientSignature: 'Требуется подпись клиента',
+  OnApproval: 'На согласовании',
+  Approved: 'Согласован',
+  ApprovalRejected: 'Отказ в согласовании',
+  NeedsCorrection: 'Требует исправления',
+  OnSigning: 'На подписании',
+  Signed: 'Подписан',
+  Cancelled: 'Аннулирован',
+};
+
+const ACT_WORKFLOW_STATUS_CLASSES: Record<ActWorkflowStatus, string> = {
+  Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
+  NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+  RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
+  OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
+  Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
+  NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
+  OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
+  Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
+};
+
+const ACT_WORKFLOW_STATUS_DESCRIPTIONS: Record<ActWorkflowStatus, string> = {
+  Draft: 'Акт вернется в черновик, даты подписания будут очищены.',
+  NotSigned: 'Акт будет отмечен как неподписанный.',
+  RequiresClientSignature: 'Акт будет ожидать подпись клиента.',
+  OnApproval: 'Акт будет отправлен на внутреннее согласование.',
+  Approved: 'Акт будет отмечен как согласованный.',
+  ApprovalRejected: 'В журнал попадет отказ в согласовании акта.',
+  NeedsCorrection: 'Акт будет отмечен как требующий исправления.',
+  OnSigning: 'Акт будет передан на подписание.',
+  Signed: 'Акт будет отмечен как подписанный.',
+  Cancelled: 'Акт будет аннулирован, будет заполнена дата аннулирования.',
+};
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -113,6 +168,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const canEdit = permissions.acts.canEdit;
   const canDelete = permissions.acts.canDelete;
   const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
+  const documentStatusSettings = useDocumentStatusSettings();
 
   const [act, setAct] = useState<Act | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
@@ -127,6 +183,11 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const [editorError, setEditorError] = useState<string | null>(null);
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const [pageActionLoading, setPageActionLoading] = useState<PageAction | null>(null);
+  const [statusChangeOpen, setStatusChangeOpen] = useState(false);
+  const [statusChangeValue, setStatusChangeValue] = useState<ActWorkflowStatus>('Draft');
+  const [statusChangeReason, setStatusChangeReason] = useState('');
+  const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
+  const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
 
   const downloadMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -262,48 +323,25 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     },
   };
 
-  const workflowStatusMeta: Record<ActWorkflowStatus, { label: string; className: string }> = {
-    Draft: {
-      label: 'Черновик',
-      className: 'bg-slate-100 text-slate-700 border border-slate-200',
-    },
-    NotSigned: {
-      label: 'Не подписан',
-      className: 'bg-slate-100 text-slate-700 border border-slate-200',
-    },
-    RequiresClientSignature: {
-      label: 'Требуется подпись клиента',
-      className: 'bg-amber-100 text-amber-800 border border-amber-200',
-    },
-    OnApproval: {
-      label: 'На согласовании',
-      className: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
-    },
-    Approved: {
-      label: 'Согласован',
-      className: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    },
-    ApprovalRejected: {
-      label: 'Отказ в согласовании',
-      className: 'bg-rose-100 text-rose-700 border border-rose-200',
-    },
-    NeedsCorrection: {
-      label: 'Требует исправления',
-      className: 'bg-orange-100 text-orange-700 border border-orange-200',
-    },
-    OnSigning: {
-      label: 'На подписании',
-      className: 'bg-violet-100 text-violet-700 border border-violet-200',
-    },
-    Signed: {
-      label: 'Подписан',
-      className: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    },
-    Cancelled: {
-      label: 'Аннулирован',
-      className: 'bg-rose-100 text-rose-700 border border-rose-200',
-    },
-  };
+  const workflowStatusLabels = useMemo(
+    () => getDocumentStatusLabels(documentStatusSettings, 'act', DEFAULT_ACT_WORKFLOW_STATUS_LABELS),
+    [documentStatusSettings],
+  );
+
+  const workflowStatusCodes = useMemo(
+    () => getDocumentStatusCodes(documentStatusSettings, 'act', ACT_WORKFLOW_STATUS_ORDER),
+    [documentStatusSettings],
+  );
+
+  const workflowStatusOptions: StatusChangeOption<ActWorkflowStatus>[] = useMemo(
+    () => workflowStatusCodes.map((status) => ({
+      value: status,
+      label: workflowStatusLabels[status],
+      description: ACT_WORKFLOW_STATUS_DESCRIPTIONS[status],
+      className: ACT_WORKFLOW_STATUS_CLASSES[status],
+    })),
+    [workflowStatusCodes, workflowStatusLabels],
+  );
 
   const typeMeta = useMemo(() => {
     if (act?.type === 'Income') {
@@ -343,7 +381,19 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     if (act?.status === 'Terminated') return 'Cancelled';
     return 'Draft';
   }, [act?.status, act?.workflowStatus]);
-  const currentWorkflowStatusMeta = workflowStatusMeta[currentWorkflowStatus] ?? workflowStatusMeta.Draft;
+  const currentWorkflowStatusLabel = workflowStatusLabels[currentWorkflowStatus] ?? workflowStatusLabels.Draft;
+  const currentWorkflowStatusClass = ACT_WORKFLOW_STATUS_CLASSES[currentWorkflowStatus] ?? ACT_WORKFLOW_STATUS_CLASSES.Draft;
+  const statusChangeTargetLabel = workflowStatusLabels[statusChangeValue] ?? statusChangeValue;
+  const statusChangeSubject = act
+    ? `Акт №${act.number || act.id} от ${formatDate(act.date)}`
+    : 'Акт не выбран';
+  const statusChangeConsequences = [
+    `Статус документа изменится с «${currentWorkflowStatusLabel}» на «${statusChangeTargetLabel}».`,
+    statusChangeValue === 'Cancelled'
+      ? 'Основной статус акта станет аннулированным, будет заполнена дата аннулирования.'
+      : 'Основной статус акта будет синхронизирован с выбранным статусом документа.',
+    'Изменение сохранится сразу после подтверждения.',
+  ];
   const printableAmount = formatMoney(act?.amount);
   const actLink = useMemo(() => {
     if (typeof window === 'undefined' || !act?.id) {
@@ -467,6 +517,48 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     }
   }, [act, confirm, requiresFinancialActionReason, toast]);
 
+  const openStatusChange = useCallback(() => {
+    if (!canEdit || !act) return;
+
+    setStatusChangeValue(currentWorkflowStatus);
+    setStatusChangeReason('');
+    setStatusChangeError(null);
+    setStatusChangeOpen(true);
+  }, [act, canEdit, currentWorkflowStatus]);
+
+  const closeStatusChange = useCallback(() => {
+    if (statusChangeSubmitting) return;
+
+    setStatusChangeOpen(false);
+    setStatusChangeReason('');
+    setStatusChangeError(null);
+  }, [statusChangeSubmitting]);
+
+  const submitStatusChange = useCallback(async () => {
+    if (!canEdit || !act) return;
+
+    try {
+      setStatusChangeSubmitting(true);
+      setStatusChangeError(null);
+      const updated = normalizeAct(
+        await apiService.updateActWorkflowStatus(act.id, statusChangeValue, statusChangeReason.trim() || null),
+      );
+      if (!updated) {
+        throw new Error('Не удалось обновить статус акта.');
+      }
+
+      setAct(updated);
+      setError(null);
+      setStatusChangeOpen(false);
+      setStatusChangeReason('');
+      toast.success('Статус акта обновлен.');
+    } catch (statusError) {
+      setStatusChangeError(extractDisplayErrorMessage(statusError, 'Не удалось изменить статус акта.'));
+    } finally {
+      setStatusChangeSubmitting(false);
+    }
+  }, [act, canEdit, statusChangeReason, statusChangeValue, toast]);
+
   const handleDelete = useCallback(async () => {
     if (!act) return;
 
@@ -555,6 +647,28 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const transferredDisabled = !canEdit || currentWorkflowStatus === 'OnSigning' || act?.status === 'Signed' || act?.status === 'Terminated';
   const signedDisabled = !canEdit || currentWorkflowStatus === 'Signed' || act?.status === 'Terminated';
   const cancelDisabled = !canEdit || act?.status === 'Terminated';
+  const workflowStatusBadgeClass = 'inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold transition';
+  const renderWorkflowStatusControl = () => {
+    const badge = (
+      <span className={`${workflowStatusBadgeClass} ${currentWorkflowStatusClass}`}>
+        {currentWorkflowStatusLabel}
+      </span>
+    );
+
+    if (!canEdit) return badge;
+
+    return (
+      <button
+        type="button"
+        onClick={openStatusChange}
+        className="inline-flex rounded-full focus:outline-none focus:ring-2 focus:ring-blue-200"
+        title="Изменить статус документа"
+        aria-label={`Изменить статус документа акта №${act?.number || act?.id || ''}`.trim()}
+      >
+        {badge}
+      </button>
+    );
+  };
 
   if (act && editorOpen) {
     return (
@@ -632,9 +746,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           </div>
 
           <div className="flex items-center gap-2">
-            <span className={`rounded-full px-3 py-1 text-sm font-semibold ${currentWorkflowStatusMeta.className}`}>
-              {currentWorkflowStatusMeta.label}
-            </span>
+            {renderWorkflowStatusControl()}
             {canEdit ? (
               <button
                 type="button"
@@ -698,9 +810,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-xl font-semibold">{printableAmount}</span>
                   <div className="flex items-center gap-2">
-                    <span className={`rounded px-3 py-1 text-sm font-semibold ${currentWorkflowStatusMeta.className}`}>
-                      {currentWorkflowStatusMeta.label}
-                    </span>
+                    {renderWorkflowStatusControl()}
                   </div>
                 </div>
               </div>
@@ -967,6 +1077,35 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           </div>
         </div>
       </div>
+      <StatusChangeModal<ActWorkflowStatus>
+        open={statusChangeOpen}
+        title="Смена статуса документа"
+        subject={statusChangeSubject}
+        currentLabel={currentWorkflowStatusLabel}
+        currentValue={currentWorkflowStatus}
+        value={statusChangeValue}
+        options={workflowStatusOptions}
+        onChange={(value) => {
+          setStatusChangeValue(value);
+          if (statusChangeError) {
+            setStatusChangeError(null);
+          }
+        }}
+        reason={statusChangeReason}
+        reasonRequired={requiresFinancialActionReason}
+        onReasonChange={(value) => {
+          setStatusChangeReason(value);
+          if (statusChangeError) {
+            setStatusChangeError(null);
+          }
+        }}
+        consequences={statusChangeConsequences}
+        onCancel={closeStatusChange}
+        onConfirm={submitStatusChange}
+        confirmLabel={`Изменить статус акта на «${statusChangeTargetLabel}»`}
+        error={statusChangeError}
+        loading={statusChangeSubmitting}
+      />
     </div>
   );
 }
