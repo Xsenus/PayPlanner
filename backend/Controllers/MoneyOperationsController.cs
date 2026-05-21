@@ -1669,11 +1669,14 @@ public class MoneyOperationsController : ControllerBase
             return NotFound();
         }
 
-        if (operation.Direction != MoneyOperationDirection.Income)
+        if (operation.Direction is not (MoneyOperationDirection.Income or MoneyOperationDirection.Expense))
         {
             return Ok(Array.Empty<MoneyOperationInvoiceCandidateDto>());
         }
 
+        var targetPaymentType = operation.Direction == MoneyOperationDirection.Expense
+            ? PaymentType.Expense
+            : PaymentType.Income;
         var purposeTokens = ExtractInvoiceNumberTokens(operation.Purpose)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var operationAmount = Math.Round(operation.Amount, 2, MidpointRounding.AwayFromZero);
@@ -1683,9 +1686,11 @@ public class MoneyOperationsController : ControllerBase
             .AsNoTracking()
             .Include(payment => payment.Invoice)
             .Include(payment => payment.Client)
+            .Include(payment => payment.ExpenseClient)
+            .Include(payment => payment.ExpenseLegalEntity)
             .Where(payment =>
                 payment.DocumentKind == DocumentKind.Invoice &&
-                payment.Type == PaymentType.Income &&
+                payment.Type == targetPaymentType &&
                 payment.Status != PaymentStatus.Cancelled &&
                 payment.InvoiceId.HasValue)
             .ToListAsync(ct);
@@ -1743,11 +1748,11 @@ public class MoneyOperationsController : ControllerBase
                     reasons.Add("сумма совпадает с остатком счёта");
                 }
 
-                var candidateName = payment.Client?.Name ?? payment.CounterpartyName;
+                var candidateName = ResolveInvoiceCandidateCounterpartyName(payment);
                 if (NamesLookRelated(operationCounterparty, candidateName))
                 {
                     score += 20;
-                    reasons.Add("похожий контрагент");
+                    reasons.Add(targetPaymentType == PaymentType.Expense ? "похожий поставщик" : "похожий контрагент");
                 }
 
                 return new MoneyOperationInvoiceCandidateDto
@@ -1760,8 +1765,10 @@ public class MoneyOperationsController : ControllerBase
                     PaidAmount = paidAmount,
                     OutstandingAmount = outstandingAmount,
                     Status = payment.Status,
-                    ClientId = payment.ClientId,
-                    ClientName = payment.Client?.Name,
+                    ClientId = targetPaymentType == PaymentType.Expense
+                        ? payment.ExpenseClientId ?? payment.ClientId
+                        : payment.ClientId,
+                    ClientName = candidateName,
                     CounterpartyName = payment.CounterpartyName,
                     MatchReason = reasons.Count == 0 ? null : string.Join(", ", reasons),
                     Score = score,
@@ -3228,13 +3235,19 @@ public class MoneyOperationsController : ControllerBase
             .SelectMany(item => ExtractInvoiceNumberTokens(item.Purpose))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var statementPaymentTypes = items
+            .Select(item => item.Direction == MoneyOperationDirection.Expense ? PaymentType.Expense : PaymentType.Income)
+            .Distinct()
+            .ToList();
         var invoiceCandidates = (await _db.Payments
                 .AsNoTracking()
                 .Include(payment => payment.Invoice)
                 .Include(payment => payment.Client)
+                .Include(payment => payment.ExpenseClient)
+                .Include(payment => payment.ExpenseLegalEntity)
                 .Where(payment =>
                     payment.DocumentKind == DocumentKind.Invoice &&
-                    payment.Type == PaymentType.Income &&
+                    statementPaymentTypes.Contains(payment.Type) &&
                     payment.Status != PaymentStatus.Cancelled &&
                     payment.InvoiceId.HasValue)
                 .ToListAsync(ct))
@@ -3246,8 +3259,9 @@ public class MoneyOperationsController : ControllerBase
                     payment.Amount,
                     payment.PaidAmount,
                     payment.Status,
-                    payment.ClientId,
-                    payment.Client != null ? payment.Client.Name : null,
+                    payment.Type,
+                    payment.Type == PaymentType.Expense ? payment.ExpenseClientId ?? payment.ClientId : payment.ClientId,
+                    ResolveInvoiceCandidateCounterpartyName(payment),
                     payment.CounterpartyName,
                     BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber)))
                 .Where(candidate =>
@@ -3865,16 +3879,20 @@ public class MoneyOperationsController : ControllerBase
         BankStatementImportItem item,
         IReadOnlyCollection<BankStatementInvoiceCandidate> candidates)
     {
-        if (item.Direction != MoneyOperationDirection.Income)
+        if (item.Direction is not (MoneyOperationDirection.Income or MoneyOperationDirection.Expense))
         {
             return null;
         }
 
+        var targetPaymentType = item.Direction == MoneyOperationDirection.Expense
+            ? PaymentType.Expense
+            : PaymentType.Income;
         var tokens = ExtractInvoiceNumberTokens(item.Purpose).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (tokens.Count > 0)
         {
             var matchingCandidates = candidates
                 .Where(candidate =>
+                    candidate.PaymentType == targetPaymentType &&
                     candidate.OutstandingAmount > 0m &&
                     item.Amount <= candidate.OutstandingAmount + 0.009m &&
                     candidate.NumberTokens.Any(tokens.Contains))
@@ -3898,6 +3916,7 @@ public class MoneyOperationsController : ControllerBase
 
         var exactNamedCandidates = candidates
             .Where(candidate =>
+                candidate.PaymentType == targetPaymentType &&
                 candidate.OutstandingAmount > 0m &&
                 Math.Abs(candidate.OutstandingAmount - item.Amount) <= 0.009m &&
                 NamesLookRelated(item.CounterpartyName, candidate.ClientName ?? candidate.CounterpartyName))
@@ -3915,7 +3934,9 @@ public class MoneyOperationsController : ControllerBase
             return $"Автоматически сверено по номеру счёта {candidate.InvoiceNumber} из назначения платежа.";
         }
 
-        return $"Автоматически сверено со счётом {candidate.InvoiceNumber} по сумме и клиенту из выписки.";
+        return candidate.PaymentType == PaymentType.Expense
+            ? $"Автоматически сверено со счётом {candidate.InvoiceNumber} по сумме и поставщику из выписки."
+            : $"Автоматически сверено со счётом {candidate.InvoiceNumber} по сумме и клиенту из выписки.";
     }
 
     private static BankStatementIncomeTypeCandidate? ResolveBankStatementIncomeType(
@@ -4184,9 +4205,13 @@ public class MoneyOperationsController : ControllerBase
             return new(invoice, "Счёт уже полностью оплачен, привязка денежной операции не выполнена.");
         }
 
-        if (operation.Amount > outstandingAmount + 0.009m && !invoicePayment.ClientId.HasValue)
+        if (operation.Amount > outstandingAmount + 0.009m &&
+            (invoicePayment.Type != PaymentType.Income || !invoicePayment.ClientId.HasValue))
         {
-            return new(invoice, $"Сумма денежной операции больше остатка по счёту, а клиент счёта не указан для зачисления переплаты. Остаток: {outstandingAmount:0.00}.");
+            var overpayMessage = invoicePayment.Type == PaymentType.Expense
+                ? $"Сумма денежной операции больше остатка по расходному счёту. Остаток: {outstandingAmount:0.00}."
+                : $"Сумма денежной операции больше остатка по счёту, а клиент счёта не указан для зачисления переплаты. Остаток: {outstandingAmount:0.00}.";
+            return new(invoice, overpayMessage);
         }
 
         return new(invoice, null);
@@ -4197,15 +4222,18 @@ public class MoneyOperationsController : ControllerBase
         int invoiceId,
         CancellationToken ct = default)
     {
-        if (operation.Direction != MoneyOperationDirection.Income || operation.Amount <= 0m)
+        if (operation.Direction is not (MoneyOperationDirection.Income or MoneyOperationDirection.Expense) || operation.Amount <= 0m)
         {
             return;
         }
 
+        var targetPaymentType = operation.Direction == MoneyOperationDirection.Expense
+            ? PaymentType.Expense
+            : PaymentType.Income;
         var invoicePayments = await _db.Payments
             .Where(item =>
                 item.InvoiceId == invoiceId &&
-                item.Type == PaymentType.Income &&
+                item.Type == targetPaymentType &&
                 item.Status != PaymentStatus.Cancelled)
             .ToListAsync(ct);
         var representative = invoicePayments
@@ -4276,12 +4304,13 @@ public class MoneyOperationsController : ControllerBase
             MoneyOperationSource.EMoney => "e-money",
             _ => "банк",
         };
-        var note = $"Системно: {DateTime.UtcNow:dd.MM.yyyy HH:mm:ss} — зачтено поступление из раздела \"Деньги\" ({sourceLabel}) на сумму {appliedAmount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"))}.";
+        var movementLabel = targetPaymentType == PaymentType.Expense ? "списание" : "поступление";
+        var note = $"Системно: {DateTime.UtcNow:dd.MM.yyyy HH:mm:ss} — зачтено {movementLabel} из раздела \"Деньги\" ({sourceLabel}) на сумму {appliedAmount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"))}.";
         payment.SystemNotes = string.IsNullOrWhiteSpace(payment.SystemNotes)
             ? note
             : $"{payment.SystemNotes.Trim()}\n{note}";
 
-        if (overpaymentAmount > 0.009m && payment.ClientId.HasValue && operation.Id > 0)
+        if (targetPaymentType == PaymentType.Income && overpaymentAmount > 0.009m && payment.ClientId.HasValue && operation.Id > 0)
         {
             var externalKey = $"money-operation-overpayment:{operation.Id}";
             var existing = await _db.ClientBalanceTransactions
@@ -4349,6 +4378,28 @@ public class MoneyOperationsController : ControllerBase
         return Regex.Replace(normalized, @"\s+", " ", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)).Trim();
     }
 
+    private static string? ResolveInvoiceCandidateCounterpartyName(Payment payment)
+        => payment.Type == PaymentType.Expense
+            ? FirstNonEmpty(
+                payment.ExpenseClient?.Name,
+                payment.ExpenseClient?.Company,
+                payment.ExpenseLegalEntity?.ShortName,
+                payment.ExpenseLegalEntity?.FullName,
+                payment.CounterpartyName,
+                payment.Client?.Name,
+                payment.Client?.Company)
+            : FirstNonEmpty(
+                payment.Client?.Name,
+                payment.Client?.Company,
+                payment.CounterpartyName,
+                payment.ExpenseClient?.Name,
+                payment.ExpenseClient?.Company,
+                payment.ExpenseLegalEntity?.ShortName,
+                payment.ExpenseLegalEntity?.FullName);
+
+    private static string? FirstNonEmpty(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
     private sealed record BankStatementInvoiceCandidate(
         int PaymentId,
         int InvoiceId,
@@ -4357,6 +4408,7 @@ public class MoneyOperationsController : ControllerBase
         decimal Amount,
         decimal PaidAmount,
         PaymentStatus Status,
+        PaymentType PaymentType,
         int? ClientId,
         string? ClientName,
         string? CounterpartyName,
