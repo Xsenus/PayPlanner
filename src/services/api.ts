@@ -1354,6 +1354,10 @@ export class ApiService {
     return this.request<Contract>(`/contracts/${id}/mark-not-signed`, { method: 'POST' });
   }
 
+  async getContractTerminationCheck(id: number) {
+    return this.request<ContractTerminationCheck>(`/contracts/${id}/termination-check`);
+  }
+
   async updateContractStatus(id: number, status: ContractStatus, reason?: string | null) {
     return this.request<Contract>(`/contracts/${id}/status`, {
       method: 'POST',
@@ -4603,6 +4607,7 @@ import type {
   Contract,
   ContractInput,
   ContractStatus,
+  ContractTerminationCheck,
   ClientRole,
   Payment,
   PaymentKind,

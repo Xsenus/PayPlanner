@@ -67,6 +67,18 @@ public class ContractsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
     }
 
+    private async Task<Contract?> LoadEditableContractDetailAsync(int id, CancellationToken ct)
+    {
+        var visibility = await ResolveContractsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return null;
+        }
+
+        return await BuildContractDetailQuery(visibility)
+            .FirstOrDefaultAsync(c => c.Id == id, ct);
+    }
+
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId,
         [FromQuery] string? search, [FromQuery] string? sortBy, [FromQuery] string? sortDir, [FromQuery] int page = 1,
@@ -303,6 +315,15 @@ public class ContractsController : ControllerBase
         return Ok(dto);
     }
 
+    [HttpGet("{id:int}/termination-check")]
+    public async Task<ActionResult<ContractTerminationCheckDto>> GetTerminationCheck(int id, CancellationToken ct)
+    {
+        var contract = await LoadContractForDocumentAsync(id, ct);
+        if (contract is null) return NotFound();
+
+        return Ok(BuildTerminationCheck(contract));
+    }
+
     [HttpPost("{id:int}/mark-concluded")]
     public async Task<ActionResult<ContractDto>> MarkConcluded(int id, CancellationToken ct)
     {
@@ -347,8 +368,17 @@ public class ContractsController : ControllerBase
             return ValidationError(nameof(request.Status), "Unknown contract status.");
         }
 
-        var contract = await LoadEditableContractAsync(id, ct);
+        var contract = await LoadEditableContractDetailAsync(id, ct);
         if (contract is null) return NotFound();
+
+        if (string.Equals(status, ContractStatus.Terminated, StringComparison.OrdinalIgnoreCase))
+        {
+            var terminationCheck = BuildTerminationCheck(contract);
+            if (terminationCheck.HasUnpaidInvoices)
+            {
+                return BadRequest($"По договору есть неоплаченные счета: {terminationCheck.UnpaidInvoiceCount} шт. на сумму {terminationCheck.UnpaidInvoiceAmount:N2}. Используйте действие «Расторгнуть» и заполните финансовые условия.");
+            }
+        }
 
         var reason = Normalize(request.Reason);
         var statusChanged = !string.Equals(contract.Status, status, StringComparison.OrdinalIgnoreCase);
@@ -442,11 +472,17 @@ public class ContractsController : ControllerBase
             return reasonError;
         }
 
-        var contract = await LoadEditableContractAsync(id, ct);
+        var contract = await LoadEditableContractDetailAsync(id, ct);
         if (contract is null) return NotFound();
         if (string.Equals(contract.Status, ContractStatus.Cancelled, StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest("Аннулированный договор нельзя расторгнуть.");
+        }
+
+        var terminationCheck = BuildTerminationCheck(contract);
+        if (terminationCheck.HasUnpaidInvoices && string.IsNullOrWhiteSpace(request.FinancialTerms))
+        {
+            return BadRequest($"По договору есть неоплаченные счета: {terminationCheck.UnpaidInvoiceCount} шт. на сумму {terminationCheck.UnpaidInvoiceAmount:N2}. Заполните финансовые условия расторжения.");
         }
 
         contract.Status = ContractStatus.Terminated;
@@ -906,6 +942,37 @@ public class ContractsController : ControllerBase
            ?? contract.LegalEntityContracts
                .Select(link => link.LegalEntity?.Email)
                .FirstOrDefault(email => !string.IsNullOrWhiteSpace(email))?.Trim();
+
+    private static ContractTerminationCheckDto BuildTerminationCheck(Contract contract)
+    {
+        var unpaidInvoices = GetContractInvoicePayments(contract)
+            .Where(payment =>
+                payment.Status != PaymentStatus.Cancelled
+                && (payment.Status != PaymentStatus.Completed || payment.Amount > payment.PaidAmount))
+            .ToList();
+
+        return new ContractTerminationCheckDto
+        {
+            HasUnpaidInvoices = unpaidInvoices.Count > 0,
+            UnpaidInvoiceCount = unpaidInvoices.Count,
+            UnpaidInvoiceAmount = unpaidInvoices.Sum(payment => Math.Max(payment.Amount - payment.PaidAmount, 0m)),
+        };
+    }
+
+    private static List<Payment> GetContractInvoicePayments(Contract contract)
+    {
+        var legacyInvoices = contract.ContractInvoices
+            .Where(link => link.Invoice != null)
+            .Select(link => link.Invoice!);
+        var canonicalInvoices = contract.Payments
+            .Where(payment => payment.DocumentKind == DocumentKind.Invoice && payment.InvoiceId.HasValue);
+
+        return legacyInvoices
+            .Concat(canonicalInvoices)
+            .GroupBy(payment => payment.Id)
+            .Select(group => group.First())
+            .ToList();
+    }
 
     private ContractDto MapToDto(Contract contract)
     {

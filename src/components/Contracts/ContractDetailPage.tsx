@@ -704,11 +704,33 @@ export function ContractDetailPage({
         return;
       }
 
+      let financialTerms: string | null = null;
+      try {
+        const terminationCheck = await apiService.getContractTerminationCheck(contract.id);
+        if (terminationCheck.hasUnpaidInvoices) {
+          const proceed = window.confirm(
+            `По договору есть неоплаченные счета: ${terminationCheck.unpaidInvoiceCount} шт. на сумму ${formatAmount(terminationCheck.unpaidInvoiceAmount)} ₽. Продолжить расторжение?`,
+          );
+          if (!proceed) return;
+
+          financialTerms = window.prompt('Финансовые условия по неоплаченным счетам')?.trim() || null;
+          if (!financialTerms) {
+            toast.error('Заполните финансовые условия, чтобы расторгнуть договор с неоплаченными счетами.', 'Договоры');
+            return;
+          }
+        } else {
+          financialTerms = window.prompt('Финансовые условия (необязательно)')?.trim() || null;
+        }
+      } catch (error) {
+        toast.error(extractDisplayErrorMessage(error, 'Не удалось проверить неоплаченные счета договора'), 'Договоры');
+        return;
+      }
+
       terminatePayload = {
         terminationDate,
         terms,
         reason: reason || null,
-        financialTerms: window.prompt('Финансовые условия (необязательно)')?.trim() || null,
+        financialTerms,
       };
     }
 

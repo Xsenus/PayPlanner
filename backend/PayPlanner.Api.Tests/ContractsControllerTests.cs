@@ -579,6 +579,49 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task Terminate_RequiresFinancialTerms_WhenContractHasUnpaidInvoices()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-UNPAID-1", new DateTime(2026, 5, 10), 15_000m);
+        var controller = CreateAdminController(db);
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-UNPAID-1",
+                Date = new DateTime(2026, 5, 1),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 15_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+                InvoiceIds = [invoicePayment.Id],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var checkResult = await controller.GetTerminationCheck(createdDto.Id, CancellationToken.None);
+        var checkOk = Assert.IsType<OkObjectResult>(checkResult.Result);
+        var check = Assert.IsType<ContractTerminationCheckDto>(checkOk.Value);
+        Assert.True(check.HasUnpaidInvoices);
+        Assert.Equal(1, check.UnpaidInvoiceCount);
+        Assert.Equal(15_000m, check.UnpaidInvoiceAmount);
+
+        var terminateResult = await controller.Terminate(
+            createdDto.Id,
+            new TerminateContractRequest
+            {
+                TerminationDate = new DateTime(2026, 5, 22),
+                Terms = "Расторжение по соглашению сторон.",
+                Reason = "Соглашение сторон",
+            },
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(terminateResult.Result);
+        Assert.Contains("неоплаченные счета", Assert.IsType<string>(badRequest.Value));
+    }
+
+    [Fact]
     public async Task Update_ClearsAmountAndValidUntil_WhenSwitchingToActualOpenEndedContract()
     {
         await using var db = await CreateContextAsync();

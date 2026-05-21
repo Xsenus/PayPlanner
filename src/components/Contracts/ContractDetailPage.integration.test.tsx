@@ -86,6 +86,8 @@ vi.mock('../../services/api', () => ({
     getActs: vi.fn(),
     getPaymentsV2: vi.fn(),
     getClientsV2: vi.fn(),
+    getContractTerminationCheck: vi.fn(),
+    terminateContract: vi.fn(),
     updateContract: vi.fn(),
     downloadContractDocument: vi.fn(),
     downloadContractTerminationAgreement: vi.fn(),
@@ -134,6 +136,8 @@ describe('ContractDetailPage integration', () => {
     vi.mocked(apiService.getActs).mockReset();
     vi.mocked(apiService.getPaymentsV2).mockReset();
     vi.mocked(apiService.getClientsV2).mockReset();
+    vi.mocked(apiService.getContractTerminationCheck).mockReset();
+    vi.mocked(apiService.terminateContract).mockReset();
     vi.mocked(apiService.updateContract).mockReset();
     vi.mocked(apiService.downloadContractDocument).mockReset();
     vi.mocked(apiService.downloadContractTerminationAgreement).mockReset();
@@ -159,6 +163,11 @@ describe('ContractDetailPage integration', () => {
     vi.mocked(apiService.getClientsV2).mockResolvedValue({
       items: [],
       total: 0,
+    });
+    vi.mocked(apiService.getContractTerminationCheck).mockResolvedValue({
+      hasUnpaidInvoices: false,
+      unpaidInvoiceCount: 0,
+      unpaidInvoiceAmount: 0,
     });
     vi.mocked(apiService.downloadContractDocument).mockResolvedValue(new Blob(['contract'], { type: 'application/msword' }));
     vi.mocked(apiService.downloadContractTerminationAgreement).mockResolvedValue(new Blob(['agreement'], { type: 'application/pdf' }));
@@ -370,5 +379,51 @@ describe('ContractDetailPage integration', () => {
     await waitFor(() => {
       expect(apiService.downloadContractTerminationAgreement).toHaveBeenCalledWith(77, 'pdf');
     });
+  });
+
+  it('checks unpaid invoices before terminating a contract', async () => {
+    const promptSpy = vi
+      .spyOn(window, 'prompt')
+      .mockReturnValueOnce('2026-05-22')
+      .mockReturnValueOnce('Расторжение по соглашению')
+      .mockReturnValueOnce('Соглашение сторон')
+      .mockReturnValueOnce('Оплатить остаток до конца месяца');
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(apiService.getContractTerminationCheck).mockResolvedValue({
+      hasUnpaidInvoices: true,
+      unpaidInvoiceCount: 2,
+      unpaidInvoiceAmount: 23_000,
+    });
+    vi.mocked(apiService.terminateContract).mockResolvedValue({
+      ...contractFixture,
+      status: 'Terminated',
+      terminationDate: '2026-05-22',
+      terminationTerms: 'Расторжение по соглашению',
+      terminationFinancialTerms: 'Оплатить остаток до конца месяца',
+    } as Contract);
+
+    render(
+      <ContractDetailPage
+        contractId={77}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Расторгнуть' }));
+
+    await waitFor(() => {
+      expect(apiService.getContractTerminationCheck).toHaveBeenCalledWith(77);
+      expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('неоплаченные счета'));
+      expect(apiService.terminateContract).toHaveBeenCalledWith(
+        77,
+        '2026-05-22',
+        'Расторжение по соглашению',
+        'Соглашение сторон',
+        'Оплатить остаток до конца месяца',
+      );
+    });
+
+    promptSpy.mockRestore();
+    confirmSpy.mockRestore();
   });
 });

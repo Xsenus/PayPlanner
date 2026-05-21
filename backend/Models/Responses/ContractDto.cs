@@ -62,3 +62,10 @@ public class ContractLegalEntityDto
     public string? Kpp { get; set; }
     public string? Comment { get; set; }
 }
+
+public sealed class ContractTerminationCheckDto
+{
+    public bool HasUnpaidInvoices { get; set; }
+    public int UnpaidInvoiceCount { get; set; }
+    public decimal UnpaidInvoiceAmount { get; set; }
+}

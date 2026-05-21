@@ -2484,6 +2484,12 @@ export interface Contract {
   paymentIds?: number[];
 }
 
+export interface ContractTerminationCheck {
+  hasUnpaidInvoices: boolean;
+  unpaidInvoiceCount: number;
+  unpaidInvoiceAmount: number;
+}
+
 
 export interface ContractInput {
   number: string;
