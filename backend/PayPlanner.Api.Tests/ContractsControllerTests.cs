@@ -790,6 +790,51 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task GetById_UsesPaymentsLinkedThroughCanonicalInvoices_ForPaymentAmountTotal_WithoutCreatingManualPaymentIds()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-006F",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-32E", new DateTime(2026, 4, 21), 13_000m);
+        invoicePayment.ContractId = contract.Id;
+
+        var linkedPayment = await CreateStandalonePaymentAsync(db, new DateTime(2026, 4, 22), 5_700m);
+        linkedPayment.InvoiceId = invoicePayment.InvoiceId;
+        linkedPayment.Account = invoicePayment.Account;
+        linkedPayment.AccountDate = invoicePayment.AccountDate;
+
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var actionResult = await controller.GetById(contract.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(13_000m, dto.InvoiceAmountTotal);
+        Assert.Equal(5_700m, dto.PaymentAmountTotal);
+        Assert.Equal([invoicePayment.Id], dto.InvoiceIds.OrderBy(id => id).ToArray());
+        Assert.Equal([linkedPayment.Id], dto.PaymentIds.OrderBy(id => id).ToArray());
+    }
+
+    [Fact]
     public async Task GetById_KeepsLegacyManualPaymentLinks_VisibleBeforeResave()
     {
         await using var db = await CreateContextAsync();

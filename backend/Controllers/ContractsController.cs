@@ -544,8 +544,10 @@ public class ContractsController : ControllerBase
             .Include(c => c.LegalEntityContracts).ThenInclude(link => link.LegalEntity)
             .Include(c => c.ContractActs).ThenInclude(link => link.Act)
             .Include(c => c.ContractInvoices).ThenInclude(link => link.Invoice).ThenInclude(invoice => invoice!.Acts)
+            .Include(c => c.ContractInvoices).ThenInclude(link => link.Invoice).ThenInclude(payment => payment.Invoice).ThenInclude(invoice => invoice!.Payments)
             .Include(c => c.ContractPayments).ThenInclude(link => link.Payment)
-            .Include(c => c.Payments).ThenInclude(payment => payment.Acts);
+            .Include(c => c.Payments).ThenInclude(payment => payment.Acts)
+            .Include(c => c.Payments).ThenInclude(payment => payment.Invoice).ThenInclude(invoice => invoice!.Payments);
 
         return visibility is null ? query : query.ApplyContractVisibility(visibility);
     }
@@ -579,6 +581,28 @@ public class ContractsController : ControllerBase
             .GroupBy(act => act.Id)
             .Select(group => group.First())
             .ToList();
+        var contractInvoicePayments = contract.ContractInvoices
+            .Where(link => link.Invoice != null)
+            .Select(link => link.Invoice)
+            .Concat(canonicalInvoicePayments)
+            .GroupBy(payment => payment.Id)
+            .Select(group => group.First())
+            .ToList();
+        var contractInvoiceEntityIds = contractInvoicePayments
+            .Select(payment => payment.InvoiceId ?? payment.Invoice?.Id)
+            .Where(id => id.HasValue && id.Value > 0)
+            .Select(id => id!.Value)
+            .ToHashSet();
+        var invoiceLinkedPayments = contractInvoicePayments
+            .Where(payment => payment.Invoice != null)
+            .SelectMany(payment => payment.Invoice!.Payments)
+            .Where(payment =>
+                payment.DocumentKind != DocumentKind.Invoice
+                && payment.InvoiceId.HasValue
+                && contractInvoiceEntityIds.Contains(payment.InvoiceId.Value))
+            .GroupBy(payment => payment.Id)
+            .Select(group => group.First())
+            .ToList();
         var legacyPaymentLinks = contract.ContractPayments
             .Where(link => link.Payment != null && link.Payment.DocumentKind != DocumentKind.Invoice)
             .ToList();
@@ -586,13 +610,24 @@ public class ContractsController : ControllerBase
         var canonicalPayments = contract.Payments
             .Where(payment => payment.DocumentKind != DocumentKind.Invoice)
             .ToList();
+        var directPaymentIds = legacyPaymentIds
+            .Concat(canonicalPayments.Select(payment => payment.Id))
+            .ToHashSet();
+        var invoiceLinkedPaymentIds = invoiceLinkedPayments
+            .Where(payment => !directPaymentIds.Contains(payment.Id))
+            .Select(payment => payment.Id)
+            .ToList();
         var paymentIds = legacyPaymentIds
             .Concat(canonicalPayments.Select(payment => payment.Id))
+            .Concat(invoiceLinkedPaymentIds)
             .Distinct()
             .ToList();
         var legacyPaymentAmount = legacyPaymentLinks.Sum(link => link.Payment?.Amount ?? 0m);
         var canonicalPaymentAmount = canonicalPayments
             .Where(payment => !legacyPaymentIds.Contains(payment.Id))
+            .Sum(payment => payment.Amount);
+        var invoiceLinkedPaymentAmount = invoiceLinkedPayments
+            .Where(payment => !directPaymentIds.Contains(payment.Id))
             .Sum(payment => payment.Amount);
 
         return new ContractDto
@@ -629,7 +664,7 @@ public class ContractsController : ControllerBase
             AuditDeletedByUserName = entry.Property<string?>("DeletedByUserName").CurrentValue,
             InvoiceAmountTotal = legacyInvoiceAmount + canonicalInvoiceAmount,
             ActAmountTotal = legacyActAmount + invoiceLinkedActs.Sum(act => act.Amount),
-            PaymentAmountTotal = legacyPaymentAmount + canonicalPaymentAmount,
+            PaymentAmountTotal = legacyPaymentAmount + canonicalPaymentAmount + invoiceLinkedPaymentAmount,
             Clients = contract.ClientContracts
                 .Where(link => link.Client != null)
                 .Select(link => new ContractClientDto
