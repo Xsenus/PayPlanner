@@ -598,7 +598,7 @@ public class ActsController : ControllerBase
             InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account,
             InvoiceId = request.InvoiceId,
             CounterpartyInn = Normalize(request.CounterpartyInn),
-            Status = request.Status,
+            Status = ResolveActStatus(workflowStatus),
             WorkflowStatus = workflowStatus,
             ClientId = owner.ClientId,
             LegalEntityId = owner.LegalEntityId,
@@ -678,7 +678,7 @@ public class ActsController : ControllerBase
         act.InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account;
         act.InvoiceId = request.InvoiceId;
         act.CounterpartyInn = Normalize(request.CounterpartyInn);
-        act.Status = request.Status;
+        act.Status = ResolveActStatus(workflowStatus);
         act.WorkflowStatus = workflowStatus;
         act.ClientId = owner.ClientId;
         act.LegalEntityId = owner.LegalEntityId;
@@ -1365,6 +1365,15 @@ public class ActsController : ControllerBase
 
     private static string? NormalizeActWorkflowStatusOrNull(string? value)
         => ActWorkflowStatus.Normalize(value);
+
+    private static ActStatus ResolveActStatus(string workflowStatus)
+        => workflowStatus switch
+        {
+            ActWorkflowStatus.OnSigning => ActStatus.Transferred,
+            ActWorkflowStatus.Signed => ActStatus.Signed,
+            ActWorkflowStatus.Cancelled => ActStatus.Terminated,
+            _ => ActStatus.Created,
+        };
 
     private static string? ResolveActWorkflowStatus(UpsertActRequest request)
     {

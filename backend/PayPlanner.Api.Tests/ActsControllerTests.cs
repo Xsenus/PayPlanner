@@ -144,6 +144,32 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task Create_DerivesLegacyStatusFromWorkflowStatus()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var action = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-STATUS-SYNC-1",
+                Date = new DateTime(2026, 4, 20),
+                Amount = 9_500m,
+                CreationMode = ActCreationMode.Manual,
+                ClientId = client.Id,
+                Status = ActStatus.Signed,
+                WorkflowStatus = ActWorkflowStatus.RequiresClientSignature,
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<ActDto>(created.Value);
+        Assert.Equal(ActStatus.Created, dto.Status);
+        Assert.Equal(ActWorkflowStatus.RequiresClientSignature, dto.WorkflowStatus);
+    }
+
+    [Fact]
     public async Task Cancel_StoresReasonAndUpdatesWorkflowStatus()
     {
         await using var db = await CreateContextAsync();
@@ -1120,7 +1146,7 @@ public class ActsControllerTests
         var updated = Assert.IsType<ActDto>(ok.Value);
         Assert.Equal("ACT-201-UPDATED", updated.Number);
         Assert.Equal("Обновлённый акт", updated.Title);
-        Assert.Equal(ActStatus.Signed, updated.Status);
+        Assert.Equal(ActStatus.Created, updated.Status);
         Assert.Equal(ActWorkflowStatus.RequiresClientSignature, updated.WorkflowStatus);
         Assert.Equal("Ручной режим должен убрать позиции счета", updated.Comment);
         Assert.Equal(ActCreationMode.Manual, updated.CreationMode);

@@ -17,7 +17,9 @@ import type {
 } from '../../types';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
+import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
+import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
@@ -106,13 +108,36 @@ type ManualActLineItemRow = {
   price: string;
 };
 
-const STATUS_VALUES: ActStatus[] = ['Created', 'Transferred', 'Signed', 'Terminated'];
 const QUANTITY_EPSILON = 0.0001;
 const DEFAULT_MANUAL_LINE_ITEM_UNIT = 'шт';
 const MANUAL_LINE_ITEM_UNIT_OPTIONS = ['шт', 'усл.', 'час'];
 const LINE_ITEM_GRID_TEMPLATE =
   'md:grid-cols-[minmax(24rem,2.7fr)_minmax(5.5rem,0.55fr)_minmax(6.5rem,0.7fr)_minmax(8.5rem,0.85fr)_minmax(8.5rem,0.85fr)_2.75rem]';
 const LINE_ITEM_GRID_MIN_WIDTH_CLASS = 'md:min-w-[58rem]';
+const ACT_WORKFLOW_STATUS_ORDER: ActWorkflowStatus[] = [
+  'Draft',
+  'NotSigned',
+  'RequiresClientSignature',
+  'OnApproval',
+  'Approved',
+  'ApprovalRejected',
+  'NeedsCorrection',
+  'OnSigning',
+  'Signed',
+  'Cancelled',
+];
+const DEFAULT_ACT_WORKFLOW_STATUS_LABELS: Record<ActWorkflowStatus, string> = {
+  Draft: 'Черновик',
+  NotSigned: 'Не подписан',
+  RequiresClientSignature: 'Требуется подпись клиента',
+  OnApproval: 'На согласовании',
+  Approved: 'Согласован',
+  ApprovalRejected: 'Отказ в согласовании',
+  NeedsCorrection: 'Требует исправления',
+  OnSigning: 'На подписании',
+  Signed: 'Подписан',
+  Cancelled: 'Аннулирован',
+};
 
 type CounterpartyOwner = {
   clientId: number | null;
@@ -138,6 +163,13 @@ function parseDecimalInput(value: string): number | null {
 
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function deriveActStatusFromWorkflowStatus(workflowStatus: ActWorkflowStatus): ActStatus {
+  if (workflowStatus === 'OnSigning') return 'Transferred';
+  if (workflowStatus === 'Signed') return 'Signed';
+  if (workflowStatus === 'Cancelled') return 'Terminated';
+  return 'Created';
 }
 
 function formatDecimalInput(value: number): string {
@@ -455,6 +487,7 @@ export function ActModal({
 }: ActModalProps) {
   const { t } = useTranslation();
   const { isRequired } = useFormRequirements('acts', open);
+  const documentStatusSettings = useDocumentStatusSettings();
   const { legalEntities } = useLegalEntities();
   const [form, setForm] = useState<FormState>(() =>
     normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues),
@@ -982,20 +1015,13 @@ export function ActModal({
     [form.responsibleId, responsibles],
   );
 
-  const statusOptions = useMemo(
-    () =>
-      STATUS_VALUES.map((status) => ({
-        value: status,
-        label:
-          status === 'Created'
-            ? t('actStatusCreated') ?? 'Создан'
-            : status === 'Transferred'
-              ? t('actStatusTransferred') ?? 'Передано'
-              : status === 'Signed'
-                ? t('actStatusSigned') ?? 'Подписано'
-                : t('actStatusTerminated') ?? 'Расторгнуто',
-      })),
-    [t],
+  const workflowStatusLabels = useMemo(
+    () => getDocumentStatusLabels(documentStatusSettings, 'act', DEFAULT_ACT_WORKFLOW_STATUS_LABELS),
+    [documentStatusSettings],
+  );
+  const workflowStatusCodes = useMemo(
+    () => getDocumentStatusCodes(documentStatusSettings, 'act', ACT_WORKFLOW_STATUS_ORDER),
+    [documentStatusSettings],
   );
 
   const isUsingInvoiceItems = linkedInvoiceId !== null && hasInvoiceLineItems && form.creationMode !== 'Manual';
@@ -1109,7 +1135,18 @@ export function ActModal({
     event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
     const value = event.target.value;
-    setForm((previous) => ({ ...previous, [field]: value }));
+    setForm((previous) => {
+      if (field === 'workflowStatus') {
+        const workflowStatus = value as ActWorkflowStatus;
+        return {
+          ...previous,
+          workflowStatus,
+          status: deriveActStatusFromWorkflowStatus(workflowStatus),
+        };
+      }
+
+      return { ...previous, [field]: value };
+    });
   };
 
   const updateManualLineItem = (id: string, patch: Partial<ManualActLineItemRow>) => {
@@ -1381,7 +1418,7 @@ export function ActModal({
       invoiceNumber: form.invoiceNumber.trim() ? form.invoiceNumber.trim() : undefined,
       invoiceId: linkedInvoiceId ?? undefined,
       counterpartyInn: undefined,
-      status: form.status,
+      status: deriveActStatusFromWorkflowStatus(form.workflowStatus),
       workflowStatus: form.workflowStatus,
       clientId: form.clientId ? Number(form.clientId) : null,
       legalEntityId: form.legalEntityId ? Number(form.legalEntityId) : null,
@@ -1483,37 +1520,17 @@ export function ActModal({
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-slate-700">{t('actStatus') ?? 'Статус'}</span>
-                  <select
-                    value={form.status}
-                    onChange={handleChange('status')}
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                  >
-                    {statusOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="flex flex-col gap-1 text-sm">
                   <span className="font-medium text-slate-700">Статус документа</span>
                   <select
                     value={form.workflowStatus}
                     onChange={handleChange('workflowStatus')}
                     className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
                   >
-                    <option value="Draft">Черновик</option>
-                    <option value="NotSigned">Не подписан</option>
-                    <option value="RequiresClientSignature">Требуется подпись клиента</option>
-                    <option value="OnApproval">На согласовании</option>
-                    <option value="Approved">Согласован</option>
-                    <option value="ApprovalRejected">Отказ в согласовании</option>
-                    <option value="NeedsCorrection">Требует исправления</option>
-                    <option value="OnSigning">На подписании</option>
-                    <option value="Signed">Подписан</option>
-                    <option value="Cancelled">Аннулирован</option>
+                    {workflowStatusCodes.map((status) => (
+                      <option key={status} value={status}>
+                        {workflowStatusLabels[status]}
+                      </option>
+                    ))}
                   </select>
                 </label>
 

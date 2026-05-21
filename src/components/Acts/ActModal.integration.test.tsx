@@ -32,6 +32,10 @@ vi.mock('../../hooks/useFormRequirements', () => ({
   }),
 }));
 
+vi.mock('../../hooks/useDocumentStatusSettings', () => ({
+  useDocumentStatusSettings: () => [],
+}));
+
 vi.mock('../../hooks/useLegalEntities', () => ({
   useLegalEntities: () => ({
     legalEntities: [
@@ -176,6 +180,44 @@ describe('ActModal integration', () => {
       total: 2,
       page: 1,
       pageSize: 25,
+    });
+  });
+
+  it('shows one document status field and derives the legacy status on submit', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ActModal
+        open
+        mode="create"
+        act={null}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createClient(1, 'Базовый клиент')]}
+        responsibles={[createResponsible(5, 'Мария Менеджер')]}
+        lookupsLoading={false}
+        defaultClientId={1}
+        defaultResponsibleId={5}
+        presentation="page"
+      />,
+    );
+
+    expect(screen.queryByLabelText('Статус')).toBeNull();
+    const documentStatus = screen.getByLabelText('Статус документа') as HTMLSelectElement;
+    fireEvent.change(documentStatus, { target: { value: 'Signed' } });
+    fireEvent.change(screen.getByLabelText('Номер акта'), { target: { value: 'ACT-STATUS-1' } });
+    fireEvent.change(screen.getByLabelText('Сумма'), { target: { value: '25000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Создать' }));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
+      number: 'ACT-STATUS-1',
+      status: 'Signed',
+      workflowStatus: 'Signed',
     });
   });
 
