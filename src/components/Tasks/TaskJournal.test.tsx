@@ -58,7 +58,9 @@ const authState = vi.hoisted((): { user: { id: number; fullName: string; email: 
 }));
 
 const permissionsState = vi.hoisted(() => ({
+  taskCanEdit: true,
   taskCanExport: true,
+  taskViewScope: 'all' as 'own' | 'department' | 'all',
 }));
 
 vi.mock('../../services/api', () => ({
@@ -116,7 +118,12 @@ vi.mock('../../hooks/useRolePermissions', () => ({
 
     return {
       calendar: { ...section, canViewAnalytics: true },
-      tasks: { ...section, canExport: permissionsState.taskCanExport },
+      tasks: {
+        ...section,
+        canEdit: permissionsState.taskCanEdit,
+        canExport: permissionsState.taskCanExport,
+        viewScope: permissionsState.taskViewScope,
+      },
       reports: { ...section },
       calculator: { ...section },
       legalEntities: { ...section },
@@ -265,7 +272,9 @@ describe('TaskJournal', () => {
     window.localStorage.clear();
     authState.user = { id: 7, fullName: 'Администратор', email: 'admin@example.com' };
     authState.isAdmin = true;
+    permissionsState.taskCanEdit = true;
     permissionsState.taskCanExport = true;
+    permissionsState.taskViewScope = 'all';
     clientsState.clients = [
       { id: 10, name: 'Иванов Иван Иванович', phone: '+7 900 000-00-00', email: 'client@example.com' } as Client,
     ];
@@ -1283,6 +1292,30 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить результат' }));
 
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'new', 'Результат исполнителя'));
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('opens observed own-scope task in view mode even when role can edit tasks', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Observer', email: 'observer@example.com' };
+    permissionsState.taskCanEdit = true;
+    permissionsState.taskViewScope = 'own';
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({ quickFilter: 'all' }));
+    await renderJournal([
+      createTask({
+        assigneeUserId: 9,
+        assigneeName: 'Assignee',
+        authorUserId: 8,
+        authorName: 'Author',
+        participants: [
+          { userId: 7, role: 'observer', displayName: 'Observer', approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
+    expect((screen.getByDisplayValue('Тестовая задача') as HTMLInputElement).disabled).toBe(true);
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
   });
 

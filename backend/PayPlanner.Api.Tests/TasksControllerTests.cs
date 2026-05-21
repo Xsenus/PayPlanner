@@ -417,8 +417,72 @@ public class TasksControllerTests
 
         Assert.IsType<ForbidResult>(result.Result);
         var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
-        Assert.Equal("Тестовая задача", stored.Title);
+        Assert.Equal(task.Title, stored.Title);
         Assert.Equal(originalDueAt, stored.DueAt);
+    }
+
+    [Fact]
+    public async Task UpdateTask_ForbidsObserverWithOwnScopeEvenWhenRoleCanEdit()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Author");
+        var assignee = await CreateAdminUserAsync(db, "assignee@example.com", "Assignee");
+        var observer = await CreateTaskUserAsync(db, "observer@example.com", "Observer", canEdit: true);
+        var client = await CreateClientAsync(db, "Client");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = observer.Id,
+            Role = "observer",
+            DisplayName = observer.FullName,
+            Email = observer.Email,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), observer);
+
+        var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Changed by observer",
+            DueAt = task.DueAt.AddDays(1),
+            Status = "new",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(task.Title, stored.Title);
+        Assert.Equal(task.DueAt, stored.DueAt);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_ForbidsObserverWithOwnScopeEvenWhenRoleCanEdit()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Author");
+        var assignee = await CreateAdminUserAsync(db, "assignee@example.com", "Assignee");
+        var observer = await CreateTaskUserAsync(db, "observer@example.com", "Observer", canEdit: true);
+        var client = await CreateClientAsync(db, "Client");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = observer.Id,
+            Role = "observer",
+            DisplayName = observer.FullName,
+            Email = observer.Email,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), observer);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Observer result",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("new", stored.Status);
+        Assert.Null(stored.Result);
     }
 
     [Fact]
@@ -2056,6 +2120,7 @@ public class TasksControllerTests
                     CanEdit = canEdit,
                     CanDelete = canEdit,
                     CanExport = canExport,
+                    ViewScope = DataVisibilityScope.Own,
                 },
             ],
         };

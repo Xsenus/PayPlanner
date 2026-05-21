@@ -37,6 +37,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type TaskJournalSettingsDto } from '../../services/api';
 import type { CaseCalendarEvent, CaseCalendarSummary, Client, ClientCase, LegalEntitySummary } from '../../types';
+import type { MenuSectionPermissions } from '../../types/permissions';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import {
@@ -747,12 +748,25 @@ function isTaskReadOnlyForCurrentUser(
   currentUserId: number | null,
   isAdminUser: boolean,
   settings: TaskJournalSettingsDto,
+  taskPermissions: MenuSectionPermissions,
 ) {
-  if (!settings.restrictExecutorEditing || isAdminUser || !currentUserId) {
+  if (isAdminUser) {
     return false;
   }
 
-  return isTaskExecutorForUser(task, currentUserId) && task.authorUserId !== currentUserId;
+  if (!currentUserId || !taskPermissions.canEdit) {
+    return true;
+  }
+
+  if (settings.restrictExecutorEditing && isTaskExecutorForUser(task, currentUserId) && task.authorUserId !== currentUserId) {
+    return true;
+  }
+
+  if (taskPermissions.viewScope === 'all' || taskPermissions.viewScope === 'department') {
+    return false;
+  }
+
+  return task.authorUserId !== currentUserId && !isTaskExecutorForUser(task, currentUserId);
 }
 
 function priorityClass(priority: TaskJournalPriority) {
@@ -1214,7 +1228,7 @@ export function TaskJournal({
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
       setModal({
-        mode: isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings) ? 'view' : 'edit',
+        mode: isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, permissions.tasks) ? 'view' : 'edit',
         task,
       });
       setHighlightedTaskId(task.id);
@@ -1224,7 +1238,7 @@ export function TaskJournal({
         onRouteTaskChange?.(task.id);
       }
     },
-    [currentUserId, isAdminUser, onRouteTaskChange, taskSettings],
+    [currentUserId, isAdminUser, onRouteTaskChange, permissions.tasks, taskSettings],
   );
 
   const openTaskCreate = useCallback(() => {
@@ -1529,8 +1543,8 @@ export function TaskJournal({
   }, [tasks]);
 
   const selectableTasks = useMemo(
-    () => filteredTasks.filter((task) => !isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings)),
-    [currentUserId, filteredTasks, isAdminUser, taskSettings],
+    () => filteredTasks.filter((task) => !isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, permissions.tasks)),
+    [currentUserId, filteredTasks, isAdminUser, permissions.tasks, taskSettings],
   );
   const selectableTaskIds = useMemo(() => new Set(selectableTasks.map((task) => task.id)), [selectableTasks]);
   const selectedTasksForBulk = useMemo(
@@ -1924,7 +1938,7 @@ export function TaskJournal({
   };
 
   const handleCalendarTaskMove = async (task: TaskJournalItem, targetDate: Date) => {
-    if (isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings)) {
+    if (isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, permissions.tasks)) {
       toast.error('Исполнитель может запросить перенос срока в карточке задачи.', 'Календарь задач');
       openTaskEditor(task, { syncRoute: true });
       return;
@@ -1957,7 +1971,7 @@ export function TaskJournal({
   };
 
   const handleTimelineTaskMove = async (task: TaskJournalItem, targetDueAt: Date) => {
-    if (isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings)) {
+    if (isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, permissions.tasks)) {
       toast.error('Исполнитель может запросить перенос срока в карточке задачи.', 'Календарь нагрузки');
       openTaskEditor(task, { syncRoute: true });
       return;
@@ -1989,7 +2003,7 @@ export function TaskJournal({
   };
 
   const handleCalendarTaskResize = async (task: TaskJournalItem, deltaMinutes: -15 | 15) => {
-    if (isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings)) {
+    if (isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, permissions.tasks)) {
       toast.error('Исполнитель не может менять длительность задачи напрямую.', 'Календарь задач');
       openTaskEditor(task, { syncRoute: true });
       return;
@@ -2368,6 +2382,7 @@ export function TaskJournal({
             currentUserId={currentUserId}
             isAdminUser={isAdminUser}
             taskSettings={taskSettings}
+            taskPermissions={permissions.tasks}
             selectedTaskIds={selectedTaskIds}
             selectableTaskIds={selectableTaskIds}
             allVisibleSelected={allVisibleBulkSelected}
@@ -2388,6 +2403,7 @@ export function TaskJournal({
             currentUserId={currentUserId}
             isAdminUser={isAdminUser}
             taskSettings={taskSettings}
+            taskPermissions={permissions.tasks}
             onEdit={openTaskEditor}
             onDone={(task) => setTaskStatus(task, 'done')}
           />
@@ -2413,6 +2429,7 @@ export function TaskJournal({
               currentUserId={currentUserId}
               isAdminUser={isAdminUser}
               taskSettings={taskSettings}
+              taskPermissions={permissions.tasks}
               movingTaskId={calendarMovingTaskId}
               resizingTaskId={calendarResizingTaskId}
             />
@@ -2436,6 +2453,7 @@ export function TaskJournal({
               currentUserId={currentUserId}
               isAdminUser={isAdminUser}
               taskSettings={taskSettings}
+              taskPermissions={permissions.tasks}
               movingTaskId={calendarMovingTaskId}
             />
           </>
@@ -2724,6 +2742,7 @@ function TaskTable({
   currentUserId,
   isAdminUser,
   taskSettings,
+  taskPermissions,
   selectedTaskIds,
   selectableTaskIds,
   allVisibleSelected,
@@ -2741,6 +2760,7 @@ function TaskTable({
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
+  taskPermissions: MenuSectionPermissions;
   selectedTaskIds: Set<number>;
   selectableTaskIds: Set<number>;
   allVisibleSelected: boolean;
@@ -2793,7 +2813,7 @@ function TaskTable({
               const taskAssignees = getTaskParticipants(task, 'assignee');
               const approvalSummary = getApprovalSummary(task);
               const taskObservers = getTaskParticipants(task, 'observer');
-              const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
+              const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
               const counterpartyName = getTaskClientName(task);
               const canSelectTask = selectableTaskIds.has(task.id);
               const canOpenCounterparty = Boolean(
@@ -2933,6 +2953,7 @@ function TaskBoard({
   currentUserId,
   isAdminUser,
   taskSettings,
+  taskPermissions,
   onEdit,
   onDone,
 }: {
@@ -2941,6 +2962,7 @@ function TaskBoard({
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
+  taskPermissions: MenuSectionPermissions;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
 }) {
@@ -2962,7 +2984,7 @@ function TaskBoard({
             ) : column.items.map((task) => {
               const TypeIcon = getTypeMeta(task.type).icon;
               const isHighlighted = highlightedTaskId === task.id;
-              const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
+              const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
               return (
                 <article
                   key={task.id}
@@ -3142,6 +3164,7 @@ function TaskTimelineCalendar({
   currentUserId,
   isAdminUser,
   taskSettings,
+  taskPermissions,
   movingTaskId,
 }: {
   tasks: TaskJournalItem[];
@@ -3159,6 +3182,7 @@ function TaskTimelineCalendar({
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
+  taskPermissions: MenuSectionPermissions;
   movingTaskId: number | null;
 }) {
   const visibleDays = useMemo(() => {
@@ -3419,7 +3443,7 @@ function TaskTimelineCalendar({
 
                       {placements.map(({ task, top, height, lane, laneCount }) => {
                         const tone = getTimelineTaskTone(task, currentUserId, assigneeFilter);
-                        const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
+                        const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const start = new Date(task.dueAt);
                         const end = new Date(start.getTime() + normalizeTaskDuration(task.plannedDurationMinutes) * 60 * 1000);
                         const width = `calc(${100 / laneCount}% - ${TIMELINE_TASK_LANE_GAP}px)`;
@@ -3518,6 +3542,7 @@ function TaskCalendar({
   currentUserId,
   isAdminUser,
   taskSettings,
+  taskPermissions,
   movingTaskId,
   resizingTaskId,
 }: {
@@ -3539,6 +3564,7 @@ function TaskCalendar({
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
+  taskPermissions: MenuSectionPermissions;
   movingTaskId: number | null;
   resizingTaskId: number | null;
 }) {
@@ -3826,7 +3852,7 @@ function TaskCalendar({
 
                     <div className="mt-2 space-y-1.5">
                       {dayTasks.slice(0, mode === 'day' ? 8 : 3).map((task) => {
-                        const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
+                        const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const hasTimeConflict = conflictTaskIds.has(task.id);
                         const tooltipTitle = [
                           ...buildTaskTooltipLines(task),
@@ -3951,7 +3977,7 @@ function TaskCalendar({
                 </div>
               ) : selectedTasks.map((task) => {
                 const TypeIcon = getTypeMeta(task.type).icon;
-                const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings);
+                const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                 return (
                   <article key={task.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-start justify-between gap-3">

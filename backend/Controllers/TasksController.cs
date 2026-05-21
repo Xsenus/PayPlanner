@@ -1366,18 +1366,14 @@ public class TasksController : ControllerBase
             return Unauthorized();
         }
 
-        if (!access.IsAdmin && access.Permission?.CanEdit != true)
-        {
-            return Forbid();
-        }
-
         var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
             return NotFound();
         }
 
-        if (ShouldRestrictExecutorFullEdit(entity, access, await GetTaskJournalSettingsAsync(ct)))
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        if (!CanFullyModifyTask(entity, access, access.Permission?.CanEdit == true, settings))
         {
             return Forbid();
         }
@@ -1513,7 +1509,8 @@ public class TasksController : ControllerBase
             return NotFound();
         }
 
-        if (!CanUpdateTaskStatus(entity, access))
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        if (!CanUpdateTaskStatus(entity, access, settings))
         {
             return Forbid();
         }
@@ -1680,7 +1677,7 @@ public class TasksController : ControllerBase
         var now = DateTime.UtcNow;
         foreach (var entity in entities)
         {
-            if (ShouldRestrictExecutorFullEdit(entity, access, settings))
+            if (!CanFullyModifyTask(entity, access, access.Permission?.CanEdit == true, settings))
             {
                 continue;
             }
@@ -1819,7 +1816,7 @@ public class TasksController : ControllerBase
         var deleted = 0;
         foreach (var entity in entities)
         {
-            if (ShouldRestrictExecutorFullEdit(entity, access, settings))
+            if (!CanFullyModifyTask(entity, access, access.Permission?.CanDelete == true, settings))
             {
                 continue;
             }
@@ -1976,7 +1973,7 @@ public class TasksController : ControllerBase
             return NotFound();
         }
 
-        if (ShouldRestrictExecutorFullEdit(entity, access, await GetTaskJournalSettingsAsync(ct)))
+        if (!CanFullyModifyTask(entity, access, access.Permission?.CanDelete == true, await GetTaskJournalSettingsAsync(ct)))
         {
             return Forbid();
         }
@@ -3432,12 +3429,45 @@ public class TasksController : ControllerBase
            IsTaskExecutor(entity, access.UserId) &&
            !IsTaskAuthor(entity, access.UserId);
 
-    private static bool CanUpdateTaskStatus(TaskJournalItem entity, TaskAccess access)
-        => access.IsAdmin || access.Permission?.CanEdit == true || CanPostTaskComment(entity, access);
+    private static bool CanFullyModifyTask(
+        TaskJournalItem entity,
+        TaskAccess access,
+        bool hasCapability,
+        TaskJournalSettingsDto settings)
+    {
+        if (access.IsAdmin)
+        {
+            return true;
+        }
+
+        if (!hasCapability || ShouldRestrictExecutorFullEdit(entity, access, settings))
+        {
+            return false;
+        }
+
+        if (access.Visibility.SeesAll
+            || string.Equals(access.Visibility.ViewScope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return IsTaskAuthor(entity, access.UserId) || IsTaskExecutor(entity, access.UserId);
+    }
+
+    private static bool CanUpdateTaskStatus(
+        TaskJournalItem entity,
+        TaskAccess access,
+        TaskJournalSettingsDto settings)
+        => access.IsAdmin
+            || CanFullyModifyTask(entity, access, access.Permission?.CanEdit == true, settings)
+            || CanPostTaskComment(entity, access);
 
     private static bool CanPostTaskComment(TaskJournalItem entity, TaskAccess access)
     {
-        if (access.IsAdmin || access.Permission?.CanEdit == true)
+        if (access.IsAdmin
+            || (access.Permission?.CanEdit == true
+                && (access.Visibility.SeesAll
+                    || string.Equals(access.Visibility.ViewScope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase))))
         {
             return true;
         }
