@@ -1176,6 +1176,9 @@ export interface MoneyOperation {
   linkedInvoiceDate?: string | null;
   linkedContractId?: number | null;
   linkedContractNumber?: string | null;
+  linkedActId?: number | null;
+  linkedActNumber?: string | null;
+  linkedActDate?: string | null;
   matchStatus?: MoneyOperationMatchStatus;
   matchedAt?: string | null;
   matchComment?: string | null;

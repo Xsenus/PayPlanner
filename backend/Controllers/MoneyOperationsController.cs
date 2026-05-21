@@ -1091,6 +1091,42 @@ public class MoneyOperationsController : ControllerBase
                     .OrderBy(payment => payment.Id)
                     .Select(payment => payment.Contract != null ? payment.Contract.Number : null)
                     .FirstOrDefault(),
+                LinkedActId = _db.Acts
+                    .Where(act =>
+                        act.InvoiceId.HasValue &&
+                        act.Invoice != null &&
+                        operation.LinkedInvoiceId.HasValue &&
+                        act.Invoice.InvoiceId == operation.LinkedInvoiceId.Value &&
+                        act.Status != ActStatus.Terminated)
+                    .OrderByDescending(act => act.Status == ActStatus.Signed)
+                    .ThenByDescending(act => act.Date)
+                    .ThenByDescending(act => act.Id)
+                    .Select(act => (int?)act.Id)
+                    .FirstOrDefault(),
+                LinkedActNumber = _db.Acts
+                    .Where(act =>
+                        act.InvoiceId.HasValue &&
+                        act.Invoice != null &&
+                        operation.LinkedInvoiceId.HasValue &&
+                        act.Invoice.InvoiceId == operation.LinkedInvoiceId.Value &&
+                        act.Status != ActStatus.Terminated)
+                    .OrderByDescending(act => act.Status == ActStatus.Signed)
+                    .ThenByDescending(act => act.Date)
+                    .ThenByDescending(act => act.Id)
+                    .Select(act => act.Number)
+                    .FirstOrDefault(),
+                LinkedActDate = _db.Acts
+                    .Where(act =>
+                        act.InvoiceId.HasValue &&
+                        act.Invoice != null &&
+                        operation.LinkedInvoiceId.HasValue &&
+                        act.Invoice.InvoiceId == operation.LinkedInvoiceId.Value &&
+                        act.Status != ActStatus.Terminated)
+                    .OrderByDescending(act => act.Status == ActStatus.Signed)
+                    .ThenByDescending(act => act.Date)
+                    .ThenByDescending(act => act.Id)
+                    .Select(act => (DateTime?)act.Date)
+                    .FirstOrDefault(),
                 MatchStatus = operation.MatchStatus == MoneyOperationMatchStatus.Matched
                     ? nameof(MoneyOperationMatchStatus.Matched)
                     : operation.MatchStatus == MoneyOperationMatchStatus.ClarificationRequired
@@ -1224,6 +1260,27 @@ public class MoneyOperationsController : ControllerBase
                 LinkedInvoiceDate = payment.Invoice != null ? payment.Invoice.Date : payment.AccountDate,
                 LinkedContractId = payment.ContractId,
                 LinkedContractNumber = payment.Contract != null ? payment.Contract.Number : null,
+                LinkedActId = _db.Acts
+                    .Where(act => act.InvoiceId == payment.Id && act.Status != ActStatus.Terminated)
+                    .OrderByDescending(act => act.Status == ActStatus.Signed)
+                    .ThenByDescending(act => act.Date)
+                    .ThenByDescending(act => act.Id)
+                    .Select(act => (int?)act.Id)
+                    .FirstOrDefault(),
+                LinkedActNumber = _db.Acts
+                    .Where(act => act.InvoiceId == payment.Id && act.Status != ActStatus.Terminated)
+                    .OrderByDescending(act => act.Status == ActStatus.Signed)
+                    .ThenByDescending(act => act.Date)
+                    .ThenByDescending(act => act.Id)
+                    .Select(act => act.Number)
+                    .FirstOrDefault(),
+                LinkedActDate = _db.Acts
+                    .Where(act => act.InvoiceId == payment.Id && act.Status != ActStatus.Terminated)
+                    .OrderByDescending(act => act.Status == ActStatus.Signed)
+                    .ThenByDescending(act => act.Date)
+                    .ThenByDescending(act => act.Id)
+                    .Select(act => (DateTime?)act.Date)
+                    .FirstOrDefault(),
                 MatchStatus = payment.InvoiceId.HasValue
                     ? nameof(MoneyOperationMatchStatus.Matched)
                     : nameof(MoneyOperationMatchStatus.None),
@@ -2688,6 +2745,9 @@ public class MoneyOperationsController : ControllerBase
             LinkedInvoiceDate = row.LinkedInvoiceDate,
             LinkedContractId = row.LinkedContractId,
             LinkedContractNumber = row.LinkedContractNumber,
+            LinkedActId = row.LinkedActId,
+            LinkedActNumber = row.LinkedActNumber,
+            LinkedActDate = row.LinkedActDate,
             MatchStatus = matchStatus,
             MatchedAt = row.MatchedAt,
             MatchComment = row.MatchComment,
@@ -2775,6 +2835,7 @@ public class MoneyOperationsController : ControllerBase
             "Статья",
             "Связанный счет",
             "Договор",
+            "Акт",
             "Статус сверки",
             "Комментарий сверки",
             "Вложения",
@@ -2801,6 +2862,7 @@ public class MoneyOperationsController : ControllerBase
                 item.CategoryName ?? string.Empty,
                 item.LinkedInvoiceNumber ?? item.PaidInvoiceNumber ?? string.Empty,
                 item.LinkedContractNumber ?? string.Empty,
+                item.LinkedActNumber ?? string.Empty,
                 GetMoneyOperationMatchStatusLabel(item.MatchStatus),
                 item.MatchComment ?? string.Empty,
                 item.AttachmentSummary ?? string.Empty,
@@ -2863,6 +2925,7 @@ public class MoneyOperationsController : ControllerBase
             "Статья",
             "Связанный счет",
             "Договор",
+            "Акт",
             "Статус сверки",
             "Комментарий сверки",
             "Вложения",
@@ -2889,6 +2952,7 @@ public class MoneyOperationsController : ControllerBase
                 item.CategoryName ?? string.Empty,
                 item.LinkedInvoiceNumber ?? item.PaidInvoiceNumber ?? string.Empty,
                 item.LinkedContractNumber ?? string.Empty,
+                item.LinkedActNumber ?? string.Empty,
                 GetMoneyOperationMatchStatusLabel(item.MatchStatus),
                 item.MatchComment ?? string.Empty,
                 item.AttachmentSummary ?? string.Empty,
@@ -3004,6 +3068,7 @@ public class MoneyOperationsController : ControllerBase
                 <td>{Html(item.PaymentOrderNumber ?? "-")}</td>
                 <td>{Html(item.LinkedInvoiceNumber ?? item.PaidInvoiceNumber ?? "-")}</td>
                 <td>{Html(item.LinkedContractNumber ?? "-")}</td>
+                <td>{Html(item.LinkedActNumber ?? "-")}</td>
                 <td>{Html(GetMoneyOperationMatchStatusLabel(item.MatchStatus))}</td>
                 <td>{Html(item.AttachmentSummary ?? "-")}</td>
               </tr>
@@ -3011,7 +3076,7 @@ public class MoneyOperationsController : ControllerBase
         }
 
         var emptyRow = items.Count == 0
-            ? """<tr><td colspan="18" class="empty">Операции не найдены</td></tr>"""
+            ? """<tr><td colspan="19" class="empty">Операции не найдены</td></tr>"""
             : string.Empty;
 
         return $$"""
@@ -3082,6 +3147,7 @@ public class MoneyOperationsController : ControllerBase
           <th>П/п</th>
           <th>Счет</th>
           <th>Договор</th>
+          <th>Акт</th>
           <th>Сверка</th>
           <th>Вложения</th>
         </tr>
@@ -4540,6 +4606,9 @@ public class MoneyOperationsController : ControllerBase
         public DateTime? LinkedInvoiceDate { get; init; }
         public int? LinkedContractId { get; init; }
         public string? LinkedContractNumber { get; init; }
+        public int? LinkedActId { get; init; }
+        public string? LinkedActNumber { get; init; }
+        public DateTime? LinkedActDate { get; init; }
         public string? MatchStatus { get; init; }
         public DateTime? MatchedAt { get; init; }
         public string? MatchComment { get; init; }

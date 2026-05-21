@@ -330,7 +330,17 @@ public class MoneyOperationsControllerTests
             MatchStatus = MoneyOperationMatchStatus.Matched,
             CreatedAt = DateTime.UtcNow,
         };
-        db.AddRange(payment, operation);
+        var act = new Act
+        {
+            Number = "АКТ-55/26",
+            Date = new DateTime(2026, 5, 8),
+            Amount = 15_000m,
+            Invoice = payment,
+            Status = ActStatus.Signed,
+            WorkflowStatus = ActWorkflowStatus.Signed,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.AddRange(payment, operation, act);
         await db.SaveChangesAsync();
         var controller = CreateController(db);
 
@@ -357,6 +367,9 @@ public class MoneyOperationsControllerTests
         Assert.Equal("Анна Иванова", manualRow.ResponsibleName);
         Assert.Equal(contract.Id, manualRow.LinkedContractId);
         Assert.Equal("ДОГ-55/26", manualRow.LinkedContractNumber);
+        Assert.Equal(act.Id, manualRow.LinkedActId);
+        Assert.Equal("АКТ-55/26", manualRow.LinkedActNumber);
+        Assert.Equal(new DateTime(2026, 5, 8), manualRow.LinkedActDate);
     }
 
     [Fact]
@@ -470,7 +483,7 @@ public class MoneyOperationsControllerTests
         var csv = Encoding.UTF8.GetString(file.FileContents[preamble.Length..]);
 
         Assert.Contains("Дата;Источник;Статус;Движение;Учет;Счет;Контрагент;Ответственный;Сумма;Ставка НДС;Сумма НДС;Валюта", csv);
-        Assert.Contains("Связанный счет;Договор;Статус сверки;Комментарий сверки;Вложения", csv);
+        Assert.Contains("Связанный счет;Договор;Акт;Статус сверки;Комментарий сверки;Вложения", csv);
         Assert.Contains("Банк;В обработке;Приход;Факт;Основной банк;ООО Ромашка;;10000.00;;;RUB", csv);
         Assert.Contains("\"Оплата по счету; май\"", csv);
         Assert.Contains("Не сверено", csv);
@@ -578,6 +591,7 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Источник: Банк", content.Content);
         Assert.Contains("<th>Ответственный</th>", content.Content);
         Assert.Contains("<th>Договор</th>", content.Content);
+        Assert.Contains("<th>Акт</th>", content.Content);
         Assert.Contains("<th>Вложения</th>", content.Content);
         Assert.Contains("В обработке", content.Content);
         Assert.Contains("&lt;ООО Ромашка&gt;", content.Content);

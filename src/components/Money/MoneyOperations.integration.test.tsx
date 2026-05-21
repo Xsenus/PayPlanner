@@ -154,9 +154,9 @@ vi.mock('../../hooks/useToast', () => ({
 
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
   usePersistedTableSettings: () => ({
-    columnOrder: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'attachmentSummary', 'categoryName', 'purpose'],
-    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'attachmentSummary', 'categoryName', 'purpose'],
-    visibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'attachmentSummary', 'categoryName', 'purpose'],
+    columnOrder: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'attachmentSummary', 'categoryName', 'purpose'],
+    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'attachmentSummary', 'categoryName', 'purpose'],
+    visibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'attachmentSummary', 'categoryName', 'purpose'],
     pageSize: 25,
     setPageSize: vi.fn(),
     draggingColumn: null,
@@ -300,6 +300,9 @@ function createOperation(overrides: Partial<MoneyOperation> = {}): MoneyOperatio
     linkedInvoiceDate: overrides.linkedInvoiceDate ?? null,
     linkedContractId: overrides.linkedContractId ?? null,
     linkedContractNumber: overrides.linkedContractNumber ?? null,
+    linkedActId: overrides.linkedActId ?? null,
+    linkedActNumber: overrides.linkedActNumber ?? null,
+    linkedActDate: overrides.linkedActDate ?? null,
     matchStatus: overrides.matchStatus ?? 'None',
     matchedAt: overrides.matchedAt ?? null,
     matchComment: overrides.matchComment ?? null,
@@ -810,6 +813,20 @@ describe('MoneyOperations integration', () => {
 
     expect(await screen.findByText('Договор')).toBeTruthy();
     expect(await screen.findByText('ДОГ-44/26')).toBeTruthy();
+  });
+
+  it('renders linked act number in the money journal table', async () => {
+    operations = [
+      createOperation({
+        linkedActId: 45,
+        linkedActNumber: 'АКТ-45/26',
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByText('Акт')).toBeTruthy();
+    expect(await screen.findByText('АКТ-45/26')).toBeTruthy();
   });
 
   it('renders attachment summary in the money journal table', async () => {
