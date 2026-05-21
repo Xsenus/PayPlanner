@@ -1152,6 +1152,11 @@ public class MoneyOperationsController : ControllerBase
                     .OrderByDescending(order => order.Id)
                     .Select(order => order.Number)
                     .FirstOrDefault(),
+                CashOrderDate = _db.CashOrders
+                    .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
+                    .OrderByDescending(order => order.Id)
+                    .Select(order => (DateTime?)order.Date)
+                    .FirstOrDefault(),
                 CashOrderStatus = _db.CashOrders
                     .Where(order => order.MoneyOperationId == operation.Id && order.Status != CashOrderStatus.Cancelled)
                     .OrderByDescending(order => order.Id)
@@ -1301,6 +1306,11 @@ public class MoneyOperationsController : ControllerBase
                     .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
                     .OrderByDescending(order => order.Id)
                     .Select(order => order.Number)
+                    .FirstOrDefault(),
+                CashOrderDate = _db.CashOrders
+                    .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
+                    .OrderByDescending(order => order.Id)
+                    .Select(order => (DateTime?)order.Date)
                     .FirstOrDefault(),
                 CashOrderStatus = _db.CashOrders
                     .Where(order => order.PaymentId == payment.Id && order.Status != CashOrderStatus.Cancelled)
@@ -2759,6 +2769,7 @@ public class MoneyOperationsController : ControllerBase
             RelatedPaymentId = row.RelatedPaymentId,
             CashOrderId = row.CashOrderId,
             CashOrderNumber = row.CashOrderNumber,
+            CashOrderDate = row.CashOrderDate,
             CashOrderStatus = string.IsNullOrWhiteSpace(row.CashOrderStatus)
                 ? null
                 : ParseEnum<CashOrderStatus>(row.CashOrderStatus),
@@ -4620,6 +4631,7 @@ public class MoneyOperationsController : ControllerBase
         public int? RelatedPaymentId { get; init; }
         public int? CashOrderId { get; init; }
         public string? CashOrderNumber { get; init; }
+        public DateTime? CashOrderDate { get; init; }
         public string? CashOrderStatus { get; init; }
         public bool CanCreateCashOrder { get; init; }
     }

@@ -907,6 +907,7 @@ public class MoneyOperationsControllerTests
         Assert.False(afterItem.CanCreateCashOrder);
         Assert.Equal(order.Id, afterItem.CashOrderId);
         Assert.Equal(order.Number, afterItem.CashOrderNumber);
+        Assert.Equal(order.Date, afterItem.CashOrderDate);
     }
 
     [Fact]
@@ -2118,6 +2119,7 @@ public class MoneyOperationsControllerTests
         var item = Assert.Single(page.Items);
         Assert.False(item.CanCreateCashOrder);
         Assert.Equal(createdOrder.Id, item.CashOrderId);
+        Assert.Equal(createdOrder.Date, item.CashOrderDate);
 
         var updateAction = await controller.Update(operation.Id, new MoneyOperation
         {

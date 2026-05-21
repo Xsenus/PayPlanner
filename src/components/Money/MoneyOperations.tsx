@@ -3540,7 +3540,14 @@ export function MoneyOperations({
               className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
               title="Открыть карточку кассового ордера">
               <ReceiptText className="h-3.5 w-3.5" />
-              {item.cashOrderNumber}
+              <span className="inline-flex flex-col items-start leading-tight">
+                <span>{item.cashOrderNumber}</span>
+                {item.cashOrderDate && (
+                  <span className="text-[11px] font-normal text-emerald-600">
+                    {formatDate(item.cashOrderDate)}
+                  </span>
+                )}
+              </span>
             </button>
           );
         }

@@ -1190,6 +1190,7 @@ export interface MoneyOperation {
   relatedPaymentId?: number | null;
   cashOrderId?: number | null;
   cashOrderNumber?: string | null;
+  cashOrderDate?: string | null;
   cashOrderStatus?: CashOrderStatus | null;
   canCreateCashOrder?: boolean;
 }

@@ -154,9 +154,9 @@ vi.mock('../../hooks/useToast', () => ({
 
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
   usePersistedTableSettings: () => ({
-    columnOrder: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'attachmentSummary', 'categoryName', 'purpose'],
-    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'attachmentSummary', 'categoryName', 'purpose'],
-    visibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'attachmentSummary', 'categoryName', 'purpose'],
+    columnOrder: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'cashOrder', 'attachmentSummary', 'categoryName', 'purpose'],
+    orderedVisibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'cashOrder', 'attachmentSummary', 'categoryName', 'purpose'],
+    visibleColumns: ['date', 'accountName', 'counterpartyName', 'responsibleName', 'linkedContractNumber', 'linkedActNumber', 'cashOrder', 'attachmentSummary', 'categoryName', 'purpose'],
     pageSize: 25,
     setPageSize: vi.fn(),
     draggingColumn: null,
@@ -314,6 +314,7 @@ function createOperation(overrides: Partial<MoneyOperation> = {}): MoneyOperatio
     relatedPaymentId: overrides.relatedPaymentId ?? null,
     cashOrderId: overrides.cashOrderId ?? null,
     cashOrderNumber: overrides.cashOrderNumber ?? null,
+    cashOrderDate: overrides.cashOrderDate ?? null,
     cashOrderStatus: overrides.cashOrderStatus ?? null,
     canCreateCashOrder: overrides.canCreateCashOrder ?? false,
   };
@@ -827,6 +828,25 @@ describe('MoneyOperations integration', () => {
 
     expect(await screen.findByText('Акт')).toBeTruthy();
     expect(await screen.findByText('АКТ-45/26')).toBeTruthy();
+  });
+
+  it('renders cash order number and date in the money journal table', async () => {
+    operations = [
+      createOperation({
+        source: 'Cash',
+        cashOrderId: 5,
+        cashOrderNumber: 'PKO-2026-0005',
+        cashOrderDate: '2026-04-29',
+      }),
+    ];
+
+    render(<MoneyOperations source="Cash" />);
+
+    const cashOrderNumber = await screen.findByText('PKO-2026-0005');
+    const cashOrderButton = cashOrderNumber.closest('button');
+
+    expect(cashOrderButton).toBeTruthy();
+    expect(within(cashOrderButton as HTMLElement).getByText('29.04.2026')).toBeTruthy();
   });
 
   it('renders attachment summary in the money journal table', async () => {
