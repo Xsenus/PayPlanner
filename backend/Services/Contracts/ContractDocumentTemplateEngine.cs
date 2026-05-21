@@ -197,6 +197,101 @@ public static class ContractDocumentTemplateEngine
         return ReplaceTokens(templateHtml, tokens);
     }
 
+    public static string RenderTerminationAgreementHtml(Contract contract, LegalEntity? mainCompany)
+    {
+        var sellerName = FirstNotEmpty(mainCompany?.FullName, mainCompany?.ShortName, "Исполнитель");
+        var sellerRequisites = BuildLegalEntityRequisites(mainCompany, sellerName);
+        var customerName = ResolveCustomerName(contract);
+        var customerRequisites = ResolveCustomerRequisites(contract);
+        var terminationDate = FormatDate(contract.TerminationDate);
+        var financialTerms = string.IsNullOrWhiteSpace(contract.TerminationFinancialTerms)
+            ? "Стороны подтверждают отсутствие дополнительных финансовых условий, если иное не указано в договоре."
+            : contract.TerminationFinancialTerms.Trim();
+
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Соглашение о расторжении договора № {{Encode(contract.Number)}}</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #111827; font-family: "Times New Roman", serif; font-size: 13px; line-height: 1.45; }
+    h1 { margin: 0 0 6px; text-align: center; font-size: 22px; }
+    h2 { margin: 22px 0 8px; font-size: 16px; }
+    .subtitle { margin-bottom: 24px; text-align: center; color: #4b5563; }
+    .parties, .signatures { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    .parties td { width: 50%; vertical-align: top; padding: 12px; border: 1px solid #d1d5db; }
+    .party-title { margin-bottom: 6px; font-weight: 700; text-transform: uppercase; }
+    .muted { color: #4b5563; font-size: 12px; }
+    .section { margin-top: 12px; }
+    .section p { margin: 0 0 8px; }
+    .signatures td { width: 50%; padding-top: 42px; vertical-align: top; }
+    .line { display: inline-block; width: 220px; border-bottom: 1px solid #111827; }
+  </style>
+</head>
+<body>
+  <h1>Соглашение о расторжении договора № {{Encode(contract.Number)}}</h1>
+  <div class="subtitle">к договору от {{Encode(FormatDate(contract.Date))}}</div>
+
+  <table class="parties">
+    <tr>
+      <td>
+        <div class="party-title">Исполнитель</div>
+        <div>{{Encode(sellerName)}}</div>
+        <div class="muted">{{Encode(sellerRequisites)}}</div>
+      </td>
+      <td>
+        <div class="party-title">Заказчик</div>
+        <div>{{Encode(customerName)}}</div>
+        <div class="muted">{{Encode(customerRequisites)}}</div>
+      </td>
+    </tr>
+  </table>
+
+  <h2>1. Предмет соглашения</h2>
+  <div class="section">
+    <p>Стороны договорились расторгнуть договор № {{Encode(contract.Number)}} от {{Encode(FormatDate(contract.Date))}} с {{Encode(terminationDate)}}.</p>
+    <p>Основание расторжения: {{Encode(contract.TerminationReason ?? "по соглашению сторон")}}.</p>
+  </div>
+
+  <h2>2. Условия расторжения</h2>
+  <div class="section">
+    <p>{{Encode(contract.TerminationTerms ?? "Условия расторжения не заполнены в карточке договора.")}}</p>
+  </div>
+
+  <h2>3. Финансовые условия</h2>
+  <div class="section">
+    <p>{{Encode(financialTerms)}}</p>
+  </div>
+
+  <h2>4. Заключительные положения</h2>
+  <div class="section">
+    <p>Соглашение вступает в силу с даты подписания сторонами, если стороны не указали иной порядок.</p>
+    <p>Остальные обязательства сторон прекращаются в порядке, указанном в договоре и настоящем соглашении.</p>
+  </div>
+
+  <h2>Подписи сторон</h2>
+  <table class="signatures">
+    <tr>
+      <td>
+        Исполнитель<br>
+        <span class="line"></span><br>
+        <span class="muted">{{Encode(sellerName)}}</span>
+      </td>
+      <td>
+        Заказчик<br>
+        <span class="line"></span><br>
+        <span class="muted">{{Encode(customerName)}}</span>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+""";
+    }
+
     private static string ReplaceTokens(string templateHtml, IReadOnlyDictionary<string, string> tokens)
         => TokenRegex.Replace(templateHtml, match =>
         {

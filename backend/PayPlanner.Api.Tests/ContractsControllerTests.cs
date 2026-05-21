@@ -539,6 +539,46 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task GetTerminationAgreement_ReturnsAgreementForTerminatedContract()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = CreateAdminController(db);
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-TERM-1",
+                Date = new DateTime(2026, 5, 1),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 42_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        await controller.Terminate(
+            createdDto.Id,
+            new TerminateContractRequest
+            {
+                TerminationDate = new DateTime(2026, 5, 22),
+                Terms = "Стороны прекращают обязательства по соглашению.",
+                Reason = "Соглашение сторон",
+                FinancialTerms = "Возвратов и штрафов нет.",
+            },
+            CancellationToken.None);
+
+        var actionResult = await controller.GetTerminationAgreement(createdDto.Id, "html", CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(actionResult);
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("Соглашение о расторжении договора № CT-TERM-1", content.Content);
+        Assert.Contains("Стороны прекращают обязательства", content.Content);
+        Assert.Contains("Возвратов и штрафов нет", content.Content);
+    }
+
+    [Fact]
     public async Task Update_ClearsAmountAndValidUntil_WhenSwitchingToActualOpenEndedContract()
     {
         await using var db = await CreateContextAsync();

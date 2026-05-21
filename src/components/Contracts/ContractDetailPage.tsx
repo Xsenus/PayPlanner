@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -779,12 +779,12 @@ export function ContractDetailPage({
     }
   };
 
-  const saveContractDocumentBlob = (blob: Blob, format: 'word' | 'pdf') => {
+  const saveContractDocumentBlob = (blob: Blob, format: 'word' | 'pdf', fileBase = 'contract') => {
     const extension = format === 'pdf' ? 'pdf' : 'doc';
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `contract-${contract?.number ?? contractId}.${extension}`;
+    link.download = `${fileBase}-${contract?.number ?? contractId}.${extension}`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -802,6 +802,24 @@ export function ContractDetailPage({
       window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось открыть печатную форму договора'), 'Договоры');
+    } finally {
+      setDocumentSaving(false);
+    }
+  };
+
+  const downloadTerminationAgreement = async (format: 'word' | 'pdf') => {
+    if (!contract || documentSaving) return;
+
+    setDocumentSaving(true);
+    try {
+      const blob = await apiService.downloadContractTerminationAgreement(contract.id, format);
+      saveContractDocumentBlob(blob, format, 'contract-termination');
+      toast.success(
+        format === 'pdf' ? 'PDF соглашения о расторжении подготовлен.' : 'Соглашение о расторжении подготовлено.',
+        'Договоры',
+      );
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось сформировать соглашение о расторжении'), 'Договоры');
     } finally {
       setDocumentSaving(false);
     }
@@ -857,6 +875,7 @@ export function ContractDetailPage({
   } as Contract);
   const isTerminated = contract?.status === 'Terminated';
   const isCancelled = contract?.status === 'Cancelled';
+  const canCreateTerminationAgreement = Boolean(isTerminated && contract?.terminationDate && contract?.terminationTerms);
   const notSignedDisabled = workflowSaving || editMode || contract?.status === 'NotSigned' || isTerminated || isCancelled;
   const workflowDisabled = workflowSaving || editMode || isTerminated || isCancelled;
   const terminateDisabled = workflowSaving || editMode || isTerminated || isCancelled;
@@ -910,6 +929,17 @@ export function ContractDetailPage({
             {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             PDF
           </button>
+          {canCreateTerminationAgreement && (
+            <button
+              type="button"
+              onClick={() => void downloadTerminationAgreement('pdf')}
+              disabled={documentSaving}
+              className="inline-flex items-center gap-2 rounded border border-orange-200 px-3 py-2 text-sm text-orange-700 disabled:opacity-60"
+            >
+              {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              Соглашение PDF
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void sendContractByEmail()}

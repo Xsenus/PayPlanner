@@ -1397,6 +1397,22 @@ export class ApiService {
     return response.blob();
   }
 
+  async downloadContractTerminationAgreement(id: number, format: 'word' | 'pdf' | 'html' = 'word') {
+    const token = getAuthToken();
+    const query = buildQuery({ format });
+    const response = await fetch(`${API_BASE_URL}/contracts/${id}/termination-agreement${query}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return response.blob();
+  }
+
   async sendContractByEmail(
     id: number,
     payload?: { email?: string; subject?: string; message?: string; format?: 'word' | 'pdf' },

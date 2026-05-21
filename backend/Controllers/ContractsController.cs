@@ -150,6 +150,46 @@ public class ContractsController : ControllerBase
         return File(Encoding.UTF8.GetBytes(documentHtml), "application/msword", fileName);
     }
 
+    [HttpGet("{id:int}/termination-agreement")]
+    public async Task<IActionResult> GetTerminationAgreement(int id, [FromQuery] string? format = "word", CancellationToken ct = default)
+    {
+        var contract = await LoadContractForDocumentAsync(id, ct);
+        if (contract is null) return NotFound();
+        if (!string.Equals(contract.Status, ContractStatus.Terminated, StringComparison.OrdinalIgnoreCase)
+            || contract.TerminationDate is null
+            || string.IsNullOrWhiteSpace(contract.TerminationTerms))
+        {
+            return BadRequest("Соглашение о расторжении доступно после расторжения договора с заполненными условиями.");
+        }
+
+        var mainCompany = await LoadMainCompanyAsync(ct);
+        var documentHtml = ContractDocumentTemplateEngine.RenderTerminationAgreementHtml(contract, mainCompany);
+        var normalizedFormat = NormalizeDocumentFormat(format);
+
+        if (normalizedFormat == "html")
+        {
+            return Content(documentHtml, "text/html; charset=utf-8");
+        }
+
+        var ext = normalizedFormat == "pdf" ? "pdf" : "doc";
+        var fileName = $"contract-termination-{SanitizeFilePart(contract.Number)}.{ext}";
+
+        if (normalizedFormat == "pdf")
+        {
+            try
+            {
+                var pdfBytes = await RenderContractPdfAsync(documentHtml, ct);
+                return File(pdfBytes, "application/pdf", fileName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        return File(Encoding.UTF8.GetBytes(documentHtml), "application/msword", fileName);
+    }
+
     [HttpPost("{id:int}/send-email")]
     public async Task<IActionResult> SendEmail(int id, [FromBody] SendInvoiceEmailRequest request, CancellationToken ct)
     {

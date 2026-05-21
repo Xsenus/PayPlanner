@@ -88,6 +88,7 @@ vi.mock('../../services/api', () => ({
     getClientsV2: vi.fn(),
     updateContract: vi.fn(),
     downloadContractDocument: vi.fn(),
+    downloadContractTerminationAgreement: vi.fn(),
     sendContractByEmail: vi.fn(),
   },
 }));
@@ -135,6 +136,7 @@ describe('ContractDetailPage integration', () => {
     vi.mocked(apiService.getClientsV2).mockReset();
     vi.mocked(apiService.updateContract).mockReset();
     vi.mocked(apiService.downloadContractDocument).mockReset();
+    vi.mocked(apiService.downloadContractTerminationAgreement).mockReset();
     vi.mocked(apiService.sendContractByEmail).mockReset();
 
     vi.mocked(apiService.getContract).mockResolvedValue(contractFixture);
@@ -159,6 +161,7 @@ describe('ContractDetailPage integration', () => {
       total: 0,
     });
     vi.mocked(apiService.downloadContractDocument).mockResolvedValue(new Blob(['contract'], { type: 'application/msword' }));
+    vi.mocked(apiService.downloadContractTerminationAgreement).mockResolvedValue(new Blob(['agreement'], { type: 'application/pdf' }));
     vi.mocked(apiService.sendContractByEmail).mockResolvedValue({
       sent: true,
       recipient: 'client@example.com',
@@ -345,5 +348,27 @@ describe('ContractDetailPage integration', () => {
     });
 
     promptSpy.mockRestore();
+  });
+
+  it('offers a termination agreement document for terminated contracts', async () => {
+    vi.mocked(apiService.getContract).mockResolvedValue({
+      ...contractFixture,
+      status: 'Terminated',
+      terminationDate: '2026-05-22',
+      terminationTerms: 'Расторгнуть по соглашению сторон',
+    } as Contract);
+
+    render(
+      <ContractDetailPage
+        contractId={77}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Соглашение PDF' }));
+
+    await waitFor(() => {
+      expect(apiService.downloadContractTerminationAgreement).toHaveBeenCalledWith(77, 'pdf');
+    });
   });
 });
