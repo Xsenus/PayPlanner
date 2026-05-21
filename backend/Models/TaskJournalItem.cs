@@ -44,6 +44,17 @@ public class TaskJournalItem
 
     public int PlannedDurationMinutes { get; set; } = 60;
 
+    public bool ContractorPaymentEnabled { get; set; }
+
+    public decimal? ContractorPaymentAmount { get; set; }
+
+    public DateTime? ContractorPaymentDueDate { get; set; }
+
+    public bool ContractorPaymentOnResult { get; set; }
+
+    public int? ContractorPaymentId { get; set; }
+    public Payment? ContractorPayment { get; set; }
+
     [MaxLength(32)]
     public string Type { get; set; } = "task";
 

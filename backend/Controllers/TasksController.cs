@@ -71,6 +71,7 @@ public class TasksController : ControllerBase
     private const string CaseInactivityAutomationDefaultAssigneeSettingKey = "tasks.automation.caseControl.defaultAssigneeUserId";
     private const string CaseInactivityAutomationEscalationDaysSettingKey = "tasks.automation.caseControl.escalationDays";
     private const string CaseInactivityAutomationEscalationUserSettingKey = "tasks.automation.caseControl.escalationUserId";
+    private const string ContractorPaymentMarker = "[PayPlanner:TaskContractorPayment]";
 
     private readonly PaymentContext _db;
     private readonly INotificationService _notificationService;
@@ -302,6 +303,7 @@ public class TasksController : ControllerBase
                 Id = user.Id,
                 Name = user.FullName == "" ? user.Email : user.FullName,
                 Email = user.Email,
+                IsExternalContractor = user.IsExternalContractor,
             })
             .ToListAsync(ct);
 
@@ -1297,6 +1299,12 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = participants.Error });
         }
 
+        var contractorPaymentValidation = await ValidateContractorPaymentRequestAsync(request, participants.PrimaryAssigneeUserId, ct);
+        if (contractorPaymentValidation is not null)
+        {
+            return BadRequest(new { message = contractorPaymentValidation });
+        }
+
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
         var statusValidation = ValidateStatusRules(nextStatus, NormalizeOptional(request.Result), participants.Items);
         if (statusValidation is not null)
@@ -1319,6 +1327,10 @@ public class TasksController : ControllerBase
             DueAt = request.DueAt,
             ApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt),
             PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes),
+            ContractorPaymentEnabled = request.ContractorPaymentEnabled,
+            ContractorPaymentAmount = NormalizeMoneyAmount(request.ContractorPaymentAmount),
+            ContractorPaymentDueDate = NormalizeDateOnly(request.ContractorPaymentDueDate),
+            ContractorPaymentOnResult = request.ContractorPaymentOnResult,
             Type = NormalizeEnumValue(request.Type, AllowedTypes, "task"),
             Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal"),
             Status = nextStatus,
@@ -1333,6 +1345,8 @@ public class TasksController : ControllerBase
 
         AddTaskHistory(entity, access, "Задача создана.");
         _db.TaskJournalItems.Add(entity);
+        await _db.SaveChangesAsync(ct);
+        await SyncContractorPaymentAsync(entity, ct);
         await _db.SaveChangesAsync(ct);
         await _notificationService.NotifyTaskAssignedAsync(entity, access.DisplayName, access.UserId, ct);
         if (IsApprovalActiveStatus(entity.Status))
@@ -1386,6 +1400,12 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = participants.Error });
         }
 
+        var contractorPaymentValidation = await ValidateContractorPaymentRequestAsync(request, participants.PrimaryAssigneeUserId, ct);
+        if (contractorPaymentValidation is not null)
+        {
+            return BadRequest(new { message = contractorPaymentValidation });
+        }
+
         var previousStatus = entity.Status;
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
         var approvalQueueRestarted = ShouldRestartApprovalQueue(previousStatus, nextStatus);
@@ -1412,6 +1432,10 @@ public class TasksController : ControllerBase
         entity.DueAt = request.DueAt;
         entity.ApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt);
         entity.PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes);
+        entity.ContractorPaymentEnabled = request.ContractorPaymentEnabled;
+        entity.ContractorPaymentAmount = NormalizeMoneyAmount(request.ContractorPaymentAmount);
+        entity.ContractorPaymentDueDate = NormalizeDateOnly(request.ContractorPaymentDueDate);
+        entity.ContractorPaymentOnResult = request.ContractorPaymentOnResult;
         entity.Type = NormalizeEnumValue(request.Type, AllowedTypes, "task");
         entity.Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal");
         entity.Status = nextStatus;
@@ -1445,6 +1469,7 @@ public class TasksController : ControllerBase
             _db.TaskJournalComments.Add(userComment);
         }
 
+        await SyncContractorPaymentAsync(entity, ct);
         await _db.SaveChangesAsync(ct);
         if (changeLabels.Count > 0)
         {
@@ -1543,6 +1568,7 @@ public class TasksController : ControllerBase
             AddTaskHistory(entity, access, $"Изменено: {string.Join(", ", parts)}.");
         }
 
+        await SyncContractorPaymentAsync(entity, ct);
         await _db.SaveChangesAsync(ct);
         if (statusChanged || resultChanged)
         {
@@ -2067,6 +2093,8 @@ public class TasksController : ControllerBase
             .Include(task => task.Client)
             .Include(task => task.LegalEntity)
             .Include(task => task.ClientCase)
+            .Include(task => task.AssigneeUser)
+            .Include(task => task.ContractorPayment)
             .Include(task => task.Participants)
                 .ThenInclude(participant => participant.User)
             .AsQueryable();
@@ -2465,6 +2493,19 @@ public class TasksController : ControllerBase
             return "Укажите корректный срок согласования.";
         }
 
+        if (request.ContractorPaymentEnabled)
+        {
+            if (NormalizeMoneyAmount(request.ContractorPaymentAmount) is null)
+            {
+                return "Укажите сумму оплаты исполнителю.";
+            }
+
+            if (NormalizeDateOnly(request.ContractorPaymentDueDate) is null)
+            {
+                return "Укажите дату оплаты исполнителю.";
+            }
+        }
+
         var changeComment = NormalizeOptional(request.ChangeComment);
         if (changeComment is { Length: > 4000 })
         {
@@ -2501,6 +2542,12 @@ public class TasksController : ControllerBase
             DueAt = ToIso(entity.DueAt),
             ApprovalDueAt = entity.ApprovalDueAt.HasValue ? ToIso(entity.ApprovalDueAt.Value) : null,
             PlannedDurationMinutes = entity.PlannedDurationMinutes,
+            ContractorPaymentEnabled = entity.ContractorPaymentEnabled,
+            ContractorPaymentAmount = entity.ContractorPaymentAmount,
+            ContractorPaymentDueDate = entity.ContractorPaymentDueDate.HasValue ? ToIso(entity.ContractorPaymentDueDate.Value) : null,
+            ContractorPaymentOnResult = entity.ContractorPaymentOnResult,
+            ContractorPaymentId = entity.ContractorPaymentId,
+            ContractorPaymentStatus = entity.ContractorPayment?.Status.ToString() ?? string.Empty,
             Type = entity.Type,
             Priority = entity.Priority,
             Status = ResolveTaskStatus(entity),
@@ -2570,6 +2617,46 @@ public class TasksController : ControllerBase
     private static DateTime? NormalizeApprovalDueAt(DateTime? value)
         => value.HasValue && value.Value != default ? value.Value : null;
 
+    private static decimal? NormalizeMoneyAmount(decimal? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        var normalized = Math.Round(value.Value, 2, MidpointRounding.AwayFromZero);
+        return normalized > 0m ? normalized : null;
+    }
+
+    private static DateTime? NormalizeDateOnly(DateTime? value)
+        => value.HasValue && value.Value != default ? value.Value.Date : null;
+
+    private async Task<string?> ValidateContractorPaymentRequestAsync(
+        UpsertTaskJournalItemRequest request,
+        int? assigneeUserId,
+        CancellationToken ct)
+    {
+        if (!request.ContractorPaymentEnabled)
+        {
+            return null;
+        }
+
+        if (!assigneeUserId.HasValue)
+        {
+            return "Для оплаты исполнителю выберите исполнителя из списка пользователей.";
+        }
+
+        var isExternalContractor = await _db.Users
+            .AsNoTracking()
+            .Where(user => user.Id == assigneeUserId.Value)
+            .Select(user => user.IsExternalContractor)
+            .FirstOrDefaultAsync(ct);
+
+        return isExternalContractor
+            ? null
+            : "В профиле выбранного исполнителя не включен признак привлеченного исполнителя.";
+    }
+
     private static string NormalizeEnumValue(string? value, HashSet<string> allowedValues, string fallback)
     {
         var normalized = NormalizeOptional(value);
@@ -2588,6 +2675,192 @@ public class TasksController : ControllerBase
         minutes = Math.Clamp(minutes, 15, 8 * 60);
         return (int)Math.Round(minutes / 15m, MidpointRounding.AwayFromZero) * 15;
     }
+
+    private async Task SyncContractorPaymentAsync(TaskJournalItem entity, CancellationToken ct)
+    {
+        var payment = await ResolveContractorPaymentAsync(entity, ct);
+        var shouldHavePayment = await ShouldCreateOrKeepContractorPaymentAsync(entity, ct);
+
+        if (!shouldHavePayment)
+        {
+            if (payment is not null && CanChangeGeneratedContractorPayment(payment))
+            {
+                payment.Status = PaymentStatus.Cancelled;
+                payment.IsPaid = false;
+                payment.PaidAmount = 0m;
+                payment.PaidDate = null;
+                payment.LastPaymentDate = null;
+                payment.SystemNotes = AppendContractorPaymentNote(payment.SystemNotes, "Автоматический платеж отменен из карточки задачи.");
+                entity.ContractorPayment = payment;
+                entity.ContractorPaymentId = payment.Id;
+            }
+
+            return;
+        }
+
+        var dueDate = NormalizeDateOnly(entity.ContractorPaymentDueDate)!.Value;
+        var amount = NormalizeMoneyAmount(entity.ContractorPaymentAmount)!.Value;
+        var description = BuildContractorPaymentDescription(entity);
+        var systemNotes = BuildContractorPaymentSystemNotes(entity);
+        var assigneeName = string.IsNullOrWhiteSpace(entity.AssigneeName) ? "Исполнитель" : entity.AssigneeName.Trim();
+
+        if (payment is null)
+        {
+            payment = new Payment
+            {
+                Type = PaymentType.Expense,
+                Status = PaymentStatus.Pending,
+                Amount = amount,
+                PaidAmount = 0m,
+                Date = dueDate,
+                PlannedDate = dueDate,
+                Description = description,
+                CounterpartyName = assigneeName,
+                Notes = "Автоматически создано из задачи.",
+                SystemNotes = systemNotes,
+                ClientId = null,
+                LegalEntityId = null,
+                ExpenseClientId = entity.ClientId,
+                ExpenseLegalEntityId = entity.LegalEntityId,
+                ClientCaseId = entity.ClientCaseId,
+                DocumentKind = DocumentKind.Payment,
+                InvoiceWorkflowStatus = InvoiceWorkflowStatus.Draft,
+                CreatedAt = DateTime.UtcNow,
+                IsPaid = false,
+            };
+
+            if (entity.AssigneeUserId.HasValue)
+            {
+                payment.Responsibles.Add(new PaymentResponsible
+                {
+                    UserId = entity.AssigneeUserId.Value,
+                });
+            }
+
+            _db.Payments.Add(payment);
+            entity.ContractorPayment = payment;
+            return;
+        }
+
+        if (!CanChangeGeneratedContractorPayment(payment))
+        {
+            return;
+        }
+
+        payment.Type = PaymentType.Expense;
+        payment.Status = PaymentStatus.Pending;
+        payment.Amount = amount;
+        payment.Date = dueDate;
+        payment.PlannedDate = dueDate;
+        payment.Description = description;
+        payment.CounterpartyName = assigneeName;
+        payment.SystemNotes = systemNotes;
+        payment.ExpenseClientId = entity.ClientId;
+        payment.ExpenseLegalEntityId = entity.LegalEntityId;
+        payment.ClientId = null;
+        payment.LegalEntityId = null;
+        payment.ClientCaseId = entity.ClientCaseId;
+        payment.IsPaid = false;
+        payment.PaidAmount = 0m;
+        payment.PaidDate = null;
+        payment.LastPaymentDate = null;
+
+        if (entity.AssigneeUserId.HasValue && !payment.Responsibles.Any(item => item.UserId == entity.AssigneeUserId.Value))
+        {
+            payment.Responsibles.Add(new PaymentResponsible
+            {
+                PaymentId = payment.Id,
+                UserId = entity.AssigneeUserId.Value,
+            });
+        }
+
+        entity.ContractorPayment = payment;
+        entity.ContractorPaymentId = payment.Id;
+    }
+
+    private async Task<Payment?> ResolveContractorPaymentAsync(TaskJournalItem entity, CancellationToken ct)
+    {
+        if (entity.ContractorPayment is not null)
+        {
+            return entity.ContractorPayment;
+        }
+
+        if (entity.ContractorPaymentId.HasValue)
+        {
+            var linked = await _db.Payments
+                .Include(payment => payment.Responsibles)
+                .FirstOrDefaultAsync(payment => payment.Id == entity.ContractorPaymentId.Value, ct);
+            if (linked is not null)
+            {
+                entity.ContractorPayment = linked;
+                return linked;
+            }
+        }
+
+        var marker = BuildContractorPaymentMarker(entity.Id);
+        var existing = await _db.Payments
+            .Include(payment => payment.Responsibles)
+            .FirstOrDefaultAsync(payment => payment.SystemNotes != null && payment.SystemNotes.Contains(marker), ct);
+        if (existing is not null)
+        {
+            entity.ContractorPayment = existing;
+            entity.ContractorPaymentId = existing.Id;
+        }
+
+        return existing;
+    }
+
+    private async Task<bool> ShouldCreateOrKeepContractorPaymentAsync(TaskJournalItem entity, CancellationToken ct)
+    {
+        if (!entity.ContractorPaymentEnabled
+            || !entity.AssigneeUserId.HasValue
+            || NormalizeMoneyAmount(entity.ContractorPaymentAmount) is null
+            || NormalizeDateOnly(entity.ContractorPaymentDueDate) is null)
+        {
+            return false;
+        }
+
+        if (entity.ContractorPaymentOnResult && !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return await _db.Users
+            .AsNoTracking()
+            .AnyAsync(user => user.Id == entity.AssigneeUserId.Value && user.IsExternalContractor, ct);
+    }
+
+    private static bool CanChangeGeneratedContractorPayment(Payment payment)
+        => payment.PaidAmount <= 0m
+           && !payment.IsPaid
+           && payment.Status is not PaymentStatus.Completed;
+
+    private static string BuildContractorPaymentMarker(int taskId)
+        => $"{ContractorPaymentMarker}:{taskId}";
+
+    private static string BuildContractorPaymentSystemNotes(TaskJournalItem entity)
+        => string.Join('\n', new[]
+        {
+            BuildContractorPaymentMarker(entity.Id),
+            "Автоматический платеж исполнителю из задачи.",
+        });
+
+    private static string BuildContractorPaymentDescription(TaskJournalItem entity)
+    {
+        var title = string.IsNullOrWhiteSpace(entity.Title) ? $"задаче #{entity.Id}" : $"задаче «{entity.Title.Trim()}»";
+        return Truncate($"Оплата исполнителю по {title}", 500);
+    }
+
+    private static string AppendContractorPaymentNote(string? currentNotes, string note)
+    {
+        var normalized = NormalizeOptional(currentNotes);
+        return string.IsNullOrWhiteSpace(normalized)
+            ? note
+            : $"{normalized}\n{note}";
+    }
+
+    private static string Truncate(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..maxLength];
 
     private static string BuildIcsCalendar(IEnumerable<TaskJournalItem> tasks)
     {
@@ -3274,6 +3547,11 @@ public class TasksController : ControllerBase
         {
             changes.Add("Участники");
         }
+
+        AddIfChanged(changes, "Оплата исполнителю", entity.ContractorPaymentEnabled, request.ContractorPaymentEnabled);
+        AddIfChanged(changes, "Сумма оплаты исполнителю", NormalizeMoneyAmount(entity.ContractorPaymentAmount), NormalizeMoneyAmount(request.ContractorPaymentAmount));
+        AddIfChanged(changes, "Дата оплаты исполнителю", NormalizeDateOnly(entity.ContractorPaymentDueDate), NormalizeDateOnly(request.ContractorPaymentDueDate));
+        AddIfChanged(changes, "Оплата по результату", entity.ContractorPaymentOnResult, request.ContractorPaymentOnResult);
 
         return changes;
     }

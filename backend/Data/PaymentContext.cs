@@ -1746,6 +1746,7 @@ public class PaymentContext : DbContext
             // --- Флаги и значения по умолчанию ---
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.IsApproved).HasDefaultValue(false);
+            entity.Property(e => e.IsExternalContractor).HasDefaultValue(false);
             entity.Property(e => e.RequiresFinancialActionReason).HasDefaultValue(false);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
@@ -1777,6 +1778,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.UpdatedAt).HasDatabaseName("idx_users_updated");
             entity.HasIndex(e => e.ApprovedAt).HasDatabaseName("idx_users_approvedAt");
             entity.HasIndex(e => e.IsEmployee).HasDatabaseName("idx_users_isemployee");
+            entity.HasIndex(e => e.IsExternalContractor).HasDatabaseName("idx_users_isexternalcontractor");
             entity.HasIndex(e => e.DepartmentId).HasDatabaseName("idx_users_department_id");
             entity.HasIndex(e => e.Department).HasDatabaseName("idx_users_department");
             entity.HasIndex(e => new { e.EmploymentStartDate, e.EmploymentEndDate })
@@ -2115,6 +2117,10 @@ public class PaymentContext : DbContext
             entity.Property(e => e.AssigneeName).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AuthorName).HasMaxLength(256).IsRequired();
             entity.Property(e => e.PlannedDurationMinutes).HasDefaultValue(60);
+            entity.Property(e => e.ContractorPaymentEnabled).HasDefaultValue(false);
+            entity.Property(e => e.ContractorPaymentAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.ContractorPaymentDueDate).HasColumnType("date");
+            entity.Property(e => e.ContractorPaymentOnResult).HasDefaultValue(false);
             entity.Property(e => e.Type).HasMaxLength(32).HasDefaultValue("task").IsRequired();
             entity.Property(e => e.Priority).HasMaxLength(32).HasDefaultValue("normal").IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue("new").IsRequired();
@@ -2134,8 +2140,15 @@ public class PaymentContext : DbContext
                 .HasForeignKey(e => e.AuthorUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.ContractorPayment)
+                .WithMany()
+                .HasForeignKey(e => e.ContractorPaymentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasIndex(e => e.DueAt).HasDatabaseName("IX_TaskJournalItems_DueAt");
             entity.HasIndex(e => e.ApprovalDueAt).HasDatabaseName("IX_TaskJournalItems_ApprovalDueAt");
+            entity.HasIndex(e => e.ContractorPaymentId).HasDatabaseName("IX_TaskJournalItems_ContractorPaymentId");
+            entity.HasIndex(e => e.ContractorPaymentDueDate).HasDatabaseName("IX_TaskJournalItems_ContractorPaymentDueDate");
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_TaskJournalItems_Status");
             entity.HasIndex(e => e.Type).HasDatabaseName("IX_TaskJournalItems_Type");
             entity.HasIndex(e => e.Priority).HasDatabaseName("IX_TaskJournalItems_Priority");

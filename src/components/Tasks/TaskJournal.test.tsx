@@ -906,6 +906,37 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('sends contractor payment fields for an external assignee', async () => {
+    await renderJournal([createTask()], {
+      assignees: [
+        { id: 9, name: 'Привлеченный исполнитель', email: 'contractor@example.com', isExternalContractor: true },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
+    fireEvent.change(screen.getByTestId('task-assignee-select'), { target: { value: '9' } });
+    fireEvent.change(screen.getByPlaceholderText('Что нужно сделать'), { target: { value: 'Оплатить работу исполнителя' } });
+
+    fireEvent.click(screen.getByTestId('task-contractor-payment-checkbox'));
+    fireEvent.change(screen.getByTestId('task-contractor-payment-amount'), { target: { value: '7500' } });
+    fireEvent.change(screen.getByTestId('task-contractor-payment-date'), { target: { value: '2026-06-07' } });
+    fireEvent.click(screen.getByTestId('task-contractor-payment-on-result'));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      assigneeUserId: 9,
+      contractorPaymentEnabled: true,
+      contractorPaymentAmount: 7500,
+      contractorPaymentDueDate: new Date('2026-06-07T00:00:00').toISOString(),
+      contractorPaymentOnResult: true,
+    }));
+  });
+
   it('uses user notification defaults when a new task is created', async () => {
     apiMock.getUserSetting.mockResolvedValue({
       key: 'tasks.notificationDefaults.v1',

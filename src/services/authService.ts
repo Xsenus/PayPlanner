@@ -98,6 +98,7 @@ export interface User {
   messenger?: string | null;
   viber?: string | null;
   isEmployee: boolean;
+  isExternalContractor?: boolean;
   departmentId?: number | null;
   department?: string | null;
   requiresFinancialActionReason?: boolean;
@@ -214,6 +215,7 @@ export interface CreateUserDto {
   roleId: number;
   isActive: boolean;
   isEmployee?: boolean;
+  isExternalContractor?: boolean;
   departmentId?: number | null;
   department?: string;
   requiresFinancialActionReason?: boolean;
@@ -235,6 +237,7 @@ export interface UpdateUserDto {
   messenger?: string;
   viber?: string;
   isEmployee?: boolean;
+  isExternalContractor?: boolean;
   departmentId?: number | null;
   department?: string;
   requiresFinancialActionReason?: boolean;
@@ -259,6 +262,31 @@ export interface UpdateProfileDto {
   instagram?: string;
   messenger?: string;
   viber?: string;
+}
+
+export interface ContractorBalanceItem {
+  taskId: number;
+  taskTitle: string;
+  paymentId?: number | null;
+  direction: 'toMe' | 'byMe';
+  assigneeName: string;
+  authorName: string;
+  amount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  paymentStatus: string;
+  taskStatus: string;
+  paymentDueDate?: string | null;
+  paidDate?: string | null;
+}
+
+export interface ContractorBalance {
+  owedToMe: number;
+  owedByMe: number;
+  paidToMe: number;
+  paidByMe: number;
+  queue: ContractorBalanceItem[];
+  paid: ContractorBalanceItem[];
 }
 
 export interface ChangePasswordDto {
@@ -588,6 +616,10 @@ class AuthApiService {
 
   public async getProfile() {
     return this.request<User>('/profile');
+  }
+
+  public async getContractorBalance() {
+    return this.request<ContractorBalance>('/profile/contractor-balance');
   }
 
   public async updateProfile(data: UpdateProfileDto) {

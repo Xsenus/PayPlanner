@@ -41,6 +41,7 @@ type FormState = {
   messenger: string;
   viber: string;
   isEmployee: boolean;
+  isExternalContractor: boolean;
   departmentId: string;
   department: string;
   requiresFinancialActionReason: boolean;
@@ -66,6 +67,7 @@ const EMPTY_FORM: FormState = {
   messenger: '',
   viber: '',
   isEmployee: false,
+  isExternalContractor: false,
   departmentId: '',
   department: '',
   requiresFinancialActionReason: false,
@@ -138,6 +140,7 @@ function buildForm(user?: User | null): FormState {
     messenger: user.messenger ?? '',
     viber: user.viber ?? '',
     isEmployee: Boolean(user.isEmployee),
+    isExternalContractor: Boolean(user.isExternalContractor),
     departmentId: user.departmentId ? String(user.departmentId) : '',
     department: user.department ?? '',
     requiresFinancialActionReason: Boolean(user.requiresFinancialActionReason),
@@ -164,6 +167,7 @@ function buildUpdatePayload(form: FormState): UpdateUserDto {
     messenger: form.messenger.trim() || undefined,
     viber: form.viber.trim() || undefined,
     isEmployee: form.isEmployee,
+    isExternalContractor: form.isExternalContractor,
     departmentId: form.departmentId ? Number(form.departmentId) : null,
     department: form.departmentId ? undefined : form.department.trim(),
     requiresFinancialActionReason: form.requiresFinancialActionReason,
@@ -345,6 +349,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
           roleId: form.roleId,
           isActive: form.isActive,
           isEmployee: form.isEmployee,
+          isExternalContractor: form.isExternalContractor,
           departmentId: form.departmentId ? Number(form.departmentId) : undefined,
           department: form.departmentId ? undefined : form.department.trim() || undefined,
           requiresFinancialActionReason: form.requiresFinancialActionReason,
@@ -499,6 +504,10 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
                     <input type="checkbox" checked={form.isEmployee} onChange={(event) => handleEmployeeToggle(event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Учитывать как сотрудника
+                  </label>
+                  <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
+                    <input type="checkbox" checked={form.isExternalContractor} onChange={(event) => updateForm('isExternalContractor', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                    Привлеченный исполнитель
                   </label>
                   <LookupSelect
                     label="Отдел"

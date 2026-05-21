@@ -349,6 +349,11 @@ public partial class AuthService
                 user.IsEmployee = request.IsEmployee.Value;
             }
 
+            if (request.IsExternalContractor.HasValue)
+            {
+                user.IsExternalContractor = request.IsExternalContractor.Value;
+            }
+
             if (request.DepartmentId.HasValue || request.Department is not null)
             {
                 var department = await ResolveDepartmentAssignmentAsync(

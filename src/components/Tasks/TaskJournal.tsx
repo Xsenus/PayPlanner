@@ -38,6 +38,7 @@ import { useToast } from '../../hooks/useToast';
 import { apiService, type TaskJournalSettingsDto } from '../../services/api';
 import type { CaseCalendarEvent, CaseCalendarSummary, Client, ClientCase, LegalEntitySummary } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatCurrencySmart } from '../../utils/formatters';
 import {
   isTaskJournalActive,
   TASK_JOURNAL_EVENT,
@@ -320,6 +321,10 @@ const emptyForm = (
     dueAt: toLocalInputValue(dueAt.toISOString()),
     approvalDueAt: null,
     plannedDurationMinutes: 60,
+    contractorPaymentEnabled: false,
+    contractorPaymentAmount: null,
+    contractorPaymentDueDate: null,
+    contractorPaymentOnResult: false,
     type: 'task',
     priority: 'normal',
     status: 'new',
@@ -1751,6 +1756,22 @@ export function TaskJournal({
       return;
     }
 
+    if (form.contractorPaymentEnabled) {
+      const selectedAssignee = assignees.find((assignee) => assignee.id === form.assigneeUserId);
+      if (!selectedAssignee?.isExternalContractor) {
+        toast.error('Для оплаты исполнителю выберите пользователя с признаком привлеченного исполнителя.', 'Журнал задач');
+        return;
+      }
+      if (!form.contractorPaymentAmount || Number(form.contractorPaymentAmount) <= 0) {
+        toast.error('Укажите сумму оплаты исполнителю.', 'Журнал задач');
+        return;
+      }
+      if (!form.contractorPaymentDueDate) {
+        toast.error('Укажите дату оплаты исполнителю.', 'Журнал задач');
+        return;
+      }
+    }
+
     const normalized: TaskForm = {
       ...form,
       isInternal: Boolean(form.isInternal),
@@ -1765,6 +1786,12 @@ export function TaskJournal({
       dueAt: fromLocalInputValue(form.dueAt),
       approvalDueAt: form.approvalDueAt ? fromLocalInputValue(form.approvalDueAt) : null,
       plannedDurationMinutes: normalizeTaskDuration(form.plannedDurationMinutes),
+      contractorPaymentEnabled: Boolean(form.contractorPaymentEnabled),
+      contractorPaymentAmount: form.contractorPaymentEnabled ? Number(form.contractorPaymentAmount) : null,
+      contractorPaymentDueDate: form.contractorPaymentEnabled && form.contractorPaymentDueDate
+        ? new Date(`${form.contractorPaymentDueDate}T00:00:00`).toISOString()
+        : null,
+      contractorPaymentOnResult: Boolean(form.contractorPaymentEnabled && form.contractorPaymentOnResult),
       tags: unique(form.tags),
       reminders: form.reminders.length ? form.reminders : ['atDue'],
       channels: form.channels.length ? form.channels : ['inApp'],
@@ -4197,6 +4224,12 @@ function TaskModal({
         assigneeName: state.task.assigneeName,
         dueAt: state.task.dueAt,
         approvalDueAt: state.task.approvalDueAt ?? null,
+        contractorPaymentEnabled: Boolean(state.task.contractorPaymentEnabled),
+        contractorPaymentAmount: state.task.contractorPaymentAmount ?? null,
+        contractorPaymentDueDate: state.task.contractorPaymentDueDate ?? null,
+        contractorPaymentOnResult: Boolean(state.task.contractorPaymentOnResult),
+        contractorPaymentId: state.task.contractorPaymentId ?? null,
+        contractorPaymentStatus: state.task.contractorPaymentStatus ?? null,
         type: state.task.type,
         priority: state.task.priority,
         status: state.task.status,
@@ -4211,6 +4244,7 @@ function TaskModal({
         ...rest,
         dueAt: toLocalInputValue(rest.dueAt),
         approvalDueAt: rest.approvalDueAt ? toLocalInputValue(rest.approvalDueAt) : null,
+        contractorPaymentDueDate: rest.contractorPaymentDueDate ? rest.contractorPaymentDueDate.split('T')[0] : null,
       };
     }
     const next = emptyForm(currentUserName, currentUserId, notificationDefaults);
@@ -4240,6 +4274,11 @@ function TaskModal({
     [legalEntities, form.legalEntityId],
   );
   const selectedOwnerName = selectedClient?.name || getLegalEntityDisplayName(selectedLegalEntity);
+  const selectedAssignee = useMemo(
+    () => assignees.find((assignee) => assignee.id === form.assigneeUserId) ?? null,
+    [assignees, form.assigneeUserId],
+  );
+  const canUseContractorPayment = Boolean(selectedAssignee?.isExternalContractor);
   const approverParticipants = useMemo(
     () => (form.participants ?? []).filter((participant) => participant.role === 'approver'),
     [form.participants],
@@ -4431,6 +4470,7 @@ function TaskModal({
   const setPrimaryAssignee = (assigneeId: number | null) => {
     if (isReadOnly) return;
     const selected = assignees.find((assignee) => assignee.id === assigneeId);
+    const paymentAllowed = Boolean(selected?.isExternalContractor);
     setForm((prev) => {
       const previousAssigneeUserId = prev.assigneeUserId;
       const previousAssigneeName = prev.assigneeName.trim().toLowerCase();
@@ -4438,6 +4478,7 @@ function TaskModal({
         ...prev,
         assigneeUserId: assigneeId,
         assigneeName: selected?.name ?? (assigneeId ? prev.assigneeName : ''),
+        contractorPaymentEnabled: paymentAllowed ? prev.contractorPaymentEnabled : false,
         participants: (prev.participants ?? []).filter((participant) => {
           if (participant.role !== 'assignee') return true;
           if (previousAssigneeUserId && participant.userId === previousAssigneeUserId) return false;
@@ -4820,6 +4861,7 @@ function TaskModal({
                 value={form.assigneeUserId ?? ''}
                 disabled={isReadOnly}
                 onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
+                data-testid="task-assignee-select"
                 className="form-input"
               >
                 <option value="">Без привязки к пользователю</option>
@@ -4925,6 +4967,71 @@ function TaskModal({
               </select>
             </Field>
           </div>
+
+          <section className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
+            <label className="flex items-start gap-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={Boolean(form.contractorPaymentEnabled)}
+                disabled={isReadOnly || !canUseContractorPayment}
+                onChange={(event) => update('contractorPaymentEnabled', event.target.checked)}
+                data-testid="task-contractor-payment-checkbox"
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50"
+              />
+              <span>
+                <span className="font-semibold text-slate-900">Оплата исполнителю</span>
+                <span className="mt-1 block text-xs leading-5 text-slate-500">
+                  {canUseContractorPayment
+                    ? 'После сохранения задачи будет подготовлен ожидающий расходный платеж.'
+                    : 'Доступно, когда у выбранного исполнителя в профиле включен признак привлеченного исполнителя.'}
+                </span>
+              </span>
+            </label>
+            {form.contractorPaymentEnabled ? (
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                <Field label="Сумма">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.contractorPaymentAmount ?? ''}
+                    onChange={(event) => update('contractorPaymentAmount', event.target.value ? Number(event.target.value) : null)}
+                    disabled={isReadOnly}
+                    data-testid="task-contractor-payment-amount"
+                    className="form-input bg-white"
+                  />
+                </Field>
+                <Field label="Дата оплаты">
+                  <input
+                    type="date"
+                    value={form.contractorPaymentDueDate ? String(form.contractorPaymentDueDate).split('T')[0] : ''}
+                    onChange={(event) => update('contractorPaymentDueDate', event.target.value || null)}
+                    disabled={isReadOnly}
+                    data-testid="task-contractor-payment-date"
+                    className="form-input bg-white"
+                  />
+                </Field>
+                <label className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-white px-3 py-3 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.contractorPaymentOnResult)}
+                    onChange={(event) => update('contractorPaymentOnResult', event.target.checked)}
+                    disabled={isReadOnly}
+                    data-testid="task-contractor-payment-on-result"
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600"
+                  />
+                  Оплата по результату
+                </label>
+                {form.contractorPaymentId ? (
+                  <div className="md:col-span-3 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-slate-600">
+                    Платеж #{form.contractorPaymentId}
+                    {form.contractorPaymentStatus ? ` · ${form.contractorPaymentStatus}` : ''}
+                    {form.contractorPaymentAmount ? ` · ${formatCurrencySmart(Number(form.contractorPaymentAmount)).full}` : ''}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
 
           <section className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">

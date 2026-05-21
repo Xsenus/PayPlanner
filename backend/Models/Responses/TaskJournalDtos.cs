@@ -20,6 +20,12 @@ public class TaskJournalItemDto
     public string DueAt { get; set; } = string.Empty;
     public string? ApprovalDueAt { get; set; }
     public int PlannedDurationMinutes { get; set; } = 60;
+    public bool ContractorPaymentEnabled { get; set; }
+    public decimal? ContractorPaymentAmount { get; set; }
+    public string? ContractorPaymentDueDate { get; set; }
+    public bool ContractorPaymentOnResult { get; set; }
+    public int? ContractorPaymentId { get; set; }
+    public string ContractorPaymentStatus { get; set; } = string.Empty;
     public string Type { get; set; } = "task";
     public string Priority { get; set; } = "normal";
     public string Status { get; set; } = "new";
@@ -78,6 +84,7 @@ public class TaskJournalAssigneeDto
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public bool IsExternalContractor { get; set; }
 }
 
 public class TaskJournalCaseAutomationCandidateDto

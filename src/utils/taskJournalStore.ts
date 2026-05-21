@@ -48,6 +48,12 @@ export interface TaskJournalItem {
   dueAt: string;
   approvalDueAt?: string | null;
   plannedDurationMinutes: number;
+  contractorPaymentEnabled?: boolean;
+  contractorPaymentAmount?: number | null;
+  contractorPaymentDueDate?: string | null;
+  contractorPaymentOnResult?: boolean;
+  contractorPaymentId?: number | null;
+  contractorPaymentStatus?: string | null;
   type: TaskJournalType;
   priority: TaskJournalPriority;
   status: TaskJournalStatus;
@@ -99,6 +105,7 @@ export interface TaskJournalAssignee {
   id: number;
   name: string;
   email: string;
+  isExternalContractor?: boolean;
 }
 
 export interface TaskJournalCaseAutomationCandidate {

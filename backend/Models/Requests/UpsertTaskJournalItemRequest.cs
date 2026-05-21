@@ -14,6 +14,10 @@ public class UpsertTaskJournalItemRequest
     public DateTime DueAt { get; set; }
     public DateTime? ApprovalDueAt { get; set; }
     public int? PlannedDurationMinutes { get; set; }
+    public bool ContractorPaymentEnabled { get; set; }
+    public decimal? ContractorPaymentAmount { get; set; }
+    public DateTime? ContractorPaymentDueDate { get; set; }
+    public bool ContractorPaymentOnResult { get; set; }
     public string Type { get; set; } = "task";
     public string Priority { get; set; } = "normal";
     public string Status { get; set; } = "new";

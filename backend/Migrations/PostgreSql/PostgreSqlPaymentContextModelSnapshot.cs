@@ -5136,6 +5136,25 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("AuthorUserId")
                         .HasColumnType("integer");
 
+                    b.Property<decimal?>("ContractorPaymentAmount")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime?>("ContractorPaymentDueDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("ContractorPaymentEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("ContractorPaymentId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("ContractorPaymentOnResult")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("ChannelsJson")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -5257,6 +5276,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("AuthorUserId")
                         .HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
+
+                    b.HasIndex("ContractorPaymentDueDate")
+                        .HasDatabaseName("IX_TaskJournalItems_ContractorPaymentDueDate");
+
+                    b.HasIndex("ContractorPaymentId")
+                        .HasDatabaseName("IX_TaskJournalItems_ContractorPaymentId");
 
                     b.HasIndex("ClientCaseId")
                         .HasDatabaseName("IX_TaskJournalItems_ClientCaseId");
@@ -5635,6 +5660,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<bool>("IsEmployee")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsExternalContractor")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("LastName")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -5717,6 +5747,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("IsEmployee")
                         .HasDatabaseName("idx_users_isemployee");
+
+                    b.HasIndex("IsExternalContractor")
+                        .HasDatabaseName("idx_users_isexternalcontractor");
 
                     b.HasIndex("RoleId")
                         .HasDatabaseName("idx_users_role");
@@ -6829,6 +6862,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.Payment", "ContractorPayment")
+                        .WithMany()
+                        .HasForeignKey("ContractorPaymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
                         .WithMany()
                         .HasForeignKey("LegalEntityId")
@@ -6841,6 +6879,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Client");
 
                     b.Navigation("ClientCase");
+
+                    b.Navigation("ContractorPayment");
 
                     b.Navigation("LegalEntity");
                 });

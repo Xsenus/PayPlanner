@@ -16,6 +16,7 @@ public class UpdateUserRequest
     public string? Messenger { get; set; }
     public string? Viber { get; set; }
     public bool? IsEmployee { get; set; }
+    public bool? IsExternalContractor { get; set; }
     public int? DepartmentId { get; set; }
     public string? Department { get; set; }
     public bool? RequiresFinancialActionReason { get; set; }

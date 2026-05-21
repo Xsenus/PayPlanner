@@ -3,6 +3,7 @@ import { KeyRound, Link2, Loader2, RefreshCw, Save, ShieldCheck, Unlink2, Upload
 import {
   authService,
   type AuthProviderPublicSettings,
+  type ContractorBalance,
   type ExternalIdentity,
   type UpdateProfileDto,
   type User,
@@ -12,6 +13,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatCurrencySmart } from '../../utils/formatters';
 import {
   DEFAULT_TASK_NOTIFICATION_DEFAULTS,
   parseTaskNotificationDefaults,
@@ -80,6 +82,15 @@ const EMPTY_PASSWORD_FORM: PasswordFormState = {
   currentPassword: '',
   newPassword: '',
   confirmPassword: '',
+};
+
+const EMPTY_CONTRACTOR_BALANCE: ContractorBalance = {
+  owedToMe: 0,
+  owedByMe: 0,
+  paidToMe: 0,
+  paidByMe: 0,
+  queue: [],
+  paid: [],
 };
 
 const PROVIDER_META: Record<ProviderId, { label: string; accent: string; description: string }> = {
@@ -168,6 +179,7 @@ export function ProfilePage() {
   const [publicSettings, setPublicSettings] = useState<AuthProviderPublicSettings>(EMPTY_PUBLIC_SETTINGS);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
+  const [contractorBalance, setContractorBalance] = useState<ContractorBalance>(EMPTY_CONTRACTOR_BALANCE);
   const [passwordForm, setPasswordForm] = useState<PasswordFormState>(EMPTY_PASSWORD_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -190,16 +202,18 @@ export function ProfilePage() {
   }, []);
 
   const loadProfile = useCallback(async () => {
-    const [nextProfile, nextProviders, nextTaskNotificationDefaults] = await Promise.all([
+    const [nextProfile, nextProviders, nextTaskNotificationDefaults, nextContractorBalance] = await Promise.all([
       authService.getProfile(),
       authService.getAuthProviders(),
       apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
+      authService.getContractorBalance().catch(() => EMPTY_CONTRACTOR_BALANCE),
     ]);
 
     setProfile(nextProfile);
     setForm(buildFormState(nextProfile));
     setPublicSettings(nextProviders);
     setTaskNotificationDefaults(parseTaskNotificationDefaults(nextTaskNotificationDefaults?.value));
+    setContractorBalance(nextContractorBalance);
     return nextProfile;
   }, []);
 
@@ -525,6 +539,40 @@ export function ProfilePage() {
             </button>
           </div>
         </div>
+
+        {profile?.isExternalContractor || contractorBalance.queue.length > 0 || contractorBalance.paid.length > 0 ? (
+          <div className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="text-lg font-semibold text-slate-900">Расчеты по задачам</div>
+                <div className="mt-1 text-sm text-slate-500">Оплаты, которые ожидают выполнения или уже закрыты по задачам.</div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Должны мне</div>
+                  <div className="mt-1 text-2xl font-semibold text-emerald-900">{formatCurrencySmart(contractorBalance.owedToMe).full}</div>
+                </div>
+                <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-700">Должен я</div>
+                  <div className="mt-1 text-2xl font-semibold text-rose-900">{formatCurrencySmart(contractorBalance.owedByMe).full}</div>
+                </div>
+              </div>
+            </div>
+            {contractorBalance.queue.length > 0 ? (
+              <div className="mt-5 space-y-2">
+                {contractorBalance.queue.slice(0, 5).map((item) => (
+                  <div key={`${item.direction}-${item.taskId}-${item.paymentId ?? 'planned'}`} className="flex flex-col gap-2 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-slate-800">{item.taskTitle}</div>
+                      <div className="mt-1 text-xs text-slate-500">{item.direction === 'toMe' ? item.authorName : item.assigneeName}</div>
+                    </div>
+                    <div className="font-semibold text-slate-900">{formatCurrencySmart(item.outstandingAmount).full}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.92fr)]">
           <div className="space-y-6">

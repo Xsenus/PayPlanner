@@ -1,7 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
@@ -13,15 +17,18 @@ public class ProfileController : ControllerBase
 {
     private readonly AuthService _authService;
     private readonly ExternalAuthService _externalAuthService;
+    private readonly PaymentContext _db;
     private readonly IWebHostEnvironment _environment;
 
     public ProfileController(
         AuthService authService,
         ExternalAuthService externalAuthService,
+        PaymentContext db,
         IWebHostEnvironment environment)
     {
         _authService = authService;
         _externalAuthService = externalAuthService;
+        _db = db;
         _environment = environment;
     }
 
@@ -36,6 +43,57 @@ public class ProfileController : ControllerBase
 
         var user = await _authService.GetUserByIdAsync(userId.Value);
         return user is null ? NotFound() : Ok(user);
+    }
+
+    [HttpGet("contractor-balance")]
+    public async Task<ActionResult<ContractorBalanceDto>> GetContractorBalance(CancellationToken cancellationToken)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        var tasks = await _db.TaskJournalItems
+            .AsNoTracking()
+            .Include(task => task.ContractorPayment)
+            .Where(task => task.ContractorPaymentEnabled)
+            .Where(task =>
+                task.AssigneeUserId == userId.Value ||
+                task.AuthorUserId == userId.Value)
+            .OrderByDescending(task => task.ContractorPaymentDueDate ?? task.UpdatedAt ?? task.CreatedAt)
+            .Take(200)
+            .ToListAsync(cancellationToken);
+
+        var items = tasks
+            .Select(task => MapContractorBalanceItem(task, userId.Value))
+            .Where(item => item is not null)
+            .Cast<ContractorBalanceItemDto>()
+            .ToList();
+
+        return Ok(new ContractorBalanceDto
+        {
+            OwedToMe = items
+                .Where(item => item.Direction == "toMe")
+                .Sum(item => item.OutstandingAmount),
+            OwedByMe = items
+                .Where(item => item.Direction == "byMe")
+                .Sum(item => item.OutstandingAmount),
+            PaidToMe = items
+                .Where(item => item.Direction == "toMe")
+                .Sum(item => item.PaidAmount),
+            PaidByMe = items
+                .Where(item => item.Direction == "byMe")
+                .Sum(item => item.PaidAmount),
+            Queue = items
+                .Where(item => item.OutstandingAmount > 0m && item.PaymentStatus != PaymentStatus.Cancelled.ToString())
+                .OrderBy(item => item.PaymentDueDate ?? string.Empty)
+                .ToList(),
+            Paid = items
+                .Where(item => item.PaidAmount > 0m || item.PaymentStatus == PaymentStatus.Completed.ToString())
+                .OrderByDescending(item => item.PaidDate ?? item.PaymentDueDate ?? string.Empty)
+                .ToList(),
+        });
     }
 
     [HttpPut]
@@ -220,6 +278,43 @@ public class ProfileController : ControllerBase
         var scheme = string.IsNullOrWhiteSpace(forwardedProto) ? Request.Scheme : forwardedProto;
         var host = string.IsNullOrWhiteSpace(forwardedHost) ? Request.Host.Value : forwardedHost;
         return $"{scheme}://{host}";
+    }
+
+    private static ContractorBalanceItemDto? MapContractorBalanceItem(TaskJournalItem task, int currentUserId)
+    {
+        if (!task.AssigneeUserId.HasValue || !task.ContractorPaymentAmount.HasValue)
+        {
+            return null;
+        }
+
+        var payment = task.ContractorPayment;
+        var amount = Math.Round(task.ContractorPaymentAmount.Value, 2);
+        var paidAmount = payment is null
+            ? 0m
+            : payment.Status == PaymentStatus.Completed && payment.PaidAmount <= 0m
+                ? amount
+                : Math.Min(Math.Round(payment.PaidAmount, 2), amount);
+        var status = payment?.Status.ToString() ?? (task.ContractorPaymentOnResult && task.Status != "done" ? "WaitingForResult" : PaymentStatus.Pending.ToString());
+        var outstandingAmount = status == PaymentStatus.Cancelled.ToString()
+            ? 0m
+            : Math.Max(amount - paidAmount, 0m);
+
+        return new ContractorBalanceItemDto
+        {
+            TaskId = task.Id,
+            TaskTitle = task.Title,
+            PaymentId = payment?.Id,
+            Direction = task.AssigneeUserId == currentUserId ? "toMe" : "byMe",
+            AssigneeName = task.AssigneeName,
+            AuthorName = task.AuthorName,
+            Amount = amount,
+            PaidAmount = paidAmount,
+            OutstandingAmount = outstandingAmount,
+            PaymentStatus = status,
+            TaskStatus = task.Status,
+            PaymentDueDate = task.ContractorPaymentDueDate?.ToString("O"),
+            PaidDate = payment?.PaidDate?.ToString("O"),
+        };
     }
 
     private static void DeletePreviousUploadedPhoto(string? previousPhotoUrl, string currentPhotoUrl, string webRootPath)

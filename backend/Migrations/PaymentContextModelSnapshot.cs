@@ -5011,6 +5011,25 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("AuthorUserId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<decimal?>("ContractorPaymentAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("ContractorPaymentDueDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("ContractorPaymentEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("ContractorPaymentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("ContractorPaymentOnResult")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("ChannelsJson")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -5132,6 +5151,12 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("AuthorUserId")
                         .HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
+
+                    b.HasIndex("ContractorPaymentDueDate")
+                        .HasDatabaseName("IX_TaskJournalItems_ContractorPaymentDueDate");
+
+                    b.HasIndex("ContractorPaymentId")
+                        .HasDatabaseName("IX_TaskJournalItems_ContractorPaymentId");
 
                     b.HasIndex("ClientCaseId")
                         .HasDatabaseName("IX_TaskJournalItems_ClientCaseId");
@@ -5499,6 +5524,11 @@ namespace PayPlanner.Api.Migrations
                     b.Property<bool>("IsEmployee")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsExternalContractor")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("LastName")
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
@@ -5581,6 +5611,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsEmployee")
                         .HasDatabaseName("idx_users_isemployee");
+
+                    b.HasIndex("IsExternalContractor")
+                        .HasDatabaseName("idx_users_isexternalcontractor");
 
                     b.HasIndex("RoleId")
                         .HasDatabaseName("idx_users_role");
@@ -6673,6 +6706,11 @@ namespace PayPlanner.Api.Migrations
                     b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
                         .WithMany()
                         .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.Payment", "ContractorPayment")
+                        .WithMany()
+                        .HasForeignKey("ContractorPaymentId")
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
