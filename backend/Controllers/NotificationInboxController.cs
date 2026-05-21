@@ -56,6 +56,11 @@ public class NotificationInboxController : ControllerBase
         [FromQuery] string? status,
         [FromQuery] string? type,
         [FromQuery] string? search,
+        [FromQuery] string? dateFrom = null,
+        [FromQuery] string? dateTo = null,
+        [FromQuery] int? employeeId = null,
+        [FromQuery] int? clientId = null,
+        [FromQuery] string? taskRole = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
         CancellationToken ct = default)
@@ -78,6 +83,8 @@ public class NotificationInboxController : ControllerBase
         query = ApplyStatusFilter(query, status);
         query = ApplyDisabledTypeFilter(query, disabledTypes);
         query = ApplyTypeAndSearchFilters(query, type, search);
+        query = ApplyDateRangeFilter(query, dateFrom, dateTo);
+        query = ApplyTaskReferenceFilters(query, _context, employeeId, clientId, taskRole);
         query = WhereNotificationTargetVisible(query, _context, visibility);
 
         var total = await query.CountAsync(ct);
@@ -103,7 +110,12 @@ public class NotificationInboxController : ControllerBase
         [FromQuery] string? status,
         [FromQuery] string? type,
         [FromQuery] string? search,
-        CancellationToken ct)
+        [FromQuery] string? dateFrom = null,
+        [FromQuery] string? dateTo = null,
+        [FromQuery] int? employeeId = null,
+        [FromQuery] int? clientId = null,
+        [FromQuery] string? taskRole = null,
+        CancellationToken ct = default)
     {
         var userId = User.GetUserId();
         if (!userId.HasValue)
@@ -119,6 +131,8 @@ public class NotificationInboxController : ControllerBase
         query = ApplyStatusFilter(query, status);
         query = ApplyDisabledTypeFilter(query, disabledTypes);
         query = ApplyTypeAndSearchFilters(query, type, search);
+        query = ApplyDateRangeFilter(query, dateFrom, dateTo);
+        query = ApplyTaskReferenceFilters(query, _context, employeeId, clientId, taskRole);
         query = WhereNotificationTargetVisible(query, _context, visibility);
 
         var items = await query
@@ -270,6 +284,114 @@ public class NotificationInboxController : ControllerBase
         }
 
         return query;
+    }
+
+    private static IQueryable<UserNotification> ApplyDateRangeFilter(
+        IQueryable<UserNotification> query,
+        string? dateFrom,
+        string? dateTo)
+    {
+        if (DateTime.TryParse(dateFrom, out var parsedFrom))
+        {
+            var from = parsedFrom.Date;
+            query = query.Where(item => item.CreatedAt >= from);
+        }
+
+        if (DateTime.TryParse(dateTo, out var parsedTo))
+        {
+            var to = parsedTo.Date.AddDays(1);
+            query = query.Where(item => item.CreatedAt < to);
+        }
+
+        return query;
+    }
+
+    private static IQueryable<UserNotification> ApplyTaskReferenceFilters(
+        IQueryable<UserNotification> query,
+        PaymentContext context,
+        int? employeeId,
+        int? clientId,
+        string? taskRole)
+    {
+        var hasEmployeeFilter = employeeId.HasValue && employeeId.Value > 0;
+        var hasClientFilter = clientId.HasValue && clientId.Value > 0;
+        var role = NormalizeTaskRole(taskRole);
+
+        if (!hasEmployeeFilter && !hasClientFilter && role is null)
+        {
+            return query;
+        }
+
+        var taskQuery = context.TaskJournalItems.AsNoTracking().AsQueryable();
+
+        if (hasClientFilter)
+        {
+            var selectedClientId = clientId!.Value;
+            taskQuery = taskQuery.Where(task =>
+                task.ClientId == selectedClientId
+                || (task.ClientCaseId.HasValue
+                    && task.ClientCase != null
+                    && task.ClientCase.ClientId == selectedClientId));
+        }
+
+        if (role is not null)
+        {
+            taskQuery = ApplyTaskRoleFilter(taskQuery, role, hasEmployeeFilter ? employeeId!.Value : null);
+        }
+        else if (hasEmployeeFilter)
+        {
+            var selectedEmployeeId = employeeId!.Value;
+            taskQuery = taskQuery.Where(task =>
+                task.AssigneeUserId == selectedEmployeeId
+                || task.AuthorUserId == selectedEmployeeId
+                || task.Participants.Any(participant => participant.UserId == selectedEmployeeId));
+        }
+
+        var taskIds = taskQuery.Select(task => task.Id);
+        return query.Where(item =>
+            item.TaskJournalItemId.HasValue
+            && taskIds.Contains(item.TaskJournalItemId.Value));
+    }
+
+    private static IQueryable<TaskJournalItem> ApplyTaskRoleFilter(
+        IQueryable<TaskJournalItem> query,
+        string role,
+        int? employeeId)
+    {
+        return role switch
+        {
+            "assignee" => employeeId.HasValue
+                ? query.Where(task =>
+                    task.AssigneeUserId == employeeId.Value
+                    || task.Participants.Any(participant =>
+                        participant.UserId == employeeId.Value
+                        && participant.Role == "assignee"))
+                : query.Where(task =>
+                    task.AssigneeUserId.HasValue
+                    || task.Participants.Any(participant => participant.Role == "assignee")),
+            "author" => employeeId.HasValue
+                ? query.Where(task => task.AuthorUserId == employeeId.Value)
+                : query.Where(task => task.AuthorUserId.HasValue),
+            "observer" => employeeId.HasValue
+                ? query.Where(task => task.Participants.Any(participant =>
+                    participant.UserId == employeeId.Value
+                    && participant.Role == "observer"))
+                : query.Where(task => task.Participants.Any(participant => participant.Role == "observer")),
+            "approver" => employeeId.HasValue
+                ? query.Where(task => task.Participants.Any(participant =>
+                    participant.UserId == employeeId.Value
+                    && participant.Role == "approver"))
+                : query.Where(task => task.Participants.Any(participant => participant.Role == "approver")),
+            _ => query
+        };
+    }
+
+    private static string? NormalizeTaskRole(string? taskRole)
+    {
+        var value = taskRole?.Trim().ToLowerInvariant();
+        return value is "assignee" or "author" or "observer" or "approver"
+            ? value
+            : null;
     }
 
     private static IQueryable<UserNotification> ApplyDisabledTypeFilter(

@@ -221,6 +221,11 @@ describe('apiService auth handling', () => {
     await apiService.getUserNotifications({
       status: 'unread',
       type: 'taskChanged',
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-21',
+      employeeId: 12,
+      clientId: 34,
+      taskRole: 'observer',
       search: 'договор',
       page: 2,
       pageSize: 10,
@@ -231,6 +236,11 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('status=unread');
     expect(String(url)).toContain('type=taskChanged');
     expect(String(url)).toContain('search=');
+    expect(String(url)).toContain('dateFrom=2026-05-01');
+    expect(String(url)).toContain('dateTo=2026-05-21');
+    expect(String(url)).toContain('employeeId=12');
+    expect(String(url)).toContain('clientId=34');
+    expect(String(url)).toContain('taskRole=observer');
     expect(String(url)).toContain('page=2');
     expect(String(url)).toContain('pageSize=10');
   });
@@ -246,6 +256,11 @@ describe('apiService auth handling', () => {
     const result = await apiService.markAllUserNotificationsRead({
       status: 'unread',
       type: 'taskReminder',
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-21',
+      employeeId: 12,
+      clientId: 34,
+      taskRole: 'author',
       search: 'срок',
     });
 
@@ -255,6 +270,11 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('status=unread');
     expect(String(url)).toContain('type=taskReminder');
     expect(String(url)).toContain('search=');
+    expect(String(url)).toContain('dateFrom=2026-05-01');
+    expect(String(url)).toContain('dateTo=2026-05-21');
+    expect(String(url)).toContain('employeeId=12');
+    expect(String(url)).toContain('clientId=34');
+    expect(String(url)).toContain('taskRole=author');
     expect(init?.method).toBe('POST');
   });
 

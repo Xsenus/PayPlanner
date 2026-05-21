@@ -21,7 +21,9 @@ import {
   type UserNotificationsQuery,
   type UserNotificationTypeDto,
 } from '../../services/api';
+import type { Client } from '../../types';
 import { useToast } from '../../hooks/useToast';
+import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
 import { emitUserNotificationsChanged } from '../../utils/userNotifications';
 import {
   DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES,
@@ -34,6 +36,7 @@ import {
 } from '../../utils/userNotificationPreferences';
 
 type NotificationStatusFilter = NonNullable<UserNotificationsQuery['status']>;
+type NotificationTaskRoleFilter = 'all' | 'assignee' | 'author' | 'observer' | 'approver';
 
 type NotificationCenterProps = {
   onOpenTask?: (taskId: number) => void;
@@ -46,6 +49,14 @@ const STATUS_FILTERS: Array<{ value: NotificationStatusFilter; label: string }> 
   { value: 'read', label: 'Прочитанные' },
   { value: 'archived', label: 'Архив' },
   { value: 'all', label: 'Все' },
+];
+
+const TASK_ROLE_FILTERS: Array<{ value: NotificationTaskRoleFilter; label: string }> = [
+  { value: 'all', label: 'Все роли' },
+  { value: 'assignee', label: 'Исполнитель' },
+  { value: 'author', label: 'Постановщик' },
+  { value: 'observer', label: 'Наблюдатель' },
+  { value: 'approver', label: 'Согласующий' },
 ];
 
 const EMPTY_PAGE: PagedResult<UserNotificationDto> = {
@@ -99,6 +110,14 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
   const [type, setType] = useState('all');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [employeeId, setEmployeeId] = useState('all');
+  const [clientId, setClientId] = useState('all');
+  const [taskRole, setTaskRole] = useState<NotificationTaskRoleFilter>('all');
+  const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [referenceLoading, setReferenceLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -118,6 +137,20 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
     () => types.filter((item) => isUserNotificationTypeEnabled(preferences, item.key)).length,
     [preferences, types],
   );
+  const selectedEmployeeId = employeeId === 'all' ? undefined : Number(employeeId);
+  const selectedClientId = clientId === 'all' ? undefined : Number(clientId);
+  const selectedTaskRole = taskRole === 'all' ? undefined : taskRole;
+  const hasCustomFilters = Boolean(
+    searchInput
+      || search
+      || type !== 'all'
+      || status !== 'active'
+      || dateFrom
+      || dateTo
+      || selectedEmployeeId
+      || selectedClientId
+      || selectedTaskRole,
+  );
 
   useEffect(() => {
     let alive = true;
@@ -130,6 +163,35 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
       .catch(() => {
         if (alive) {
           setTypes([]);
+        }
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    setReferenceLoading(true);
+    Promise.all([
+      apiService.getTaskJournalAssignees().catch(() => [] as TaskJournalAssignee[]),
+      apiService.getClientsV2({
+        page: 1,
+        pageSize: 500,
+        isActive: true,
+        sortBy: 'name',
+      }).then((response) => response.items).catch(() => [] as Client[]),
+    ])
+      .then(([nextAssignees, nextClients]) => {
+        if (alive) {
+          setAssignees(nextAssignees);
+          setClients(nextClients);
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setReferenceLoading(false);
         }
       });
 
@@ -183,6 +245,11 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
       status,
       type: type === 'all' ? undefined : type,
       search,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      employeeId: selectedEmployeeId,
+      clientId: selectedClientId,
+      taskRole: selectedTaskRole,
       page,
       pageSize: itemsPage.pageSize || 25,
     })
@@ -206,7 +273,19 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
     return () => {
       alive = false;
     };
-  }, [itemsPage.pageSize, page, search, status, toast, type]);
+  }, [
+    dateFrom,
+    dateTo,
+    itemsPage.pageSize,
+    page,
+    search,
+    selectedClientId,
+    selectedEmployeeId,
+    selectedTaskRole,
+    status,
+    toast,
+    type,
+  ]);
 
   useEffect(() => refresh(), [refresh]);
 
@@ -320,6 +399,11 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
         status,
         type: type === 'all' ? undefined : type,
         search,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        employeeId: selectedEmployeeId,
+        clientId: selectedClientId,
+        taskRole: selectedTaskRole,
       });
       emitUserNotificationsChanged();
       refresh();
@@ -351,6 +435,19 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
     } finally {
       setPreferencesSaving(false);
     }
+  };
+
+  const handleResetFilters = () => {
+    setStatus('active');
+    setType('all');
+    setSearchInput('');
+    setSearch('');
+    setDateFrom('');
+    setDateTo('');
+    setEmployeeId('all');
+    setClientId('all');
+    setTaskRole('all');
+    setPage(1);
   };
 
   return (
@@ -457,6 +554,98 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
               <option key={item.key} value={item.key}>{item.label}</option>
             ))}
           </select>
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[10rem_10rem_minmax(12rem,1fr)_minmax(12rem,1fr)_12rem_auto]">
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">С даты</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => {
+                setDateFrom(event.target.value);
+                setPage(1);
+              }}
+              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">По дату</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => {
+                setDateTo(event.target.value);
+                setPage(1);
+              }}
+              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Сотрудник</span>
+            <select
+              value={employeeId}
+              onChange={(event) => {
+                setEmployeeId(event.target.value);
+                setPage(1);
+              }}
+              disabled={referenceLoading}
+              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-wait disabled:bg-slate-50 disabled:text-slate-400"
+            >
+              <option value="all">Все сотрудники</option>
+              {assignees.map((item) => (
+                <option key={item.id} value={item.id}>{item.name || item.email}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Клиент</span>
+            <select
+              value={clientId}
+              onChange={(event) => {
+                setClientId(event.target.value);
+                setPage(1);
+              }}
+              disabled={referenceLoading}
+              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-wait disabled:bg-slate-50 disabled:text-slate-400"
+            >
+              <option value="all">Все клиенты</option>
+              {clients.map((item) => (
+                <option key={item.id} value={item.id}>{item.name || item.company || `Клиент #${item.id}`}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Роль</span>
+            <select
+              value={taskRole}
+              onChange={(event) => {
+                setTaskRole(event.target.value as NotificationTaskRoleFilter);
+                setPage(1);
+              }}
+              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            >
+              {TASK_ROLE_FILTERS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              disabled={!hasCustomFilters}
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 xl:w-auto"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Сбросить
+            </button>
+          </div>
         </div>
       </section>
 

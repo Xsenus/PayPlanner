@@ -173,6 +173,61 @@ public class NotificationInboxControllerTests
     }
 
     [Fact]
+    public async Task GetNotifications_FiltersTaskNotificationsByDateEmployeeClientAndRole()
+    {
+        await using var db = await CreateContextAsync();
+        var currentUser = await CreateUserAsync(db, "notification-filter-owner@example.com");
+        var assignee = await CreateUserAsync(db, "notification-filter-assignee@example.com");
+        var otherAssignee = await CreateUserAsync(db, "notification-filter-other@example.com");
+        var targetClient = CreateClient("Target client");
+        var otherClient = CreateClient("Other client");
+        db.Clients.AddRange(targetClient, otherClient);
+        await db.SaveChangesAsync();
+
+        var targetTask = CreateTask(currentUser.Id, "Target task");
+        targetTask.ClientId = targetClient.Id;
+        targetTask.AssigneeUserId = assignee.Id;
+        targetTask.AssigneeName = assignee.FullName;
+        var otherTask = CreateTask(currentUser.Id, "Other task");
+        otherTask.ClientId = otherClient.Id;
+        otherTask.AssigneeUserId = otherAssignee.Id;
+        otherTask.AssigneeName = otherAssignee.FullName;
+        db.TaskJournalItems.AddRange(targetTask, otherTask);
+        await db.SaveChangesAsync();
+
+        var target = CreateNotification(currentUser.Id, "task:target:changed", title: "Target");
+        target.TaskJournalItemId = targetTask.Id;
+        target.ObjectId = targetTask.Id;
+        target.CreatedAt = new DateTime(2026, 5, 20, 8, 30, 0, DateTimeKind.Utc);
+        var wrongDate = CreateNotification(currentUser.Id, "task:target:old", title: "Old");
+        wrongDate.TaskJournalItemId = targetTask.Id;
+        wrongDate.ObjectId = targetTask.Id;
+        wrongDate.CreatedAt = new DateTime(2026, 5, 19, 8, 30, 0, DateTimeKind.Utc);
+        var wrongClientAndEmployee = CreateNotification(currentUser.Id, "task:other:changed", title: "Other");
+        wrongClientAndEmployee.TaskJournalItemId = otherTask.Id;
+        wrongClientAndEmployee.ObjectId = otherTask.Id;
+        wrongClientAndEmployee.CreatedAt = new DateTime(2026, 5, 20, 8, 30, 0, DateTimeKind.Utc);
+        db.UserNotifications.AddRange(target, wrongDate, wrongClientAndEmployee);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, currentUser.Id);
+
+        var listResult = await controller.GetNotifications(
+            "active",
+            null,
+            null,
+            dateFrom: "2026-05-20",
+            dateTo: "2026-05-20",
+            employeeId: assignee.Id,
+            clientId: targetClient.Id,
+            taskRole: "assignee");
+
+        var page = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var item = Assert.Single(page.Items);
+        Assert.Equal(target.Id, item.Id);
+    }
+
+    [Fact]
     public async Task MarkAllRead_UpdatesOnlyFilteredCurrentUserNotifications()
     {
         await using var db = await CreateContextAsync();
@@ -219,7 +274,7 @@ public class NotificationInboxControllerTests
             "active",
             UserNotificationTypes.TaskReminder,
             "срок",
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         var dto = Assert.IsType<UserNotificationBulkActionResultDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal(1, dto.UpdatedCount);
@@ -276,6 +331,19 @@ public class NotificationInboxControllerTests
             TagsJson = "[]",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
+        };
+
+    private static Client CreateClient(string name)
+        => new()
+        {
+            Name = name,
+            Email = string.Empty,
+            Phone = string.Empty,
+            Company = string.Empty,
+            Address = string.Empty,
+            Notes = string.Empty,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
         };
 
     private static NotificationInboxController CreateController(PaymentContext db, int userId)

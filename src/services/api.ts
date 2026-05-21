@@ -311,6 +311,11 @@ export interface UserNotificationsQuery {
   status?: 'active' | 'unread' | 'read' | 'archived' | 'all' | string;
   type?: string;
   search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  employeeId?: number;
+  clientId?: number;
+  taskRole?: 'assignee' | 'author' | 'observer' | 'approver' | string;
   page?: number;
   pageSize?: number;
 }
@@ -2179,6 +2184,11 @@ export class ApiService {
       status: params?.status ?? 'active',
       type: params?.type,
       search: params?.search,
+      dateFrom: params?.dateFrom,
+      dateTo: params?.dateTo,
+      employeeId: params?.employeeId,
+      clientId: params?.clientId,
+      taskRole: params?.taskRole,
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 25,
     });
@@ -2201,11 +2211,16 @@ export class ApiService {
     });
   }
 
-  async markAllUserNotificationsRead(params?: Pick<UserNotificationsQuery, 'status' | 'type' | 'search'>) {
+  async markAllUserNotificationsRead(params?: Pick<UserNotificationsQuery, 'status' | 'type' | 'search' | 'dateFrom' | 'dateTo' | 'employeeId' | 'clientId' | 'taskRole'>) {
     const q = buildQuery({
       status: params?.status,
       type: params?.type,
       search: params?.search,
+      dateFrom: params?.dateFrom,
+      dateTo: params?.dateTo,
+      employeeId: params?.employeeId,
+      clientId: params?.clientId,
+      taskRole: params?.taskRole,
     });
     return this.request<UserNotificationBulkActionResultDto>(`/notifications/inbox/read-all${q}`, {
       method: 'POST',
