@@ -38,7 +38,9 @@ builder.Services.AddSwaggerGen();
 void ConfigureSqlite(DbContextOptionsBuilder options) => options
     .UseSqlite(databaseProvider.ConnectionString)
     .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
-void ConfigurePostgreSql(DbContextOptionsBuilder options) => options.UseNpgsql(databaseProvider.ConnectionString);
+void ConfigurePostgreSql(DbContextOptionsBuilder options) => options
+    .UseNpgsql(databaseProvider.ConnectionString)
+    .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
 
 static void EnsureWalMode(string connectionString)
 {
