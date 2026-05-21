@@ -1975,6 +1975,55 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Key).IsUnique().HasDatabaseName("IX_SystemSettings_Key");
         });
 
+        // ------------------ App releases ------------------
+        modelBuilder.Entity<AppRelease>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ReleaseId).HasMaxLength(160).IsRequired();
+            entity.Property(e => e.Version).HasMaxLength(40).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Summary).HasMaxLength(2000).IsRequired();
+            entity.Property(e => e.Source).HasMaxLength(40).HasDefaultValue("manual").IsRequired();
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.UpdatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.ReleaseId).IsUnique().HasDatabaseName("IX_AppReleases_ReleaseId");
+            entity.HasIndex(e => new { e.IsActive, e.ReleasedAt }).HasDatabaseName("IX_AppReleases_IsActive_ReleasedAt");
+        });
+
+        modelBuilder.Entity<AppReleaseItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Type).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Text).HasMaxLength(1000).IsRequired();
+            entity.HasIndex(e => new { e.AppReleaseId, e.SortOrder }).HasDatabaseName("IX_AppReleaseItems_Release_SortOrder");
+
+            entity.HasOne(e => e.AppRelease)
+                  .WithMany(e => e.Items)
+                  .HasForeignKey(e => e.AppReleaseId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AppReleaseSeen>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SeenAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => new { e.UserId, e.AppReleaseId }).IsUnique().HasDatabaseName("IX_AppReleaseSeen_User_Release");
+            entity.HasIndex(e => e.AppReleaseId).HasDatabaseName("IX_AppReleaseSeen_ReleaseId");
+
+            entity.HasOne(e => e.AppRelease)
+                  .WithMany(e => e.SeenByUsers)
+                  .HasForeignKey(e => e.AppReleaseId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
         // ------------------ FormFieldRequirements ------------------
         modelBuilder.Entity<FormFieldRequirement>(entity =>
         {
@@ -2916,6 +2965,9 @@ public class PaymentContext : DbContext
     /// </summary>
     public DbSet<UserSetting> UserSettings { get; set; }
     public DbSet<SystemSetting> SystemSettings { get; set; }
+    public DbSet<AppRelease> AppReleases { get; set; }
+    public DbSet<AppReleaseItem> AppReleaseItems { get; set; }
+    public DbSet<AppReleaseSeen> AppReleaseSeen { get; set; }
     public DbSet<FormFieldRequirement> FormFieldRequirements { get; set; }
     public DbSet<SpreadsheetImportBatch> SpreadsheetImportBatches { get; set; }
     public DbSet<SpreadsheetImportBatchFile> SpreadsheetImportBatchFiles { get; set; }

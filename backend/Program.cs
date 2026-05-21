@@ -217,6 +217,7 @@ using (var scope = app.Services.CreateScope())
         var ctx = scope.ServiceProvider.GetRequiredService<PaymentContext>();
         await ctx.Database.MigrateAsync();
         await SeedDataService.SeedAsync(ctx, seedClients);
+        await AppReleaseSeedService.SyncAsync(ctx, app.Environment.ContentRootPath);
         await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(ctx);
     }
     else
@@ -225,6 +226,7 @@ using (var scope = app.Services.CreateScope())
         await using var pgContext = await pgFactory.CreateDbContextAsync();
         await pgContext.Database.MigrateAsync();
         await SeedDataService.SeedAsync(pgContext, seedClients);
+        await AppReleaseSeedService.SyncAsync(pgContext, app.Environment.ContentRootPath);
         await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(pgContext);
     }
 }
