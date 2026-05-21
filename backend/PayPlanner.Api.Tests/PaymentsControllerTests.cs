@@ -343,9 +343,14 @@ public class PaymentsControllerTests
         invoiceDocument.AccountDate = invoice.Date;
         invoiceDocument.ContractId = contract.Id;
 
+        var paymentByInvoiceContract = CreatePayment(new DateTime(2026, 4, 14), 9_000m, "Платеж по счету с договором");
+        paymentByInvoiceContract.InvoiceId = invoice.Id;
+        paymentByInvoiceContract.Account = invoice.Number;
+        paymentByInvoiceContract.AccountDate = invoice.Date;
+
         var unrelatedPayment = CreatePayment(new DateTime(2026, 4, 13), 8_000m, "Посторонний платеж");
 
-        db.Payments.AddRange(canonicalPayment, legacyPayment, invoiceDocument, unrelatedPayment);
+        db.Payments.AddRange(canonicalPayment, legacyPayment, invoiceDocument, paymentByInvoiceContract, unrelatedPayment);
         await db.SaveChangesAsync();
 
         db.ContractPayments.Add(new ContractPayment
@@ -381,9 +386,11 @@ public class PaymentsControllerTests
         var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
         var response = Assert.IsType<PaymentsPageResponse>(ok.Value);
 
-        Assert.Equal(2, response.Total);
-        Assert.Equal(new[] { canonicalPayment.Id, legacyPayment.Id }, response.Items.Select(item => item.Id).OrderBy(id => id).ToArray());
-        Assert.Equal(11_000m, response.Summary.Income);
+        Assert.Equal(3, response.Total);
+        Assert.Equal(
+            new[] { canonicalPayment.Id, legacyPayment.Id, paymentByInvoiceContract.Id },
+            response.Items.Select(item => item.Id).OrderBy(id => id).ToArray());
+        Assert.Equal(20_000m, response.Summary.Income);
         Assert.DoesNotContain(response.Items, item => item.Id == invoiceDocument.Id);
         Assert.DoesNotContain(response.Items, item => item.Id == unrelatedPayment.Id);
     }

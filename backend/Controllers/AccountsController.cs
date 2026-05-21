@@ -768,7 +768,13 @@ public class AccountsController : ControllerBase
         {
             query = query.Where(payment =>
                 payment.ContractId == contractId.Value
-                || _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == payment.Id));
+                || _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == payment.Id)
+                || _db.ContractPayments.Any(link => link.ContractId == contractId.Value && link.PaymentId == payment.Id)
+                || (payment.InvoiceId.HasValue && _db.Payments.Any(invoicePayment =>
+                    invoicePayment.InvoiceId == payment.InvoiceId.Value
+                    && invoicePayment.DocumentKind == DocumentKind.Invoice
+                    && (invoicePayment.ContractId == contractId.Value
+                        || _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == invoicePayment.Id)))));
         }
 
         if (from.HasValue)

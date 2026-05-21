@@ -539,6 +539,65 @@ describe('PaymentModal integration', () => {
     expect(payload.clientId).toBeUndefined();
   });
 
+  it('shows client contracts in the payment card and submits the selected contract', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    getContractsMock.mockResolvedValue({
+      items: [
+        {
+          id: 321,
+          number: '1-14/07-2025',
+          title: 'спор между Чуркиной О.В. и Карповым А.Б.',
+          date: '2025-07-14',
+          billingMode: 'Fixed',
+          isOpenEnded: true,
+          createdAt: '2025-07-14T00:00:00Z',
+          invoiceAmountTotal: 0,
+          actAmountTotal: 0,
+          paymentAmountTotal: 0,
+          clients: [{ id: 69, name: 'Test Client' }],
+        },
+      ],
+    });
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 778,
+          date: '2026-04-12',
+          plannedDate: '2026-04-12',
+          amount: 25_000,
+          paidAmount: 25_000,
+          status: 'Completed',
+          description: 'Оплата по счету 154',
+          isPaid: true,
+          paidDate: '2026-04-12',
+          lastPaymentDate: '2026-04-12',
+          notes: '',
+          clientId: 69,
+          type: 'Income',
+          account: '',
+          accountDate: '',
+          documentKind: 'Payment',
+          createdAt: '2026-04-12T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+      />,
+    );
+
+    const contractSelect = await screen.findByLabelText('Договор');
+    await waitFor(() => expect(screen.getByRole('option', { name: /1-14\/07-2025/ })).toBeTruthy());
+    fireEvent.change(contractSelect, { target: { value: '321' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(getContractsMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 69 }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ id: 778, contractId: 321 }));
+  });
+
   it('submits expense attribution and payment document details for expense payments', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(

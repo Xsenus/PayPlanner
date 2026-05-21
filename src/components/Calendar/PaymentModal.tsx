@@ -15,6 +15,7 @@ import type {
   PaymentPayload,
   Invoice,
   InvoiceInput,
+  Contract,
   ActResponsible,
   CashOrderType,
   ApplyClientBalanceResult,
@@ -153,6 +154,13 @@ function getLegalEntityDisplayName(entity: LegalEntitySummary): string {
   return entity.shortName?.trim() || entity.fullName?.trim() || `Юр. лицо #${entity.id}`;
 }
 
+function getContractDisplayName(contract: Pick<Contract, 'id' | 'number' | 'date' | 'title'>): string {
+  const number = contract.number?.trim() || `#${contract.id}`;
+  const date = contract.date ? toRuDate(contract.date) || contract.date : '';
+  const title = contract.title?.trim();
+  return `Договор №${number}${date ? ` от ${date}` : ''}${title ? ` · ${title}` : ''}`;
+}
+
 interface PaymentModalProps {
   defaultClientId?: number;
   defaultLegalEntityId?: number;
@@ -227,6 +235,9 @@ export function PaymentModal({
   const [overpaymentComment, setOverpaymentComment] = useState('');
   const [cases, setCases] = useState<ClientCase[]>([]);
   const [fallbackCase, setFallbackCase] = useState<ClientCase | null>(null);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [contractsLoading, setContractsLoading] = useState(false);
+  const [contractsError, setContractsError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     date: todayYMD(),
@@ -282,6 +293,32 @@ export function PaymentModal({
     () => legalEntities.find((entity) => String(entity.id) === formData.expenseLegalEntityId) ?? null,
     [legalEntities, formData.expenseLegalEntityId],
   );
+  const selectedContract = useMemo(
+    () => contracts.find((contract) => String(contract.id) === formData.contractId) ?? null,
+    [contracts, formData.contractId],
+  );
+  const contractOptions = useMemo(() => {
+    if (!formData.contractId || selectedContract) {
+      return contracts;
+    }
+
+    return [
+      {
+        id: Number(formData.contractId),
+        number: formData.contractId,
+        title: null,
+        date: '',
+        billingMode: 'Fixed',
+        isOpenEnded: true,
+        createdAt: '',
+        invoiceAmountTotal: 0,
+        actAmountTotal: 0,
+        paymentAmountTotal: 0,
+        clients: [],
+      } as Contract,
+      ...contracts,
+    ];
+  }, [contracts, formData.contractId, selectedContract]);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientPickerMode, setClientPickerMode] = useState<'client' | 'expense'>('client');
 
@@ -483,6 +520,59 @@ export function PaymentModal({
     invoiceSearch,
     isOpen,
   ]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setContracts([]);
+      setContractsLoading(false);
+      setContractsError(null);
+      return;
+    }
+
+    const clientId = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
+    const legalEntityId = formData.legalEntityId ? parseInt(formData.legalEntityId, 10) : undefined;
+
+    if (!clientId && !legalEntityId) {
+      setContracts([]);
+      setContractsLoading(false);
+      setContractsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadContracts = async () => {
+      try {
+        setContractsLoading(true);
+        setContractsError(null);
+        const response = await apiService.getContracts({
+          clientId,
+          legalEntityId,
+          sortBy: 'date',
+          sortDir: 'desc',
+          page: 1,
+          pageSize: 100,
+        });
+        if (!cancelled) {
+          setContracts(response.items ?? []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setContracts([]);
+          setContractsError(error instanceof Error ? error.message : 'Не удалось загрузить договоры контрагента.');
+        }
+      } finally {
+        if (!cancelled) {
+          setContractsLoading(false);
+        }
+      }
+    };
+
+    void loadContracts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.clientId, formData.legalEntityId, isOpen]);
 
   useEffect(() => {
     if (!isOpen || !isCashPaymentSource) {
@@ -1228,6 +1318,7 @@ export function PaymentModal({
           ? fromInputToApiDate(formData.paymentDocumentDate)
           : undefined,
         invoiceId: formData.invoiceId ? parseInt(formData.invoiceId, 10) : undefined,
+        contractId: formData.contractId ? parseInt(formData.contractId, 10) : undefined,
         account: shouldPersistLegacyAccountFields ? formData.account?.trim() || undefined : undefined,
         accountDate:
           shouldPersistLegacyAccountFields && formData.accountDate
@@ -1845,6 +1936,7 @@ export function PaymentModal({
         ? fromInputToApiDate(formData.paymentDocumentDate)
         : undefined,
       invoiceId: formData.invoiceId ? parseInt(formData.invoiceId, 10) : undefined,
+      contractId: formData.contractId ? parseInt(formData.contractId, 10) : undefined,
       account: shouldPersistLegacyAccountFields ? formData.account?.trim() || undefined : undefined,
       accountDate:
         shouldPersistLegacyAccountFields && formData.accountDate
@@ -2739,6 +2831,37 @@ export function PaymentModal({
                           </option>
                         ))}
                       </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Договор
+                      </label>
+                      <select
+                        name="contractId"
+                        value={formData.contractId}
+                        onChange={handleChange}
+                        aria-label="Договор"
+                        disabled={hasLockedInvoice || contractsLoading || (!formData.clientId && !formData.legalEntityId)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">
+                          {!formData.clientId && !formData.legalEntityId
+                            ? 'Выберите контрагента'
+                            : contractsLoading
+                              ? 'Загрузка договоров...'
+                              : 'Без договора'}
+                        </option>
+                        {contractOptions.map((contract) => (
+                          <option key={contract.id} value={String(contract.id)}>
+                            {getContractDisplayName(contract)}
+                          </option>
+                        ))}
+                      </select>
+                      {contractsError && (
+                        <div className="mt-1 text-xs text-rose-600">
+                          {contractsError}
+                        </div>
+                      )}
                     </div>
 
                     <div>
