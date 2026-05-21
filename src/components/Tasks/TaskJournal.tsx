@@ -4071,6 +4071,7 @@ function TaskDaySchedulePanel({
   const selectedDate = useMemo(() => parseLocalInputDate(selectedDueAt), [selectedDueAt]);
   const plannedDuration = normalizeTaskDuration(plannedDurationMinutes);
   const assigneeLabel = assigneeName?.trim() || 'Исполнитель не выбран';
+  const hasAssigneeFilter = Boolean(assigneeUserId || assigneeName?.trim());
 
   const dayTasks = useMemo(() => {
     if (!selectedDate) {
@@ -4094,19 +4095,19 @@ function TaskDaySchedulePanel({
     () => assigneeDayTasks.filter((task) => isTaskJournalActive(task.status)),
     [assigneeDayTasks],
   );
+  const visibleScheduleTasks = hasAssigneeFilter ? assigneeDayTasks : dayTasks;
+  const activeVisibleScheduleTasks = hasAssigneeFilter ? activeAssigneeDayTasks : activeDayTasks;
+  const scheduleOwnerLabel = hasAssigneeFilter ? assigneeLabel : 'Все исполнители';
 
   const selectedStartMinute = selectedDate ? getMinuteOfDay(selectedDate) : null;
   const selectedEndMinute = selectedStartMinute === null ? null : selectedStartMinute + plannedDuration;
-  const conflictSource = activeAssigneeDayTasks.length > 0 || assigneeUserId || assigneeName?.trim()
-    ? activeAssigneeDayTasks
-    : activeDayTasks;
+  const conflictSource = hasAssigneeFilter ? activeAssigneeDayTasks : activeDayTasks;
   const conflicts = selectedStartMinute === null || selectedEndMinute === null
     ? []
     : conflictSource.filter((task) =>
       task.id !== currentTaskId &&
       intervalsOverlap(selectedStartMinute, selectedEndMinute, getTaskStartMinute(task), getTaskEndMinute(task)));
-  const dayLoadMinutes = activeDayTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
-  const assigneeLoadMinutes = activeAssigneeDayTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
+  const visibleScheduleLoadMinutes = activeVisibleScheduleTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
 
   if (!selectedDate) {
     return (
@@ -4128,15 +4129,15 @@ function TaskDaySchedulePanel({
             {formatDateOnly(selectedDate)}, слот {formatTimeRange(selectedDate, plannedDuration)}
           </h3>
           <p className="mt-1 text-sm text-slate-500">
-            {assigneeLabel}: {activeAssigneeDayTasks.length} активных задач · {formatDuration(assigneeLoadMinutes)}
+            {scheduleOwnerLabel}: {activeVisibleScheduleTasks.length} активных задач · {formatDuration(visibleScheduleLoadMinutes)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-semibold">
           <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">
-            Всего: {dayTasks.length}
+            Всего: {visibleScheduleTasks.length}
           </span>
           <span className="rounded-full bg-white px-3 py-1 text-slate-600 ring-1 ring-slate-200">
-            Активных: {activeDayTasks.length} · {formatDuration(dayLoadMinutes)}
+            Активных: {activeVisibleScheduleTasks.length} · {formatDuration(visibleScheduleLoadMinutes)}
           </span>
           <span className={`rounded-full px-3 py-1 ring-1 ${conflicts.length > 0 ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}`}>
             {conflicts.length > 0 ? `Пересечения: ${conflicts.length}` : 'Свободно'}
@@ -4144,13 +4145,13 @@ function TaskDaySchedulePanel({
         </div>
       </div>
 
-      {dayTasks.length === 0 ? (
+      {visibleScheduleTasks.length === 0 ? (
         <div className="mt-4 rounded-xl border border-dashed border-blue-200 bg-white/70 px-4 py-5 text-sm text-slate-500">
-          На выбранный день задач пока нет.
+          {hasAssigneeFilter ? 'На выбранный день у выбранного исполнителя задач пока нет.' : 'На выбранный день задач пока нет.'}
         </div>
       ) : (
         <div className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
-          {dayTasks.map((task) => {
+          {visibleScheduleTasks.map((task) => {
             const start = new Date(task.dueAt);
             const duration = normalizeTaskDuration(task.plannedDurationMinutes);
             const isCurrent = task.id === currentTaskId;

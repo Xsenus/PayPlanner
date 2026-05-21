@@ -865,6 +865,16 @@ describe('TaskJournal', () => {
         assigneeUserId: 7,
         assigneeName: 'Администратор',
       }),
+      createTask({
+        id: 103,
+        title: 'Other assignee same day task',
+        dueAt: busySlot.toISOString(),
+        assigneeUserId: 8,
+        assigneeName: 'Другой исполнитель',
+        participants: [
+          { userId: 8, role: 'assignee', displayName: 'Другой исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
     ], { waitForTitle: 'Busy slot' });
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
@@ -877,7 +887,9 @@ describe('TaskJournal', () => {
 
     const panel = screen.getByTestId('task-day-schedule-panel');
     expect(within(panel).getByText('Busy slot')).toBeTruthy();
+    expect(within(panel).queryByText('Other assignee same day task')).toBeNull();
     expect(within(panel).queryByText('Other day task')).toBeNull();
+    expect(within(panel).getByText('Всего: 1')).toBeTruthy();
     expect(within(panel).getByText(/Пересечения: 1/)).toBeTruthy();
   });
 
