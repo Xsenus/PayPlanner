@@ -13,6 +13,7 @@ const {
   cancelCashOrderMock,
   copyCashOrderMock,
   createMoneyOperationMock,
+  createMoneyOperationTransferMock,
   deleteCashOrderMock,
   deleteMoneyOperationMock,
   downloadCashOrderPdfMock,
@@ -64,6 +65,7 @@ const {
     cancelCashOrderMock: vi.fn(),
     copyCashOrderMock: vi.fn(),
     createMoneyOperationMock: vi.fn(),
+    createMoneyOperationTransferMock: vi.fn(),
     deleteCashOrderMock: vi.fn(),
     deleteMoneyOperationMock: vi.fn(),
     downloadCashOrderPdfMock: vi.fn(),
@@ -182,6 +184,7 @@ vi.mock('../../services/api', () => ({
     cancelCashOrder: cancelCashOrderMock,
     copyCashOrder: copyCashOrderMock,
     createMoneyOperation: createMoneyOperationMock,
+    createMoneyOperationTransfer: createMoneyOperationTransferMock,
     deleteCashOrder: deleteCashOrderMock,
     deleteMoneyOperation: deleteMoneyOperationMock,
     downloadCashOrderPdf: downloadCashOrderPdfMock,
@@ -347,6 +350,7 @@ describe('MoneyOperations integration', () => {
     cancelCashOrderMock.mockReset();
     copyCashOrderMock.mockReset();
     createMoneyOperationMock.mockReset();
+    createMoneyOperationTransferMock.mockReset();
     deleteCashOrderMock.mockReset();
     deleteMoneyOperationMock.mockReset();
     downloadCashOrderPdfMock.mockReset();
@@ -416,6 +420,30 @@ describe('MoneyOperations integration', () => {
         source: 'Bank',
         currency: 'RUB',
         bankName: 'Банк',
+        bankAccountNumber: null,
+        isDefault: false,
+        isActive: true,
+        createdAt: '2026-04-20T08:00:00Z',
+        updatedAt: null,
+      },
+      {
+        id: 103,
+        name: 'Основная касса',
+        source: 'Cash',
+        currency: 'RUB',
+        bankName: null,
+        bankAccountNumber: null,
+        isDefault: false,
+        isActive: true,
+        createdAt: '2026-04-20T08:00:00Z',
+        updatedAt: null,
+      },
+      {
+        id: 104,
+        name: 'Резервная касса',
+        source: 'Cash',
+        currency: 'RUB',
+        bankName: null,
         bankAccountNumber: null,
         isDefault: false,
         isActive: true,
@@ -722,6 +750,43 @@ describe('MoneyOperations integration', () => {
       const created = { ...payload, id: nextId++, updatedAt: null };
       operations = [created, ...operations];
       return created;
+    });
+    createMoneyOperationTransferMock.mockImplementation(async (payload: {
+      sourceMoneyAccountId: number;
+      targetMoneyAccountId: number;
+      amount: number;
+      currency?: string | null;
+      date: string;
+      purpose?: string | null;
+    }) => {
+      const sourceOperation = createOperation({
+        id: nextId++,
+        source: 'Bank',
+        direction: 'Expense',
+        moneyAccountId: payload.sourceMoneyAccountId,
+        accountName: 'Основной счёт',
+        counterpartyName: 'Основная касса',
+        amount: payload.amount,
+        currency: payload.currency ?? 'RUB',
+        date: payload.date,
+        purpose: payload.purpose ?? 'Перевод между счетами',
+        matchStatus: 'Ignored',
+      });
+      const targetOperation = createOperation({
+        id: nextId++,
+        source: 'Cash',
+        direction: 'Income',
+        moneyAccountId: payload.targetMoneyAccountId,
+        accountName: 'Основная касса',
+        counterpartyName: 'Основной счёт',
+        amount: payload.amount,
+        currency: payload.currency ?? 'RUB',
+        date: payload.date,
+        purpose: payload.purpose ?? 'Перевод между счетами',
+        matchStatus: 'Ignored',
+      });
+      operations = [targetOperation, sourceOperation, ...operations];
+      return { sourceOperation, targetOperation };
     });
 
     createCashOrderFromPaymentMock.mockImplementation(async (paymentId: number) => ({
@@ -1214,6 +1279,45 @@ describe('MoneyOperations integration', () => {
     );
     expect(toastSuccessMock).toHaveBeenCalledWith('Операция создана.', 'Деньги');
     await screen.findByText('Новый поставщик');
+  }, 15000);
+
+  it('creates a paired transfer between money accounts from the operation form', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('button', { name: 'Добавить' }));
+    await screen.findByText('Добавить операцию по банку');
+
+    await user.click(screen.getByLabelText('Между счетами'));
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '101');
+    await user.selectOptions(screen.getByLabelText('Куда перевести'), '103');
+    await user.clear(screen.getByLabelText('Получатель'));
+    await user.type(screen.getByLabelText('Получатель'), 'Инкассация');
+    await user.clear(screen.getByLabelText('Сумма, RUB'));
+    await user.type(screen.getByLabelText('Сумма, RUB'), '12000');
+    await user.clear(screen.getByLabelText(/^Назначение$/));
+    await user.type(screen.getByLabelText(/^Назначение$/), 'Инкассация в кассу');
+
+    const modalSaveButton = screen
+      .getAllByRole('button', { name: 'Сохранить' })
+      .find((button) => button.className.includes('bg-blue-600'));
+    expect(modalSaveButton).toBeTruthy();
+    await user.click(modalSaveButton as HTMLElement);
+
+    await waitFor(() => expect(createMoneyOperationTransferMock).toHaveBeenCalledTimes(1));
+    expect(createMoneyOperationTransferMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceMoneyAccountId: 101,
+        targetMoneyAccountId: 103,
+        amount: 12000,
+        date: '2026-04-21',
+        purpose: 'Инкассация в кассу',
+      }),
+    );
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Перевод между счетами создан.', 'Деньги');
   }, 15000);
 
   it('filters money operations by selected account', async () => {

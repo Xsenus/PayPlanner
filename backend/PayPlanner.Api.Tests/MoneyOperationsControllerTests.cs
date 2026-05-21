@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
@@ -20,6 +21,66 @@ namespace PayPlanner.Api.Tests;
 
 public class MoneyOperationsControllerTests
 {
+    [Fact]
+    public async Task CreateTransfer_CreatesPairedOperations_AndCashOrderForCashSide()
+    {
+        await using var db = await CreateContextAsync();
+        var bankAccount = new MoneyAccount
+        {
+            Name = "Основной банк",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsActive = true,
+        };
+        var cashAccount = new MoneyAccount
+        {
+            Name = "Основная касса",
+            Source = MoneyOperationSource.Cash,
+            Currency = "RUB",
+            IsActive = true,
+        };
+        db.MoneyAccounts.AddRange(bankAccount, cashAccount);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+
+        var action = await controller.CreateTransfer(new MoneyOperationTransferRequest
+        {
+            SourceMoneyAccountId = bankAccount.Id,
+            TargetMoneyAccountId = cashAccount.Id,
+            Amount = 12_000m,
+            Currency = "RUB",
+            Date = new DateTime(2026, 5, 22),
+            Purpose = "Инкассация в кассу",
+            PaymentOrderNumber = "TR-1",
+        });
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var response = Assert.IsType<MoneyOperationTransferResponse>(created.Value);
+
+        Assert.Equal(MoneyOperationDirection.Expense, response.SourceOperation.Direction);
+        Assert.Equal(MoneyOperationSource.Bank, response.SourceOperation.Source);
+        Assert.Equal(bankAccount.Id, response.SourceOperation.MoneyAccountId);
+        Assert.Equal(cashAccount.Name, response.SourceOperation.PaidAccountName);
+        Assert.Equal(MoneyOperationDirection.Income, response.TargetOperation.Direction);
+        Assert.Equal(MoneyOperationSource.Cash, response.TargetOperation.Source);
+        Assert.Equal(cashAccount.Id, response.TargetOperation.MoneyAccountId);
+        Assert.Equal(bankAccount.Name, response.TargetOperation.PaidAccountName);
+        Assert.Equal(MoneyOperationMatchStatus.Ignored, response.SourceOperation.MatchStatus);
+        Assert.Equal(MoneyOperationMatchStatus.Ignored, response.TargetOperation.MatchStatus);
+
+        var operations = await db.MoneyOperations
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Equal(2, operations.Count);
+
+        var cashOrder = Assert.Single(await db.CashOrders.ToListAsync());
+        Assert.Equal(response.TargetOperation.Id, cashOrder.MoneyOperationId);
+        Assert.Equal(CashOrderType.Incoming, cashOrder.Type);
+        Assert.Equal(CashOrderStatus.Posted, cashOrder.Status);
+        Assert.Equal(12_000m, cashOrder.Amount);
+    }
+
     [Fact]
     public async Task CreateUpdateDeleteMoneyOperation_RoundTripsSuccessfully()
     {

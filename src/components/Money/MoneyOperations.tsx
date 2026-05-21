@@ -237,6 +237,7 @@ const DEFAULT_FORM: MoneyOperation = {
   matchComment: '',
   createdAt: new Date().toISOString(),
   updatedAt: null,
+  transferTargetMoneyAccountId: null,
 };
 
 function createDefaultForm(source: MoneyOperationSource): MoneyOperation {
@@ -1568,9 +1569,14 @@ function MoneyOperationModal({
   const [error, setError] = useState<string | null>(null);
   const [invoiceCandidates, setInvoiceCandidates] = useState<MoneyOperationInvoiceCandidate[]>([]);
   const [invoiceCandidatesLoading, setInvoiceCandidatesLoading] = useState(false);
+  const activeMoneyAccounts = useMemo(() => (moneyAccounts ?? []).filter((account) => account.isActive), [moneyAccounts]);
   const sourceMoneyAccounts = useMemo(
     () => (moneyAccounts ?? []).filter((account) => account.source === source && account.isActive),
     [moneyAccounts, source],
+  );
+  const transferTargetAccounts = useMemo(
+    () => activeMoneyAccounts.filter((account) => account.id !== form.moneyAccountId),
+    [activeMoneyAccounts, form.moneyAccountId],
   );
   const modalCategoryOptions = useMemo(() => {
     const paymentKind = getPaymentKindForDirection(form.direction);
@@ -1657,7 +1663,11 @@ function MoneyOperationModal({
       return {
         ...prev,
         direction,
-        incomeTypeId: selectedCategory?.id ?? null,
+        incomeTypeId: direction === 'Transfer' ? null : selectedCategory?.id ?? null,
+        categoryName: direction === 'Transfer' ? '' : prev.categoryName,
+        linkedInvoiceId: direction === 'Transfer' ? null : prev.linkedInvoiceId,
+        paidInvoiceNumber: direction === 'Transfer' ? '' : prev.paidInvoiceNumber,
+        paidAmount: direction === 'Transfer' ? 0 : prev.paidAmount,
       };
     });
   };
@@ -1683,11 +1693,25 @@ function MoneyOperationModal({
       accountName: account?.name ?? '',
       source: account?.source ?? source,
       currency: account?.currency || prev.currency || 'RUB',
+      transferTargetMoneyAccountId:
+        prev.transferTargetMoneyAccountId === account?.id ? null : prev.transferTargetMoneyAccountId,
     }));
   };
 
   const handleSubmit = async () => {
     setError(null);
+    if (form.direction === 'Transfer') {
+      if (!form.moneyAccountId || !form.transferTargetMoneyAccountId) {
+        setError('Выберите счёт списания и счёт зачисления для перевода.');
+        return;
+      }
+
+      if (form.moneyAccountId === form.transferTargetMoneyAccountId) {
+        setError('Для перевода выберите два разных денежных счёта.');
+        return;
+      }
+    }
+
     try {
       await onSave({
         ...form,
@@ -1792,8 +1816,26 @@ function MoneyOperationModal({
                 />
               )}
             </label>
+            {form.direction === 'Transfer' && (
+              <label className="flex flex-col gap-1 text-sm text-slate-600">
+                Куда перевести
+                <select
+                  value={form.transferTargetMoneyAccountId ?? ''}
+                  onChange={(event) =>
+                    setField('transferTargetMoneyAccountId', event.target.value ? Number(event.target.value) : null)
+                  }
+                  className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
+                  <option value="">Выберите счёт зачисления</option>
+                  {transferTargetAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="flex flex-col gap-1 text-sm text-slate-600">
-              {form.direction === 'Income' ? 'Покупатель' : 'Поставщик'}
+              {form.direction === 'Income' ? 'Покупатель' : form.direction === 'Transfer' ? 'Получатель' : 'Поставщик'}
               <input
                 value={form.counterpartyName ?? ''}
                 onChange={(event) => setField('counterpartyName', event.target.value)}
@@ -1820,21 +1862,23 @@ function MoneyOperationModal({
                 ))}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-sm text-slate-600">
-              {form.direction === 'Income' ? 'Статья прихода' : 'Статья расхода'}
-              <input
-                value={form.categoryName ?? ''}
-                onChange={(event) => handleCategoryChange(event.target.value)}
-                list={`money-operation-category-options-${source}`}
-                className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
-                placeholder="Статья"
-              />
-              <datalist id={`money-operation-category-options-${source}`}>
-                {modalCategoryOptions.map((option) => (
-                  <option key={`${option.paymentType}-${option.id}`} value={option.name} />
-                ))}
-              </datalist>
-            </label>
+            {form.direction !== 'Transfer' && (
+              <label className="flex flex-col gap-1 text-sm text-slate-600">
+                {form.direction === 'Income' ? 'Статья прихода' : 'Статья расхода'}
+                <input
+                  value={form.categoryName ?? ''}
+                  onChange={(event) => handleCategoryChange(event.target.value)}
+                  list={`money-operation-category-options-${source}`}
+                  className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
+                  placeholder="Статья"
+                />
+                <datalist id={`money-operation-category-options-${source}`}>
+                  {modalCategoryOptions.map((option) => (
+                    <option key={`${option.paymentType}-${option.id}`} value={option.name} />
+                  ))}
+                </datalist>
+              </label>
+            )}
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Номер ПП
               <input
@@ -2446,6 +2490,13 @@ export function MoneyOperations({
           })),
     [accountSummaries, moneyAccounts],
   );
+  const visibleMoneyAccountOptions = useMemo(
+    () =>
+      source === 'Total'
+        ? moneyAccountOptions
+        : moneyAccountOptions.filter((account) => account.source === source),
+    [moneyAccountOptions, source],
+  );
   const activeMoneyFilters = useMemo(() => {
     const filters: Array<{ key: string; label: string; value: string; onClear: () => void }> = [];
 
@@ -2539,7 +2590,7 @@ export function MoneyOperations({
       apiService.getMoneyOperationAccountSummaries({ from, to, source }),
       apiService.getMoneyOperationDailyBalances({ from, to, source }),
       apiService.getMoneyBalanceReconciliationResults({ from, to, source }),
-      apiService.getMoneyAccounts({ source, activeOnly: true }),
+      apiService.getMoneyAccounts({ activeOnly: true }),
     ])
       .then(([accounts, balances, reconciliationResults, moneyAccountItems]) => {
         if (!cancelled) {
@@ -3615,6 +3666,24 @@ export function MoneyOperations({
         await apiService.updateMoneyOperation(editingOperation.id, prepared);
         await reload();
         toast.success('Операция обновлена.', 'Деньги');
+      } else if (prepared.direction === 'Transfer') {
+        await apiService.createMoneyOperationTransfer({
+          sourceMoneyAccountId: prepared.moneyAccountId ?? 0,
+          targetMoneyAccountId: prepared.transferTargetMoneyAccountId ?? 0,
+          amount: prepared.amount,
+          currency: prepared.currency ?? null,
+          date: prepared.date,
+          recognitionDate: prepared.recognitionDate,
+          paymentOrderNumber: prepared.paymentOrderNumber ?? null,
+          purpose: prepared.purpose ?? null,
+          responsibleUserId: prepared.responsibleUserId ?? null,
+        });
+        toast.success('Перевод между счетами создан.', 'Деньги');
+        if (source !== 'Total' && page !== 1) {
+          setPage(1);
+        } else {
+          await reload();
+        }
       } else {
         await apiService.createMoneyOperation({
           ...prepared,
@@ -3993,7 +4062,7 @@ export function MoneyOperations({
                 onChange={(event) => selectMoneyAccount(event.target.value)}
                 className="min-w-52 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-700 focus:border-blue-500 focus:outline-none">
                 <option value="">{SOURCE_ALL_ACCOUNTS_LABELS[source]}</option>
-                {moneyAccountOptions.map((account) => (
+                {visibleMoneyAccountOptions.map((account) => (
                   <option key={`${account.source}-${account.accountName}-${account.id ?? ''}`} value={account.id ?? account.accountName}>
                     {account.accountName}
                   </option>

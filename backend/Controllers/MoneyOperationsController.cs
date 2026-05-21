@@ -5,6 +5,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
@@ -1991,6 +1992,121 @@ public class MoneyOperationsController : ControllerBase
         }
         await SyncCashOrderAsync(model);
         return Created($"/api/money-operations/{model.Id}", model);
+    }
+
+    [HttpPost("transfer")]
+    public async Task<ActionResult<MoneyOperationTransferResponse>> CreateTransfer(
+        [FromBody] MoneyOperationTransferRequest request,
+        CancellationToken ct = default)
+    {
+        if (request.Amount <= 0)
+        {
+            return BadRequest("Сумма перевода должна быть больше нуля.");
+        }
+
+        if (request.SourceMoneyAccountId <= 0 || request.TargetMoneyAccountId <= 0)
+        {
+            return BadRequest("Выберите счёт списания и счёт зачисления.");
+        }
+
+        if (request.SourceMoneyAccountId == request.TargetMoneyAccountId)
+        {
+            return BadRequest("Для перевода выберите два разных денежных счёта.");
+        }
+
+        var accounts = await _db.MoneyAccounts
+            .Where(account => account.Id == request.SourceMoneyAccountId || account.Id == request.TargetMoneyAccountId)
+            .ToListAsync(ct);
+        var sourceAccount = accounts.FirstOrDefault(account => account.Id == request.SourceMoneyAccountId);
+        var targetAccount = accounts.FirstOrDefault(account => account.Id == request.TargetMoneyAccountId);
+
+        if (sourceAccount is null || targetAccount is null)
+        {
+            return BadRequest("Денежный счёт для перевода не найден.");
+        }
+
+        if (!sourceAccount.IsActive || !targetAccount.IsActive)
+        {
+            return BadRequest("Перевод можно создать только между активными денежными счетами.");
+        }
+
+        var now = DateTime.UtcNow;
+        var currency = string.IsNullOrWhiteSpace(request.Currency)
+            ? sourceAccount.Currency
+            : request.Currency.Trim();
+        var date = request.Date == default ? DateTime.Today : request.Date;
+        var purpose = string.IsNullOrWhiteSpace(request.Purpose)
+            ? $"Перевод со счёта {sourceAccount.Name} на счёт {targetAccount.Name}"
+            : request.Purpose.Trim();
+        var paymentOrderNumber = string.IsNullOrWhiteSpace(request.PaymentOrderNumber)
+            ? null
+            : request.PaymentOrderNumber.Trim();
+
+        var sourceOperation = new MoneyOperation
+        {
+            Source = sourceAccount.Source,
+            Direction = MoneyOperationDirection.Expense,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            MoneyAccountId = sourceAccount.Id,
+            AccountName = sourceAccount.Name,
+            CounterpartyName = targetAccount.Name,
+            ResponsibleUserId = request.ResponsibleUserId,
+            Amount = request.Amount,
+            Currency = currency,
+            PaymentOrderNumber = paymentOrderNumber,
+            Date = date,
+            RecognitionDate = request.RecognitionDate,
+            IsAdvancePayment = false,
+            Purpose = purpose,
+            DirectionName = "Перевод между счетами",
+            PaidAccountName = targetAccount.Name,
+            MatchStatus = MoneyOperationMatchStatus.Ignored,
+            MatchComment = $"Списание по переводу на счёт {targetAccount.Name}.",
+            CreatedAt = now,
+        };
+
+        var targetOperation = new MoneyOperation
+        {
+            Source = targetAccount.Source,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            MoneyAccountId = targetAccount.Id,
+            AccountName = targetAccount.Name,
+            CounterpartyName = sourceAccount.Name,
+            ResponsibleUserId = request.ResponsibleUserId,
+            Amount = request.Amount,
+            Currency = currency,
+            PaymentOrderNumber = paymentOrderNumber,
+            Date = date,
+            RecognitionDate = request.RecognitionDate,
+            IsAdvancePayment = false,
+            Purpose = purpose,
+            DirectionName = "Перевод между счетами",
+            PaidAccountName = sourceAccount.Name,
+            MatchStatus = MoneyOperationMatchStatus.Ignored,
+            MatchComment = $"Зачисление по переводу со счёта {sourceAccount.Name}.",
+            CreatedAt = now,
+        };
+
+        var responsibleError = await ApplyResponsibleUserAsync(sourceOperation, ct)
+            ?? await ApplyResponsibleUserAsync(targetOperation, ct);
+        if (responsibleError is not null)
+        {
+            return BadRequest(responsibleError);
+        }
+
+        _db.MoneyOperations.AddRange(sourceOperation, targetOperation);
+        await _db.SaveChangesAsync(ct);
+        await SyncCashOrderAsync(sourceOperation);
+        await SyncCashOrderAsync(targetOperation);
+
+        return Created(
+            $"/api/money-operations/{sourceOperation.Id}",
+            new MoneyOperationTransferResponse
+            {
+                SourceOperation = sourceOperation,
+                TargetOperation = targetOperation,
+            });
     }
 
     [HttpPost("bank-statement/import")]

@@ -4316,6 +4316,13 @@ export class ApiService {
     });
   }
 
+  async createMoneyOperationTransfer(payload: MoneyOperationTransferRequest) {
+    return this.request<MoneyOperationTransferResponse>('/money-operations/transfer', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async updateMoneyOperation(id: number, payload: MoneyOperation) {
     return this.request<MoneyOperation>(`/money-operations/${id}`, {
       method: 'PUT',
@@ -4690,6 +4697,8 @@ import type {
   MoneyOperationAccountingType,
   MoneyOperationDirection,
   MoneyOperationSource,
+  MoneyOperationTransferRequest,
+  MoneyOperationTransferResponse,
   CashFlowReport,
   MoneyCategoryReport,
   CounterpartyReport,

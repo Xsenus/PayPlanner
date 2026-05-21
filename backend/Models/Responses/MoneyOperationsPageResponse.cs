@@ -152,3 +152,9 @@ public sealed class MoneyOperationsPageResponse : PagedResponse<MoneyOperationLi
 {
     public MoneyOperationsSummaryDto Summary { get; init; } = new();
 }
+
+public sealed class MoneyOperationTransferResponse
+{
+    public MoneyOperation SourceOperation { get; init; } = new();
+    public MoneyOperation TargetOperation { get; init; } = new();
+}

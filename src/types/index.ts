@@ -1193,6 +1193,24 @@ export interface MoneyOperation {
   cashOrderDate?: string | null;
   cashOrderStatus?: CashOrderStatus | null;
   canCreateCashOrder?: boolean;
+  transferTargetMoneyAccountId?: number | null;
+}
+
+export interface MoneyOperationTransferRequest {
+  sourceMoneyAccountId: number;
+  targetMoneyAccountId: number;
+  amount: number;
+  currency?: string | null;
+  date: string;
+  recognitionDate?: string | null;
+  paymentOrderNumber?: string | null;
+  purpose?: string | null;
+  responsibleUserId?: number | null;
+}
+
+export interface MoneyOperationTransferResponse {
+  sourceOperation: MoneyOperation;
+  targetOperation: MoneyOperation;
 }
 
 export interface CashOrder {
