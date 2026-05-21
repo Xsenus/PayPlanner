@@ -1,10 +1,15 @@
 using System;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using PayPlanner.Api.Data;
 
 #nullable disable
 
 namespace PayPlanner.Api.Migrations
 {
+    [Migration("20260521162000_AddClientCaseCourtDirectory")]
+    [DbContext(typeof(PaymentContext))]
     public partial class AddClientCaseCourtDirectory : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)

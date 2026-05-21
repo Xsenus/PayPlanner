@@ -1,11 +1,16 @@
 using System;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using PayPlanner.Api.Data;
 
 #nullable disable
 
 namespace PayPlanner.Api.Migrations.PostgreSql
 {
+    [Migration("20260521150030_AddClientCaseCourtEventHistoryPostgres")]
+    [DbContext(typeof(PostgreSqlPaymentContext))]
     public partial class AddClientCaseCourtEventHistoryPostgres : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
