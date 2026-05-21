@@ -24,6 +24,8 @@ public class MoneyOperationsControllerTests
     public async Task CreateUpdateDeleteMoneyOperation_RoundTripsSuccessfully()
     {
         await using var db = await CreateContextAsync();
+        var primaryResponsible = await CreateUserAsync(db, "money-primary@example.test", "Мария Финансист");
+        var nextResponsible = await CreateUserAsync(db, "money-next@example.test", "Олег Бухгалтер");
         var controller = CreateController(db);
 
         var createAction = await controller.Create(new MoneyOperation
@@ -33,6 +35,7 @@ public class MoneyOperationsControllerTests
             AccountingType = MoneyOperationAccountingType.Fact,
             AccountName = "  Расчётный счёт  ",
             CounterpartyName = "  ООО Ромашка  ",
+            ResponsibleUserId = primaryResponsible.Id,
             CategoryName = "  Аренда  ",
             Amount = 15_500m,
             VatRate = 20m,
@@ -55,6 +58,7 @@ public class MoneyOperationsControllerTests
         var createdOperation = Assert.IsType<MoneyOperation>(created.Value);
         Assert.Equal("Расчётный счёт", createdOperation.AccountName);
         Assert.Equal("ООО Ромашка", createdOperation.CounterpartyName);
+        Assert.Equal(primaryResponsible.Id, createdOperation.ResponsibleUserId);
         Assert.Equal(20m, createdOperation.VatRate);
         Assert.Equal(2_583.33m, createdOperation.VatAmount);
         Assert.Equal("RUB", createdOperation.Currency);
@@ -68,6 +72,7 @@ public class MoneyOperationsControllerTests
             AccountingType = MoneyOperationAccountingType.Plan,
             AccountName = "  Основной счёт  ",
             CounterpartyName = "  ООО Василёк  ",
+            ResponsibleUserId = nextResponsible.Id,
             CategoryName = "  Возврат  ",
             Amount = 9_900m,
             VatRate = 10m,
@@ -91,6 +96,7 @@ public class MoneyOperationsControllerTests
         Assert.Equal(MoneyOperationDirection.Income, updatedOperation.Direction);
         Assert.Equal(MoneyOperationAccountingType.Plan, updatedOperation.AccountingType);
         Assert.Equal("ООО Василёк", updatedOperation.CounterpartyName);
+        Assert.Equal(nextResponsible.Id, updatedOperation.ResponsibleUserId);
         Assert.Equal(10m, updatedOperation.VatRate);
         Assert.Equal(900m, updatedOperation.VatAmount);
         Assert.Equal("USD", updatedOperation.Currency);
@@ -100,6 +106,28 @@ public class MoneyOperationsControllerTests
 
         var deleteAction = await controller.Delete(createdOperation.Id, CancellationToken.None);
         Assert.IsType<NoContentResult>(deleteAction);
+        Assert.False(await db.MoneyOperations.AnyAsync());
+    }
+
+    [Fact]
+    public async Task CreateMoneyOperation_ReturnsBadRequest_WhenResponsibleUserIsInactive()
+    {
+        await using var db = await CreateContextAsync();
+        var inactiveResponsible = await CreateUserAsync(db, "inactive-money@example.test", "Неактивный", isActive: false);
+        var controller = CreateController(db);
+
+        var action = await controller.Create(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Expense,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 1_000m,
+            Date = new DateTime(2026, 4, 21),
+            ResponsibleUserId = inactiveResponsible.Id,
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action);
+        Assert.Equal("Ответственный за денежную операцию не найден или отключён.", badRequest.Value);
         Assert.False(await db.MoneyOperations.AnyAsync());
     }
 
@@ -4710,6 +4738,41 @@ public class MoneyOperationsControllerTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private static async Task<User> CreateUserAsync(
+        PaymentContext db,
+        string email,
+        string fullName,
+        bool isActive = true)
+    {
+        var role = await db.Roles.FirstOrDefaultAsync(item => item.Name == "money-user");
+        if (role is null)
+        {
+            role = new Role
+            {
+                Name = "money-user",
+                Description = "Money operation test role",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+        }
+
+        var user = new User
+        {
+            Email = email,
+            PasswordHash = "hash",
+            FullName = fullName,
+            RoleId = role.Id,
+            IsActive = isActive,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
     }
 
     private static MoneyOperationsController CreateController(PaymentContext db, int? userId = null, bool isAdminClaim = true)

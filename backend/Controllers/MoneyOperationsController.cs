@@ -1044,13 +1044,17 @@ public class MoneyOperationsController : ControllerBase
                 MoneyAccountName = operation.MoneyAccount != null ? operation.MoneyAccount.Name : null,
                 AccountName = operation.AccountName,
                 CounterpartyName = operation.CounterpartyName,
-                ResponsibleUserId = _db.Payments
+                ResponsibleUserId = operation.ResponsibleUserId ?? _db.Payments
                     .Where(payment => operation.LinkedInvoiceId.HasValue && payment.InvoiceId == operation.LinkedInvoiceId.Value)
                     .SelectMany(payment => payment.Responsibles)
                     .OrderBy(link => link.UserId)
                     .Select(link => (int?)link.UserId)
                     .FirstOrDefault(),
-                ResponsibleName = _db.Payments
+                ResponsibleName = operation.ResponsibleUser != null
+                    ? (operation.ResponsibleUser.FullName != null && operation.ResponsibleUser.FullName != ""
+                        ? operation.ResponsibleUser.FullName
+                        : operation.ResponsibleUser.Email)
+                    : _db.Payments
                     .Where(payment => operation.LinkedInvoiceId.HasValue && payment.InvoiceId == operation.LinkedInvoiceId.Value)
                     .SelectMany(payment => payment.Responsibles)
                     .OrderBy(link => link.UserId)
@@ -1338,6 +1342,9 @@ public class MoneyOperationsController : ControllerBase
                 (operation.PaidInvoiceNumber ?? string.Empty).Contains(term) ||
                 (operation.CategoryName ?? string.Empty).Contains(term) ||
                 (operation.IncomeType != null && operation.IncomeType.Name.Contains(term)) ||
+                (operation.ResponsibleUser != null &&
+                    ((operation.ResponsibleUser.FullName ?? string.Empty).Contains(term) ||
+                     operation.ResponsibleUser.Email.Contains(term))) ||
                 (operation.LinkedInvoice != null && operation.LinkedInvoice.Number.Contains(term)) ||
                 (operation.BankStatementImportBatch != null && operation.BankStatementImportBatch.FileName.Contains(term)) ||
                 (operation.LinkedInvoice != null && operation.LinkedInvoice.Payments.Any(payment =>
@@ -1352,9 +1359,12 @@ public class MoneyOperationsController : ControllerBase
                      (operation.CounterpartyName ?? string.Empty).Contains(titleTerm) ||
                      (operation.Purpose ?? string.Empty).Contains(titleTerm) ||
                      (operation.PaidInvoiceNumber ?? string.Empty).Contains(titleTerm) ||
-                     (operation.CategoryName ?? string.Empty).Contains(titleTerm) ||
-                     (operation.IncomeType != null && operation.IncomeType.Name.Contains(titleTerm)) ||
-                     (operation.LinkedInvoice != null && operation.LinkedInvoice.Number.Contains(titleTerm)) ||
+                      (operation.CategoryName ?? string.Empty).Contains(titleTerm) ||
+                      (operation.IncomeType != null && operation.IncomeType.Name.Contains(titleTerm)) ||
+                      (operation.ResponsibleUser != null &&
+                          ((operation.ResponsibleUser.FullName ?? string.Empty).Contains(titleTerm) ||
+                           operation.ResponsibleUser.Email.Contains(titleTerm))) ||
+                      (operation.LinkedInvoice != null && operation.LinkedInvoice.Number.Contains(titleTerm)) ||
                      (operation.BankStatementImportBatch != null && operation.BankStatementImportBatch.FileName.Contains(titleTerm)) ||
                      (operation.LinkedInvoice != null && operation.LinkedInvoice.Payments.Any(payment =>
                          (payment.Contract != null &&
@@ -1544,6 +1554,7 @@ public class MoneyOperationsController : ControllerBase
         var item = await _db.MoneyOperations
             .AsNoTracking()
             .Include(operation => operation.MoneyAccount)
+            .Include(operation => operation.ResponsibleUser)
             .FirstOrDefaultAsync(operation => operation.Id == id, ct);
         return item is null ? NotFound() : Ok(item);
     }
@@ -1621,6 +1632,27 @@ public class MoneyOperationsController : ControllerBase
         }
 
         model.CategoryName = null;
+        return null;
+    }
+
+    private async Task<string?> ApplyResponsibleUserAsync(MoneyOperation model, CancellationToken ct)
+    {
+        var responsibleUserId = model.ResponsibleUserId.GetValueOrDefault();
+        if (responsibleUserId <= 0)
+        {
+            model.ResponsibleUserId = null;
+            return null;
+        }
+
+        var exists = await _db.Users
+            .AsNoTracking()
+            .AnyAsync(user => user.Id == responsibleUserId && user.IsActive, ct);
+        if (!exists)
+        {
+            return "Ответственный за денежную операцию не найден или отключён.";
+        }
+
+        model.ResponsibleUserId = responsibleUserId;
         return null;
     }
 
@@ -1828,6 +1860,12 @@ public class MoneyOperationsController : ControllerBase
         if (incomeTypeError is not null)
         {
             return BadRequest(incomeTypeError);
+        }
+
+        var responsibleUserError = await ApplyResponsibleUserAsync(model, ct);
+        if (responsibleUserError is not null)
+        {
+            return BadRequest(responsibleUserError);
         }
 
         model.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
@@ -2384,6 +2422,12 @@ public class MoneyOperationsController : ControllerBase
             return BadRequest(incomeTypeError);
         }
 
+        var responsibleUserError = await ApplyResponsibleUserAsync(model, ct);
+        if (responsibleUserError is not null)
+        {
+            return BadRequest(responsibleUserError);
+        }
+
         entity.Source = model.Source;
         entity.Direction = model.Direction;
         entity.AccountingType = model.AccountingType;
@@ -2395,6 +2439,7 @@ public class MoneyOperationsController : ControllerBase
         entity.Currency = string.IsNullOrWhiteSpace(model.Currency) ? null : model.Currency.Trim();
         entity.AccountName = string.IsNullOrWhiteSpace(model.AccountName) ? null : model.AccountName.Trim();
         entity.CounterpartyName = string.IsNullOrWhiteSpace(model.CounterpartyName) ? null : model.CounterpartyName.Trim();
+        entity.ResponsibleUserId = model.ResponsibleUserId;
         entity.IncomeTypeId = model.IncomeTypeId;
         entity.CategoryName = model.CategoryName;
         entity.PaymentOrderNumber = string.IsNullOrWhiteSpace(model.PaymentOrderNumber) ? null : model.PaymentOrderNumber.Trim();

@@ -3471,6 +3471,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("RecognitionDate")
                         .HasColumnType("date");
 
+                    b.Property<int?>("ResponsibleUserId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("SalesPointName")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -3526,6 +3529,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("MoneyAccountId")
                         .HasDatabaseName("IX_MoneyOperations_MoneyAccountId");
+
+                    b.HasIndex("ResponsibleUserId")
+                        .HasDatabaseName("IX_MoneyOperations_ResponsibleUserId");
 
                     b.HasIndex("Source")
                         .HasDatabaseName("IX_MoneyOperations_Source");
@@ -6582,6 +6588,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("MoneyAccountId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("BankStatementImportBatch");
 
                     b.Navigation("IncomeType");
@@ -6589,6 +6600,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("LinkedInvoice");
 
                     b.Navigation("MoneyAccount");
+
+                    b.Navigation("ResponsibleUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.NotificationBotSubscription", b =>

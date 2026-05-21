@@ -889,6 +889,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.IncomeTypeId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.ResponsibleUser)
+                  .WithMany()
+                  .HasForeignKey(e => e.ResponsibleUserId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(e => e.BankStatementImportBatch)
                   .WithMany()
                   .HasForeignKey(e => e.BankStatementImportBatchId)
@@ -902,6 +907,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.AccountingType).HasDatabaseName("IX_MoneyOperations_AccountingType");
             entity.HasIndex(e => e.LinkedInvoiceId).HasDatabaseName("IX_MoneyOperations_LinkedInvoiceId");
             entity.HasIndex(e => e.MatchStatus).HasDatabaseName("IX_MoneyOperations_MatchStatus");
+            entity.HasIndex(e => e.ResponsibleUserId).HasDatabaseName("IX_MoneyOperations_ResponsibleUserId");
             entity.HasIndex(e => e.BankStatementImportBatchId).HasDatabaseName("IX_MoneyOperations_BankStatementImportBatchId");
             entity.HasIndex(e => new { e.Source, e.Date }).HasDatabaseName("IX_MoneyOperations_Source_Date");
         });

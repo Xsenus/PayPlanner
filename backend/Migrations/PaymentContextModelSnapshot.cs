@@ -3396,6 +3396,9 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("RecognitionDate")
                         .HasColumnType("date");
 
+                    b.Property<int?>("ResponsibleUserId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("SalesPointName")
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
@@ -3451,6 +3454,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("MoneyAccountId")
                         .HasDatabaseName("IX_MoneyOperations_MoneyAccountId");
+
+                    b.HasIndex("ResponsibleUserId")
+                        .HasDatabaseName("IX_MoneyOperations_ResponsibleUserId");
 
                     b.HasIndex("Source")
                         .HasDatabaseName("IX_MoneyOperations_Source");
@@ -6438,6 +6444,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("MoneyAccountId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.User", "ResponsibleUser")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("BankStatementImportBatch");
 
                     b.Navigation("IncomeType");
@@ -6445,6 +6456,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("LinkedInvoice");
 
                     b.Navigation("MoneyAccount");
+
+                    b.Navigation("ResponsibleUser");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.NotificationBotSubscription", b =>

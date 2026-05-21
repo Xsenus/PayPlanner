@@ -56,6 +56,7 @@ import type {
   MoneyOperationInvoiceCandidate,
   MoneyOperationJournalStatus,
   MoneyOperationSource,
+  ActResponsible,
   CashBookSummary,
   CashInventory,
   CashOrder,
@@ -207,6 +208,8 @@ const DEFAULT_FORM: MoneyOperation = {
   moneyAccount: null,
   accountName: '',
   counterpartyName: '',
+  responsibleUserId: null,
+  responsibleName: null,
   incomeTypeId: null,
   categoryName: '',
   amount: 0,
@@ -1543,6 +1546,7 @@ function MoneyOperationModal({
   source,
   initialData,
   moneyAccounts,
+  responsibles,
   categoryOptions,
   open,
   onClose,
@@ -1552,6 +1556,7 @@ function MoneyOperationModal({
   source: MoneyOperationSource;
   initialData?: MoneyOperation | null;
   moneyAccounts?: MoneyAccount[];
+  responsibles?: ActResponsible[];
   categoryOptions?: MoneyOperationCategoryOption[];
   open: boolean;
   onClose: () => void;
@@ -1794,6 +1799,25 @@ function MoneyOperationModal({
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
                 placeholder="Контрагент"
               />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Ответственный
+              <select
+                value={form.responsibleUserId ?? ''}
+                onChange={(event) => {
+                  const nextId = event.target.value ? Number(event.target.value) : null;
+                  const selected = (responsibles ?? []).find((item) => item.id === nextId);
+                  setField('responsibleUserId', nextId);
+                  setField('responsibleName', selected?.fullName ?? null);
+                }}
+                className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
+                <option value="">Без ответственного</option>
+                {(responsibles ?? []).map((responsible) => (
+                  <option key={responsible.id} value={responsible.id}>
+                    {responsible.fullName}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               {form.direction === 'Income' ? 'Статья прихода' : 'Статья расхода'}
@@ -2088,6 +2112,7 @@ export function MoneyOperations({
   const [totalSourceFilter, setTotalSourceFilter] = useState<'all' | MoneyOperationSource>('all');
   const [moneyAccountId, setMoneyAccountId] = useState<number | ''>('');
   const [moneyAccounts, setMoneyAccounts] = useState<MoneyAccount[]>([]);
+  const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [accountName, setAccountName] = useState('');
   const [categoryName, setCategoryName] = useState('');
   const [categoryDictionaryOptions, setCategoryDictionaryOptions] = useState<MoneyOperationCategoryOption[]>([]);
@@ -2469,6 +2494,30 @@ export function MoneyOperations({
 
     return filters;
   }, [accountName, accountingTypeFilter, categoryName, directionFilter, source, totalSourceFilter]);
+
+  useEffect(() => {
+    if (!modalOpen || responsibles.length > 0) {
+      return;
+    }
+
+    let cancelled = false;
+    apiService
+      .getActResponsibles()
+      .then((items) => {
+        if (!cancelled) {
+          setResponsibles(items ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResponsibles([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [modalOpen, responsibles.length]);
 
   useEffect(() => {
     if (source === 'Total') {
@@ -5400,6 +5449,7 @@ export function MoneyOperations({
         source={apiSource ?? 'Bank'}
         initialData={editingOperation}
         moneyAccounts={moneyAccounts}
+        responsibles={responsibles}
         categoryOptions={categoryDictionaryOptions}
         open={modalOpen}
         onClose={() => {

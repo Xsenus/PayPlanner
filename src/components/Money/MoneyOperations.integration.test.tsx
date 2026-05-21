@@ -26,6 +26,7 @@ const {
   getBankStatementImportsMock,
   getCashOrderMock,
   getIncomeTypesMock,
+  getActResponsiblesMock,
   getMoneyAccountsMock,
   getMoneyOperationAccountsMock,
   getMoneyOperationAccountSummariesMock,
@@ -76,6 +77,7 @@ const {
     getBankStatementImportsMock: vi.fn(),
     getCashOrderMock: vi.fn(),
     getIncomeTypesMock: vi.fn(),
+    getActResponsiblesMock: vi.fn(),
     getMoneyAccountsMock: vi.fn(),
     getMoneyOperationAccountsMock: vi.fn(),
     getMoneyOperationAccountSummariesMock: vi.fn(),
@@ -193,6 +195,7 @@ vi.mock('../../services/api', () => ({
     getBankStatementImports: getBankStatementImportsMock,
     getCashOrder: getCashOrderMock,
     getIncomeTypes: getIncomeTypesMock,
+    getActResponsibles: getActResponsiblesMock,
     getMoneyAccounts: getMoneyAccountsMock,
     getMoneyOperationAccounts: getMoneyOperationAccountsMock,
     getMoneyOperationAccountSummaries: getMoneyOperationAccountSummariesMock,
@@ -353,6 +356,7 @@ describe('MoneyOperations integration', () => {
     getBankStatementImportMock.mockReset();
     getBankStatementImportsMock.mockReset();
     getIncomeTypesMock.mockReset();
+    getActResponsiblesMock.mockReset();
     getMoneyAccountsMock.mockReset();
     getMoneyOperationAccountsMock.mockReset();
     getMoneyOperationAccountSummariesMock.mockReset();
@@ -428,6 +432,10 @@ describe('MoneyOperations integration', () => {
         isActive: true,
         createdAt: '2026-04-20T08:00:00Z',
       },
+    ]);
+    getActResponsiblesMock.mockResolvedValue([
+      { id: 12, fullName: 'Анна Иванова', email: 'anna@example.test' },
+      { id: 13, fullName: 'Олег Бухгалтер', email: 'oleg@example.test' },
     ]);
 
     getMoneyOperationAccountsMock.mockImplementation(async (params?: { source?: 'Bank' | 'Cash' | 'Card' | 'EMoney' }) =>
@@ -1139,6 +1147,7 @@ describe('MoneyOperations integration', () => {
     await user.selectOptions(screen.getByLabelText('Банковский счёт'), '102');
     await user.clear(screen.getByLabelText('Поставщик'));
     await user.type(screen.getByLabelText('Поставщик'), 'Новый поставщик');
+    await user.selectOptions(screen.getByLabelText('Ответственный'), '12');
     await user.clear(categoryInput as HTMLElement);
     await user.type(categoryInput as HTMLElement, 'Хозрасходы');
     await user.clear(screen.getByLabelText(/^Назначение$/));
@@ -1159,6 +1168,8 @@ describe('MoneyOperations integration', () => {
         moneyAccountId: 102,
         accountName: 'Резервный счёт',
         counterpartyName: 'Новый поставщик',
+        responsibleUserId: 12,
+        responsibleName: 'Анна Иванова',
         incomeTypeId: 2,
         categoryName: null,
         purpose: 'Оплата по договору',
