@@ -570,6 +570,60 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task Get_UsesCanonicalContractLinks_ForTotalsAndIds()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+
+        var contract = new Contract
+        {
+            Number = "CT-006-LIST",
+            Date = new DateTime(2026, 4, 14),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            ClientContracts =
+            {
+                new ClientContract
+                {
+                    ClientId = client.Id,
+                },
+            },
+        };
+
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-32-LIST", new DateTime(2026, 4, 14), 12_500m);
+        invoicePayment.ContractId = contract.Id;
+
+        var payment = await CreateStandalonePaymentAsync(db, new DateTime(2026, 4, 15), 5_500m);
+        payment.ContractId = contract.Id;
+
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var actionResult = await controller.Get(
+            from: null,
+            to: null,
+            clientId: client.Id,
+            search: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var items = GetAnonymousProperty<IEnumerable<ContractDto>>(ok.Value!, "items").ToList();
+        var dto = Assert.Single(items);
+        Assert.Equal(contract.Id, dto.Id);
+        Assert.Equal(12_500m, dto.InvoiceAmountTotal);
+        Assert.Equal(5_500m, dto.PaymentAmountTotal);
+        Assert.Equal([invoicePayment.Id], dto.InvoiceIds.OrderBy(id => id).ToArray());
+        Assert.Equal([payment.Id], dto.PaymentIds.OrderBy(id => id).ToArray());
+    }
+
+    [Fact]
     public async Task GetById_KeepsLegacyManualInvoiceLinks_VisibleBeforeResave()
     {
         await using var db = await CreateContextAsync();

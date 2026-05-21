@@ -1735,6 +1735,107 @@ describe('ClientDetail integration', () => {
     });
   });
 
+  it('shows contract amount and related documents when the invoice carries the contract link', async () => {
+    const contract = {
+      id: 11,
+      number: '1-18/05-26',
+      title: 'Спор между клиентами',
+      date: '2026-05-18',
+      billingMode: 'Actual',
+      isOpenEnded: true,
+      invoiceAmountTotal: 0,
+      actAmountTotal: 0,
+      paymentAmountTotal: 0,
+      clients: [{ id: 1, name: 'Иванов Иван Иванович' }],
+      invoiceIds: [],
+      actIds: [],
+      paymentIds: [],
+      createdAt: '2026-05-18T00:00:00Z',
+    } as Contract;
+
+    useContractsMock.mockReturnValue({
+      ...emptyContractsResult,
+      contracts: [contract],
+      pagination: { total: 1, page: 1, pageSize: 10 },
+    });
+    vi.mocked(apiService.getContracts).mockResolvedValue({
+      items: [contract],
+      total: 1,
+      page: 1,
+      pageSize: 200,
+    });
+    vi.mocked(apiService.getInvoices).mockResolvedValue({
+      items: [
+        {
+          id: 154,
+          invoiceEntityId: 1540,
+          number: '154',
+          date: '2026-05-18',
+          amount: 25_000,
+          type: 'Income',
+          status: 'Completed',
+          isPaid: true,
+          contractId: 11,
+          createdAt: '2026-05-18T00:00:00Z',
+        } as Invoice,
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 200,
+    });
+    vi.mocked(apiService.getActs).mockResolvedValue({
+      items: [
+        {
+          id: 1183,
+          number: '1183',
+          date: '2026-05-19',
+          amount: 25_000,
+          invoiceId: 154,
+          status: 'Created',
+          createdAt: '2026-05-19T00:00:00Z',
+        } as Act,
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 200,
+    });
+    vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
+      items: [
+        {
+          id: 900,
+          date: '2026-05-19',
+          amount: 25_000,
+          invoiceId: 1540,
+          documentKind: 'Payment',
+        } as Payment,
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 500,
+      summary: {
+        income: 25_000,
+        expense: 0,
+        balance: 25_000,
+        incomeCount: 1,
+        expenseCount: 0,
+        total: 1,
+      },
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="contracts" />);
+
+    await screen.findByText('№1-18/05-26');
+    expect(await screen.findByText('Счет №154')).toBeTruthy();
+    expect(await screen.findByText('Акт №1183')).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        screen.getAllByText((content) =>
+          content.includes('25') && content.includes('000') && content.includes('₽'),
+        ).length,
+      ).toBeGreaterThan(0);
+    });
+  });
+
   it('shows contract filter badges and resets the contract query state', async () => {
     const user = userEvent.setup();
     const today = new Date();

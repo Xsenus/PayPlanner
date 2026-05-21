@@ -3654,6 +3654,77 @@ export function ClientDetail({
     [getActInvoice, getInvoicePayments],
   );
 
+  const getContractInvoices = useCallback(
+    (contract: Contract) => {
+      const requestedIds = new Set(contract.invoiceIds ?? []);
+      return uniqById([
+        ...Array.from(requestedIds)
+          .map((id) => relatedInvoiceById.get(id) ?? relatedInvoiceByEntityId.get(id))
+          .filter((item): item is Invoice => Boolean(item)),
+        ...relatedInvoiceOptions.filter((invoice) =>
+          invoice.contractId === contract.id ||
+          requestedIds.has(invoice.id) ||
+          (invoice.invoiceEntityId ? requestedIds.has(invoice.invoiceEntityId) : false),
+        ),
+      ]);
+    },
+    [relatedInvoiceByEntityId, relatedInvoiceById, relatedInvoiceOptions],
+  );
+
+  const getContractActs = useCallback(
+    (contract: Contract) => {
+      const requestedIds = new Set(contract.actIds ?? []);
+      const invoices = getContractInvoices(contract);
+      return uniqById([
+        ...Array.from(requestedIds)
+          .map((id) => relatedActById.get(id))
+          .filter((item): item is Act => Boolean(item)),
+        ...relatedActOptions.filter((act) => act.contractId === contract.id || requestedIds.has(act.id)),
+        ...invoices.flatMap(getInvoiceActs),
+      ]);
+    },
+    [getContractInvoices, getInvoiceActs, relatedActById, relatedActOptions],
+  );
+
+  const getContractPayments = useCallback(
+    (contract: Contract) => {
+      const requestedIds = new Set(contract.paymentIds ?? []);
+      const invoiceIds = new Set<number>();
+      getContractInvoices(contract).forEach((invoice) => {
+        invoiceIds.add(invoice.id);
+        if (invoice.invoiceEntityId) invoiceIds.add(invoice.invoiceEntityId);
+      });
+
+      return uniqById([
+        ...Array.from(requestedIds)
+          .map((id) => relatedPaymentById.get(id))
+          .filter((item): item is Payment => Boolean(item)),
+        ...relatedPaymentOptions.filter((payment) =>
+          payment.contractId === contract.id ||
+          requestedIds.has(payment.id) ||
+          (payment.invoiceId ? invoiceIds.has(payment.invoiceId) : false),
+        ),
+      ]);
+    },
+    [getContractInvoices, relatedPaymentById, relatedPaymentOptions],
+  );
+
+  const getContractDisplayAmount = useCallback(
+    (contract: Contract) => {
+      const effectiveAmount = getContractEffectiveAmount(contract);
+      if (contract.billingMode !== "Actual") {
+        return effectiveAmount;
+      }
+
+      const lookupInvoiceAmount = getContractInvoices(contract).reduce(
+        (sum, invoice) => sum + (invoice.amount ?? 0),
+        0,
+      );
+      return Math.max(effectiveAmount ?? 0, lookupInvoiceAmount);
+    },
+    [getContractInvoices],
+  );
+
   type RelatedChip = {
     key: string;
     label: string;
@@ -10100,39 +10171,29 @@ export function ClientDetail({
                                       )
                                     ) : column.key === "amount" ? (
                                       <span className="font-semibold text-gray-900">
-                                        {getContractEffectiveAmount(
-                                          contract,
-                                        ) !== null
+                                        {getContractDisplayAmount(contract) !== null
                                           ? formatCurrencySmart(
-                                              getContractEffectiveAmount(
-                                                contract,
-                                              ) ?? 0,
+                                              getContractDisplayAmount(contract) ?? 0,
                                             ).full
                                           : "—"}
                                       </span>
                                     ) : column.key === "linkedInvoices" ? (
                                       (() => {
-                                        const invoices = (contract.invoiceIds ?? [])
-                                          .map((id) => relatedInvoiceById.get(id))
-                                          .filter((item): item is Invoice => Boolean(item));
+                                        const invoices = getContractInvoices(contract);
                                         return renderRelatedChips(
                                           invoices.slice(0, 3).map(createInvoiceChip),
                                         );
                                       })()
                                     ) : column.key === "linkedActs" ? (
                                       (() => {
-                                        const acts = (contract.actIds ?? [])
-                                          .map((id) => relatedActById.get(id))
-                                          .filter((item): item is Act => Boolean(item));
+                                        const acts = getContractActs(contract);
                                         return renderRelatedChips(
                                           acts.slice(0, 3).map(createActChip),
                                         );
                                       })()
                                     ) : column.key === "linkedPayments" ? (
                                       (() => {
-                                        const contractPayments = (contract.paymentIds ?? [])
-                                          .map((id) => relatedPaymentById.get(id))
-                                          .filter((item): item is Payment => Boolean(item));
+                                        const contractPayments = getContractPayments(contract);
                                         return renderRelatedChips(
                                           contractPayments.slice(0, 3).map(createPaymentChip),
                                         );
