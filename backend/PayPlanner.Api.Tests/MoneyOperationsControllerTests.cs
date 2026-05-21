@@ -2598,6 +2598,65 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task CashOrder_CashBook_IncludesDaysWithoutOrders()
+    {
+        await using var db = await CreateContextAsync();
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = "ПКО-2026-0001",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 1),
+                Amount = 10_000m,
+                Currency = "RUB",
+                CreatedAt = DateTime.UtcNow,
+            },
+            new CashOrder
+            {
+                Number = "РКО-2026-0001",
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 3),
+                Amount = 3_000m,
+                Currency = "RUB",
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = new CashOrdersController(db);
+
+        var action = await controller.GetCashBook(new DateTime(2026, 4, 1), new DateTime(2026, 4, 3), ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var book = Assert.IsType<CashBookResponseDto>(ok.Value);
+        Assert.Collection(
+            book.Days,
+            day =>
+            {
+                Assert.Equal(new DateTime(2026, 4, 1), day.Date);
+                Assert.Equal(0m, day.OpeningBalance);
+                Assert.Equal(10_000m, day.Income);
+                Assert.Equal(10_000m, day.ClosingBalance);
+            },
+            day =>
+            {
+                Assert.Equal(new DateTime(2026, 4, 2), day.Date);
+                Assert.Equal(10_000m, day.OpeningBalance);
+                Assert.Equal(0m, day.Income);
+                Assert.Equal(0m, day.Expense);
+                Assert.Equal(10_000m, day.ClosingBalance);
+            },
+            day =>
+            {
+                Assert.Equal(new DateTime(2026, 4, 3), day.Date);
+                Assert.Equal(10_000m, day.OpeningBalance);
+                Assert.Equal(3_000m, day.Expense);
+                Assert.Equal(7_000m, day.ClosingBalance);
+            });
+    }
+
+    [Fact]
     public async Task CashOrder_CashBookAndRegister_FilterByAccount()
     {
         await using var db = await CreateContextAsync();

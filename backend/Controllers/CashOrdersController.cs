@@ -698,22 +698,26 @@ public class CashOrdersController : ControllerBase
             })
             .OrderBy(group => group.Date)
             .ToListAsync(ct);
+        var periodGroupsByDate = periodGroups.ToDictionary(group => group.Date);
 
         var runningBalance = openingBalance;
-        var days = new List<CashBookDayDto>(periodGroups.Count);
-        foreach (var group in periodGroups)
+        var days = new List<CashBookDayDto>((toDate - fromDate).Days + 1);
+        for (var date = fromDate; date <= toDate; date = date.AddDays(1))
         {
+            periodGroupsByDate.TryGetValue(date, out var group);
             var dayOpening = runningBalance;
-            runningBalance += group.Income - group.Expense;
+            var dayIncome = group?.Income ?? 0m;
+            var dayExpense = group?.Expense ?? 0m;
+            runningBalance += dayIncome - dayExpense;
             days.Add(new CashBookDayDto
             {
-                Date = group.Date,
+                Date = date,
                 OpeningBalance = dayOpening,
-                Income = group.Income,
-                Expense = group.Expense,
+                Income = dayIncome,
+                Expense = dayExpense,
                 ClosingBalance = runningBalance,
-                IncomingCount = group.IncomingCount,
-                OutgoingCount = group.OutgoingCount,
+                IncomingCount = group?.IncomingCount ?? 0,
+                OutgoingCount = group?.OutgoingCount ?? 0,
             });
         }
 
