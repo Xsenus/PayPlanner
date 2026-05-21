@@ -7,6 +7,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using System.Text;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -393,6 +394,72 @@ public class ContractsControllerTests
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult.Result);
         Assert.Contains("черновиков", Assert.IsType<string>(badRequest.Value));
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsContractHtml()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db, email: "client@example.com");
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-DOC-1",
+                Date = new DateTime(2026, 5, 21),
+                Title = "Юридическое сопровождение",
+                Description = "Консультации и подготовка документов",
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 45_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var actionResult = await controller.GetDocument(createdDto.Id, "html", CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(actionResult);
+        Assert.Equal("text/html; charset=utf-8", content.ContentType);
+        Assert.Contains("Договор № CT-DOC-1", content.Content);
+        Assert.Contains("Юридическое сопровождение", content.Content);
+        Assert.Contains("client@example.com", content.Content);
+    }
+
+    [Fact]
+    public async Task SendEmail_UsesClientEmailAndAttachesContractDocument()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db, email: "client@example.com");
+        var emailService = new CapturingEmailService();
+        var controller = new ContractsController(db, new NoopFormRequirementsService(), emailService: emailService);
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-MAIL-1",
+                Date = new DateTime(2026, 5, 21),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 45_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var actionResult = await controller.SendEmail(
+            createdDto.Id,
+            new SendInvoiceEmailRequest { Format = "word" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        Assert.True(GetAnonymousProperty<bool>(ok.Value!, "sent"));
+        Assert.Equal("client@example.com", emailService.ToEmail);
+        Assert.Equal("Договор № CT-MAIL-1", emailService.Subject);
+        Assert.Equal("contract-CT-MAIL-1.doc", emailService.AttachmentFileName);
+        Assert.Equal("application/msword", emailService.AttachmentContentType);
+        Assert.Contains("Договор № CT-MAIL-1", Encoding.UTF8.GetString(emailService.AttachmentBytes!));
     }
 
     [Fact]
@@ -1074,12 +1141,13 @@ public class ContractsControllerTests
         return db;
     }
 
-    private static async Task<Client> CreateClientAsync(PaymentContext db)
+    private static async Task<Client> CreateClientAsync(PaymentContext db, string? email = null)
     {
         var client = new Client
         {
             Name = "Тестовый клиент",
             Company = "ООО Тест",
+            Email = email ?? string.Empty,
         };
 
         db.Clients.Add(client);
@@ -1174,5 +1242,37 @@ public class ContractsControllerTests
 
         public Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default)
             => Task.FromResult(new List<string>());
+    }
+
+    private sealed class CapturingEmailService : IEmailService
+    {
+        public string? ToEmail { get; private set; }
+        public string? Subject { get; private set; }
+        public string? Body { get; private set; }
+        public string? AttachmentFileName { get; private set; }
+        public byte[]? AttachmentBytes { get; private set; }
+        public string? AttachmentContentType { get; private set; }
+
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason) => Task.CompletedTask;
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail) => Task.CompletedTask;
+
+        public Task SendEmailWithAttachmentAsync(
+            string toEmail,
+            string subject,
+            string body,
+            string attachmentFileName,
+            byte[] attachmentBytes,
+            string attachmentContentType)
+        {
+            ToEmail = toEmail;
+            Subject = subject;
+            Body = body;
+            AttachmentFileName = attachmentFileName;
+            AttachmentBytes = attachmentBytes;
+            AttachmentContentType = attachmentContentType;
+            return Task.CompletedTask;
+        }
     }
 }

@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, Ban, Check, FileX, GripVertical, Loader2, Pencil, Plus, Save, Send, Settings2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -176,6 +176,7 @@ export function ContractDetailPage({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [workflowSaving, setWorkflowSaving] = useState(false);
+  const [documentSaving, setDocumentSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -778,6 +779,66 @@ export function ContractDetailPage({
     }
   };
 
+  const saveContractDocumentBlob = (blob: Blob, format: 'word' | 'pdf') => {
+    const extension = format === 'pdf' ? 'pdf' : 'doc';
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `contract-${contract?.number ?? contractId}.${extension}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const openContractDocumentPreview = async () => {
+    if (!contract || documentSaving) return;
+
+    setDocumentSaving(true);
+    try {
+      const blob = await apiService.downloadContractDocument(contract.id, 'html');
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось открыть печатную форму договора'), 'Договоры');
+    } finally {
+      setDocumentSaving(false);
+    }
+  };
+
+  const downloadContractDocument = async (format: 'word' | 'pdf') => {
+    if (!contract || documentSaving) return;
+
+    setDocumentSaving(true);
+    try {
+      const blob = await apiService.downloadContractDocument(contract.id, format);
+      saveContractDocumentBlob(blob, format);
+      toast.success(format === 'pdf' ? 'PDF договора подготовлен.' : 'Документ договора подготовлен.', 'Договоры');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось сформировать договор'), 'Договоры');
+    } finally {
+      setDocumentSaving(false);
+    }
+  };
+
+  const sendContractByEmail = async () => {
+    if (!contract || documentSaving) return;
+
+    const email = window.prompt('Email получателя договора')?.trim();
+    if (!email) return;
+
+    setDocumentSaving(true);
+    try {
+      await apiService.sendContractByEmail(contract.id, { email, format: 'pdf' });
+      toast.success('Договор отправлен на email.', 'Договоры');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось отправить договор'), 'Договоры');
+    } finally {
+      setDocumentSaving(false);
+    }
+  };
+
   const executionMetrics = getContractExecutionMetrics(contract ?? {
     billingMode: 'Fixed',
     amount: null,
@@ -822,6 +883,42 @@ export function ContractDetailPage({
         </button>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void openContractDocumentPreview()}
+            disabled={documentSaving}
+            className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
+          >
+            {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            Печать
+          </button>
+          <button
+            type="button"
+            onClick={() => void downloadContractDocument('word')}
+            disabled={documentSaving}
+            className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
+          >
+            {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Word
+          </button>
+          <button
+            type="button"
+            onClick={() => void downloadContractDocument('pdf')}
+            disabled={documentSaving}
+            className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
+          >
+            {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => void sendContractByEmail()}
+            disabled={documentSaving}
+            className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
+          >
+            {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+            Email
+          </button>
           <button
             type="button"
             onClick={() => void runWorkflowAction('markNotSigned')}

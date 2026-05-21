@@ -2,6 +2,8 @@ using System;
 using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +13,8 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Contracts;
+using PayPlanner.Api.Services.Invoices;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -24,15 +28,26 @@ public class ContractsController : ControllerBase
     private const string ContractNumberTemplateSettingKey = "contracts.numbering.template";
     private const string ContractAutoGenerateNumberSettingKey = "contracts.rules.autoGenerateWhenEmpty";
     private const string ContractAllowManualNumberEditSettingKey = "contracts.rules.allowManualNumberEdit";
+    private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
+    private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
+    private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
     private const string DefaultContractNumberTemplate = "{N}-{DD}/{MM}-{YY}";
 
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
+    private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
+    private readonly IEmailService? _emailService;
 
-    public ContractsController(PaymentContext db, IFormRequirementsService formRequirements)
+    public ContractsController(
+        PaymentContext db,
+        IFormRequirementsService formRequirements,
+        IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
+        IEmailService? emailService = null)
     {
         _db = db;
         _formRequirements = formRequirements;
+        _invoiceDocumentPdfService = invoiceDocumentPdfService;
+        _emailService = emailService;
     }
 
     private Task<DataVisibilityAccess?> ResolveContractsVisibilityAsync(CancellationToken ct)
@@ -93,6 +108,104 @@ public class ContractsController : ControllerBase
         var contract = await BuildContractDetailQuery(visibility).FirstOrDefaultAsync(c => c.Id == id, ct);
         var dto = contract is null ? null : MapToDto(contract);
         return dto is null ? NotFound() : Ok(dto);
+    }
+
+    [HttpGet("{id:int}/document")]
+    public async Task<IActionResult> GetDocument(int id, [FromQuery] string? format = "word", CancellationToken ct = default)
+    {
+        var contract = await LoadContractForDocumentAsync(id, ct);
+        if (contract is null) return NotFound();
+
+        var mainCompany = await LoadMainCompanyAsync(ct);
+        var documentHtml = ContractDocumentTemplateEngine.RenderHtml(contract, mainCompany);
+        var normalizedFormat = NormalizeDocumentFormat(format);
+
+        if (normalizedFormat == "html")
+        {
+            return Content(documentHtml, "text/html; charset=utf-8");
+        }
+
+        var ext = normalizedFormat == "pdf" ? "pdf" : "doc";
+        var fileName = $"contract-{SanitizeFilePart(contract.Number)}.{ext}";
+
+        if (normalizedFormat == "pdf")
+        {
+            try
+            {
+                var pdfBytes = await RenderContractPdfAsync(documentHtml, ct);
+                return File(pdfBytes, "application/pdf", fileName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+
+        return File(Encoding.UTF8.GetBytes(documentHtml), "application/msword", fileName);
+    }
+
+    [HttpPost("{id:int}/send-email")]
+    public async Task<IActionResult> SendEmail(int id, [FromBody] SendInvoiceEmailRequest request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return ValidationProblem(ModelState);
+        if (_emailService is null)
+        {
+            return BadRequest("Email service is not configured.");
+        }
+
+        var contract = await LoadContractForDocumentAsync(id, ct);
+        if (contract is null) return NotFound();
+
+        var email = string.IsNullOrWhiteSpace(request.Email)
+            ? ResolveContractRecipientEmail(contract)
+            : request.Email.Trim();
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return BadRequest("Recipient email is required.");
+        }
+
+        var mainCompany = await LoadMainCompanyAsync(ct);
+        var documentHtml = ContractDocumentTemplateEngine.RenderHtml(contract, mainCompany);
+        var normalizedFormat = NormalizeDocumentFormat(request.Format);
+        if (normalizedFormat == "html")
+        {
+            normalizedFormat = "word";
+        }
+
+        byte[] bytes;
+        string fileName;
+        string contentType;
+
+        if (normalizedFormat == "pdf")
+        {
+            try
+            {
+                bytes = await RenderContractPdfAsync(documentHtml, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+
+            fileName = $"contract-{SanitizeFilePart(contract.Number)}.pdf";
+            contentType = "application/pdf";
+        }
+        else
+        {
+            bytes = Encoding.UTF8.GetBytes(documentHtml);
+            fileName = $"contract-{SanitizeFilePart(contract.Number)}.doc";
+            contentType = "application/msword";
+        }
+
+        await _emailService.SendEmailWithAttachmentAsync(
+            email,
+            string.IsNullOrWhiteSpace(request.Subject) ? $"Договор № {contract.Number}" : request.Subject.Trim(),
+            string.IsNullOrWhiteSpace(request.Message) ? "Во вложении договор." : request.Message.Trim(),
+            fileName,
+            bytes,
+            contentType);
+
+        return Ok(new { sent = true, recipient = email, fileName, format = normalizedFormat });
     }
 
     [HttpPost("{id:int}/send-to-signing")]
@@ -551,6 +664,85 @@ public class ContractsController : ControllerBase
 
         return visibility is null ? query : query.ApplyContractVisibility(visibility);
     }
+
+    private async Task<Contract?> LoadContractForDocumentAsync(int id, CancellationToken ct)
+    {
+        var visibility = await ResolveContractsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return null;
+        }
+
+        return await BuildContractDetailQuery(visibility)
+            .FirstOrDefaultAsync(contract => contract.Id == id, ct);
+    }
+
+    private Task<byte[]> RenderContractPdfAsync(string documentHtml, CancellationToken ct)
+    {
+        if (_invoiceDocumentPdfService is null)
+        {
+            throw new InvalidOperationException(
+                "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения.");
+        }
+
+        return _invoiceDocumentPdfService.RenderAsync(documentHtml, ct);
+    }
+
+    private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
+    {
+        var settings = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(setting =>
+                setting.Key == LegacyMainCompanySettingKey
+                || setting.Key == MainCompanyIdsSettingKey
+                || setting.Key == DefaultMainCompanyIdSettingKey)
+            .ToDictionaryAsync(setting => setting.Key, setting => setting.Value, ct);
+
+        int? companyId = null;
+        if (settings.TryGetValue(DefaultMainCompanyIdSettingKey, out var rawDefaultId)
+            && int.TryParse(rawDefaultId, out var parsedDefaultId)
+            && parsedDefaultId > 0)
+        {
+            companyId = parsedDefaultId;
+        }
+        else if (settings.TryGetValue(LegacyMainCompanySettingKey, out var rawLegacyId)
+            && int.TryParse(rawLegacyId, out var parsedLegacyId)
+            && parsedLegacyId > 0)
+        {
+            companyId = parsedLegacyId;
+        }
+        else if (settings.TryGetValue(MainCompanyIdsSettingKey, out var rawIds)
+            && !string.IsNullOrWhiteSpace(rawIds))
+        {
+            try
+            {
+                var parsedIds = JsonSerializer.Deserialize<List<int>>(rawIds);
+                companyId = parsedIds?.FirstOrDefault(value => value > 0);
+            }
+            catch (JsonException)
+            {
+                companyId = null;
+            }
+        }
+
+        if (!companyId.HasValue || companyId.Value <= 0)
+        {
+            return null;
+        }
+
+        return await _db.LegalEntities
+            .AsNoTracking()
+            .Include(entity => entity.Addresses)
+            .FirstOrDefaultAsync(entity => entity.Id == companyId.Value, ct);
+    }
+
+    private static string? ResolveContractRecipientEmail(Contract contract)
+        => contract.ClientContracts
+               .Select(link => link.Client?.Email)
+               .FirstOrDefault(email => !string.IsNullOrWhiteSpace(email))?.Trim()
+           ?? contract.LegalEntityContracts
+               .Select(link => link.LegalEntity?.Email)
+               .FirstOrDefault(email => !string.IsNullOrWhiteSpace(email))?.Trim();
 
     private ContractDto MapToDto(Contract contract)
     {
@@ -1170,6 +1362,36 @@ public class ContractsController : ControllerBase
 
     private static string? NormalizeContractStatusOrNull(string? value)
         => ContractStatus.Normalize(value);
+
+    private static string NormalizeDocumentFormat(string? format)
+    {
+        if (string.Equals(format, "html", StringComparison.OrdinalIgnoreCase))
+        {
+            return "html";
+        }
+
+        if (string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            return "pdf";
+        }
+
+        return "word";
+    }
+
+    private static string SanitizeFilePart(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "contract";
+        }
+
+        foreach (var invalid in Path.GetInvalidFileNameChars())
+        {
+            value = value.Replace(invalid, '-');
+        }
+
+        return value.Trim();
+    }
 
     private static List<int> NormalizeIds(IEnumerable<int>? ids) => ids?.Where(x => x > 0).Distinct().ToList() ?? [];
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

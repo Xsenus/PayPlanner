@@ -87,6 +87,8 @@ vi.mock('../../services/api', () => ({
     getPaymentsV2: vi.fn(),
     getClientsV2: vi.fn(),
     updateContract: vi.fn(),
+    downloadContractDocument: vi.fn(),
+    sendContractByEmail: vi.fn(),
   },
 }));
 
@@ -132,6 +134,8 @@ describe('ContractDetailPage integration', () => {
     vi.mocked(apiService.getPaymentsV2).mockReset();
     vi.mocked(apiService.getClientsV2).mockReset();
     vi.mocked(apiService.updateContract).mockReset();
+    vi.mocked(apiService.downloadContractDocument).mockReset();
+    vi.mocked(apiService.sendContractByEmail).mockReset();
 
     vi.mocked(apiService.getContract).mockResolvedValue(contractFixture);
     vi.mocked(apiService.getContractRulesSettings).mockResolvedValue({
@@ -153,6 +157,21 @@ describe('ContractDetailPage integration', () => {
     vi.mocked(apiService.getClientsV2).mockResolvedValue({
       items: [],
       total: 0,
+    });
+    vi.mocked(apiService.downloadContractDocument).mockResolvedValue(new Blob(['contract'], { type: 'application/msword' }));
+    vi.mocked(apiService.sendContractByEmail).mockResolvedValue({
+      sent: true,
+      recipient: 'client@example.com',
+      fileName: 'contract-CTR-77.pdf',
+      format: 'pdf',
+    });
+    Object.defineProperty(globalThis.URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:contract'),
+    });
+    Object.defineProperty(globalThis.URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
     });
   });
 
@@ -288,5 +307,43 @@ describe('ContractDetailPage integration', () => {
     });
 
     expect(screen.getByText('Платежи договора')).toBeTruthy();
+  });
+
+  it('downloads and sends contract documents from the detail header', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('client@example.com');
+
+    render(
+      <ContractDetailPage
+        contractId={77}
+        onBack={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(apiService.getContract).toHaveBeenCalledWith(77);
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Word' }));
+
+    await waitFor(() => {
+      expect(apiService.downloadContractDocument).toHaveBeenCalledWith(77, 'word');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
+
+    await waitFor(() => {
+      expect(apiService.downloadContractDocument).toHaveBeenCalledWith(77, 'pdf');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Email' }));
+
+    await waitFor(() => {
+      expect(apiService.sendContractByEmail).toHaveBeenCalledWith(77, {
+        email: 'client@example.com',
+        format: 'pdf',
+      });
+    });
+
+    promptSpy.mockRestore();
   });
 });
