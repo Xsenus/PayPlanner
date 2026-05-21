@@ -5,6 +5,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -13,6 +14,18 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class ObjectAuditController : ControllerBase
 {
+    private static readonly string[] CaseScopedAuditObjectTypes =
+    [
+        "client-case",
+        "client-case-court-event",
+        "client-case-court-party",
+        "client-case-document",
+        "client-case-procedural-deadline",
+        "client-case-related-party",
+        "client-case-work-order",
+        "client-case-work-order-item",
+    ];
+
     private readonly PaymentContext _db;
 
     public ObjectAuditController(PaymentContext db)
@@ -44,6 +57,8 @@ public class ObjectAuditController : ControllerBase
         var query = _db.ObjectAuditEvents
             .AsNoTracking()
             .AsQueryable();
+
+        query = await ApplyObjectAuditVisibilityAsync(query, access, ct);
 
         if (!string.IsNullOrWhiteSpace(objectType))
         {
@@ -135,6 +150,16 @@ public class ObjectAuditController : ControllerBase
         }
 
         var normalizedObjectType = NormalizeObjectType(objectType);
+        var access = await GetDeletedObjectsAccessAsync(ct);
+        if (!access.CanView)
+        {
+            return Forbid();
+        }
+
+        if (!await CanViewAuditObjectAsync(normalizedObjectType, objectId, access, ct))
+        {
+            return Forbid();
+        }
 
         var history = await _db.ObjectAuditEvents
             .AsNoTracking()
@@ -254,7 +279,110 @@ public class ObjectAuditController : ControllerBase
 
         return new DeletedObjectsAccessSnapshot(
             permission.CanView,
-            permission.CanEdit);
+            permission.CanEdit,
+            IsAdmin: false);
+    }
+
+    private async Task<IQueryable<ObjectAuditEvent>> ApplyObjectAuditVisibilityAsync(
+        IQueryable<ObjectAuditEvent> query,
+        DeletedObjectsAccessSnapshot access,
+        CancellationToken ct)
+    {
+        if (access.IsAdmin)
+        {
+            return query;
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        if (casesVisibility is null)
+        {
+            return query.Where(item => !CaseScopedAuditObjectTypes.Contains(item.ObjectType));
+        }
+
+        var visibleCases = _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(casesVisibility);
+
+        return query.Where(item =>
+            !CaseScopedAuditObjectTypes.Contains(item.ObjectType)
+            || (item.ObjectType == "client-case" && visibleCases.Any(clientCase => clientCase.Id == item.ObjectId))
+            || (item.ObjectType == "client-case-court-event" && _db.ClientCaseCourtEvents.Any(courtEvent =>
+                courtEvent.Id == item.ObjectId
+                && visibleCases.Any(clientCase => clientCase.Id == courtEvent.ClientCaseId)))
+            || (item.ObjectType == "client-case-court-party" && _db.ClientCaseCourtParties.Any(courtParty =>
+                courtParty.Id == item.ObjectId
+                && visibleCases.Any(clientCase => clientCase.Id == courtParty.ClientCaseId)))
+            || (item.ObjectType == "client-case-document" && _db.ClientCaseDocuments.Any(document =>
+                document.Id == item.ObjectId
+                && visibleCases.Any(clientCase => clientCase.Id == document.ClientCaseId)))
+            || (item.ObjectType == "client-case-procedural-deadline" && _db.ClientCaseProceduralDeadlines.Any(deadline =>
+                deadline.Id == item.ObjectId
+                && visibleCases.Any(clientCase => clientCase.Id == deadline.ClientCaseId)))
+            || (item.ObjectType == "client-case-related-party" && _db.ClientCaseRelatedParties.Any(party =>
+                party.Id == item.ObjectId
+                && visibleCases.Any(clientCase => clientCase.Id == party.ClientCaseId)))
+            || (item.ObjectType == "client-case-work-order" && _db.ClientCaseWorkOrders.Any(workOrder =>
+                workOrder.Id == item.ObjectId
+                && visibleCases.Any(clientCase => clientCase.Id == workOrder.ClientCaseId)))
+            || (item.ObjectType == "client-case-work-order-item" && _db.ClientCaseWorkOrderItems.Any(workOrderItem =>
+                workOrderItem.Id == item.ObjectId
+                && visibleCases.Any(clientCase => clientCase.Id == workOrderItem.WorkOrder.ClientCaseId))));
+    }
+
+    private async Task<bool> CanViewAuditObjectAsync(
+        string objectType,
+        int objectId,
+        DeletedObjectsAccessSnapshot access,
+        CancellationToken ct)
+    {
+        if (access.IsAdmin || !CaseScopedAuditObjectTypes.Contains(objectType))
+        {
+            return true;
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        if (casesVisibility is null)
+        {
+            return false;
+        }
+
+        var visibleCases = _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(casesVisibility);
+
+        return objectType switch
+        {
+            "client-case" => await visibleCases.AnyAsync(clientCase => clientCase.Id == objectId, ct),
+            "client-case-court-event" => await _db.ClientCaseCourtEvents
+                .AsNoTracking()
+                .AnyAsync(courtEvent => courtEvent.Id == objectId
+                    && visibleCases.Any(clientCase => clientCase.Id == courtEvent.ClientCaseId), ct),
+            "client-case-court-party" => await _db.ClientCaseCourtParties
+                .AsNoTracking()
+                .AnyAsync(courtParty => courtParty.Id == objectId
+                    && visibleCases.Any(clientCase => clientCase.Id == courtParty.ClientCaseId), ct),
+            "client-case-document" => await _db.ClientCaseDocuments
+                .AsNoTracking()
+                .AnyAsync(document => document.Id == objectId
+                    && visibleCases.Any(clientCase => clientCase.Id == document.ClientCaseId), ct),
+            "client-case-procedural-deadline" => await _db.ClientCaseProceduralDeadlines
+                .AsNoTracking()
+                .AnyAsync(deadline => deadline.Id == objectId
+                    && visibleCases.Any(clientCase => clientCase.Id == deadline.ClientCaseId), ct),
+            "client-case-related-party" => await _db.ClientCaseRelatedParties
+                .AsNoTracking()
+                .AnyAsync(party => party.Id == objectId
+                    && visibleCases.Any(clientCase => clientCase.Id == party.ClientCaseId), ct),
+            "client-case-work-order" => await _db.ClientCaseWorkOrders
+                .AsNoTracking()
+                .AnyAsync(workOrder => workOrder.Id == objectId
+                    && visibleCases.Any(clientCase => clientCase.Id == workOrder.ClientCaseId), ct),
+            "client-case-work-order-item" => await _db.ClientCaseWorkOrderItems
+                .AsNoTracking()
+                .AnyAsync(workOrderItem => workOrderItem.Id == objectId
+                    && visibleCases.Any(clientCase => clientCase.Id == workOrderItem.WorkOrder.ClientCaseId), ct),
+            _ => true,
+        };
     }
 
     private static string NormalizeObjectType(string objectType)
@@ -693,9 +821,9 @@ public class ObjectAuditController : ControllerBase
         return true;
     }
 
-    private readonly record struct DeletedObjectsAccessSnapshot(bool CanView, bool CanRestore)
+    private readonly record struct DeletedObjectsAccessSnapshot(bool CanView, bool CanRestore, bool IsAdmin)
     {
-        public static DeletedObjectsAccessSnapshot None { get; } = new(false, false);
-        public static DeletedObjectsAccessSnapshot Admin { get; } = new(true, true);
+        public static DeletedObjectsAccessSnapshot None { get; } = new(false, false, false);
+        public static DeletedObjectsAccessSnapshot Admin { get; } = new(true, true, true);
     }
 }

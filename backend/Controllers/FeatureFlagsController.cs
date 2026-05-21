@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.LegalIntegrations;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -11,10 +12,14 @@ namespace PayPlanner.Api.Controllers;
 public sealed class FeatureFlagsController : ControllerBase
 {
     private readonly IOptionsSnapshot<AppFeatureFlagsOptions> _options;
+    private readonly ILegalIntegrationDiagnosticsService? _legalIntegrationDiagnostics;
 
-    public FeatureFlagsController(IOptionsSnapshot<AppFeatureFlagsOptions> options)
+    public FeatureFlagsController(
+        IOptionsSnapshot<AppFeatureFlagsOptions> options,
+        ILegalIntegrationDiagnosticsService? legalIntegrationDiagnostics = null)
     {
         _options = options;
+        _legalIntegrationDiagnostics = legalIntegrationDiagnostics;
     }
 
     [HttpGet]
@@ -22,5 +27,13 @@ public sealed class FeatureFlagsController : ControllerBase
     public ActionResult<AppFeatureFlagsDto> Get()
     {
         return Ok(AppFeatureFlagsDto.FromOptions(_options.Value));
+    }
+
+    [HttpGet("legal-integrations/diagnostics")]
+    [AllowAnonymous]
+    public ActionResult<LegalIntegrationDiagnosticsDto> GetLegalIntegrationDiagnostics()
+    {
+        return Ok(_legalIntegrationDiagnostics?.GetDiagnostics()
+            ?? LegalIntegrationDiagnosticsService.BuildDiagnostics(_options.Value));
     }
 }

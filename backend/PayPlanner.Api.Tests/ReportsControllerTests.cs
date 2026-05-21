@@ -112,7 +112,7 @@ public class ReportsControllerTests
 
         var controller = CreateController(db, CreateAdminPrincipal());
 
-        var action = await controller.LegalWork(today.AddDays(-30), today.AddDays(30), CancellationToken.None);
+        var action = await controller.LegalWork(today.AddDays(-30), today.AddDays(30), null, null, null, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<LegalWorkReportDto>(ok.Value);
@@ -128,6 +128,22 @@ public class ReportsControllerTests
         Assert.Equal(37_000m, report.FeeTotal);
         Assert.Equal(10_000m, report.PaidTotal);
         Assert.Equal(27_000m, report.OutstandingTotal);
+        Assert.Equal(3, report.Cases.Count);
+        Assert.Contains(report.Cases, item =>
+            item.CaseId == activeCase.Id
+            && item.OpenTasks == 1
+            && item.OverdueTasks == 1
+            && item.OverdueDeadlines == 1
+            && item.PaidTotal == 10_000m
+            && item.OutstandingTotal == 15_000m);
+        Assert.Contains(report.FinanceByStatus, item =>
+            item.Status == nameof(ClientCaseStatus.Open)
+            && item.CaseCount == 1
+            && item.FeeTotal == 25_000m
+            && item.PaidTotal == 10_000m);
+        Assert.Contains(report.DeadlinesByType, item =>
+            item.DeadlineType == "due"
+            && item.OverdueCount == 1);
 
         var responsibleRow = Assert.Single(report.Responsibles);
         Assert.Equal(responsible.Id, responsibleRow.ResponsibleUserId);
@@ -142,6 +158,33 @@ public class ReportsControllerTests
         Assert.Contains(report.CasesByStatus, row => row.Status == nameof(ClientCaseStatus.Open) && row.OverdueDeadlines == 1);
         Assert.Equal("Крайний срок по делу", Assert.Single(report.OverdueDeadlines).DeadlineLabel);
         Assert.Equal("Срок обжалования", Assert.Single(report.UpcomingDeadlines).DeadlineLabel);
+
+        var filteredAction = await controller.LegalWork(
+            today.AddDays(-30),
+            today.AddDays(30),
+            nameof(ClientCaseStatus.Open),
+            responsible.Id,
+            "Банк",
+            CancellationToken.None);
+        var filteredReport = Assert.IsType<LegalWorkReportDto>(Assert.IsType<OkObjectResult>(filteredAction.Result).Value);
+        Assert.Equal(1, filteredReport.TotalCases);
+        Assert.Equal(nameof(ClientCaseStatus.Open), filteredReport.StatusFilter);
+        Assert.Equal(responsible.Id, filteredReport.ResponsibleUserIdFilter);
+        Assert.Equal("Банк", filteredReport.CaseTypeFilter);
+        Assert.Equal(activeCase.Id, Assert.Single(filteredReport.Cases).CaseId);
+
+        var csvAction = await controller.ExportLegalWorkCsv(
+            today.AddDays(-30),
+            today.AddDays(30),
+            nameof(ClientCaseStatus.Open),
+            responsible.Id,
+            "Банк",
+            CancellationToken.None);
+        var csv = Assert.IsType<FileContentResult>(csvAction);
+        Assert.Equal("text/csv; charset=utf-8", csv.ContentType);
+        var csvText = System.Text.Encoding.UTF8.GetString(csv.FileContents);
+        Assert.Contains("Банкротство", csvText, StringComparison.Ordinal);
+        Assert.Contains("Финансы по статусам", csvText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -337,6 +380,165 @@ public class ReportsControllerTests
         Assert.Equal(1, report.TotalVisibleCases);
         var row = Assert.Single(report.Items);
         Assert.Equal("VISIBLE", row.CaseNumber);
+    }
+
+    [Fact]
+    public async Task LegalWork_UsesCaseTaskAndPaymentVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "legal-work-lawyer", Description = "Lawyer" };
+        var visibleUser = new User
+        {
+            Email = "visible-legal-work@example.test",
+            FullName = "Visible Legal Work User",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = "hidden-legal-work@example.test",
+            FullName = "Hidden Legal Work User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Accounts,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var today = DateTime.UtcNow.Date;
+        var visibleClient = new Client { Name = "Visible Legal Client", ResponsibleUserId = visibleUser.Id };
+        var hiddenClient = new Client { Name = "Hidden Legal Client", ResponsibleUserId = hiddenUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var visibleCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "LEGAL-VISIBLE",
+            Title = "Visible legal work case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = today.AddDays(-10),
+            StartDate = today.AddDays(-10),
+            DueDate = today.AddDays(-1),
+            FeeAmount = 30_000m,
+        };
+        var hiddenCase = new ClientCase
+        {
+            ClientId = hiddenClient.Id,
+            CaseNumber = "LEGAL-HIDDEN",
+            Title = "Hidden legal work case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = hiddenUser.Id,
+            CreatedAt = today.AddDays(-10),
+            StartDate = today.AddDays(-10),
+            DueDate = today.AddDays(-1),
+            FeeAmount = 90_000m,
+        };
+        db.ClientCases.AddRange(visibleCase, hiddenCase);
+        await db.SaveChangesAsync();
+
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                ClientCaseId = visibleCase.Id,
+                ObjectName = visibleCase.Title,
+                Title = "Visible task",
+                AssigneeUserId = visibleUser.Id,
+                AssigneeName = visibleUser.FullName,
+                DueAt = today.AddDays(-1).AddHours(9),
+                Status = "new",
+                Priority = "high",
+                Type = "task",
+                CreatedAt = today.AddDays(-2),
+            },
+            new TaskJournalItem
+            {
+                ClientCaseId = hiddenCase.Id,
+                ObjectName = hiddenCase.Title,
+                Title = "Hidden task",
+                AssigneeUserId = hiddenUser.Id,
+                AssigneeName = hiddenUser.FullName,
+                DueAt = today.AddDays(-1).AddHours(9),
+                Status = "new",
+                Priority = "high",
+                Type = "task",
+                CreatedAt = today.AddDays(-2),
+            });
+
+        var visiblePayment = new Payment
+        {
+            ClientId = visibleClient.Id,
+            ClientCaseId = visibleCase.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 12_000m,
+            PaidAmount = 12_000m,
+            Date = today,
+            PlannedDate = today,
+            CreatedAt = today,
+        };
+        visiblePayment.Responsibles.Add(new PaymentResponsible { UserId = visibleUser.Id });
+        var hiddenPayment = new Payment
+        {
+            ClientId = hiddenClient.Id,
+            ClientCaseId = hiddenCase.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 50_000m,
+            PaidAmount = 50_000m,
+            Date = today,
+            PlannedDate = today,
+            CreatedAt = today,
+        };
+        hiddenPayment.Responsibles.Add(new PaymentResponsible { UserId = hiddenUser.Id });
+        db.Payments.AddRange(visiblePayment, hiddenPayment);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var action = await controller.LegalWork(today.AddDays(-30), today.AddDays(30), null, null, null, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<LegalWorkReportDto>(ok.Value);
+        Assert.Equal(1, report.TotalCases);
+        Assert.Equal(30_000m, report.FeeTotal);
+        Assert.Equal(12_000m, report.PaidTotal);
+        Assert.Equal(18_000m, report.OutstandingTotal);
+        Assert.Equal(1, report.OpenTaskCount);
+        Assert.Equal("LEGAL-VISIBLE", Assert.Single(report.OverdueDeadlines).CaseNumber);
+        Assert.DoesNotContain(report.Responsibles, item => item.ResponsibleUserId == hiddenUser.Id);
     }
 
     [Fact]

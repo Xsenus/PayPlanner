@@ -45,6 +45,35 @@ public class CasesV2Controller : ControllerBase
         new("motion", "Ходатайство", "Ходатайство", "Ходатайство"),
         new("objection", "Возражение", "Возражение", "Возражение"),
         new("court-letter", "Письмо в суд", "Переписка", "Письмо в суд"),
+        new("power-of-attorney", "Доверенность", "Доверенность", "Доверенность"),
+        new("application", "Заявление", "Заявление", "Заявление"),
+        new("procedural-document", "Процессуальный документ", "Процессуальный документ", "Процессуальный документ"),
+    ];
+    private static readonly CaseDocumentTemplateTokenDefinition[] CaseDocumentTemplateTokens =
+    [
+        new("case.id", "Дело", "Внутренний ID дела."),
+        new("case.title", "Дело", "Название дела."),
+        new("case.number", "Дело", "Номер дела в CRM."),
+        new("case.type", "Дело", "Тип дела."),
+        new("case.stage", "Дело", "Стадия дела."),
+        new("case.priority", "Дело", "Приоритет дела."),
+        new("client.name", "Клиент", "Клиент, доверитель или связанное юридическое лицо дела."),
+        new("responsible.name", "Команда", "Ответственный юрист или сотрудник."),
+        new("court.name", "Суд", "Наименование суда."),
+        new("court.caseNumber", "Суд", "Номер судебного дела."),
+        new("claimant", "Участники", "Истец или заявитель."),
+        new("defendant", "Участники", "Ответчик или должник."),
+        new("thirdParties", "Участники", "Третьи лица."),
+        new("representatives", "Участники", "Представители по делу."),
+        new("judge.name", "Суд", "Судья."),
+        new("nextHearingAt", "Сроки", "Дата и время ближайшего заседания."),
+        new("claimFiledAt", "Сроки", "Дата подачи заявления."),
+        new("courtDecisionAt", "Сроки", "Дата судебного решения."),
+        new("appealDeadlineAt", "Сроки", "Срок апелляции."),
+        new("cassationDeadlineAt", "Сроки", "Срок кассации."),
+        new("document.type", "Документ", "Тип формируемого документа."),
+        new("today", "Системные", "Текущая дата в формате ДД.ММ.ГГГГ."),
+        new("now", "Системные", "Текущая дата и время в формате ДД.ММ.ГГГГ ЧЧ:ММ."),
     ];
     private static readonly string[] DefaultCaseDocumentTypes =
     [
@@ -513,6 +542,218 @@ public class CasesV2Controller : ControllerBase
             : clientCase.Title;
     }
 
+    private async Task AddCourtEventUserNotificationsAsync(
+        ClientCase clientCase,
+        ClientCaseCourtEvent courtEvent,
+        string action,
+        int? actorUserId,
+        string actorName,
+        CancellationToken ct)
+    {
+        var recipientUserIds = new HashSet<int>();
+        AddIfPositive(recipientUserIds, clientCase.ResponsibleUserId);
+        AddIfPositive(recipientUserIds, clientCase.Client?.ResponsibleUserId);
+        AddIfPositive(recipientUserIds, clientCase.LegalEntity?.ResponsibleUserId);
+
+        if (recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var isCreated = string.Equals(action, "created", StringComparison.OrdinalIgnoreCase);
+        var title = isCreated
+            ? $"Новое судебное событие: {BuildCaseNotificationTitle(clientCase)}"
+            : $"Обновлено судебное событие: {BuildCaseNotificationTitle(clientCase)}";
+        var body = BuildCourtEventNotificationBody(clientCase, courtEvent, isCreated, actorName);
+        var eventVersionTicks = (courtEvent.UpdatedAt ?? courtEvent.CreatedAt).Ticks;
+        var eventKey = $"case:{clientCase.Id}:court-event:{courtEvent.Id}:{action}:{eventVersionTicks}";
+        var metadata = new
+        {
+            clientCaseId = clientCase.Id,
+            courtEventId = courtEvent.Id,
+            action,
+            actorUserId,
+            eventType = courtEvent.EventType,
+            movementStatus = courtEvent.MovementStatus,
+            scheduledAt = courtEvent.ScheduledAt,
+            courtName = courtEvent.CourtName,
+            courtCaseNumber = courtEvent.CourtCaseNumber,
+            clientCaseDocumentId = courtEvent.ClientCaseDocumentId,
+            proceduralDeadlineId = courtEvent.ProceduralDeadlineId,
+        };
+
+        foreach (var recipientUserId in recipientUserIds.OrderBy(static id => id))
+        {
+            await AddCaseUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.CaseCourtEvent,
+                eventKey,
+                title,
+                body,
+                "cyan",
+                clientCase,
+                metadata,
+                ct);
+        }
+    }
+
+    private static string BuildCourtEventNotificationBody(
+        ClientCase clientCase,
+        ClientCaseCourtEvent courtEvent,
+        bool isCreated,
+        string actorName)
+    {
+        var builder = new StringBuilder()
+            .Append(isCreated ? "Добавлено судебное событие." : "Обновлено судебное событие.")
+            .AppendLine()
+            .Append("Дело: ")
+            .Append(BuildCaseNotificationTitle(clientCase))
+            .AppendLine()
+            .Append("Событие: ")
+            .Append(courtEvent.Title)
+            .AppendLine()
+            .Append("Дата: ")
+            .Append(courtEvent.ScheduledAt.ToString(courtEvent.AllDay ? "dd.MM.yyyy" : "dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture))
+            .AppendLine()
+            .Append("Автор: ")
+            .Append(actorName);
+
+        if (!string.IsNullOrWhiteSpace(courtEvent.CourtName))
+        {
+            builder
+                .AppendLine()
+                .Append("Суд: ")
+                .Append(courtEvent.CourtName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(courtEvent.CourtCaseNumber))
+        {
+            builder
+                .AppendLine()
+                .Append("Номер в суде: ")
+                .Append(courtEvent.CourtCaseNumber);
+        }
+
+        if (!string.IsNullOrWhiteSpace(courtEvent.MovementStatus))
+        {
+            builder
+                .AppendLine()
+                .Append("Статус: ")
+                .Append(courtEvent.MovementStatus);
+        }
+
+        return builder.ToString();
+    }
+
+    private async Task AddProceduralDeadlineUserNotificationsAsync(
+        ClientCase clientCase,
+        ClientCaseProceduralDeadline deadline,
+        string action,
+        int? actorUserId,
+        string actorName,
+        CancellationToken ct)
+    {
+        var recipientUserIds = new HashSet<int>();
+        AddIfPositive(recipientUserIds, clientCase.ResponsibleUserId);
+        AddIfPositive(recipientUserIds, clientCase.Client?.ResponsibleUserId);
+        AddIfPositive(recipientUserIds, clientCase.LegalEntity?.ResponsibleUserId);
+
+        if (recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var title = action switch
+        {
+            "created" => $"Новый процессуальный срок: {BuildCaseNotificationTitle(clientCase)}",
+            "closed" => $"Закрыт процессуальный срок: {BuildCaseNotificationTitle(clientCase)}",
+            _ => $"Обновлен процессуальный срок: {BuildCaseNotificationTitle(clientCase)}",
+        };
+        var body = BuildProceduralDeadlineNotificationBody(clientCase, deadline, action, actorName);
+        var eventVersionTicks = (deadline.UpdatedAt ?? deadline.CreatedAt).Ticks;
+        var eventKey = $"case:{clientCase.Id}:procedural-deadline:{deadline.Id}:{action}:{eventVersionTicks}";
+        var metadata = new
+        {
+            clientCaseId = clientCase.Id,
+            proceduralDeadlineId = deadline.Id,
+            action,
+            actorUserId,
+            deadlineType = deadline.DeadlineType,
+            dueAt = deadline.DueAt,
+            status = deadline.Status,
+            warningDaysBefore = deadline.WarningDaysBefore,
+            taskJournalItemId = deadline.TaskJournalItemId,
+            clientCaseDocumentId = deadline.ClientCaseDocumentId,
+            sourceType = deadline.SourceType,
+            sourceId = deadline.SourceId,
+        };
+
+        foreach (var recipientUserId in recipientUserIds.OrderBy(static id => id))
+        {
+            await AddCaseUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.CaseProceduralDeadline,
+                eventKey,
+                title,
+                body,
+                "amber",
+                clientCase,
+                metadata,
+                ct);
+        }
+    }
+
+    private static string BuildProceduralDeadlineNotificationBody(
+        ClientCase clientCase,
+        ClientCaseProceduralDeadline deadline,
+        string action,
+        string actorName)
+    {
+        var actionText = action switch
+        {
+            "created" => "Добавлен процессуальный срок.",
+            "closed" => "Процессуальный срок закрыт.",
+            _ => "Процессуальный срок обновлен.",
+        };
+        var builder = new StringBuilder()
+            .Append(actionText)
+            .AppendLine()
+            .Append("Дело: ")
+            .Append(BuildCaseNotificationTitle(clientCase))
+            .AppendLine()
+            .Append("Срок: ")
+            .Append(deadline.Title)
+            .AppendLine()
+            .Append("Дата: ")
+            .Append(deadline.DueAt.ToString(deadline.AllDay ? "dd.MM.yyyy" : "dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture))
+            .AppendLine()
+            .Append("Статус: ")
+            .Append(deadline.Status)
+            .AppendLine()
+            .Append("Автор: ")
+            .Append(actorName);
+
+        if (!string.IsNullOrWhiteSpace(deadline.CloseReason))
+        {
+            builder
+                .AppendLine()
+                .Append("Причина закрытия: ")
+                .Append(deadline.CloseReason);
+        }
+
+        if (!string.IsNullOrWhiteSpace(deadline.SourceType) && deadline.SourceId.HasValue)
+        {
+            builder
+                .AppendLine()
+                .Append("Источник: ")
+                .Append(deadline.SourceType)
+                .Append(" #")
+                .Append(deadline.SourceId.Value);
+        }
+
+        return builder.ToString();
+    }
+
     private static string BuildCaseOwnerName(ClientCase clientCase)
         => clientCase.Client?.Name
             ?? clientCase.LegalEntity?.ShortName
@@ -816,6 +1057,26 @@ public class CasesV2Controller : ControllerBase
         return Ok(templates);
     }
 
+    [HttpGet("document-template-tokens")]
+    [HttpGet("/api/document-template-tokens")]
+    public async Task<ActionResult<IReadOnlyList<CaseDocumentTemplateTokenDto>>> GetDocumentTemplateTokens(CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        return Ok(CaseDocumentTemplateTokens
+            .Select(static token => new CaseDocumentTemplateTokenDto
+            {
+                Key = token.Key,
+                Category = token.Category,
+                Description = token.Description,
+                Placeholder = "{{" + token.Key + "}}",
+            })
+            .ToList());
+    }
+
     [HttpPost("document-templates")]
     [HttpPost("/api/document-templates")]
     public async Task<ActionResult<CaseDocumentTemplateDefinitionDto>> CreateDocumentTemplate(
@@ -929,6 +1190,11 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        if (!IsCaseDocumentTemplateApplicableToCase(template, clientCase))
+        {
+            return BadRequest(new { message = "Шаблон документа не привязан к типу этого дела." });
+        }
+
         var documentType = NormalizeOptional(request.DocumentType) ?? template.DocumentType;
         var caseNumber = !string.IsNullOrWhiteSpace(clientCase.CaseNumber)
             ? clientCase.CaseNumber.Trim()
@@ -976,6 +1242,198 @@ public class CasesV2Controller : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("/api/case-calendar/events")]
+    public async Task<ActionResult<IReadOnlyList<CaseCalendarEventDto>>> GetCaseCalendarEvents(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? clientCaseId,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] bool includeTasks = true,
+        CancellationToken ct = default)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var fromDate = (from ?? DateTime.UtcNow.Date.AddDays(-30)).Date;
+        var toDate = (to ?? fromDate.AddDays(90)).Date;
+        if (toDate < fromDate)
+        {
+            return BadRequest(new { message = "Дата окончания периода не может быть раньше даты начала." });
+        }
+
+        var events = await QueryCaseCalendarEventsAsync(visibility, fromDate, toDate, clientCaseId, responsibleUserId, includeTasks, ct);
+        return Ok(events);
+    }
+
+    [HttpGet("/api/case-calendar/summary")]
+    public async Task<ActionResult<CaseCalendarSummaryDto>> GetCaseCalendarSummary(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? clientCaseId,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] bool includeTasks = true,
+        CancellationToken ct = default)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var fromDate = (from ?? DateTime.UtcNow.Date.AddDays(-30)).Date;
+        var toDate = (to ?? fromDate.AddDays(90)).Date;
+        if (toDate < fromDate)
+        {
+            return BadRequest(new { message = "Дата окончания периода не может быть раньше даты начала." });
+        }
+
+        var events = await QueryCaseCalendarEventsAsync(visibility, fromDate, toDate, clientCaseId, responsibleUserId, includeTasks, ct);
+        return Ok(BuildCaseCalendarSummary(events, fromDate, toDate));
+    }
+
+    [HttpPost("procedural-deadlines/calculate")]
+    public ActionResult<ProceduralDeadlineCalculationDto> CalculateProceduralDeadlinePreview(
+        [FromBody] ProceduralDeadlineCalculationRequest? request)
+    {
+        var result = ProceduralDeadlineCalculator.Calculate(request ?? new ProceduralDeadlineCalculationRequest());
+        if (result.Error is not null)
+        {
+            return BadRequest(new { message = result.Error });
+        }
+
+        return Ok(new ProceduralDeadlineCalculationDto
+        {
+            DeadlineAt = result.DeadlineAt,
+            Rule = result.Rule,
+            MonthsToAdd = result.MonthsToAdd,
+            DaysToAdd = result.DaysToAdd,
+            RollForwardToWorkingDay = result.RollForwardToWorkingDay,
+        });
+    }
+
+    [HttpGet("court-directory")]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseCourtDto>>> GetCourtDirectory(
+        [FromQuery] bool includeInactive = false,
+        CancellationToken ct = default)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var query = _db.ClientCaseCourts.AsNoTracking();
+        if (!includeInactive)
+        {
+            query = query.Where(item => item.IsActive);
+        }
+
+        var courts = await query
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Name)
+            .ToListAsync(ct);
+        var items = courts.Select(MapCourt).ToList();
+
+        return Ok(items);
+    }
+
+    [HttpPost("court-directory")]
+    public async Task<ActionResult<ClientCaseCourtDto>> CreateCourtDirectoryItem(
+        [FromBody] UpsertClientCaseCourtRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireDocumentTemplateEditPermissionAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var validation = ValidateCourtDirectoryRequest(request);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        var now = DateTime.UtcNow;
+        var item = new ClientCaseCourt
+        {
+            Name = validation.Name,
+            Instance = validation.Instance,
+            Code = validation.Code,
+            Url = validation.Url,
+            Address = validation.Address,
+            Contacts = validation.Contacts,
+            IsActive = validation.IsActive,
+            SortOrder = validation.SortOrder,
+            CreatedAt = now,
+            CreatedByUserId = actorUserId,
+            CreatedByUserName = Truncate(actorName, 256),
+            UpdatedAt = now,
+            UpdatedByUserId = actorUserId,
+            UpdatedByUserName = Truncate(actorName, 256),
+        };
+
+        _db.ClientCaseCourts.Add(item);
+        _db.SetAuditReason($"Добавлен суд в справочник: {item.Name}");
+        await _db.SaveChangesAsync(ct);
+
+        return Created($"/api/v2/cases/court-directory/{item.Id}", MapCourt(item));
+    }
+
+    [HttpPut("court-directory/{courtId:int}")]
+    public async Task<ActionResult<ClientCaseCourtDto>> UpdateCourtDirectoryItem(
+        int courtId,
+        [FromBody] UpsertClientCaseCourtRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireDocumentTemplateEditPermissionAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var item = await _db.ClientCaseCourts.FirstOrDefaultAsync(court => court.Id == courtId, ct);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        var validation = ValidateCourtDirectoryRequest(request);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        item.Name = validation.Name;
+        item.Instance = validation.Instance;
+        item.Code = validation.Code;
+        item.Url = validation.Url;
+        item.Address = validation.Address;
+        item.Contacts = validation.Contacts;
+        item.IsActive = validation.IsActive;
+        item.SortOrder = validation.SortOrder;
+        item.UpdatedAt = DateTime.UtcNow;
+        item.UpdatedByUserId = User.GetUserId();
+        item.UpdatedByUserName = Truncate(User.GetDisplayName(), 256);
+
+        _db.SetAuditReason($"Обновлен суд в справочнике: {item.Name}");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapCourt(item));
+    }
+
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
@@ -1016,6 +1474,667 @@ public class CasesV2Controller : ControllerBase
         }
 
         return entity is not null ? Ok(entity) : NotFound();
+    }
+
+    [HttpGet("{id:int}/procedural-deadlines")]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseProceduralDeadlineDto>>> GetProceduralDeadlines(int id, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var exists = await _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .AnyAsync(item => item.Id == id, ct);
+        if (!exists)
+        {
+            return NotFound();
+        }
+
+        var deadlines = await _db.ClientCaseProceduralDeadlines
+            .AsNoTracking()
+            .Where(item => item.ClientCaseId == id)
+            .OrderBy(item => item.Status == "closed")
+            .ThenBy(item => item.DueAt)
+            .ThenBy(item => item.Id)
+            .Select(item => MapProceduralDeadline(item))
+            .ToListAsync(ct);
+
+        return Ok(deadlines);
+    }
+
+    [HttpPost("{id:int}/procedural-deadlines")]
+    public async Task<ActionResult<ClientCaseProceduralDeadlineDto>> CreateProceduralDeadline(
+        int id,
+        [FromBody] UpsertClientCaseProceduralDeadlineRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var validation = ValidateProceduralDeadlineRequest(request);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        var linkError = await ValidateProceduralDeadlineLinksAsync(id, request, ct);
+        if (linkError is not null)
+        {
+            return BadRequest(new { message = linkError });
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        var now = DateTime.UtcNow;
+        var deadline = new ClientCaseProceduralDeadline
+        {
+            ClientCaseId = id,
+            DeadlineType = validation.DeadlineType,
+            Title = validation.Title,
+            Description = validation.Description,
+            DueAt = validation.DueAt,
+            AllDay = validation.AllDay,
+            Status = validation.Status,
+            WarningDaysBefore = validation.WarningDaysBefore,
+            TaskJournalItemId = request?.TaskJournalItemId,
+            ClientCaseDocumentId = request?.ClientCaseDocumentId,
+            SourceType = validation.SourceType,
+            SourceId = request?.SourceId,
+            Notes = validation.Notes,
+            CreatedAt = now,
+            CreatedByUserId = actorUserId,
+            CreatedByUserName = Truncate(actorName, 256),
+            UpdatedAt = now,
+            UpdatedByUserId = actorUserId,
+            UpdatedByUserName = Truncate(actorName, 256),
+        };
+
+        _db.ClientCaseProceduralDeadlines.Add(deadline);
+        AppendCaseEvent(clientCase, $"Добавлен процессуальный срок «{deadline.Title}» на {deadline.DueAt:dd.MM.yyyy}. Автор: {actorName}.");
+        _db.SetAuditReason($"Добавлен процессуальный срок дела: {deadline.Title}");
+        await _db.SaveChangesAsync(ct);
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+        await LinkProceduralDeadlineTaskAsync(deadline.Id, ct);
+        await SyncDeadlineCourtEventLinkAsync(deadline, null, null, actorUserId, actorName, ct);
+        await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "created", actorUserId, actorName, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Created($"/api/v2/cases/{id}/procedural-deadlines/{deadline.Id}", MapProceduralDeadline(deadline));
+    }
+
+    [HttpPut("{id:int}/procedural-deadlines/{deadlineId:int}")]
+    public async Task<ActionResult<ClientCaseProceduralDeadlineDto>> UpdateProceduralDeadline(
+        int id,
+        int deadlineId,
+        [FromBody] UpsertClientCaseProceduralDeadlineRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var deadline = await _db.ClientCaseProceduralDeadlines
+            .FirstOrDefaultAsync(item => item.Id == deadlineId && item.ClientCaseId == id, ct);
+        if (deadline is null)
+        {
+            return NotFound();
+        }
+
+        var validation = ValidateProceduralDeadlineRequest(request);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        var linkError = await ValidateProceduralDeadlineLinksAsync(id, request, ct);
+        if (linkError is not null)
+        {
+            return BadRequest(new { message = linkError });
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        var oldDueAt = deadline.DueAt;
+        var oldStatus = deadline.Status;
+        var oldSourceType = deadline.SourceType;
+        var oldSourceId = deadline.SourceId;
+
+        deadline.DeadlineType = validation.DeadlineType;
+        deadline.Title = validation.Title;
+        deadline.Description = validation.Description;
+        deadline.DueAt = validation.DueAt;
+        deadline.AllDay = validation.AllDay;
+        deadline.Status = validation.Status;
+        deadline.WarningDaysBefore = validation.WarningDaysBefore;
+        deadline.TaskJournalItemId = request?.TaskJournalItemId;
+        deadline.ClientCaseDocumentId = request?.ClientCaseDocumentId;
+        deadline.SourceType = validation.SourceType;
+        deadline.SourceId = request?.SourceId;
+        deadline.Notes = validation.Notes;
+        deadline.UpdatedAt = DateTime.UtcNow;
+        deadline.UpdatedByUserId = actorUserId;
+        deadline.UpdatedByUserName = Truncate(actorName, 256);
+
+        if (deadline.Status == "closed" && oldStatus != "closed")
+        {
+            deadline.ClosedAt = DateTime.UtcNow;
+            deadline.ClosedByUserId = actorUserId;
+            deadline.ClosedByUserName = Truncate(actorName, 256);
+            deadline.CloseReason = Truncate(NormalizeOptional(request?.CloseReason) ?? string.Empty, 1000);
+        }
+        else if (deadline.Status != "closed")
+        {
+            deadline.ClosedAt = null;
+            deadline.ClosedByUserId = null;
+            deadline.ClosedByUserName = string.Empty;
+            deadline.CloseReason = string.Empty;
+        }
+
+        var moveSuffix = oldDueAt.Date == deadline.DueAt.Date
+            ? string.Empty
+            : $" Перенос: {oldDueAt:dd.MM.yyyy} -> {deadline.DueAt:dd.MM.yyyy}.";
+        AppendCaseEvent(clientCase, $"Процессуальный срок «{deadline.Title}» обновлен.{moveSuffix} Изменил: {actorName}.");
+        _db.SetAuditReason($"Обновлен процессуальный срок дела: {deadline.Title}");
+        await _db.SaveChangesAsync(ct);
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+        await LinkProceduralDeadlineTaskAsync(deadline.Id, ct);
+        await SyncDeadlineCourtEventLinkAsync(deadline, oldSourceType, oldSourceId, actorUserId, actorName, ct);
+        await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "updated", actorUserId, actorName, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapProceduralDeadline(deadline));
+    }
+
+    [HttpPost("{id:int}/procedural-deadlines/{deadlineId:int}/close")]
+    public async Task<ActionResult<ClientCaseProceduralDeadlineDto>> CloseProceduralDeadline(
+        int id,
+        int deadlineId,
+        [FromBody] CloseClientCaseProceduralDeadlineRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var deadline = await _db.ClientCaseProceduralDeadlines
+            .FirstOrDefaultAsync(item => item.Id == deadlineId && item.ClientCaseId == id, ct);
+        if (deadline is null)
+        {
+            return NotFound();
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        deadline.Status = "closed";
+        deadline.ClosedAt = DateTime.UtcNow;
+        deadline.ClosedByUserId = actorUserId;
+        deadline.ClosedByUserName = Truncate(actorName, 256);
+        deadline.CloseReason = Truncate(NormalizeOptional(request?.Reason) ?? string.Empty, 1000);
+        deadline.UpdatedAt = deadline.ClosedAt;
+        deadline.UpdatedByUserId = actorUserId;
+        deadline.UpdatedByUserName = Truncate(actorName, 256);
+
+        AppendCaseEvent(clientCase, $"Процессуальный срок «{deadline.Title}» закрыт. Закрыл: {actorName}.{FormatOptionalComment(deadline.CloseReason)}");
+        _db.SetAuditReason($"Закрыт процессуальный срок дела: {deadline.Title}");
+        await _db.SaveChangesAsync(ct);
+
+        await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
+        await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "closed", actorUserId, actorName, ct);
+        await _db.SaveChangesAsync(ct);
+        return Ok(MapProceduralDeadline(deadline));
+    }
+
+    [HttpGet("{id:int}/court-events")]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseCourtEventDto>>> GetCourtEvents(int id, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var exists = await _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .AnyAsync(item => item.Id == id, ct);
+        if (!exists)
+        {
+            return NotFound();
+        }
+
+        var items = await _db.ClientCaseCourtEvents
+            .AsNoTracking()
+            .Where(item => item.ClientCaseId == id)
+            .OrderBy(item => item.ScheduledAt)
+            .ThenBy(item => item.Id)
+            .Select(item => MapCourtEvent(item))
+            .ToListAsync(ct);
+
+        return Ok(items);
+    }
+
+    [HttpPost("{id:int}/court-events")]
+    public async Task<ActionResult<ClientCaseCourtEventDto>> CreateCourtEvent(
+        int id,
+        [FromBody] UpsertClientCaseCourtEventRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var court = await ResolveCourtDirectoryItemForRequestAsync(request?.CourtId, ct);
+        if (request?.CourtId is not null && court is null)
+        {
+            return BadRequest(new { message = "Судебная инстанция не найдена в справочнике." });
+        }
+
+        var validation = ValidateCourtEventRequest(request, clientCase, court);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        var linkError = await ValidateCourtEventLinksAsync(id, request, ct);
+        if (linkError is not null)
+        {
+            return BadRequest(new { message = linkError });
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        var now = DateTime.UtcNow;
+        var courtEvent = new ClientCaseCourtEvent
+        {
+            ClientCaseId = id,
+            EventType = validation.EventType,
+            Title = validation.Title,
+            Description = validation.Description,
+            ScheduledAt = validation.ScheduledAt,
+            AllDay = validation.AllDay,
+            CourtInstance = validation.CourtInstance,
+            CourtId = court?.Id,
+            CourtName = validation.CourtName,
+            CourtCaseNumber = validation.CourtCaseNumber,
+            Courtroom = validation.Courtroom,
+            JudgeName = validation.JudgeName,
+            SecretaryName = validation.SecretaryName,
+            MovementStatus = validation.MovementStatus,
+            ResultSummary = validation.ResultSummary,
+            SourceType = validation.SourceType,
+            ClientCaseDocumentId = request?.ClientCaseDocumentId,
+            ProceduralDeadlineId = request?.ProceduralDeadlineId,
+            CreatedAt = now,
+            CreatedByUserId = actorUserId,
+            CreatedByUserName = Truncate(actorName, 256),
+            UpdatedAt = now,
+            UpdatedByUserId = actorUserId,
+            UpdatedByUserName = Truncate(actorName, 256),
+        };
+
+        _db.ClientCaseCourtEvents.Add(courtEvent);
+        AppendCaseEvent(clientCase, $"Добавлено судебное событие «{courtEvent.Title}» на {courtEvent.ScheduledAt:dd.MM.yyyy HH:mm}. Автор: {actorName}.");
+        _db.SetAuditReason($"Добавлено судебное событие дела: {courtEvent.Title}");
+        await _db.SaveChangesAsync(ct);
+
+        AddCourtEventHistory(courtEvent, "created", $"Событие создано: {courtEvent.Title}.", actorUserId, actorName);
+        await SyncCourtEventDeadlineSourceAsync(courtEvent, null, actorUserId, actorName, ct);
+        await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "created", actorUserId, actorName, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Created($"/api/v2/cases/{id}/court-events/{courtEvent.Id}", MapCourtEvent(courtEvent));
+    }
+
+    [HttpPut("{id:int}/court-events/{courtEventId:int}")]
+    public async Task<ActionResult<ClientCaseCourtEventDto>> UpdateCourtEvent(
+        int id,
+        int courtEventId,
+        [FromBody] UpsertClientCaseCourtEventRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var courtEvent = await _db.ClientCaseCourtEvents
+            .FirstOrDefaultAsync(item => item.Id == courtEventId && item.ClientCaseId == id, ct);
+        if (courtEvent is null)
+        {
+            return NotFound();
+        }
+
+        var court = await ResolveCourtDirectoryItemForRequestAsync(request?.CourtId, ct);
+        if (request?.CourtId is not null && court is null)
+        {
+            return BadRequest(new { message = "Судебная инстанция не найдена в справочнике." });
+        }
+
+        var validation = ValidateCourtEventRequest(request, clientCase, court);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        var linkError = await ValidateCourtEventLinksAsync(id, request, ct);
+        if (linkError is not null)
+        {
+            return BadRequest(new { message = linkError });
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        var oldProceduralDeadlineId = courtEvent.ProceduralDeadlineId;
+        courtEvent.EventType = validation.EventType;
+        courtEvent.Title = validation.Title;
+        courtEvent.Description = validation.Description;
+        courtEvent.ScheduledAt = validation.ScheduledAt;
+        courtEvent.AllDay = validation.AllDay;
+        courtEvent.CourtInstance = validation.CourtInstance;
+        courtEvent.CourtId = court?.Id;
+        courtEvent.CourtName = validation.CourtName;
+        courtEvent.CourtCaseNumber = validation.CourtCaseNumber;
+        courtEvent.Courtroom = validation.Courtroom;
+        courtEvent.JudgeName = validation.JudgeName;
+        courtEvent.SecretaryName = validation.SecretaryName;
+        courtEvent.MovementStatus = validation.MovementStatus;
+        courtEvent.ResultSummary = validation.ResultSummary;
+        courtEvent.SourceType = validation.SourceType;
+        courtEvent.ClientCaseDocumentId = request?.ClientCaseDocumentId;
+        courtEvent.ProceduralDeadlineId = request?.ProceduralDeadlineId;
+        courtEvent.UpdatedAt = DateTime.UtcNow;
+        courtEvent.UpdatedByUserId = actorUserId;
+        courtEvent.UpdatedByUserName = Truncate(actorName, 256);
+
+        AppendCaseEvent(clientCase, $"Обновлено судебное событие «{courtEvent.Title}». Автор: {actorName}.");
+        _db.SetAuditReason($"Обновлено судебное событие дела: {courtEvent.Title}");
+        AddCourtEventHistory(courtEvent, "updated", $"Событие обновлено: {courtEvent.Title}.", actorUserId, actorName);
+        await SyncCourtEventDeadlineSourceAsync(courtEvent, oldProceduralDeadlineId, actorUserId, actorName, ct);
+        await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "updated", actorUserId, actorName, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapCourtEvent(courtEvent));
+    }
+
+    [HttpGet("{id:int}/court-events/{courtEventId:int}/history")]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseCourtEventHistoryDto>>> GetCourtEventHistory(
+        int id,
+        int courtEventId,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var exists = await _db.ClientCaseCourtEvents
+            .AsNoTracking()
+            .Where(item => item.Id == courtEventId && item.ClientCaseId == id)
+            .AnyAsync(item => _db.ClientCases
+                .ApplyClientCaseVisibility(visibility)
+                .Any(clientCase => clientCase.Id == item.ClientCaseId), ct);
+        if (!exists)
+        {
+            return NotFound();
+        }
+
+        var history = await _db.ClientCaseCourtEventHistory
+            .AsNoTracking()
+            .Where(item => item.ClientCaseCourtEventId == courtEventId && item.ClientCaseId == id)
+            .OrderByDescending(item => item.OccurredAt)
+            .ThenByDescending(item => item.Id)
+            .Select(item => MapCourtEventHistory(item))
+            .ToListAsync(ct);
+
+        return Ok(history);
+    }
+
+    [HttpGet("{id:int}/court-parties")]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseCourtPartyDto>>> GetCourtParties(
+        int id,
+        [FromQuery] bool includeArchived,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var exists = await _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .AnyAsync(item => item.Id == id, ct);
+        if (!exists)
+        {
+            return NotFound();
+        }
+
+        var query = _db.ClientCaseCourtParties
+            .AsNoTracking()
+            .Where(item => item.ClientCaseId == id);
+        if (!includeArchived)
+        {
+            query = query.Where(item => !item.IsArchived);
+        }
+
+        var items = await query
+            .OrderBy(item => item.IsArchived)
+            .ThenBy(item => item.Side)
+            .ThenBy(item => item.DisplayName)
+            .ThenBy(item => item.Id)
+            .Select(item => MapCourtParty(item))
+            .ToListAsync(ct);
+
+        return Ok(items);
+    }
+
+    [HttpPost("{id:int}/court-parties")]
+    public async Task<ActionResult<ClientCaseCourtPartyDto>> CreateCourtParty(
+        int id,
+        [FromBody] UpsertClientCaseCourtPartyRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var validation = await ValidateCourtPartyRequestAsync(id, request, ct);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        var now = DateTime.UtcNow;
+        var party = new ClientCaseCourtParty
+        {
+            ClientCaseId = id,
+            RelatedPartyId = validation.RelatedPartyId,
+            DisplayName = validation.DisplayName,
+            Side = validation.Side,
+            ProcessRole = validation.ProcessRole,
+            RepresentativeName = validation.RepresentativeName,
+            Notes = validation.Notes,
+            CreatedAt = now,
+            CreatedByUserId = actorUserId,
+            CreatedByUserName = Truncate(actorName, 256),
+            UpdatedAt = now,
+            UpdatedByUserId = actorUserId,
+            UpdatedByUserName = Truncate(actorName, 256),
+        };
+
+        _db.ClientCaseCourtParties.Add(party);
+        AppendCaseEvent(clientCase, $"Добавлена сторона процесса: {party.DisplayName} ({ResolveCourtPartySideLabel(party.Side)}). Автор: {actorName}.");
+        _db.SetAuditReason($"Добавлена сторона процесса по делу: {party.DisplayName}");
+        await _db.SaveChangesAsync(ct);
+
+        return Created($"/api/v2/cases/{id}/court-parties/{party.Id}", MapCourtParty(party));
+    }
+
+    [HttpDelete("{id:int}/court-parties/{partyId:int}")]
+    public async Task<IActionResult> ArchiveCourtParty(int id, int partyId, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var party = await _db.ClientCaseCourtParties
+            .FirstOrDefaultAsync(item => item.Id == partyId && item.ClientCaseId == id, ct);
+        if (party is null)
+        {
+            return NotFound();
+        }
+
+        if (!party.IsArchived)
+        {
+            party.IsArchived = true;
+            party.UpdatedAt = DateTime.UtcNow;
+            party.UpdatedByUserId = User.GetUserId();
+            party.UpdatedByUserName = Truncate(User.GetDisplayName(), 256);
+            AppendCaseEvent(clientCase, $"Сторона процесса архивирована: {party.DisplayName}. Автор: {User.GetDisplayName()}.");
+            _db.SetAuditReason($"Сторона процесса архивирована: {party.DisplayName}");
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return NoContent();
     }
 
     [HttpPost("{id:int}/access-request")]
@@ -1396,7 +2515,8 @@ public class CasesV2Controller : ControllerBase
             .ThenByDescending(item => item.Id)
             .ToListAsync(ct);
 
-        return Ok(MapDocuments(documents));
+        var templates = await GetCaseDocumentTemplateLibraryAsync(ct);
+        return Ok(MapDocuments(documents, templates));
     }
 
     [HttpGet("/api/case-documents")]
@@ -1406,6 +2526,10 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] string? documentType,
         [FromQuery] string? status,
         [FromQuery] int? sourceTaskId,
+        [FromQuery] int? sourceEventId = null,
+        [FromQuery] int? sourceWorkOrderId = null,
+        [FromQuery] int? sourceInvoiceId = null,
+        [FromQuery] string? sourceStage = null,
         [FromQuery] bool latestOnly = true,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
@@ -1465,6 +2589,31 @@ public class CasesV2Controller : ControllerBase
             query = query.Where(item => EF.Functions.Like(item.DocumentKey, prefix + "%"));
         }
 
+        if (sourceEventId.HasValue)
+        {
+            var key = BuildCourtEventDocumentKey(sourceEventId.Value);
+            query = query.Where(item => item.DocumentKey == key);
+        }
+
+        if (sourceWorkOrderId.HasValue)
+        {
+            var key = BuildWorkOrderDocumentKey(sourceWorkOrderId.Value);
+            query = query.Where(item => item.DocumentKey == key);
+        }
+
+        if (sourceInvoiceId.HasValue)
+        {
+            var key = BuildInvoiceDocumentKey(sourceInvoiceId.Value);
+            query = query.Where(item => item.DocumentKey == key);
+        }
+
+        var normalizedSourceStage = NormalizeDocumentKey(sourceStage);
+        if (normalizedSourceStage is not null)
+        {
+            var prefix = $"stage-{normalizedSourceStage}-";
+            query = query.Where(item => EF.Functions.Like(item.DocumentKey, prefix + "%"));
+        }
+
         if (latestOnly)
         {
             query = query.Where(item => !_db.ClientCaseDocuments.Any(other =>
@@ -1520,7 +2669,8 @@ public class CasesV2Controller : ControllerBase
             .Where(item => item.ClientCaseId == document.ClientCaseId && item.DocumentKey == document.DocumentKey)
             .MaxAsync(item => (int?)item.Version, ct) ?? document.Version;
 
-        return Ok(MapDocument(document, document.Version == latestVersion));
+        var templates = await GetCaseDocumentTemplateLibraryAsync(ct);
+        return Ok(MapDocument(document, document.Version == latestVersion, templates));
     }
 
     [HttpPost("{id:int}/documents")]
@@ -1634,7 +2784,20 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
-        var template = BuildCaseDocumentTemplate(clientCase, request);
+        var templateDefinitionResult = await ResolveCaseDocumentTemplateDefinitionAsync(request, ct);
+        if (templateDefinitionResult.Error is not null)
+        {
+            return templateDefinitionResult.NotFound
+                ? NotFound(new { message = templateDefinitionResult.Error })
+                : BadRequest(new { message = templateDefinitionResult.Error });
+        }
+
+        if (!IsCaseDocumentTemplateApplicableToCase(templateDefinitionResult.Template, clientCase))
+        {
+            return BadRequest(new { message = "Шаблон документа не привязан к типу этого дела." });
+        }
+
+        var template = BuildCaseDocumentTemplate(clientCase, request, templateDefinitionResult.Template);
         var latestVersion = await _db.ClientCaseDocuments
             .Where(item => item.ClientCaseId == id && item.DocumentKey == template.DocumentKey)
             .MaxAsync(item => (int?)item.Version, ct) ?? 0;
@@ -1670,8 +2833,10 @@ public class CasesV2Controller : ControllerBase
                 clientCase,
                 $"Сформирован шаблон «{document.OriginalFileName}»: тип «{document.DocumentType}», статус «{document.Status}», версия {document.Version}. Автор: {User.GetDisplayName()}.");
             await _db.SaveChangesAsync(ct);
+            AddCaseDocumentAuditEvent(clientCase, document, "Generated", $"Сформирован документ из шаблона «{document.OriginalFileName}».");
+            await _db.SaveChangesAsync(ct);
 
-            return Created($"/api/v2/cases/{id}/documents/{document.Id}", MapDocument(document, true));
+            return Created($"/api/v2/cases/{id}/documents/{document.Id}", MapDocument(document, true, [templateDefinitionResult.Template]));
         }
         catch
         {
@@ -1904,8 +3069,73 @@ public class CasesV2Controller : ControllerBase
                 clientCase,
                 $"{eventPrefix}: тип «{document.DocumentType}», статус «{document.Status}», версия {document.Version}. Добавил: {User.GetDisplayName()}.");
             await _db.SaveChangesAsync(ct);
+            AddCaseDocumentAuditEvent(
+                clientCase,
+                document,
+                isNewDocument ? "Created" : "VersionCreated",
+                isNewDocument
+                    ? $"Документ «{document.OriginalFileName}» загружен."
+                    : $"Загружена новая версия документа «{document.OriginalFileName}».");
+            await _db.SaveChangesAsync(ct);
 
             return Created($"/api/case-documents/{document.Id}", MapDocument(document, true));
+        }
+        catch
+        {
+            _caseDocumentStorage.DeleteIfExists(relativePath);
+            throw;
+        }
+    }
+
+    private async Task<ClientCaseDocument> SaveGeneratedCaseDocumentAsync(
+        ClientCase clientCase,
+        string documentKey,
+        string documentType,
+        string status,
+        string fileName,
+        string html,
+        string auditAction,
+        string auditDescription,
+        string caseEventText,
+        CancellationToken ct)
+    {
+        var latestVersion = await _db.ClientCaseDocuments
+            .Where(item => item.ClientCaseId == clientCase.Id && item.DocumentKey == documentKey)
+            .MaxAsync(item => (int?)item.Version, ct) ?? 0;
+        var version = latestVersion + 1;
+        var safeFileName = SanitizeFileName(fileName);
+        var storedFileName = BuildStoredFileName(documentKey, version, safeFileName);
+        var relativePath = _caseDocumentStorage.BuildRelativePath(clientCase.Id, storedFileName);
+        var content = Encoding.UTF8.GetBytes(html);
+
+        try
+        {
+            await _caseDocumentStorage.SaveAsync(relativePath, content, ct);
+
+            var document = new ClientCaseDocument
+            {
+                ClientCaseId = clientCase.Id,
+                DocumentKey = documentKey,
+                Version = version,
+                DocumentType = documentType,
+                Status = status,
+                OriginalFileName = safeFileName,
+                StoredFileName = storedFileName,
+                StoragePath = relativePath,
+                ContentType = "text/html; charset=utf-8",
+                SizeBytes = content.LongLength,
+                UploadedByUserId = User.GetUserId(),
+                UploadedByName = User.GetDisplayName(),
+                UploadedAt = DateTime.UtcNow,
+            };
+
+            _db.ClientCaseDocuments.Add(document);
+            AppendCaseEvent(clientCase, caseEventText);
+            await _db.SaveChangesAsync(ct);
+            AddCaseDocumentAuditEvent(clientCase, document, auditAction, auditDescription);
+            await _db.SaveChangesAsync(ct);
+
+            return document;
         }
         catch
         {
@@ -1941,6 +3171,11 @@ public class CasesV2Controller : ControllerBase
             AppendCaseEvent(
                 clientCase,
                 $"Документ «{document.OriginalFileName}»: {string.Join(", ", changes)}. Изменил: {User.GetDisplayName()}.");
+            AddCaseDocumentAuditEvent(
+                clientCase,
+                document,
+                "Updated",
+                $"Документ «{document.OriginalFileName}»: {string.Join(", ", changes)}.");
             await _db.SaveChangesAsync(ct);
         }
 
@@ -1985,11 +3220,366 @@ public class CasesV2Controller : ControllerBase
         AppendCaseEvent(
             clientCase,
             $"Документ «{document.OriginalFileName}» удален. Удалил: {User.GetDisplayName()}.");
+        AddCaseDocumentAuditEvent(clientCase, document, "Deleted", $"Документ «{document.OriginalFileName}» удален.");
         await _db.SaveChangesAsync(ct);
         _caseDocumentStorage.DeleteIfExists(storagePath);
 
         return NoContent();
     }
+
+    private void AddCaseDocumentAuditEvent(
+        ClientCase clientCase,
+        ClientCaseDocument document,
+        string action,
+        string description)
+    {
+        _db.ObjectAuditEvents.Add(new ObjectAuditEvent
+        {
+            ObjectType = "client-case-document",
+            ObjectId = document.Id,
+            Action = action,
+            Description = description,
+            ActorUserId = User.GetUserId(),
+            ActorUserName = User.GetDisplayName(),
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                clientCaseId = clientCase.Id,
+                caseTitle = clientCase.Title,
+                documentKey = document.DocumentKey,
+                version = document.Version,
+                documentType = document.DocumentType,
+                status = document.Status,
+                fileName = document.OriginalFileName,
+            }, CaseDocumentTemplateJsonOptions),
+            CreatedAt = DateTime.UtcNow,
+        });
+    }
+
+    private async Task<IReadOnlyList<CaseCalendarEventDto>> QueryCaseCalendarEventsAsync(
+        DataVisibilityAccess visibility,
+        DateTime fromDate,
+        DateTime toDate,
+        int? clientCaseId,
+        int? responsibleUserId,
+        bool includeTasks,
+        CancellationToken ct)
+    {
+        var toExclusive = toDate.Date.AddDays(1);
+        var caseQuery = _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
+            .Include(item => item.ResponsibleUser)
+            .Include(item => item.CourtEvents)
+            .Include(item => item.ProceduralDeadlines)
+            .AsQueryable();
+
+        if (clientCaseId.HasValue)
+        {
+            caseQuery = caseQuery.Where(item => item.Id == clientCaseId.Value);
+        }
+
+        if (responsibleUserId.HasValue)
+        {
+            caseQuery = caseQuery.Where(item => item.ResponsibleUserId == responsibleUserId.Value);
+        }
+
+        caseQuery = caseQuery.Where(item =>
+            (item.DueDate.HasValue && item.DueDate.Value >= fromDate && item.DueDate.Value < toExclusive) ||
+            (item.NextHearingAt.HasValue && item.NextHearingAt.Value >= fromDate && item.NextHearingAt.Value < toExclusive) ||
+            (item.ClaimFiledAt.HasValue && item.ClaimFiledAt.Value >= fromDate && item.ClaimFiledAt.Value < toExclusive) ||
+            (item.CourtDecisionAt.HasValue && item.CourtDecisionAt.Value >= fromDate && item.CourtDecisionAt.Value < toExclusive) ||
+            (item.AppealDeadlineAt.HasValue && item.AppealDeadlineAt.Value >= fromDate && item.AppealDeadlineAt.Value < toExclusive) ||
+            (item.CassationDeadlineAt.HasValue && item.CassationDeadlineAt.Value >= fromDate && item.CassationDeadlineAt.Value < toExclusive) ||
+            (item.MotionDeadlineAt.HasValue && item.MotionDeadlineAt.Value >= fromDate && item.MotionDeadlineAt.Value < toExclusive) ||
+            (item.ObjectionDeadlineAt.HasValue && item.ObjectionDeadlineAt.Value >= fromDate && item.ObjectionDeadlineAt.Value < toExclusive) ||
+            _db.ClientCaseCourtEvents.Any(courtEvent =>
+                courtEvent.ClientCaseId == item.Id &&
+                courtEvent.MovementStatus != "cancelled" &&
+                courtEvent.ScheduledAt >= fromDate &&
+                courtEvent.ScheduledAt < toExclusive) ||
+            _db.ClientCaseProceduralDeadlines.Any(deadline =>
+                deadline.ClientCaseId == item.Id &&
+                deadline.Status != "closed" &&
+                deadline.Status != "cancelled" &&
+                deadline.DueAt >= fromDate &&
+                deadline.DueAt < toExclusive) ||
+            (includeTasks && _db.TaskJournalItems.Any(task =>
+                task.ClientCaseId == item.Id &&
+                task.DueAt >= fromDate &&
+                task.DueAt < toExclusive &&
+                task.Status != "done" &&
+                task.Status != "cancelled")));
+
+        var cases = await caseQuery
+            .OrderBy(item => item.NextHearingAt ?? item.DueDate ?? item.AppealDeadlineAt ?? item.MotionDeadlineAt ?? item.ObjectionDeadlineAt ?? item.CourtDecisionAt ?? item.StartDate ?? DateTime.MaxValue)
+            .ThenBy(item => item.Id)
+            .Take(1000)
+            .ToListAsync(ct);
+
+        var events = new List<CaseCalendarEventDto>();
+        foreach (var clientCase in cases)
+        {
+            var separateDeadlineTypes = clientCase.ProceduralDeadlines
+                .Where(item => item.Status != "closed" && item.Status != "cancelled")
+                .Select(item => item.DeadlineType)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            AddCaseCalendarDateEvents(events, clientCase, separateDeadlineTypes, fromDate, toExclusive);
+            AddCaseCalendarCourtEvents(events, clientCase, fromDate, toExclusive);
+            AddCaseCalendarProceduralDeadlineEvents(events, clientCase, fromDate, toExclusive);
+        }
+
+        if (includeTasks && cases.Count > 0)
+        {
+            var visibleCaseIds = cases.Select(item => item.Id).ToArray();
+            var tasks = await _db.TaskJournalItems
+                .AsNoTracking()
+                .Where(item => item.ClientCaseId.HasValue && visibleCaseIds.Contains(item.ClientCaseId.Value))
+                .Where(item => item.DueAt >= fromDate && item.DueAt < toExclusive)
+                .Where(item => item.Status != "done" && item.Status != "cancelled")
+                .OrderBy(item => item.DueAt)
+                .ThenBy(item => item.Id)
+                .Take(2000)
+                .ToListAsync(ct);
+            var casesById = cases.ToDictionary(item => item.Id);
+            foreach (var task in tasks)
+            {
+                if (task.ClientCaseId.HasValue && casesById.TryGetValue(task.ClientCaseId.Value, out var clientCase))
+                {
+                    events.Add(MapTaskCalendarEvent(clientCase, task));
+                }
+            }
+        }
+
+        return events
+            .OrderBy(item => item.StartAt)
+            .ThenBy(item => item.Kind, StringComparer.Ordinal)
+            .ThenBy(item => item.Title, StringComparer.CurrentCulture)
+            .ToList();
+    }
+
+    private static CaseCalendarSummaryDto BuildCaseCalendarSummary(
+        IReadOnlyCollection<CaseCalendarEventDto> events,
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        return new CaseCalendarSummaryDto
+        {
+            From = fromDate,
+            To = toDate,
+            TotalEventCount = events.Count,
+            OverdueCount = events.Count(static item => item.IsOverdue),
+            WarningCount = events.Count(static item => item.IsWarning),
+            CourtEventCount = events.Count(static item => item.Kind == "court"),
+            ProceduralDeadlineCount = events.Count(static item => item.Kind == "procedural-deadline"),
+            CaseDeadlineCount = events.Count(static item => item.Kind == "case-deadline"),
+            TaskCount = events.Count(static item => item.Kind == "task"),
+            NearestEvent = events
+                .Where(static item => item.StartAt >= DateTime.UtcNow.Date)
+                .OrderBy(static item => item.StartAt)
+                .FirstOrDefault()
+                ?? events.OrderByDescending(static item => item.StartAt).FirstOrDefault(),
+        };
+    }
+
+    private static void AddCaseCalendarDateEvents(
+        ICollection<CaseCalendarEventDto> events,
+        ClientCase clientCase,
+        IReadOnlySet<string> separateDeadlineTypes,
+        DateTime fromDate,
+        DateTime toExclusive)
+    {
+        AddCaseCalendarEvent(events, clientCase, "case-deadline", "due", "Крайний срок по делу", clientCase.DueDate, true, fromDate, toExclusive);
+        AddCaseCalendarEvent(events, clientCase, "court", "hearing", "Судебное заседание", clientCase.NextHearingAt, false, fromDate, toExclusive);
+        AddCaseCalendarEvent(events, clientCase, "court", "claim", "Подача иска", clientCase.ClaimFiledAt, true, fromDate, toExclusive);
+        AddCaseCalendarEvent(events, clientCase, "court", "decision", "Судебное решение", clientCase.CourtDecisionAt, true, fromDate, toExclusive);
+        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "appeal", "Срок апелляции", clientCase.AppealDeadlineAt, fromDate, toExclusive);
+        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "cassation", "Срок кассации", clientCase.CassationDeadlineAt, fromDate, toExclusive);
+        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "motion", "Срок подачи ходатайства", clientCase.MotionDeadlineAt, fromDate, toExclusive);
+        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "objection", "Срок подачи возражений", clientCase.ObjectionDeadlineAt, fromDate, toExclusive);
+    }
+
+    private static void AddLegacyProceduralCalendarEvent(
+        ICollection<CaseCalendarEventDto> events,
+        ClientCase clientCase,
+        IReadOnlySet<string> separateDeadlineTypes,
+        string sourceType,
+        string title,
+        DateTime? startAt,
+        DateTime fromDate,
+        DateTime toExclusive)
+    {
+        if (separateDeadlineTypes.Contains(sourceType))
+        {
+            return;
+        }
+
+        AddCaseCalendarEvent(events, clientCase, "procedural-deadline", sourceType, title, startAt, true, fromDate, toExclusive);
+    }
+
+    private static void AddCaseCalendarProceduralDeadlineEvents(
+        ICollection<CaseCalendarEventDto> events,
+        ClientCase clientCase,
+        DateTime fromDate,
+        DateTime toExclusive)
+    {
+        foreach (var deadline in clientCase.ProceduralDeadlines
+            .Where(item => item.Status != "closed" && item.Status != "cancelled")
+            .Where(item => item.DueAt >= fromDate && item.DueAt < toExclusive)
+            .OrderBy(item => item.DueAt)
+            .ThenBy(item => item.Id))
+        {
+            var normalizedStart = deadline.AllDay ? deadline.DueAt.Date : deadline.DueAt;
+            events.Add(new CaseCalendarEventDto
+            {
+                Id = $"procedural-deadline:{deadline.Id}",
+                Kind = "procedural-deadline",
+                SourceType = deadline.DeadlineType,
+                SourceId = deadline.Id,
+                Title = deadline.Title,
+                StartAt = normalizedStart,
+                EndAt = deadline.AllDay ? normalizedStart.Date.AddDays(1) : normalizedStart.AddHours(1),
+                AllDay = deadline.AllDay,
+                ClientCaseId = clientCase.Id,
+                CaseTitle = clientCase.Title,
+                ClientName = clientCase.Client?.Name,
+                LegalEntityName = ResolveLegalEntityName(clientCase.LegalEntity),
+                ResponsibleUserId = clientCase.ResponsibleUserId,
+                ResponsibleName = ResolveCaseResponsibleName(clientCase),
+                Status = deadline.Status,
+                Priority = clientCase.Priority,
+                DeadlineType = deadline.DeadlineType,
+                IsOverdue = normalizedStart.Date < DateTime.UtcNow.Date,
+                IsWarning = normalizedStart.Date >= DateTime.UtcNow.Date && normalizedStart.Date <= DateTime.UtcNow.Date.AddDays(Math.Max(0, deadline.WarningDaysBefore)),
+                CourtName = NormalizeOptional(clientCase.CourtName),
+                CourtCaseNumber = NormalizeOptional(clientCase.CourtCaseNumber),
+            });
+        }
+    }
+
+    private static void AddCaseCalendarCourtEvents(
+        ICollection<CaseCalendarEventDto> events,
+        ClientCase clientCase,
+        DateTime fromDate,
+        DateTime toExclusive)
+    {
+        foreach (var courtEvent in clientCase.CourtEvents
+            .Where(item => item.MovementStatus != "cancelled")
+            .Where(item => item.ScheduledAt >= fromDate && item.ScheduledAt < toExclusive)
+            .OrderBy(item => item.ScheduledAt)
+            .ThenBy(item => item.Id))
+        {
+            var normalizedStart = courtEvent.AllDay ? courtEvent.ScheduledAt.Date : courtEvent.ScheduledAt;
+            events.Add(new CaseCalendarEventDto
+            {
+                Id = $"court-event:{courtEvent.Id}",
+                Kind = "court",
+                SourceType = courtEvent.EventType,
+                SourceId = courtEvent.Id,
+                Title = courtEvent.Title,
+                StartAt = normalizedStart,
+                EndAt = courtEvent.AllDay ? normalizedStart.Date.AddDays(1) : normalizedStart.AddHours(1),
+                AllDay = courtEvent.AllDay,
+                ClientCaseId = clientCase.Id,
+                CaseTitle = clientCase.Title,
+                ClientName = clientCase.Client?.Name,
+                LegalEntityName = ResolveLegalEntityName(clientCase.LegalEntity),
+                ResponsibleUserId = clientCase.ResponsibleUserId,
+                ResponsibleName = ResolveCaseResponsibleName(clientCase),
+                Status = courtEvent.MovementStatus,
+                Priority = clientCase.Priority,
+                DeadlineType = courtEvent.EventType,
+                IsOverdue = normalizedStart.Date < DateTime.UtcNow.Date && courtEvent.MovementStatus is not "held" and not "completed",
+                IsWarning = normalizedStart.Date >= DateTime.UtcNow.Date && normalizedStart.Date <= DateTime.UtcNow.Date.AddDays(7),
+                CourtName = NormalizeOptional(courtEvent.CourtName) ?? NormalizeOptional(clientCase.CourtName),
+                CourtCaseNumber = NormalizeOptional(courtEvent.CourtCaseNumber) ?? NormalizeOptional(clientCase.CourtCaseNumber),
+            });
+        }
+    }
+
+    private static void AddCaseCalendarEvent(
+        ICollection<CaseCalendarEventDto> events,
+        ClientCase clientCase,
+        string kind,
+        string sourceType,
+        string title,
+        DateTime? startAt,
+        bool allDay,
+        DateTime fromDate,
+        DateTime toExclusive)
+    {
+        if (!startAt.HasValue || startAt.Value < fromDate || startAt.Value >= toExclusive)
+        {
+            return;
+        }
+
+        var normalizedStart = allDay ? startAt.Value.Date : startAt.Value;
+        events.Add(new CaseCalendarEventDto
+        {
+            Id = $"{kind}:{sourceType}:{clientCase.Id}",
+            Kind = kind,
+            SourceType = sourceType,
+            Title = title,
+            StartAt = normalizedStart,
+            EndAt = allDay ? normalizedStart.Date.AddDays(1) : normalizedStart.AddHours(1),
+            AllDay = allDay,
+            ClientCaseId = clientCase.Id,
+            CaseTitle = clientCase.Title,
+            ClientName = clientCase.Client?.Name,
+            LegalEntityName = ResolveLegalEntityName(clientCase.LegalEntity),
+            ResponsibleUserId = clientCase.ResponsibleUserId,
+            ResponsibleName = ResolveCaseResponsibleName(clientCase),
+            Status = clientCase.Status.ToString(),
+            Priority = clientCase.Priority,
+            DeadlineType = sourceType,
+            IsOverdue = kind.Contains("deadline", StringComparison.OrdinalIgnoreCase) && normalizedStart.Date < DateTime.UtcNow.Date,
+            IsWarning = kind.Contains("deadline", StringComparison.OrdinalIgnoreCase) && normalizedStart.Date >= DateTime.UtcNow.Date && normalizedStart.Date <= DateTime.UtcNow.Date.AddDays(7),
+            CourtName = NormalizeOptional(clientCase.CourtName),
+            CourtCaseNumber = NormalizeOptional(clientCase.CourtCaseNumber),
+        });
+    }
+
+    private static CaseCalendarEventDto MapTaskCalendarEvent(ClientCase clientCase, TaskJournalItem task)
+    {
+        var durationMinutes = task.PlannedDurationMinutes > 0 ? task.PlannedDurationMinutes : 60;
+        return new CaseCalendarEventDto
+        {
+            Id = $"task:{task.Id}",
+            Kind = "task",
+            SourceType = task.Type,
+            SourceId = task.Id,
+            Title = task.Title,
+            StartAt = task.DueAt,
+            EndAt = task.DueAt.AddMinutes(durationMinutes),
+            AllDay = false,
+            ClientCaseId = clientCase.Id,
+            CaseTitle = clientCase.Title,
+            ClientName = clientCase.Client?.Name,
+            LegalEntityName = ResolveLegalEntityName(clientCase.LegalEntity),
+            ResponsibleUserId = task.AssigneeUserId ?? clientCase.ResponsibleUserId,
+            ResponsibleName = string.IsNullOrWhiteSpace(task.AssigneeName) ? ResolveCaseResponsibleName(clientCase) : task.AssigneeName,
+            Status = task.Status,
+            Priority = task.Priority,
+            DeadlineType = null,
+            IsOverdue = task.DueAt < DateTime.UtcNow
+                && !string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(task.Status, "cancelled", StringComparison.OrdinalIgnoreCase),
+            IsWarning = task.DueAt >= DateTime.UtcNow && task.DueAt <= DateTime.UtcNow.AddDays(7),
+            CourtName = NormalizeOptional(clientCase.CourtName),
+            CourtCaseNumber = NormalizeOptional(clientCase.CourtCaseNumber),
+        };
+    }
+
+    private static string ResolveCaseResponsibleName(ClientCase clientCase)
+        => !string.IsNullOrWhiteSpace(clientCase.ResponsibleUser?.FullName)
+            ? clientCase.ResponsibleUser.FullName
+            : clientCase.ResponsibleUser?.Email ?? string.Empty;
+
+    private static string? ResolveLegalEntityName(LegalEntity? legalEntity)
+        => legalEntity is null
+            ? null
+            : NormalizeOptional(legalEntity.ShortName) ?? NormalizeOptional(legalEntity.FullName);
 
     [HttpPost("{id:int}/activity")]
     public async Task<ActionResult<ClientCaseActivityDto>> MarkActivity(
@@ -2536,6 +4126,54 @@ public class CasesV2Controller : ControllerBase
         return Content(BuildWorkOrderPrintHtml(clientCase, workOrder), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
+    [HttpPost("{id:int}/work-order/generate-document")]
+    public async Task<ActionResult<ClientCaseDocumentDto>> GenerateWorkOrderDocument(int id, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
+            .Include(item => item.ResponsibleUser)
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var workOrder = await _db.ClientCaseWorkOrders
+            .Include(item => item.Items)
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id, ct);
+        if (workOrder is null)
+        {
+            return NotFound(new { message = "По делу еще нет заказ-наряда." });
+        }
+
+        var document = await SaveGeneratedCaseDocumentAsync(
+            clientCase,
+            BuildWorkOrderDocumentKey(workOrder.Id),
+            "Заказ-наряд",
+            NormalizeWorkOrderStatus(workOrder.Status) == "approved" ? "Согласован" : "Подготовлен",
+            $"case-{id}-work-order.html",
+            BuildWorkOrderPrintHtml(clientCase, workOrder),
+            "Generated",
+            $"Сформирована печатная форма заказ-наряда «{workOrder.Title}».",
+            $"Заказ-наряд «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
+            ct);
+
+        return Created($"/api/v2/cases/{id}/documents/{document.Id}", MapDocument(document, true));
+    }
+
     [HttpPost("{id:int}/work-order")]
     public async Task<ActionResult<ClientCaseWorkOrderDto>> CreateWorkOrder(
         int id,
@@ -2931,6 +4569,18 @@ public class CasesV2Controller : ControllerBase
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
 
+        var invoiceDocument = await SaveGeneratedCaseDocumentAsync(
+            clientCase,
+            BuildInvoiceDocumentKey(payment.Id),
+            "Счет",
+            "Черновик",
+            $"case-{id}-invoice-{payment.Id}.html",
+            BuildWorkOrderInvoiceDocumentHtml(clientCase, workOrder, payment, number, invoiceDate, dueDate),
+            "Generated",
+            $"Сформирован документ счета №{number} из заказ-наряда «{workOrder.Title}».",
+            $"Счет №{number} из заказ-наряда «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
+            ct);
+
         return Created($"/invoices/{payment.Id}", new ClientCaseWorkOrderInvoiceDto
         {
             PaymentId = payment.Id,
@@ -2939,6 +4589,7 @@ public class CasesV2Controller : ControllerBase
             Date = invoiceDate,
             DueDate = dueDate,
             Amount = payment.Amount,
+            DocumentId = invoiceDocument.Id,
             WorkOrder = MapWorkOrder(workOrder),
         });
     }
@@ -3508,37 +5159,15 @@ public class CasesV2Controller : ControllerBase
 
         if (previousCourtDecisionAt.HasValue && previousDeadline.HasValue)
         {
-            var previousCalculated = CalculateProceduralDeadline(previousCourtDecisionAt.Value, monthsToAdd);
+            var previousCalculated = ProceduralDeadlineCalculator.CalculateByMonths(previousCourtDecisionAt.Value, monthsToAdd);
             if (!SameDate(previousDeadline, previousCalculated))
             {
                 return null;
             }
         }
 
-        return CalculateProceduralDeadline(courtDecisionAt.Value, monthsToAdd);
+        return ProceduralDeadlineCalculator.CalculateByMonths(courtDecisionAt.Value, monthsToAdd);
     }
-
-    private static DateTime CalculateProceduralDeadline(DateTime decisionAt, int monthsToAdd)
-    {
-        var calculated = decisionAt.Date.AddMonths(monthsToAdd);
-        while (IsRussianNonWorkingDay(calculated))
-        {
-            calculated = calculated.AddDays(1);
-        }
-
-        return DateTime.SpecifyKind(calculated, decisionAt.Kind);
-    }
-
-    private static bool IsRussianNonWorkingDay(DateTime date)
-        => date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday || IsFixedRussianHoliday(date);
-
-    private static bool IsFixedRussianHoliday(DateTime date)
-        => (date.Month == 1 && date.Day is >= 1 and <= 8)
-           || (date.Month == 2 && date.Day == 23)
-           || (date.Month == 3 && date.Day == 8)
-           || (date.Month == 5 && date.Day is 1 or 9)
-           || (date.Month == 6 && date.Day == 12)
-           || (date.Month == 11 && date.Day == 4);
 
     private static bool SameDate(DateTime? left, DateTime? right)
         => left.HasValue == right.HasValue && (!left.HasValue || left.Value.Date == right!.Value.Date);
@@ -3647,10 +5276,57 @@ public class CasesV2Controller : ControllerBase
         }
     }
 
-    private static CaseDocumentTemplate BuildCaseDocumentTemplate(ClientCase clientCase, GenerateCaseDocumentTemplateRequest? request)
+    private async Task<(CaseDocumentTemplateDefinition Template, string? Error, bool NotFound)> ResolveCaseDocumentTemplateDefinitionAsync(
+        GenerateCaseDocumentTemplateRequest? request,
+        CancellationToken ct)
     {
-        var templateKey = NormalizeCaseDocumentTemplateKey(request?.TemplateKey, request?.DocumentType);
-        var definition = GetCaseDocumentTemplateDefinition(templateKey);
+        var templates = await GetCaseDocumentTemplateLibraryAsync(ct);
+        var requestedTemplateKey = NormalizeOptional(request?.TemplateKey);
+        if (requestedTemplateKey is not null)
+        {
+            var normalizedKey = NormalizeDocumentTemplateCode(requestedTemplateKey);
+            if (normalizedKey is null)
+            {
+                return (default, "Некорректный код шаблона.", false);
+            }
+
+            var template = templates.FirstOrDefault(item =>
+                item.IsActive && string.Equals(item.Key, normalizedKey, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(template.Key))
+            {
+                return (template, null, false);
+            }
+
+            var legacyKey = NormalizeCaseDocumentTemplateKey(requestedTemplateKey, request?.DocumentType);
+            if (!string.Equals(legacyKey, normalizedKey, StringComparison.OrdinalIgnoreCase))
+            {
+                template = templates.FirstOrDefault(item =>
+                    item.IsActive && string.Equals(item.Key, legacyKey, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(template.Key))
+                {
+                    return (template, null, false);
+                }
+            }
+
+            return (default, "Активный шаблон документа не найден.", true);
+        }
+
+        var inferredKey = NormalizeCaseDocumentTemplateKey(null, request?.DocumentType);
+        var inferredTemplate = templates.FirstOrDefault(item =>
+            item.IsActive && string.Equals(item.Key, inferredKey, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(inferredTemplate.Key))
+        {
+            return (inferredTemplate, null, false);
+        }
+
+        return (CaseDocumentTemplateDefinitions[0], null, false);
+    }
+
+    private static CaseDocumentTemplate BuildCaseDocumentTemplate(
+        ClientCase clientCase,
+        GenerateCaseDocumentTemplateRequest? request,
+        CaseDocumentTemplateDefinition definition)
+    {
         var documentType = NormalizeOptional(request?.DocumentType) ?? definition.DocumentType;
         var status = NormalizeRequired(request?.Status, "Подготовлен");
         var caseNumber = !string.IsNullOrWhiteSpace(clientCase.CaseNumber)
@@ -3681,6 +5357,7 @@ public class CasesV2Controller : ControllerBase
                 item.Label,
                 item.DocumentType,
                 item.Heading,
+                NormalizeCaseDocumentTemplateCaseTypes(item.CaseTypes),
                 item.Description,
                 item.Content,
                 item.Version <= 0 ? 1 : item.Version,
@@ -3708,6 +5385,7 @@ public class CasesV2Controller : ControllerBase
                     Label = template.Title,
                     DocumentType = template.DocumentType,
                     Heading = template.Heading,
+                    CaseTypes = NormalizeCaseDocumentTemplateCaseTypes(template.CaseTypes),
                     Description = template.Description,
                     Content = template.Content,
                     Version = template.Version <= 0 ? 1 : template.Version,
@@ -3776,6 +5454,7 @@ public class CasesV2Controller : ControllerBase
                 Title = title,
                 DocumentType = documentType,
                 Heading = NormalizeRequired(template.Heading, title),
+                CaseTypes = NormalizeCaseDocumentTemplateCaseTypes(template.CaseTypes),
                 Version = template.Version <= 0 ? 1 : template.Version,
                 IsActive = template.IsActive,
             });
@@ -3784,6 +5463,35 @@ public class CasesV2Controller : ControllerBase
         return result.Count > 0
             ? result
             : CaseDocumentTemplateDefinitions.ToList();
+    }
+
+    private static List<string> NormalizeCaseDocumentTemplateCaseTypes(IEnumerable<string>? values)
+    {
+        if (values is null)
+        {
+            return new List<string>();
+        }
+
+        return values
+            .SelectMany(static value => (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(NormalizeOptional)
+            .Where(static value => value is not null)
+            .Select(static value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.Create(new CultureInfo("ru-RU"), ignoreCase: true))
+            .ToList();
+    }
+
+    private static bool IsCaseDocumentTemplateApplicableToCase(CaseDocumentTemplateDefinition template, ClientCase clientCase)
+    {
+        var caseTypes = NormalizeCaseDocumentTemplateCaseTypes(template.CaseTypes);
+        if (caseTypes.Count == 0)
+        {
+            return true;
+        }
+
+        var caseType = NormalizeOptional(clientCase.CaseType);
+        return caseType is not null && caseTypes.Contains(caseType, StringComparer.OrdinalIgnoreCase);
     }
 
     private static (CaseDocumentTemplateDefinition Template, string? Error) BuildCaseDocumentTemplateDefinition(
@@ -3806,6 +5514,9 @@ public class CasesV2Controller : ControllerBase
 
         var documentType = NormalizeOptional(request?.DocumentType) ?? existing?.DocumentType ?? "Документ";
         var heading = NormalizeOptional(request?.Heading) ?? existing?.Heading ?? label;
+        var caseTypes = request?.CaseTypes is null
+            ? NormalizeCaseDocumentTemplateCaseTypes(existing?.CaseTypes)
+            : NormalizeCaseDocumentTemplateCaseTypes(request.CaseTypes);
         var now = DateTime.UtcNow;
 
         return (new CaseDocumentTemplateDefinition(
@@ -3813,6 +5524,7 @@ public class CasesV2Controller : ControllerBase
             label,
             documentType,
             heading,
+            caseTypes,
             request?.Description ?? existing?.Description,
             request?.Content ?? request?.Html ?? existing?.Content,
             existing.HasValue ? existing.Value.Version + 1 : 1,
@@ -3827,6 +5539,7 @@ public class CasesV2Controller : ControllerBase
             Label = template.Title,
             DocumentType = template.DocumentType,
             Heading = template.Heading,
+            CaseTypes = NormalizeCaseDocumentTemplateCaseTypes(template.CaseTypes),
             Description = template.Description,
             Content = template.Content,
             Version = template.Version <= 0 ? 1 : template.Version,
@@ -4119,6 +5832,24 @@ public class CasesV2Controller : ControllerBase
                 "Просим принять документ к сведению и при необходимости приобщить к материалам дела.",
                 "Реквизиты адресата, исходящий номер и приложения необходимо уточнить перед отправкой."
             ],
+            "power-of-attorney" =>
+            [
+                $"Доверитель {ValueOrDash(ownerName)} уполномочивает представителя по делу «{ValueOrDash(clientCase.Title)}».",
+                $"Представитель вправе готовить, подписывать и подавать процессуальные документы, получать материалы дела, участвовать в заседаниях и совершать иные действия, необходимые для защиты интересов доверителя. Ответственный по делу: {ValueOrDash(clientCase.ResponsibleUser?.FullName)}.",
+                "Срок действия, паспортные данные доверителя и представителя, а также перечень специальных полномочий необходимо проверить и заполнить перед подписанием."
+            ],
+            "application" =>
+            [
+                $"По делу «{ValueOrDash(clientCase.Title)}» подготовлено заявление от имени {ValueOrDash(ownerName)}.",
+                $"Прошу рассмотреть настоящее заявление, учесть обстоятельства дела и приобщить документ к материалам. Адресат: {ValueOrDash(clientCase.CourtName)}.",
+                "Просительную часть, приложения и процессуальные основания необходимо уточнить перед направлением."
+            ],
+            "procedural-document" =>
+            [
+                $"Процессуальный документ подготовлен по делу «{ValueOrDash(clientCase.Title)}».",
+                $"Документ связан со стадией «{ValueOrDash(clientCase.Stage)}», ближайшее заседание: {ValueOrDash(FormatTemplateDateTime(clientCase.NextHearingAt))}.",
+                "Перед подачей необходимо проверить процессуальный срок, адресата, полномочия подписанта, список приложений и доказательств."
+            ],
             _ =>
             [
                 $"Справка сформирована по карточке дела «{ValueOrDash(clientCase.Title)}».",
@@ -4176,14 +5907,19 @@ public class CasesV2Controller : ControllerBase
     private static string E(string? value)
         => WebUtility.HtmlEncode(value ?? string.Empty);
 
-    private static IReadOnlyList<ClientCaseDocumentDto> MapDocuments(IReadOnlyCollection<ClientCaseDocument> documents)
+    private static IReadOnlyList<ClientCaseDocumentDto> MapDocuments(
+        IReadOnlyCollection<ClientCaseDocument> documents,
+        IReadOnlyCollection<CaseDocumentTemplateDefinition>? templates = null)
     {
         var latestVersions = documents
             .GroupBy(item => item.DocumentKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Max(item => item.Version), StringComparer.OrdinalIgnoreCase);
 
         return documents
-            .Select(item => MapDocument(item, latestVersions.TryGetValue(item.DocumentKey, out var latest) && item.Version == latest))
+            .Select(item => MapDocument(
+                item,
+                latestVersions.TryGetValue(item.DocumentKey, out var latest) && item.Version == latest,
+                templates))
             .ToList();
     }
 
@@ -4214,16 +5950,22 @@ public class CasesV2Controller : ControllerBase
             item => item.Version,
             StringComparer.OrdinalIgnoreCase);
 
+        var templates = await GetCaseDocumentTemplateLibraryAsync(ct);
+
         return documents
             .Select(item => MapDocument(
                 item,
-                latestByKey.TryGetValue($"{item.ClientCaseId}:{item.DocumentKey}", out var latest) && item.Version == latest))
+                latestByKey.TryGetValue($"{item.ClientCaseId}:{item.DocumentKey}", out var latest) && item.Version == latest,
+                templates))
             .ToList();
     }
 
-    private static ClientCaseDocumentDto MapDocument(ClientCaseDocument document, bool isLatestVersion)
+    private static ClientCaseDocumentDto MapDocument(
+        ClientCaseDocument document,
+        bool isLatestVersion,
+        IReadOnlyCollection<CaseDocumentTemplateDefinition>? templates = null)
     {
-        var template = ResolveDocumentTemplate(document.DocumentKey);
+        var template = ResolveDocumentTemplate(document.DocumentKey, templates);
 
         return new ClientCaseDocumentDto
         {
@@ -4233,6 +5975,10 @@ public class CasesV2Controller : ControllerBase
             TemplateKey = template?.Key,
             TemplateLabel = template?.Title,
             SourceTaskId = ResolveDocumentSourceTaskId(document.DocumentKey),
+            SourceEventId = ResolveDocumentSourceId(document.DocumentKey, "court-event-"),
+            SourceWorkOrderId = ResolveDocumentSourceId(document.DocumentKey, "work-order-"),
+            SourceInvoiceId = ResolveDocumentSourceId(document.DocumentKey, "invoice-"),
+            SourceStage = ResolveDocumentSourceStage(document.DocumentKey),
             Version = document.Version,
             DocumentType = document.DocumentType,
             Status = document.Status,
@@ -4246,7 +5992,9 @@ public class CasesV2Controller : ControllerBase
         };
     }
 
-    private static CaseDocumentTemplateDefinition? ResolveDocumentTemplate(string documentKey)
+    private static CaseDocumentTemplateDefinition? ResolveDocumentTemplate(
+        string documentKey,
+        IReadOnlyCollection<CaseDocumentTemplateDefinition>? templates = null)
     {
         const string templatePrefix = "template-";
         if (!documentKey.StartsWith(templatePrefix, StringComparison.OrdinalIgnoreCase))
@@ -4255,10 +6003,22 @@ public class CasesV2Controller : ControllerBase
         }
 
         var templateKey = documentKey[templatePrefix.Length..];
-        var definition = CaseDocumentTemplateDefinitions.FirstOrDefault(item =>
+        var definitions = templates is { Count: > 0 }
+            ? templates
+            : CaseDocumentTemplateDefinitions;
+        var definition = definitions.FirstOrDefault(item =>
             string.Equals(item.Key, templateKey, StringComparison.OrdinalIgnoreCase));
         return string.IsNullOrWhiteSpace(definition.Key) ? null : definition;
     }
+
+    private static string BuildWorkOrderDocumentKey(int workOrderId)
+        => $"work-order-{workOrderId}";
+
+    private static string BuildInvoiceDocumentKey(int paymentId)
+        => $"invoice-{paymentId}";
+
+    private static string BuildCourtEventDocumentKey(int courtEventId)
+        => $"court-event-{courtEventId}";
 
     private static int? ResolveDocumentSourceTaskId(string documentKey)
     {
@@ -4278,6 +6038,35 @@ public class CasesV2Controller : ControllerBase
         return int.TryParse(rest[..separatorIndex], NumberStyles.Integer, CultureInfo.InvariantCulture, out var taskId)
             ? taskId
             : null;
+    }
+
+    private static int? ResolveDocumentSourceId(string documentKey, string prefix)
+    {
+        if (!documentKey.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var rest = documentKey[prefix.Length..];
+        var separatorIndex = rest.IndexOf('-', StringComparison.Ordinal);
+        var rawId = separatorIndex < 0 ? rest : rest[..separatorIndex];
+        return int.TryParse(rawId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var sourceId)
+            ? sourceId
+            : null;
+    }
+
+    private static string? ResolveDocumentSourceStage(string documentKey)
+    {
+        const string stagePrefix = "stage-";
+        if (!documentKey.StartsWith(stagePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var rest = documentKey[stagePrefix.Length..];
+        var separatorIndex = rest.IndexOf('-', StringComparison.Ordinal);
+        var sourceStage = separatorIndex < 0 ? rest : rest[..separatorIndex];
+        return string.IsNullOrWhiteSpace(sourceStage) ? null : sourceStage;
     }
 
     private static ClientCaseSummaryDto MapCaseSummary(ClientCase clientCase)
@@ -4858,6 +6647,688 @@ public class CasesV2Controller : ControllerBase
 </body>
 </html>
 """;
+    }
+
+    private static string BuildWorkOrderInvoiceDocumentHtml(
+        ClientCase clientCase,
+        ClientCaseWorkOrder workOrder,
+        Payment payment,
+        string number,
+        DateTime invoiceDate,
+        DateTime dueDate)
+    {
+        var generatedAt = DateTime.UtcNow.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        var rows = string.Join(Environment.NewLine, payment.InvoiceLineItems
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .Select((item, index) => $"""
+              <tr>
+                <td>{index + 1}</td>
+                <td>{Html(item.Name)}</td>
+                <td class="num">{Html(item.Quantity.ToString("N2", CultureInfo.GetCultureInfo("ru-RU")))}</td>
+                <td>{Html(item.Unit)}</td>
+                <td class="num">{Html(FormatMoney(item.Price))}</td>
+                <td class="num">{Html(FormatMoney(item.Quantity * item.Price))}</td>
+              </tr>
+            """));
+        if (string.IsNullOrWhiteSpace(rows))
+        {
+            rows = """<tr><td colspan="6" class="empty">Позиции счета пока не добавлены.</td></tr>""";
+        }
+
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Счет №{{Html(number)}}</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, Arial, sans-serif; color: #0f172a; }
+    body { margin: 0; padding: 32px; background: #f8fafc; }
+    main { max-width: 1000px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; }
+    h1 { margin: 0; font-size: 28px; line-height: 1.2; }
+    .meta { margin-top: 8px; color: #64748b; font-size: 13px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+    .stat { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; background: #f8fafc; }
+    .stat span { display: block; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .stat strong { display: block; margin-top: 6px; font-size: 18px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 8px; text-align: left; vertical-align: top; }
+    th { color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; background: #f8fafc; }
+    .num { text-align: right; white-space: nowrap; }
+    .empty { text-align: center; color: #64748b; padding: 24px; }
+    .total { margin-top: 18px; display: flex; justify-content: flex-end; font-size: 20px; font-weight: 700; }
+    @media print { body { padding: 0; background: #fff; } main { border: 0; border-radius: 0; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Счет №{{Html(number)}}</h1>
+    <div class="meta">Сформировано: {{Html(generatedAt)}}</div>
+    <div class="grid">
+      <div class="stat"><span>Дело</span><strong>{{Html(clientCase.Title)}}</strong><div class="meta">{{Html(clientCase.CaseNumber)}}</div></div>
+      <div class="stat"><span>Клиент</span><strong>{{Html(GetOwnerName(clientCase))}}</strong></div>
+      <div class="stat"><span>Основание</span><strong>{{Html(workOrder.Title)}}</strong></div>
+      <div class="stat"><span>Дата счета</span><strong>{{Html(FormatRuDate(invoiceDate))}}</strong></div>
+      <div class="stat"><span>Срок оплаты</span><strong>{{Html(FormatRuDate(dueDate))}}</strong></div>
+      <div class="stat"><span>Сумма</span><strong>{{Html(FormatMoney(payment.Amount))}}</strong></div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>№</th>
+          <th>Услуга</th>
+          <th class="num">Кол-во</th>
+          <th>Ед.</th>
+          <th class="num">Цена</th>
+          <th class="num">Сумма</th>
+        </tr>
+      </thead>
+      <tbody>
+{{rows}}
+      </tbody>
+    </table>
+    <div class="total">Итого: {{Html(FormatMoney(payment.Amount))}}</div>
+  </main>
+</body>
+</html>
+""";
+    }
+
+    private static ClientCaseProceduralDeadlineDto MapProceduralDeadline(ClientCaseProceduralDeadline item)
+        => new()
+        {
+            Id = item.Id,
+            ClientCaseId = item.ClientCaseId,
+            DeadlineType = item.DeadlineType,
+            DeadlineTypeLabel = ResolveProceduralDeadlineTypeLabel(item.DeadlineType),
+            Title = item.Title,
+            Description = item.Description,
+            DueAt = item.DueAt,
+            AllDay = item.AllDay,
+            Status = item.Status,
+            StatusLabel = ResolveProceduralDeadlineStatusLabel(item.Status),
+            WarningDaysBefore = item.WarningDaysBefore,
+            TaskJournalItemId = item.TaskJournalItemId,
+            ClientCaseDocumentId = item.ClientCaseDocumentId,
+            SourceType = item.SourceType,
+            SourceId = item.SourceId,
+            Notes = item.Notes,
+            CreatedAt = item.CreatedAt,
+            CreatedByUserId = item.CreatedByUserId,
+            CreatedByUserName = item.CreatedByUserName,
+            UpdatedAt = item.UpdatedAt,
+            UpdatedByUserId = item.UpdatedByUserId,
+            UpdatedByUserName = item.UpdatedByUserName,
+            ClosedAt = item.ClosedAt,
+            ClosedByUserId = item.ClosedByUserId,
+            ClosedByUserName = item.ClosedByUserName,
+            CloseReason = item.CloseReason,
+            IsOverdue = item.Status != "closed" && item.DueAt.Date < DateTime.UtcNow.Date,
+            IsWarning = item.Status != "closed" && item.DueAt.Date >= DateTime.UtcNow.Date && item.DueAt.Date <= DateTime.UtcNow.Date.AddDays(Math.Max(0, item.WarningDaysBefore)),
+        };
+
+    private static ClientCaseCourtEventDto MapCourtEvent(ClientCaseCourtEvent item)
+        => new()
+        {
+            Id = item.Id,
+            ClientCaseId = item.ClientCaseId,
+            EventType = item.EventType,
+            EventTypeLabel = ResolveCourtEventTypeLabel(item.EventType),
+            Title = item.Title,
+            Description = item.Description,
+            ScheduledAt = item.ScheduledAt,
+            AllDay = item.AllDay,
+            CourtInstance = item.CourtInstance,
+            CourtInstanceLabel = ResolveCourtInstanceLabel(item.CourtInstance),
+            CourtId = item.CourtId,
+            CourtName = item.CourtName,
+            CourtCaseNumber = item.CourtCaseNumber,
+            Courtroom = item.Courtroom,
+            JudgeName = item.JudgeName,
+            SecretaryName = item.SecretaryName,
+            MovementStatus = item.MovementStatus,
+            MovementStatusLabel = ResolveCourtMovementStatusLabel(item.MovementStatus),
+            ResultSummary = item.ResultSummary,
+            SourceType = item.SourceType,
+            ClientCaseDocumentId = item.ClientCaseDocumentId,
+            ProceduralDeadlineId = item.ProceduralDeadlineId,
+            CreatedAt = item.CreatedAt,
+            CreatedByUserId = item.CreatedByUserId,
+            CreatedByUserName = item.CreatedByUserName,
+            UpdatedAt = item.UpdatedAt,
+            UpdatedByUserId = item.UpdatedByUserId,
+            UpdatedByUserName = item.UpdatedByUserName,
+            IsOverdue = item.MovementStatus is not "held" and not "completed" and not "cancelled" && item.ScheduledAt.Date < DateTime.UtcNow.Date,
+        };
+
+    private static ClientCaseCourtEventHistoryDto MapCourtEventHistory(ClientCaseCourtEventHistory item)
+        => new()
+        {
+            Id = item.Id,
+            ClientCaseCourtEventId = item.ClientCaseCourtEventId,
+            ClientCaseId = item.ClientCaseId,
+            Action = item.Action,
+            Summary = item.Summary,
+            OccurredAt = item.OccurredAt,
+            ActorUserId = item.ActorUserId,
+            ActorUserName = item.ActorUserName,
+        };
+
+    private void AddCourtEventHistory(
+        ClientCaseCourtEvent courtEvent,
+        string action,
+        string summary,
+        int? actorUserId,
+        string actorName)
+    {
+        _db.ClientCaseCourtEventHistory.Add(new ClientCaseCourtEventHistory
+        {
+            ClientCaseCourtEventId = courtEvent.Id,
+            ClientCaseId = courtEvent.ClientCaseId,
+            Action = Truncate(action, 64),
+            Summary = Truncate(summary, 1000),
+            OccurredAt = DateTime.UtcNow,
+            ActorUserId = actorUserId,
+            ActorUserName = Truncate(actorName, 256),
+        });
+    }
+
+    private static ClientCaseCourtDto MapCourt(ClientCaseCourt item)
+        => new()
+        {
+            Id = item.Id,
+            Name = item.Name,
+            Instance = item.Instance,
+            InstanceLabel = ResolveCourtInstanceLabel(item.Instance),
+            Code = item.Code,
+            Url = item.Url,
+            Address = item.Address,
+            Contacts = item.Contacts,
+            IsActive = item.IsActive,
+            SortOrder = item.SortOrder,
+            CreatedAt = item.CreatedAt,
+            CreatedByUserId = item.CreatedByUserId,
+            CreatedByUserName = item.CreatedByUserName,
+            UpdatedAt = item.UpdatedAt,
+            UpdatedByUserId = item.UpdatedByUserId,
+            UpdatedByUserName = item.UpdatedByUserName,
+        };
+
+    private static ClientCaseCourtPartyDto MapCourtParty(ClientCaseCourtParty item)
+        => new()
+        {
+            Id = item.Id,
+            ClientCaseId = item.ClientCaseId,
+            RelatedPartyId = item.RelatedPartyId,
+            DisplayName = item.DisplayName,
+            Side = item.Side,
+            SideLabel = ResolveCourtPartySideLabel(item.Side),
+            ProcessRole = item.ProcessRole,
+            RepresentativeName = item.RepresentativeName,
+            Notes = item.Notes,
+            IsArchived = item.IsArchived,
+            CreatedAt = item.CreatedAt,
+            CreatedByUserId = item.CreatedByUserId,
+            CreatedByUserName = item.CreatedByUserName,
+            UpdatedAt = item.UpdatedAt,
+            UpdatedByUserId = item.UpdatedByUserId,
+            UpdatedByUserName = item.UpdatedByUserName,
+        };
+
+    private async Task<CourtPartyValidationResult> ValidateCourtPartyRequestAsync(
+        int clientCaseId,
+        UpsertClientCaseCourtPartyRequest? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return new("Укажите параметры стороны процесса.");
+        }
+
+        var displayName = NormalizeOptional(request.DisplayName);
+        if (request.RelatedPartyId.HasValue)
+        {
+            var relatedParty = await _db.ClientCaseRelatedParties
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == request.RelatedPartyId.Value && item.ClientCaseId == clientCaseId, ct);
+            if (relatedParty is null)
+            {
+                return new("Связанный участник дела не найден.");
+            }
+
+            displayName ??= relatedParty.DisplayName;
+        }
+
+        if (displayName is null)
+        {
+            return new("Укажите наименование стороны процесса.");
+        }
+
+        return new(
+            null,
+            request.RelatedPartyId,
+            Truncate(displayName, 300),
+            NormalizeCourtPartySide(request.Side),
+            Truncate(NormalizeOptional(request.ProcessRole) ?? "Участник процесса", 120),
+            Truncate(NormalizeOptional(request.RepresentativeName) ?? string.Empty, 300),
+            Truncate(NormalizeOptional(request.Notes) ?? string.Empty, 1000));
+    }
+
+    private static string NormalizeCourtPartySide(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
+        return normalized switch
+        {
+            "claimant" or "plaintiff" => "claimant",
+            "respondent" or "defendant" => "respondent",
+            "thirdparty" or "third-party" or "third_party" => "thirdParty",
+            "applicant" => "applicant",
+            _ => "other",
+        };
+    }
+
+    private static string ResolveCourtPartySideLabel(string value)
+        => value switch
+        {
+            "claimant" => "Истец",
+            "respondent" => "Ответчик",
+            "thirdParty" => "Третье лицо",
+            "applicant" => "Заявитель",
+            _ => "Иная сторона",
+        };
+
+    private async Task<ClientCaseCourt?> ResolveCourtDirectoryItemForRequestAsync(int? courtId, CancellationToken ct)
+    {
+        if (!courtId.HasValue)
+        {
+            return null;
+        }
+
+        return await _db.ClientCaseCourts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == courtId.Value && item.IsActive, ct);
+    }
+
+    private static CourtDirectoryValidationResult ValidateCourtDirectoryRequest(UpsertClientCaseCourtRequest? request)
+    {
+        if (request is null)
+        {
+            return new("Укажите параметры суда.");
+        }
+
+        var name = NormalizeOptional(request.Name);
+        if (name is null)
+        {
+            return new("Укажите наименование суда.");
+        }
+
+        return new(
+            null,
+            Truncate(name, 200),
+            NormalizeCourtInstance(request.Instance),
+            Truncate(NormalizeOptional(request.Code) ?? string.Empty, 100),
+            Truncate(NormalizeOptional(request.Url) ?? string.Empty, 1000),
+            Truncate(NormalizeOptional(request.Address) ?? string.Empty, 500),
+            Truncate(NormalizeOptional(request.Contacts) ?? string.Empty, 500),
+            request.IsActive ?? true,
+            request.SortOrder ?? 0);
+    }
+
+    private static CourtEventValidationResult ValidateCourtEventRequest(UpsertClientCaseCourtEventRequest? request, ClientCase clientCase, ClientCaseCourt? court)
+    {
+        if (request is null)
+        {
+            return new("Укажите параметры судебного события.");
+        }
+
+        if (!request.ScheduledAt.HasValue)
+        {
+            return new("Укажите дату судебного события.");
+        }
+
+        var eventType = NormalizeCourtEventType(request.EventType);
+        var title = NormalizeOptional(request.Title) ?? ResolveCourtEventTypeLabel(eventType);
+        var allDay = request.AllDay ?? eventType is "decision" or "movement";
+        return new(
+            null,
+            eventType,
+            Truncate(title, 200),
+            Truncate(NormalizeOptional(request.Description) ?? string.Empty, 1000),
+            NormalizeDeadlineDateTime(request.ScheduledAt.Value, allDay),
+            allDay,
+            NormalizeCourtInstance(request.CourtInstance ?? court?.Instance),
+            Truncate(NormalizeOptional(request.CourtName) ?? NormalizeOptional(court?.Name) ?? NormalizeOptional(clientCase.CourtName) ?? string.Empty, 200),
+            Truncate(NormalizeOptional(request.CourtCaseNumber) ?? NormalizeOptional(clientCase.CourtCaseNumber) ?? string.Empty, 100),
+            Truncate(NormalizeOptional(request.Courtroom) ?? NormalizeOptional(clientCase.Courtroom) ?? string.Empty, 120),
+            Truncate(NormalizeOptional(request.JudgeName) ?? string.Empty, 200),
+            Truncate(NormalizeOptional(request.SecretaryName) ?? string.Empty, 200),
+            NormalizeCourtMovementStatus(request.MovementStatus),
+            Truncate(NormalizeOptional(request.ResultSummary) ?? string.Empty, 1000),
+            Truncate(NormalizeOptional(request.SourceType) ?? "manual", 64));
+    }
+
+    private static string NormalizeCourtEventType(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
+        return normalized switch
+        {
+            "claim" or "hearing" or "decision" or "postponement" or "suspension" or "movement" => normalized,
+            _ => "hearing",
+        };
+    }
+
+    private static string ResolveCourtEventTypeLabel(string value)
+        => value switch
+        {
+            "claim" => "Подача иска",
+            "decision" => "Судебное решение",
+            "postponement" => "Перенос заседания",
+            "suspension" => "Приостановление",
+            "movement" => "Движение дела",
+            _ => "Судебное заседание",
+        };
+
+    private static string NormalizeCourtInstance(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
+        return normalized switch
+        {
+            "first" or "appeal" or "cassation" or "supervision" => normalized,
+            _ => "first",
+        };
+    }
+
+    private static string ResolveCourtInstanceLabel(string value)
+        => value switch
+        {
+            "appeal" => "Апелляция",
+            "cassation" => "Кассация",
+            "supervision" => "Надзор",
+            _ => "Первая инстанция",
+        };
+
+    private static string NormalizeCourtMovementStatus(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
+        return normalized switch
+        {
+            "scheduled" or "held" or "postponed" or "cancelled" or "completed" or "suspended" => normalized,
+            _ => "scheduled",
+        };
+    }
+
+    private static string ResolveCourtMovementStatusLabel(string value)
+        => value switch
+        {
+            "held" => "Проведено",
+            "postponed" => "Отложено",
+            "cancelled" => "Отменено",
+            "completed" => "Завершено",
+            "suspended" => "Приостановлено",
+            _ => "Назначено",
+        };
+
+    private async Task<string?> ValidateCourtEventLinksAsync(int clientCaseId, UpsertClientCaseCourtEventRequest? request, CancellationToken ct)
+    {
+        if (request?.ClientCaseDocumentId is { } documentId)
+        {
+            var documentExists = await _db.ClientCaseDocuments
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == documentId && item.ClientCaseId == clientCaseId, ct);
+            if (!documentExists)
+            {
+                return "Р”РѕРєСѓРјРµРЅС‚ СЃСѓРґРµР±РЅРѕРіРѕ СЃРѕР±С‹С‚РёСЏ РЅРµ РЅР°Р№РґРµРЅ РІ СЌС‚РѕРј РґРµР»Рµ.";
+            }
+        }
+
+        if (request?.ProceduralDeadlineId is { } deadlineId)
+        {
+            var deadlineExists = await _db.ClientCaseProceduralDeadlines
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == deadlineId && item.ClientCaseId == clientCaseId, ct);
+            if (!deadlineExists)
+            {
+                return "РџСЂРѕС†РµСЃСЃСѓР°Р»СЊРЅС‹Р№ СЃСЂРѕРє СЃСѓРґРµР±РЅРѕРіРѕ СЃРѕР±С‹С‚РёСЏ РЅРµ РЅР°Р№РґРµРЅ РІ СЌС‚РѕРј РґРµР»Рµ.";
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<string?> ValidateProceduralDeadlineLinksAsync(int clientCaseId, UpsertClientCaseProceduralDeadlineRequest? request, CancellationToken ct)
+    {
+        if (request?.TaskJournalItemId is { } taskId)
+        {
+            var taskExists = await _db.TaskJournalItems
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == taskId && item.ClientCaseId == clientCaseId, ct);
+            if (!taskExists)
+            {
+                return "Р—Р°РґР°С‡Р° РїСЂРѕС†РµСЃСЃСѓР°Р»СЊРЅРѕРіРѕ СЃСЂРѕРєР° РЅРµ РЅР°Р№РґРµРЅР° РІ СЌС‚РѕРј РґРµР»Рµ.";
+            }
+        }
+
+        if (request?.ClientCaseDocumentId is { } documentId)
+        {
+            var documentExists = await _db.ClientCaseDocuments
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == documentId && item.ClientCaseId == clientCaseId, ct);
+            if (!documentExists)
+            {
+                return "Р”РѕРєСѓРјРµРЅС‚ РїСЂРѕС†РµСЃСЃСѓР°Р»СЊРЅРѕРіРѕ СЃСЂРѕРєР° РЅРµ РЅР°Р№РґРµРЅ РІ СЌС‚РѕРј РґРµР»Рµ.";
+            }
+        }
+
+        if (IsCourtEventSourceType(request?.SourceType) && request?.SourceId is { } courtEventId)
+        {
+            var courtEventExists = await _db.ClientCaseCourtEvents
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == courtEventId && item.ClientCaseId == clientCaseId, ct);
+            if (!courtEventExists)
+            {
+                return "РЎСѓРґРµР±РЅРѕРµ СЃРѕР±С‹С‚РёРµ РїСЂРѕС†РµСЃСЃСѓР°Р»СЊРЅРѕРіРѕ СЃСЂРѕРєР° РЅРµ РЅР°Р№РґРµРЅРѕ РІ СЌС‚РѕРј РґРµР»Рµ.";
+            }
+        }
+
+        return null;
+    }
+
+    private async Task SyncCourtEventDeadlineSourceAsync(
+        ClientCaseCourtEvent courtEvent,
+        int? previousDeadlineId,
+        int? actorUserId,
+        string actorName,
+        CancellationToken ct)
+    {
+        if (previousDeadlineId.HasValue && previousDeadlineId != courtEvent.ProceduralDeadlineId)
+        {
+            var previousDeadline = await _db.ClientCaseProceduralDeadlines
+                .FirstOrDefaultAsync(item => item.Id == previousDeadlineId && item.SourceId == courtEvent.Id, ct);
+            if (previousDeadline is not null && IsCourtEventSourceType(previousDeadline.SourceType))
+            {
+                previousDeadline.SourceType = "manual";
+                previousDeadline.SourceId = null;
+                previousDeadline.UpdatedAt = DateTime.UtcNow;
+                previousDeadline.UpdatedByUserId = actorUserId;
+                previousDeadline.UpdatedByUserName = Truncate(actorName, 256);
+            }
+        }
+
+        if (!courtEvent.ProceduralDeadlineId.HasValue)
+        {
+            return;
+        }
+
+        var deadline = await _db.ClientCaseProceduralDeadlines
+            .FirstOrDefaultAsync(item => item.Id == courtEvent.ProceduralDeadlineId && item.ClientCaseId == courtEvent.ClientCaseId, ct);
+        if (deadline is null)
+        {
+            return;
+        }
+
+        deadline.SourceType = "court-event";
+        deadline.SourceId = courtEvent.Id;
+        deadline.ClientCaseDocumentId ??= courtEvent.ClientCaseDocumentId;
+        deadline.UpdatedAt = DateTime.UtcNow;
+        deadline.UpdatedByUserId = actorUserId;
+        deadline.UpdatedByUserName = Truncate(actorName, 256);
+    }
+
+    private async Task SyncDeadlineCourtEventLinkAsync(
+        ClientCaseProceduralDeadline deadline,
+        string? previousSourceType,
+        int? previousSourceId,
+        int? actorUserId,
+        string actorName,
+        CancellationToken ct)
+    {
+        if (IsCourtEventSourceType(previousSourceType) && previousSourceId.HasValue && previousSourceId != deadline.SourceId)
+        {
+            var previousCourtEvent = await _db.ClientCaseCourtEvents
+                .FirstOrDefaultAsync(item => item.Id == previousSourceId && item.ProceduralDeadlineId == deadline.Id, ct);
+            if (previousCourtEvent is not null)
+            {
+                previousCourtEvent.ProceduralDeadlineId = null;
+                previousCourtEvent.UpdatedAt = DateTime.UtcNow;
+                previousCourtEvent.UpdatedByUserId = actorUserId;
+                previousCourtEvent.UpdatedByUserName = Truncate(actorName, 256);
+            }
+        }
+
+        if (!IsCourtEventSourceType(deadline.SourceType) || !deadline.SourceId.HasValue)
+        {
+            return;
+        }
+
+        var courtEvent = await _db.ClientCaseCourtEvents
+            .FirstOrDefaultAsync(item => item.Id == deadline.SourceId && item.ClientCaseId == deadline.ClientCaseId, ct);
+        if (courtEvent is null)
+        {
+            return;
+        }
+
+        courtEvent.ProceduralDeadlineId = deadline.Id;
+        courtEvent.ClientCaseDocumentId ??= deadline.ClientCaseDocumentId;
+        courtEvent.UpdatedAt = DateTime.UtcNow;
+        courtEvent.UpdatedByUserId = actorUserId;
+        courtEvent.UpdatedByUserName = Truncate(actorName, 256);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private static bool IsCourtEventSourceType(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        return string.Equals(normalized, "court-event", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "courtEvent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "court_event", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static ProceduralDeadlineValidationResult ValidateProceduralDeadlineRequest(UpsertClientCaseProceduralDeadlineRequest? request)
+    {
+        if (request is null)
+        {
+            return new("Укажите параметры процессуального срока.");
+        }
+
+        var deadlineType = NormalizeProceduralDeadlineType(request.DeadlineType);
+        if (deadlineType is null)
+        {
+            return new("Укажите тип процессуального срока.");
+        }
+
+        var title = NormalizeOptional(request.Title) ?? ResolveProceduralDeadlineTypeLabel(deadlineType);
+        if (!request.DueAt.HasValue)
+        {
+            return new("Укажите дату процессуального срока.");
+        }
+
+        var allDay = request.AllDay ?? true;
+        return new(
+            null,
+            deadlineType,
+            Truncate(title, 200),
+            Truncate(NormalizeOptional(request.Description) ?? string.Empty, 1000),
+            NormalizeDeadlineDateTime(request.DueAt.Value, allDay),
+            allDay,
+            NormalizeProceduralDeadlineStatus(request.Status),
+            Math.Clamp(request.WarningDaysBefore ?? 7, 0, 365),
+            Truncate(NormalizeOptional(request.SourceType) ?? "manual", 64),
+            Truncate(NormalizeOptional(request.Notes) ?? string.Empty, 1000));
+    }
+
+    private static DateTime NormalizeDeadlineDateTime(DateTime value, bool allDay)
+    {
+        var normalized = value.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(value, DateTimeKind.Utc)
+            : value.ToUniversalTime();
+        return allDay ? normalized.Date : normalized;
+    }
+
+    private static string? NormalizeProceduralDeadlineType(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        return normalized.All(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_')
+            ? Truncate(normalized, 64)
+            : null;
+    }
+
+    private static string NormalizeProceduralDeadlineStatus(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
+        return normalized is "active" or "moved" or "closed" or "cancelled" ? normalized : "active";
+    }
+
+    private static string ResolveProceduralDeadlineTypeLabel(string value)
+        => value.ToLowerInvariant() switch
+        {
+            "appeal" => "Апелляция",
+            "cassation" => "Кассация",
+            "motion" => "Ходатайство",
+            "objection" => "Возражения",
+            "claim" => "Подача заявления",
+            "hearing" => "Судебное заседание",
+            "document" => "Документ",
+            _ => value,
+        };
+
+    private static string ResolveProceduralDeadlineStatusLabel(string value)
+        => value.ToLowerInvariant() switch
+        {
+            "active" => "Активен",
+            "moved" => "Перенесен",
+            "closed" => "Закрыт",
+            "cancelled" => "Отменен",
+            _ => value,
+        };
+
+    private async Task LinkProceduralDeadlineTaskAsync(int deadlineId, CancellationToken ct)
+    {
+        var deadline = await _db.ClientCaseProceduralDeadlines
+            .FirstOrDefaultAsync(item => item.Id == deadlineId, ct);
+        if (deadline is null || deadline.TaskJournalItemId.HasValue)
+        {
+            return;
+        }
+
+        var tag = $"case-deadline:entity-{deadline.Id}";
+        var task = await _db.TaskJournalItems
+            .Where(item => item.ClientCaseId == deadline.ClientCaseId && item.TagsJson.Contains(tag))
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (task is null)
+        {
+            return;
+        }
+
+        deadline.TaskJournalItemId = task.Id;
+        deadline.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
     }
 
     private static string NormalizeWorkOrderStatus(string? value)
@@ -5477,6 +7948,7 @@ public class CasesV2Controller : ControllerBase
         public DateTime Date { get; set; }
         public DateTime DueDate { get; set; }
         public decimal Amount { get; set; }
+        public int? DocumentId { get; set; }
         public ClientCaseWorkOrderDto WorkOrder { get; set; } = new();
     }
 
@@ -5529,6 +8001,236 @@ public class CasesV2Controller : ControllerBase
         public decimal UnitPrice { get; set; }
         public decimal TotalAmount { get; set; }
         public int SortOrder { get; set; }
+    }
+
+    public sealed class ClientCaseProceduralDeadlineDto
+    {
+        public int Id { get; set; }
+        public int ClientCaseId { get; set; }
+        public string DeadlineType { get; set; } = string.Empty;
+        public string DeadlineTypeLabel { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public DateTime DueAt { get; set; }
+        public bool AllDay { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public string StatusLabel { get; set; } = string.Empty;
+        public int WarningDaysBefore { get; set; }
+        public int? TaskJournalItemId { get; set; }
+        public int? ClientCaseDocumentId { get; set; }
+        public string SourceType { get; set; } = string.Empty;
+        public int? SourceId { get; set; }
+        public string Notes { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+        public int? CreatedByUserId { get; set; }
+        public string CreatedByUserName { get; set; } = string.Empty;
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedByUserId { get; set; }
+        public string UpdatedByUserName { get; set; } = string.Empty;
+        public DateTime? ClosedAt { get; set; }
+        public int? ClosedByUserId { get; set; }
+        public string ClosedByUserName { get; set; } = string.Empty;
+        public string CloseReason { get; set; } = string.Empty;
+        public bool IsOverdue { get; set; }
+        public bool IsWarning { get; set; }
+    }
+
+    public sealed class UpsertClientCaseProceduralDeadlineRequest
+    {
+        public string? DeadlineType { get; set; }
+        public string? Title { get; set; }
+        public string? Description { get; set; }
+        public DateTime? DueAt { get; set; }
+        public bool? AllDay { get; set; }
+        public string? Status { get; set; }
+        public int? WarningDaysBefore { get; set; }
+        public int? TaskJournalItemId { get; set; }
+        public int? ClientCaseDocumentId { get; set; }
+        public string? SourceType { get; set; }
+        public int? SourceId { get; set; }
+        public string? Notes { get; set; }
+        public string? CloseReason { get; set; }
+    }
+
+    public sealed class CloseClientCaseProceduralDeadlineRequest
+    {
+        public string? Reason { get; set; }
+    }
+
+    public sealed class ClientCaseCourtDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Instance { get; set; } = string.Empty;
+        public string InstanceLabel { get; set; } = string.Empty;
+        public string Code { get; set; } = string.Empty;
+        public string Url { get; set; } = string.Empty;
+        public string Address { get; set; } = string.Empty;
+        public string Contacts { get; set; } = string.Empty;
+        public bool IsActive { get; set; }
+        public int SortOrder { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public int? CreatedByUserId { get; set; }
+        public string CreatedByUserName { get; set; } = string.Empty;
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedByUserId { get; set; }
+        public string UpdatedByUserName { get; set; } = string.Empty;
+    }
+
+    public sealed class UpsertClientCaseCourtRequest
+    {
+        public string? Name { get; set; }
+        public string? Instance { get; set; }
+        public string? Code { get; set; }
+        public string? Url { get; set; }
+        public string? Address { get; set; }
+        public string? Contacts { get; set; }
+        public bool? IsActive { get; set; }
+        public int? SortOrder { get; set; }
+    }
+
+    public sealed class ClientCaseCourtEventDto
+    {
+        public int Id { get; set; }
+        public int ClientCaseId { get; set; }
+        public string EventType { get; set; } = string.Empty;
+        public string EventTypeLabel { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public DateTime ScheduledAt { get; set; }
+        public bool AllDay { get; set; }
+        public string CourtInstance { get; set; } = string.Empty;
+        public string CourtInstanceLabel { get; set; } = string.Empty;
+        public int? CourtId { get; set; }
+        public string CourtName { get; set; } = string.Empty;
+        public string CourtCaseNumber { get; set; } = string.Empty;
+        public string Courtroom { get; set; } = string.Empty;
+        public string JudgeName { get; set; } = string.Empty;
+        public string SecretaryName { get; set; } = string.Empty;
+        public string MovementStatus { get; set; } = string.Empty;
+        public string MovementStatusLabel { get; set; } = string.Empty;
+        public string ResultSummary { get; set; } = string.Empty;
+        public string SourceType { get; set; } = string.Empty;
+        public int? ClientCaseDocumentId { get; set; }
+        public int? ProceduralDeadlineId { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public int? CreatedByUserId { get; set; }
+        public string CreatedByUserName { get; set; } = string.Empty;
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedByUserId { get; set; }
+        public string UpdatedByUserName { get; set; } = string.Empty;
+        public bool IsOverdue { get; set; }
+    }
+
+    public sealed class UpsertClientCaseCourtEventRequest
+    {
+        public string? EventType { get; set; }
+        public string? Title { get; set; }
+        public string? Description { get; set; }
+        public DateTime? ScheduledAt { get; set; }
+        public bool? AllDay { get; set; }
+        public string? CourtInstance { get; set; }
+        public int? CourtId { get; set; }
+        public string? CourtName { get; set; }
+        public string? CourtCaseNumber { get; set; }
+        public string? Courtroom { get; set; }
+        public string? JudgeName { get; set; }
+        public string? SecretaryName { get; set; }
+        public string? MovementStatus { get; set; }
+        public string? ResultSummary { get; set; }
+        public string? SourceType { get; set; }
+        public int? ClientCaseDocumentId { get; set; }
+        public int? ProceduralDeadlineId { get; set; }
+    }
+
+    public sealed class ClientCaseCourtEventHistoryDto
+    {
+        public int Id { get; set; }
+        public int ClientCaseCourtEventId { get; set; }
+        public int ClientCaseId { get; set; }
+        public string Action { get; set; } = string.Empty;
+        public string Summary { get; set; } = string.Empty;
+        public DateTime OccurredAt { get; set; }
+        public int? ActorUserId { get; set; }
+        public string ActorUserName { get; set; } = string.Empty;
+    }
+
+    public sealed class ClientCaseCourtPartyDto
+    {
+        public int Id { get; set; }
+        public int ClientCaseId { get; set; }
+        public int? RelatedPartyId { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public string Side { get; set; } = string.Empty;
+        public string SideLabel { get; set; } = string.Empty;
+        public string ProcessRole { get; set; } = string.Empty;
+        public string RepresentativeName { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+        public bool IsArchived { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public int? CreatedByUserId { get; set; }
+        public string CreatedByUserName { get; set; } = string.Empty;
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedByUserId { get; set; }
+        public string UpdatedByUserName { get; set; } = string.Empty;
+    }
+
+    public sealed class UpsertClientCaseCourtPartyRequest
+    {
+        public int? RelatedPartyId { get; set; }
+        public string? DisplayName { get; set; }
+        public string? Side { get; set; }
+        public string? ProcessRole { get; set; }
+        public string? RepresentativeName { get; set; }
+        public string? Notes { get; set; }
+    }
+
+    public sealed class ProceduralDeadlineCalculationDto
+    {
+        public DateTime? DeadlineAt { get; set; }
+        public string Rule { get; set; } = string.Empty;
+        public int MonthsToAdd { get; set; }
+        public int DaysToAdd { get; set; }
+        public bool RollForwardToWorkingDay { get; set; }
+    }
+
+    public sealed class CaseCalendarEventDto
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Kind { get; set; } = string.Empty;
+        public string SourceType { get; set; } = string.Empty;
+        public int? SourceId { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public DateTime StartAt { get; set; }
+        public DateTime EndAt { get; set; }
+        public bool AllDay { get; set; }
+        public int ClientCaseId { get; set; }
+        public string CaseTitle { get; set; } = string.Empty;
+        public string? ClientName { get; set; }
+        public string? LegalEntityName { get; set; }
+        public int? ResponsibleUserId { get; set; }
+        public string ResponsibleName { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string Priority { get; set; } = string.Empty;
+        public string? DeadlineType { get; set; }
+        public bool IsOverdue { get; set; }
+        public bool IsWarning { get; set; }
+        public string? CourtName { get; set; }
+        public string? CourtCaseNumber { get; set; }
+    }
+
+    public sealed class CaseCalendarSummaryDto
+    {
+        public DateTime From { get; set; }
+        public DateTime To { get; set; }
+        public int TotalEventCount { get; set; }
+        public int OverdueCount { get; set; }
+        public int WarningCount { get; set; }
+        public int CourtEventCount { get; set; }
+        public int ProceduralDeadlineCount { get; set; }
+        public int CaseDeadlineCount { get; set; }
+        public int TaskCount { get; set; }
+        public CaseCalendarEventDto? NearestEvent { get; set; }
     }
 
     public sealed class ClientCaseActivityDto
@@ -5720,11 +8422,20 @@ public class CasesV2Controller : ControllerBase
         public string Label { get; set; } = string.Empty;
         public string DocumentType { get; set; } = string.Empty;
         public string Heading { get; set; } = string.Empty;
+        public List<string> CaseTypes { get; set; } = new();
         public string? Description { get; set; }
         public string? Content { get; set; }
         public int Version { get; set; } = 1;
         public bool IsActive { get; set; } = true;
         public DateTime? UpdatedAt { get; set; }
+    }
+
+    public sealed class CaseDocumentTemplateTokenDto
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Category { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Placeholder { get; set; } = string.Empty;
     }
 
     public sealed class UpsertCaseDocumentTemplateRequest
@@ -5734,6 +8445,7 @@ public class CasesV2Controller : ControllerBase
         public string? Name { get; set; }
         public string? DocumentType { get; set; }
         public string? Heading { get; set; }
+        public List<string>? CaseTypes { get; set; }
         public string? Description { get; set; }
         public string? Content { get; set; }
         public string? Html { get; set; }
@@ -5766,6 +8478,7 @@ public class CasesV2Controller : ControllerBase
         public string Label { get; set; } = string.Empty;
         public string DocumentType { get; set; } = string.Empty;
         public string Heading { get; set; } = string.Empty;
+        public List<string> CaseTypes { get; set; } = new();
         public string? Description { get; set; }
         public string? Content { get; set; }
         public int Version { get; set; } = 1;
@@ -5780,14 +8493,69 @@ public class CasesV2Controller : ControllerBase
         string FileName,
         string Html);
 
+    private readonly record struct ProceduralDeadlineValidationResult(
+        string? Error,
+        string DeadlineType = "",
+        string Title = "",
+        string Description = "",
+        DateTime DueAt = default,
+        bool AllDay = true,
+        string Status = "active",
+        int WarningDaysBefore = 7,
+        string SourceType = "manual",
+        string Notes = "");
+
+    private readonly record struct CourtEventValidationResult(
+        string? Error,
+        string EventType = "",
+        string Title = "",
+        string Description = "",
+        DateTime ScheduledAt = default,
+        bool AllDay = false,
+        string CourtInstance = "",
+        string CourtName = "",
+        string CourtCaseNumber = "",
+        string Courtroom = "",
+        string JudgeName = "",
+        string SecretaryName = "",
+        string MovementStatus = "",
+        string ResultSummary = "",
+        string SourceType = "manual");
+
+    private readonly record struct CourtPartyValidationResult(
+        string? Error,
+        int? RelatedPartyId = null,
+        string DisplayName = "",
+        string Side = "other",
+        string ProcessRole = "",
+        string RepresentativeName = "",
+        string Notes = "");
+
+    private readonly record struct CourtDirectoryValidationResult(
+        string? Error,
+        string Name = "",
+        string Instance = "first",
+        string Code = "",
+        string Url = "",
+        string Address = "",
+        string Contacts = "",
+        bool IsActive = true,
+        int SortOrder = 0);
+
     private readonly record struct CaseDocumentTemplateDefinition(
         string Key,
         string Title,
         string DocumentType,
         string Heading,
+        IReadOnlyList<string>? CaseTypes = null,
         string? Description = null,
         string? Content = null,
         int Version = 1,
         bool IsActive = true,
         DateTime? UpdatedAt = null);
+
+    private readonly record struct CaseDocumentTemplateTokenDefinition(
+        string Key,
+        string Category,
+        string Description);
 }

@@ -79,6 +79,9 @@ public class PaymentContext : DbContext
         typeof(ClientCaseRelatedParty),
         typeof(ClientCaseWorkOrder),
         typeof(ClientCaseWorkOrderItem),
+        typeof(ClientCaseCourtEvent),
+        typeof(ClientCaseCourtParty),
+        typeof(ClientCaseCourt),
         typeof(Role),
         typeof(User),
     };
@@ -1386,6 +1389,165 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.DueDate).HasDatabaseName("IX_ClientCaseWorkOrderItems_DueDate");
         });
 
+        // ------------------ ClientCaseProceduralDeadline ------------------
+        modelBuilder.Entity<ClientCaseProceduralDeadline>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DeadlineType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(1000);
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.SourceType).HasMaxLength(64);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.UpdatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.ClosedByUserName).HasMaxLength(256);
+            entity.Property(e => e.CloseReason).HasMaxLength(1000);
+
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.ProceduralDeadlines)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany()
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.ClientCaseDocument)
+                .WithMany()
+                .HasForeignKey(e => e.ClientCaseDocumentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_ClientCaseProceduralDeadlines_ClientCaseId");
+            entity.HasIndex(e => e.DueAt).HasDatabaseName("IX_ClientCaseProceduralDeadlines_DueAt");
+            entity.HasIndex(e => e.Status).HasDatabaseName("IX_ClientCaseProceduralDeadlines_Status");
+            entity.HasIndex(e => e.DeadlineType).HasDatabaseName("IX_ClientCaseProceduralDeadlines_DeadlineType");
+            entity.HasIndex(e => e.TaskJournalItemId).HasDatabaseName("IX_ClientCaseProceduralDeadlines_TaskJournalItemId");
+            entity.HasIndex(e => e.ClientCaseDocumentId).HasDatabaseName("IX_ClientCaseProceduralDeadlines_DocumentId");
+            entity.HasIndex(e => new { e.ClientCaseId, e.Status, e.DueAt }).HasDatabaseName("IX_ClientCaseProceduralDeadlines_Case_Status_DueAt");
+        });
+
+        // ------------------ ClientCaseCourtEvent ------------------
+        modelBuilder.Entity<ClientCaseCourtEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.EventType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(1000);
+            entity.Property(e => e.CourtInstance).HasMaxLength(64);
+            entity.Property(e => e.CourtName).HasMaxLength(200);
+            entity.Property(e => e.CourtCaseNumber).HasMaxLength(100);
+            entity.Property(e => e.Courtroom).HasMaxLength(120);
+            entity.Property(e => e.JudgeName).HasMaxLength(200);
+            entity.Property(e => e.SecretaryName).HasMaxLength(200);
+            entity.Property(e => e.MovementStatus).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ResultSummary).HasMaxLength(1000);
+            entity.Property(e => e.SourceType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.UpdatedByUserName).HasMaxLength(256);
+
+            entity.HasOne(e => e.Court)
+                .WithMany()
+                .HasForeignKey(e => e.CourtId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.CourtEvents)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ClientCaseDocument)
+                .WithMany()
+                .HasForeignKey(e => e.ClientCaseDocumentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.ProceduralDeadline)
+                .WithMany()
+                .HasForeignKey(e => e.ProceduralDeadlineId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_ClientCaseCourtEvents_ClientCaseId");
+            entity.HasIndex(e => e.ScheduledAt).HasDatabaseName("IX_ClientCaseCourtEvents_ScheduledAt");
+            entity.HasIndex(e => e.EventType).HasDatabaseName("IX_ClientCaseCourtEvents_EventType");
+            entity.HasIndex(e => e.MovementStatus).HasDatabaseName("IX_ClientCaseCourtEvents_MovementStatus");
+            entity.HasIndex(e => e.CourtId).HasDatabaseName("IX_ClientCaseCourtEvents_CourtId");
+            entity.HasIndex(e => e.ClientCaseDocumentId).HasDatabaseName("IX_ClientCaseCourtEvents_DocumentId");
+            entity.HasIndex(e => e.ProceduralDeadlineId).HasDatabaseName("IX_ClientCaseCourtEvents_DeadlineId");
+            entity.HasIndex(e => new { e.ClientCaseId, e.MovementStatus, e.ScheduledAt }).HasDatabaseName("IX_ClientCaseCourtEvents_Case_Status_ScheduledAt");
+        });
+
+        // ------------------ ClientCaseCourt ------------------
+        modelBuilder.Entity<ClientCaseCourt>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Instance).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Code).HasMaxLength(100);
+            entity.Property(e => e.Url).HasMaxLength(1000);
+            entity.Property(e => e.Address).HasMaxLength(500);
+            entity.Property(e => e.Contacts).HasMaxLength(500);
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.UpdatedByUserName).HasMaxLength(256);
+
+            entity.HasIndex(e => e.Name).HasDatabaseName("IX_ClientCaseCourts_Name");
+            entity.HasIndex(e => e.Instance).HasDatabaseName("IX_ClientCaseCourts_Instance");
+            entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_ClientCaseCourts_IsActive");
+            entity.HasIndex(e => new { e.IsActive, e.SortOrder, e.Name }).HasDatabaseName("IX_ClientCaseCourts_Active_Sort_Name");
+        });
+
+        // ------------------ ClientCaseCourtEventHistory ------------------
+        modelBuilder.Entity<ClientCaseCourtEventHistory>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Action).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Summary).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.ActorUserName).HasMaxLength(256);
+
+            entity.HasOne(e => e.ClientCaseCourtEvent)
+                .WithMany(e => e.History)
+                .HasForeignKey(e => e.ClientCaseCourtEventId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.CourtEventHistory)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.ClientCaseCourtEventId).HasDatabaseName("IX_ClientCaseCourtEventHistory_CourtEventId");
+            entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_ClientCaseCourtEventHistory_ClientCaseId");
+            entity.HasIndex(e => e.OccurredAt).HasDatabaseName("IX_ClientCaseCourtEventHistory_OccurredAt");
+            entity.HasIndex(e => new { e.ClientCaseId, e.OccurredAt }).HasDatabaseName("IX_ClientCaseCourtEventHistory_Case_OccurredAt");
+        });
+
+        // ------------------ ClientCaseCourtParty ------------------
+        modelBuilder.Entity<ClientCaseCourtParty>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DisplayName).HasMaxLength(300).IsRequired();
+            entity.Property(e => e.Side).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ProcessRole).HasMaxLength(120).IsRequired();
+            entity.Property(e => e.RepresentativeName).HasMaxLength(300);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.UpdatedByUserName).HasMaxLength(256);
+
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.CourtParties)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.RelatedParty)
+                .WithMany()
+                .HasForeignKey(e => e.RelatedPartyId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_ClientCaseCourtParties_ClientCaseId");
+            entity.HasIndex(e => e.RelatedPartyId).HasDatabaseName("IX_ClientCaseCourtParties_RelatedPartyId");
+            entity.HasIndex(e => e.Side).HasDatabaseName("IX_ClientCaseCourtParties_Side");
+            entity.HasIndex(e => new { e.ClientCaseId, e.Side, e.IsArchived }).HasDatabaseName("IX_ClientCaseCourtParties_Case_Side_Archived");
+        });
+
         // ------------------ DealType ------------------
         modelBuilder.Entity<DealType>(entity =>
         {
@@ -2123,6 +2285,10 @@ public class PaymentContext : DbContext
             ConfigureAudit<AddressRecord>(modelBuilder);
             ConfigureAudit<Client>(modelBuilder);
             ConfigureAudit<ClientCase>(modelBuilder);
+            ConfigureAudit<ClientCaseProceduralDeadline>(modelBuilder);
+            ConfigureAudit<ClientCaseCourtEvent>(modelBuilder);
+            ConfigureAudit<ClientCaseCourtParty>(modelBuilder);
+            ConfigureAudit<ClientCaseCourt>(modelBuilder);
             ConfigureAudit<ClientPassport>(modelBuilder);
             ConfigureAudit<Contract>(modelBuilder);
             ConfigureAudit<ExternalContact>(modelBuilder);
@@ -2480,6 +2646,10 @@ public class PaymentContext : DbContext
     {
         if (clrType == typeof(Client)) return "client";
         if (clrType == typeof(ClientCase)) return "client-case";
+        if (clrType == typeof(ClientCaseProceduralDeadline)) return "client-case-procedural-deadline";
+        if (clrType == typeof(ClientCaseCourtEvent)) return "client-case-court-event";
+        if (clrType == typeof(ClientCaseCourtParty)) return "client-case-court-party";
+        if (clrType == typeof(ClientCaseCourt)) return "client-case-court";
         if (clrType == typeof(ClientCaseRelatedParty)) return "client-case-related-party";
         if (clrType == typeof(ClientCaseWorkOrder)) return "client-case-work-order";
         if (clrType == typeof(ClientCaseWorkOrderItem)) return "client-case-work-order-item";
@@ -2615,6 +2785,16 @@ public class PaymentContext : DbContext
     public DbSet<ClientCaseWorkOrder> ClientCaseWorkOrders { get; set; }
 
     public DbSet<ClientCaseWorkOrderItem> ClientCaseWorkOrderItems { get; set; }
+
+    public DbSet<ClientCaseProceduralDeadline> ClientCaseProceduralDeadlines { get; set; }
+
+    public DbSet<ClientCaseCourtEvent> ClientCaseCourtEvents { get; set; }
+
+    public DbSet<ClientCaseCourtEventHistory> ClientCaseCourtEventHistory { get; set; }
+
+    public DbSet<ClientCaseCourtParty> ClientCaseCourtParties { get; set; }
+
+    public DbSet<ClientCaseCourt> ClientCaseCourts { get; set; }
 
     /// <summary>
     /// Карточки клиентов.

@@ -70,6 +70,8 @@ public static class UserNotificationTypes
     public const string CaseInactivityControl = "caseInactivityControl";
     public const string CaseAccessRequested = "caseAccessRequested";
     public const string CaseAccessResolved = "caseAccessResolved";
+    public const string CaseCourtEvent = "caseCourtEvent";
+    public const string CaseProceduralDeadline = "caseProceduralDeadline";
 
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
     [
@@ -84,7 +86,9 @@ public static class UserNotificationTypes
         new(TaskRevisionRequested, "Возврат на доработку", "Согласующий вернул задачу исполнителю на доработку.", "orange", "high", NotificationChannels.All, false, false),
         new(CaseInactivityControl, "Автоконтроль дела", "По делу долго не было активных задач, создана контрольная задача.", "amber", "high", NotificationChannels.All, true, false),
         new(CaseAccessRequested, "Запрос доступа к делу", "Исполнитель запросил доступ к скрытому делу.", "violet", "high", NotificationChannels.All, false, false),
-        new(CaseAccessResolved, "Решение по доступу к делу", "Руководитель разрешил или отклонил доступ к скрытому делу.", "emerald", "normal", NotificationChannels.All, false, false)
+        new(CaseAccessResolved, "Решение по доступу к делу", "Руководитель разрешил или отклонил доступ к скрытому делу.", "emerald", "normal", NotificationChannels.All, false, false),
+        new(CaseCourtEvent, "Судебное событие", "По делу добавлено или обновлено судебное заседание, движение или судебный акт.", "cyan", "high", NotificationChannels.All, false, false),
+        new(CaseProceduralDeadline, "Процессуальный срок", "По делу добавлен, перенесен, закрыт или приближается процессуальный срок.", "amber", "high", NotificationChannels.All, false, false)
     ];
 
     public static bool IsKnown(string? value)

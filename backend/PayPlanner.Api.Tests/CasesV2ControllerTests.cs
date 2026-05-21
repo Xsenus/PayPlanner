@@ -1300,6 +1300,534 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CaseCalendarEvents_ReturnsCaseDeadlinesCourtEventsAndTasks()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Календарный клиент",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Календарное дело",
+            Status = ClientCaseStatus.Open,
+            Priority = "high",
+            ResponsibleUserId = owner.Id,
+            CourtName = "Арбитражный суд",
+            CourtCaseNumber = "А55-100/2026",
+            NextHearingAt = new DateTime(2026, 6, 10, 11, 0, 0, DateTimeKind.Utc),
+            AppealDeadlineAt = new DateTime(2026, 6, 20, 0, 0, 0, DateTimeKind.Utc),
+            MotionDeadlineAt = new DateTime(2026, 7, 5, 0, 0, 0, DateTimeKind.Utc),
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ClientCaseId = clientCase.Id,
+            ObjectName = clientCase.Title,
+            Title = "Подготовить позицию",
+            DueAt = new DateTime(2026, 6, 12, 9, 30, 0, DateTimeKind.Utc),
+            PlannedDurationMinutes = 45,
+            Type = "task",
+            Priority = "urgent",
+            Status = "inProgress",
+            AssigneeUserId = owner.Id,
+            AssigneeName = owner.FullName,
+            AuthorUserId = owner.Id,
+            AuthorName = owner.FullName,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetCaseCalendarEvents(
+            new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc),
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: true,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(ok.Value);
+        Assert.Contains(events, item => item.Kind == "court" && item.SourceType == "hearing" && item.ClientCaseId == clientCase.Id);
+        Assert.Contains(events, item => item.Kind == "procedural-deadline" && item.DeadlineType == "appeal" && item.AllDay);
+        Assert.Contains(events, item => item.Kind == "task" && item.SourceId.HasValue && item.Title == "Подготовить позицию" && item.EndAt == item.StartAt.AddMinutes(45));
+        Assert.DoesNotContain(events, item => item.DeadlineType == "motion");
+
+        var summaryResult = await controller.GetCaseCalendarSummary(
+            new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc),
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: true,
+            ct: CancellationToken.None);
+
+        var summaryOk = Assert.IsType<OkObjectResult>(summaryResult.Result);
+        var summary = Assert.IsType<CasesV2Controller.CaseCalendarSummaryDto>(summaryOk.Value);
+        Assert.Equal(3, summary.TotalEventCount);
+        Assert.Equal(1, summary.CourtEventCount);
+        Assert.Equal(1, summary.ProceduralDeadlineCount);
+        Assert.Equal(1, summary.TaskCount);
+        Assert.NotNull(summary.NearestEvent);
+    }
+
+    [Fact]
+    public async Task ProceduralDeadlines_CreateShowInCalendarAndClose()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент со сроками",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с отдельным сроком",
+            Status = ClientCaseStatus.Open,
+            Priority = "high",
+            ResponsibleUserId = owner.Id,
+            AppealDeadlineAt = new DateTime(2026, 6, 20, 0, 0, 0, DateTimeKind.Utc),
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var createResult = await controller.CreateProceduralDeadline(
+            clientCase.Id,
+            new CasesV2Controller.UpsertClientCaseProceduralDeadlineRequest
+            {
+                DeadlineType = "appeal",
+                Title = "Апелляционная жалоба",
+                DueAt = new DateTime(2026, 6, 25, 0, 0, 0, DateTimeKind.Utc),
+                WarningDaysBefore = 5,
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CasesV2Controller.ClientCaseProceduralDeadlineDto>(
+            Assert.IsType<CreatedResult>(createResult.Result).Value);
+        Assert.Equal("appeal", created.DeadlineType);
+        Assert.Equal("active", created.Status);
+        Assert.NotNull(created.TaskJournalItemId);
+
+        var deadlineNotifications = await db.UserNotifications
+            .Where(item => item.Type == UserNotificationTypes.CaseProceduralDeadline)
+            .ToListAsync();
+        var createdNotification = Assert.Single(deadlineNotifications, item =>
+            item.MetadataJson.Contains($"\"proceduralDeadlineId\":{created.Id}", StringComparison.Ordinal)
+            && item.MetadataJson.Contains("\"action\":\"created\"", StringComparison.Ordinal));
+        Assert.Equal(owner.Id, createdNotification.RecipientUserId);
+        Assert.Equal("case", createdNotification.ObjectType);
+        Assert.Equal(clientCase.Id, createdNotification.ObjectId);
+        Assert.Contains("Процессуальный срок", createdNotification.Title, StringComparison.OrdinalIgnoreCase);
+
+        var calendarResult = await controller.GetCaseCalendarEvents(
+            new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc),
+            clientCaseId: clientCase.Id,
+            responsibleUserId: null,
+            includeTasks: false,
+            ct: CancellationToken.None);
+        var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(calendarResult.Result).Value);
+        Assert.Contains(events, item => item.Kind == "procedural-deadline" && item.SourceId == created.Id && item.Title == "Апелляционная жалоба");
+        Assert.DoesNotContain(events, item => item.Kind == "procedural-deadline" && item.SourceId is null && item.DeadlineType == "appeal");
+
+        var closeResult = await controller.CloseProceduralDeadline(
+            clientCase.Id,
+            created.Id,
+            new CasesV2Controller.CloseClientCaseProceduralDeadlineRequest { Reason = "Подано в суд" },
+            CancellationToken.None);
+        var closed = Assert.IsType<CasesV2Controller.ClientCaseProceduralDeadlineDto>(
+            Assert.IsType<OkObjectResult>(closeResult.Result).Value);
+        Assert.Equal("closed", closed.Status);
+        Assert.Equal("Подано в суд", closed.CloseReason);
+
+        var tasks = await db.TaskJournalItems
+            .Where(item => item.ClientCaseId == clientCase.Id && item.TagsJson.Contains($"case-deadline:entity-{created.Id}"))
+            .ToListAsync();
+        Assert.Contains(tasks, item => item.Status == "cancelled");
+        Assert.Contains(await db.UserNotifications
+            .Where(item => item.Type == UserNotificationTypes.CaseProceduralDeadline)
+            .ToListAsync(), item => item.MetadataJson.Contains("\"action\":\"closed\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CourtEvents_CreateShowInCalendarAndCanLinkDeadline()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент с заседанием",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с судебным событием",
+            Status = ClientCaseStatus.Open,
+            Priority = "high",
+            ResponsibleUserId = owner.Id,
+            CourtName = "Арбитражный суд Самарской области",
+            CourtCaseNumber = "А55-100/2026",
+            Courtroom = "12",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var document = new ClientCaseDocument
+        {
+            ClientCaseId = clientCase.Id,
+            DocumentKey = "hearing-doc",
+            Version = 1,
+            DocumentType = "Судебный документ",
+            Status = "draft",
+            OriginalFileName = "hearing.pdf",
+            StoredFileName = "hearing.pdf",
+            StoragePath = "cases/hearing.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 100,
+            UploadedByUserId = owner.Id,
+            UploadedByName = owner.FullName,
+            UploadedAt = DateTime.UtcNow,
+        };
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var deadlineResult = await controller.CreateProceduralDeadline(
+            clientCase.Id,
+            new CasesV2Controller.UpsertClientCaseProceduralDeadlineRequest
+            {
+                DeadlineType = "motion",
+                Title = "Подать ходатайство к заседанию",
+                DueAt = new DateTime(2026, 7, 9, 0, 0, 0, DateTimeKind.Utc),
+            },
+            CancellationToken.None);
+        var deadline = Assert.IsType<CasesV2Controller.ClientCaseProceduralDeadlineDto>(
+            Assert.IsType<CreatedResult>(deadlineResult.Result).Value);
+
+        var createResult = await controller.CreateCourtEvent(
+            clientCase.Id,
+            new CasesV2Controller.UpsertClientCaseCourtEventRequest
+            {
+                EventType = "hearing",
+                Title = "Предварительное заседание",
+                ScheduledAt = new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Utc),
+                CourtInstance = "first",
+                MovementStatus = "scheduled",
+                ClientCaseDocumentId = document.Id,
+                ProceduralDeadlineId = deadline.Id,
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CasesV2Controller.ClientCaseCourtEventDto>(
+            Assert.IsType<CreatedResult>(createResult.Result).Value);
+        Assert.Equal("hearing", created.EventType);
+        Assert.Equal("first", created.CourtInstance);
+        Assert.Equal("scheduled", created.MovementStatus);
+        Assert.Equal(deadline.Id, created.ProceduralDeadlineId);
+        Assert.Equal(document.Id, created.ClientCaseDocumentId);
+        Assert.Equal("Арбитражный суд Самарской области", created.CourtName);
+        Assert.Equal("А55-100/2026", created.CourtCaseNumber);
+
+        var linkedDeadline = await db.ClientCaseProceduralDeadlines.SingleAsync(item => item.Id == deadline.Id);
+        Assert.Equal("court-event", linkedDeadline.SourceType);
+        Assert.Equal(created.Id, linkedDeadline.SourceId);
+        Assert.Equal(document.Id, linkedDeadline.ClientCaseDocumentId);
+
+        var listResult = await controller.GetCourtEvents(clientCase.Id, CancellationToken.None);
+        var list = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtEventDto>>(
+            Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        Assert.Single(list);
+
+        var calendarResult = await controller.GetCaseCalendarEvents(
+            new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 7, 31, 0, 0, 0, DateTimeKind.Utc),
+            clientCaseId: clientCase.Id,
+            responsibleUserId: null,
+            includeTasks: false,
+            ct: CancellationToken.None);
+        var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(
+            Assert.IsType<OkObjectResult>(calendarResult.Result).Value);
+        Assert.Contains(events, item =>
+            item.Kind == "court"
+            && item.SourceId == created.Id
+            && item.SourceType == "hearing"
+            && item.Title == "Предварительное заседание");
+
+        var auditEvent = await db.ObjectAuditEvents
+            .SingleOrDefaultAsync(item => item.ObjectType == "client-case-court-event" && item.ObjectId == created.Id);
+        Assert.NotNull(auditEvent);
+
+        var historyResult = await controller.GetCourtEventHistory(clientCase.Id, created.Id, CancellationToken.None);
+        var history = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtEventHistoryDto>>(
+            Assert.IsType<OkObjectResult>(historyResult.Result).Value);
+        Assert.Contains(history, item => item.Action == "created" && item.Summary.Contains("Предварительное заседание"));
+
+        var notification = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.CaseCourtEvent);
+        Assert.Equal(owner.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("Судебное событие", notification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Предварительное заседание", notification.BodyPreview, StringComparison.Ordinal);
+        Assert.Contains($"\"courtEventId\":{created.Id}", notification.MetadataJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CourtDirectory_CreateUpdateListAndUseInCourtEvent()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-directory-owner@example.com", "Владелец");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = owner.RoleId,
+            Section = RolePermissionCatalog.Dictionaries,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = true,
+            CanExport = true,
+            ViewScope = DataVisibilityScope.All,
+        });
+        var client = new Client
+        {
+            Name = "Клиент со справочником судов",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело со справочным судом",
+            Status = ClientCaseStatus.Open,
+            Priority = "normal",
+            ResponsibleUserId = owner.Id,
+            CourtCaseNumber = "А40-200/2026",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, owner);
+        var createCourtResult = await controller.CreateCourtDirectoryItem(
+            new CasesV2Controller.UpsertClientCaseCourtRequest
+            {
+                Name = "Арбитражный суд города Москвы",
+                Instance = "first",
+                Code = "msk-arbitrage",
+                Url = "https://msk.arbitr.ru",
+                Address = "Москва",
+                Contacts = "info@example.test",
+                SortOrder = 10,
+            },
+            CancellationToken.None);
+
+        var court = Assert.IsType<CasesV2Controller.ClientCaseCourtDto>(
+            Assert.IsType<CreatedResult>(createCourtResult.Result).Value);
+        Assert.Equal("Арбитражный суд города Москвы", court.Name);
+        Assert.True(court.IsActive);
+
+        var updateCourtResult = await controller.UpdateCourtDirectoryItem(
+            court.Id,
+            new CasesV2Controller.UpsertClientCaseCourtRequest
+            {
+                Name = "Арбитражный суд города Москвы",
+                Instance = "appeal",
+                Code = "msk-arbitrage",
+                Url = "https://msk.arbitr.ru",
+                Address = "Москва, обновлено",
+                Contacts = "updated@example.test",
+                SortOrder = 5,
+                IsActive = true,
+            },
+            CancellationToken.None);
+        var updatedCourt = Assert.IsType<CasesV2Controller.ClientCaseCourtDto>(
+            Assert.IsType<OkObjectResult>(updateCourtResult.Result).Value);
+        Assert.Equal("appeal", updatedCourt.Instance);
+        Assert.Equal("Москва, обновлено", updatedCourt.Address);
+
+        var listResult = await controller.GetCourtDirectory(includeInactive: false, CancellationToken.None);
+        var courts = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtDto>>(
+            Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        Assert.Single(courts);
+
+        var createEventResult = await controller.CreateCourtEvent(
+            clientCase.Id,
+            new CasesV2Controller.UpsertClientCaseCourtEventRequest
+            {
+                EventType = "hearing",
+                Title = "Заседание из справочника",
+                ScheduledAt = new DateTime(2026, 9, 1, 9, 0, 0, DateTimeKind.Utc),
+                CourtId = court.Id,
+                MovementStatus = "scheduled",
+            },
+            CancellationToken.None);
+        var createdEvent = Assert.IsType<CasesV2Controller.ClientCaseCourtEventDto>(
+            Assert.IsType<CreatedResult>(createEventResult.Result).Value);
+        Assert.Equal(court.Id, createdEvent.CourtId);
+        Assert.Equal("appeal", createdEvent.CourtInstance);
+        Assert.Equal("Арбитражный суд города Москвы", createdEvent.CourtName);
+        Assert.Equal("А40-200/2026", createdEvent.CourtCaseNumber);
+    }
+
+    [Fact]
+    public async Task ProceduralDeadlines_CreateWithCourtEventSourceBackfillsCourtEventLink()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "deadline-court-link@example.com", "Р’Р»Р°РґРµР»РµС†");
+        var client = new Client
+        {
+            Name = "РљР»РёРµРЅС‚ СЃ РґРІСѓСЃС‚РѕСЂРѕРЅРЅРµР№ СЃРІСЏР·СЊСЋ",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Р”РµР»Рѕ СЃРѕ СЃСЂРѕРєРѕРј Рё СЃРѕР±С‹С‚РёРµРј",
+            Status = ClientCaseStatus.Open,
+            Priority = "normal",
+            ResponsibleUserId = owner.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var courtEvent = new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = "hearing",
+            Title = "Р—Р°СЃРµРґР°РЅРёРµ РґР»СЏ СЃСЂРѕРєР°",
+            ScheduledAt = new DateTime(2026, 8, 10, 10, 0, 0, DateTimeKind.Utc),
+            CourtInstance = "first",
+            MovementStatus = "scheduled",
+            SourceType = "manual",
+            CreatedAt = DateTime.UtcNow,
+            CreatedByUserId = owner.Id,
+            CreatedByUserName = owner.FullName,
+        };
+        db.ClientCaseCourtEvents.Add(courtEvent);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, owner);
+        var createResult = await controller.CreateProceduralDeadline(
+            clientCase.Id,
+            new CasesV2Controller.UpsertClientCaseProceduralDeadlineRequest
+            {
+                DeadlineType = "motion",
+                Title = "РџРѕРґР°С‚СЊ РїРѕР·РёС†РёСЋ Рє Р·Р°СЃРµРґР°РЅРёСЋ",
+                DueAt = new DateTime(2026, 8, 8, 0, 0, 0, DateTimeKind.Utc),
+                SourceType = "court-event",
+                SourceId = courtEvent.Id,
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CasesV2Controller.ClientCaseProceduralDeadlineDto>(
+            Assert.IsType<CreatedResult>(createResult.Result).Value);
+        Assert.Equal("court-event", created.SourceType);
+        Assert.Equal(courtEvent.Id, created.SourceId);
+
+        var linkedCourtEvent = await db.ClientCaseCourtEvents.SingleAsync(item => item.Id == courtEvent.Id);
+        Assert.Equal(created.Id, linkedCourtEvent.ProceduralDeadlineId);
+    }
+
+    [Fact]
+    public async Task CourtParties_CreateListAndArchive()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-party-owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент со сторонами",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело со сторонами процесса",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var createResult = await controller.CreateCourtParty(
+            clientCase.Id,
+            new CasesV2Controller.UpsertClientCaseCourtPartyRequest
+            {
+                DisplayName = "ООО Ответчик",
+                Side = "respondent",
+                ProcessRole = "Ответчик",
+                RepresentativeName = "Петров Петр",
+                Notes = "Основная сторона процесса",
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CasesV2Controller.ClientCaseCourtPartyDto>(
+            Assert.IsType<CreatedResult>(createResult.Result).Value);
+        Assert.Equal("respondent", created.Side);
+        Assert.Equal("Ответчик", created.SideLabel);
+        Assert.Equal("ООО Ответчик", created.DisplayName);
+
+        var listResult = await controller.GetCourtParties(clientCase.Id, includeArchived: false, CancellationToken.None);
+        var list = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtPartyDto>>(
+            Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        Assert.Single(list);
+
+        var archiveResult = await controller.ArchiveCourtParty(clientCase.Id, created.Id, CancellationToken.None);
+        Assert.IsType<NoContentResult>(archiveResult);
+
+        var activeListResult = await controller.GetCourtParties(clientCase.Id, includeArchived: false, CancellationToken.None);
+        var activeList = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtPartyDto>>(
+            Assert.IsType<OkObjectResult>(activeListResult.Result).Value);
+        Assert.Empty(activeList);
+
+        var archivedListResult = await controller.GetCourtParties(clientCase.Id, includeArchived: true, CancellationToken.None);
+        var archivedList = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtPartyDto>>(
+            Assert.IsType<OkObjectResult>(archivedListResult.Result).Value);
+        Assert.Single(archivedList);
+        Assert.True(archivedList[0].IsArchived);
+
+        var auditEvent = await db.ObjectAuditEvents
+            .SingleOrDefaultAsync(item => item.ObjectType == "client-case-court-party" && item.ObjectId == created.Id && item.Action == "Created");
+        Assert.NotNull(auditEvent);
+    }
+
+    [Fact]
+    public async Task ProceduralDeadlineCalculationPreview_ReturnsCalculatedDate()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db, new User { Id = 1, Email = "owner@example.com", FullName = "Владелец" });
+
+        var result = controller.CalculateProceduralDeadlinePreview(new ProceduralDeadlineCalculationRequest
+        {
+            StartAt = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
+            Rule = "workingDays",
+            DaysToAdd = 2,
+            RollForwardToWorkingDay = true,
+        });
+
+        var dto = Assert.IsType<CasesV2Controller.ProceduralDeadlineCalculationDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal("workingDays", dto.Rule);
+        Assert.Equal(new DateTime(2026, 5, 5, 0, 0, 0, DateTimeKind.Utc), dto.DeadlineAt);
+    }
+
+    [Fact]
     public async Task Update_ToClosed_ClosesLinkedActiveTasksAndDoesNotRecreateDeadlineTasks()
     {
         await using var db = await CreateContextAsync();
@@ -1622,6 +2150,14 @@ public class CasesV2ControllerTests
         Assert.IsType<NoContentResult>(deleteResult);
         Assert.DoesNotContain(await db.ClientCaseDocuments.ToListAsync(), item => item.Id == first.Id);
         Assert.Contains(await db.ClientCaseDocuments.ToListAsync(), item => item.Id == second.Id);
+        var documentAuditEvents = await db.ObjectAuditEvents
+            .Where(item => item.ObjectType == "client-case-document")
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Equal(3, documentAuditEvents.Count);
+        Assert.Contains(documentAuditEvents, item => item.ObjectId == first.Id && item.Action == "Created");
+        Assert.Contains(documentAuditEvents, item => item.ObjectId == second.Id && item.Action == "VersionCreated");
+        Assert.Contains(documentAuditEvents, item => item.ObjectId == first.Id && item.Action == "Deleted");
         await db.Entry(clientCase).ReloadAsync();
         Assert.Contains("Документ «claim.txt» загружен", clientCase.EventHistory, StringComparison.Ordinal);
         Assert.Contains("Документ «claim-v2.txt»: загружена новая версия", clientCase.EventHistory, StringComparison.Ordinal);
@@ -1643,6 +2179,30 @@ public class CasesV2ControllerTests
         Assert.Contains(templates, item => item.Key == "case-summary" && item.DocumentType == "Карточка дела");
         Assert.Contains(templates, item => item.Key == "claim" && item.DocumentType == "Иск");
         Assert.Contains(templates, item => item.Key == "court-letter" && item.DocumentType == "Переписка");
+        Assert.Contains(templates, item => item.Key == "power-of-attorney" && item.DocumentType == "Доверенность");
+        Assert.Contains(templates, item => item.Key == "application" && item.DocumentType == "Заявление");
+        Assert.Contains(templates, item => item.Key == "procedural-document" && item.DocumentType == "Процессуальный документ");
+    }
+
+    [Fact]
+    public async Task DocumentTemplateTokens_ReturnsSupportedPlaceholders()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetDocumentTemplateTokens(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var tokens = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseDocumentTemplateTokenDto>>(ok.Value);
+
+        Assert.Contains(tokens, item =>
+            item.Key == "case.title" &&
+            item.Category == "Дело" &&
+            item.Placeholder == "{{case.title}}");
+        Assert.Contains(tokens, item => item.Key == "client.name" && item.Category == "Клиент");
+        Assert.Contains(tokens, item => item.Key == "document.type" && item.Category == "Документ");
+        Assert.DoesNotContain(tokens, item => string.IsNullOrWhiteSpace(item.Description));
     }
 
     [Fact]
@@ -1670,6 +2230,7 @@ public class CasesV2ControllerTests
         {
             Client = client,
             Title = "Земцов - банкротство",
+            CaseType = "Банкротство",
             CourtName = "Арбитражный суд Самарской области",
             ResponsibleUserId = owner.Id,
             Status = ClientCaseStatus.Open,
@@ -1684,6 +2245,7 @@ public class CasesV2ControllerTests
             Label = "Рабочий шаблон",
             DocumentType = "Иск",
             Heading = "Заявление",
+            CaseTypes = new List<string> { "Банкротство", " Банкротство ", "Семейное право" },
             Content = "<p>{{case.title}} — {{client.name}} — {{court.name}}</p>",
         }, CancellationToken.None);
 
@@ -1691,6 +2253,7 @@ public class CasesV2ControllerTests
         var createdDto = Assert.IsType<CasesV2Controller.CaseDocumentTemplateDefinitionDto>(created.Value);
         Assert.Equal("custom-claim", createdDto.Key);
         Assert.Equal(1, createdDto.Version);
+        Assert.Equal(new[] { "Банкротство", "Семейное право" }, createdDto.CaseTypes);
 
         var updateResult = await controller.UpdateDocumentTemplate(
             "custom-claim",
@@ -1705,6 +2268,7 @@ public class CasesV2ControllerTests
         var updatedDto = Assert.IsType<CasesV2Controller.CaseDocumentTemplateDefinitionDto>(updatedOk.Value);
         Assert.Equal("Обновленный шаблон", updatedDto.Label);
         Assert.Equal(2, updatedDto.Version);
+        Assert.Equal(new[] { "Банкротство", "Семейное право" }, updatedDto.CaseTypes);
 
         var listResult = await controller.GetDocumentTemplates(CancellationToken.None);
         var listOk = Assert.IsType<OkObjectResult>(listResult.Result);
@@ -1721,6 +2285,51 @@ public class CasesV2ControllerTests
         Assert.Equal("custom-claim", rendered.TemplateKey);
         Assert.Contains("Земцов - банкротство", rendered.Html, StringComparison.Ordinal);
         Assert.Contains("Владелец", rendered.Html, StringComparison.Ordinal);
+
+        var restrictedCase = new ClientCase
+        {
+            Client = client,
+            Title = "Земцов - трудовой спор",
+            CaseType = "Трудовой спор",
+            ResponsibleUserId = owner.Id,
+            Status = ClientCaseStatus.Open,
+        };
+        db.ClientCases.Add(restrictedCase);
+        await db.SaveChangesAsync();
+
+        var restrictedRenderResult = await controller.RenderDocumentTemplate(
+            "custom-claim",
+            new CasesV2Controller.RenderCaseDocumentTemplateRequest { ClientCaseId = restrictedCase.Id },
+            CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(restrictedRenderResult.Result);
+    }
+
+    [Fact]
+    public async Task DocumentTemplates_ForbidEditWithoutDictionaryPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = owner.RoleId,
+            Section = RolePermissionCatalog.Dictionaries,
+            CanView = true,
+            CanEdit = false,
+            ViewScope = DataVisibilityScope.All,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.CreateDocumentTemplate(new CasesV2Controller.UpsertCaseDocumentTemplateRequest
+        {
+            Key = "blocked-template",
+            Label = "Закрытый шаблон",
+            DocumentType = "Документ",
+            Heading = "Закрытый шаблон",
+            Content = "<p>{{case.title}}</p>",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
     }
 
     [Fact]
@@ -1898,6 +2507,50 @@ public class CasesV2ControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<ClientCaseDocumentDto>(ok.Value);
         Assert.Equal(42, dto.SourceTaskId);
+    }
+
+    [Fact]
+    public async Task GetDocumentById_ReturnsExtendedDocumentSources()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Owner");
+        var client = new Client
+        {
+            Name = "Client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var document = new ClientCaseDocument
+        {
+            ClientCase = clientCase,
+            DocumentKey = "court-event-77",
+            Version = 1,
+            DocumentType = "Court",
+            Status = "Ready",
+            OriginalFileName = "court.html",
+            StoredFileName = "court.html",
+            StoragePath = "1/court.html",
+            ContentType = "text/html",
+            SizeBytes = 100,
+            UploadedByName = "Owner",
+            UploadedAt = DateTime.UtcNow,
+        };
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetDocumentById(document.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<ClientCaseDocumentDto>(ok.Value);
+        Assert.Equal(77, dto.SourceEventId);
     }
 
     [Fact]
@@ -2113,6 +2766,151 @@ public class CasesV2ControllerTests
 
         await db.Entry(clientCase).ReloadAsync();
         Assert.Contains("Сформирован шаблон", clientCase.EventHistory, StringComparison.Ordinal);
+        var auditEvent = await db.ObjectAuditEvents.SingleAsync(item => item.ObjectType == "client-case-document");
+        Assert.Equal(dto.Id, auditEvent.ObjectId);
+        Assert.Equal("Generated", auditEvent.Action);
+        Assert.Contains("template-claim", auditEvent.MetadataJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Documents_GeneratesPowerOfAttorneyTemplate()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Доверитель",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для доверенности",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            Stage = "Суд первой инстанции",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var contentRoot = Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N"));
+        var controller = CreateController(db, owner, contentRoot);
+
+        var result = await controller.GenerateDocumentTemplate(
+            clientCase.Id,
+            new CasesV2Controller.GenerateCaseDocumentTemplateRequest
+            {
+                TemplateKey = "power-of-attorney",
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<ClientCaseDocumentDto>(created.Value);
+        Assert.Equal("template-power-of-attorney", dto.DocumentKey);
+        Assert.Equal("power-of-attorney", dto.TemplateKey);
+        Assert.Equal("Доверенность", dto.DocumentType);
+
+        var stored = await db.ClientCaseDocuments.SingleAsync(item => item.Id == dto.Id);
+        var html = await File.ReadAllTextAsync(Path.Combine(contentRoot, "App_Data", "case-documents", stored.StoragePath), Encoding.UTF8);
+        Assert.Contains("Доверенность", html, StringComparison.Ordinal);
+        Assert.Contains("Доверитель", html, StringComparison.Ordinal);
+        Assert.Contains("специальных полномочий", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Documents_GeneratesCustomTemplateFromLibrary()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = owner.RoleId,
+            Section = RolePermissionCatalog.Dictionaries,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = true,
+            ViewScope = DataVisibilityScope.All,
+        });
+        var client = new Client
+        {
+            Name = "Custom Client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Custom Case",
+            CaseNumber = "CUSTOM-1",
+            CaseType = "Briefing",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var contentRoot = Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N"));
+        var controller = CreateController(db, owner, contentRoot);
+
+        var createResult = await controller.CreateDocumentTemplate(new CasesV2Controller.UpsertCaseDocumentTemplateRequest
+        {
+            Key = "custom-brief",
+            Label = "Custom Brief",
+            DocumentType = "Brief",
+            Heading = "Custom Heading",
+            CaseTypes = new List<string> { "Briefing" },
+            Content = "<html><body><h1>{{case.title}}</h1><p>{{client.name}}</p><p>{{document.type}}</p></body></html>",
+        }, CancellationToken.None);
+        Assert.IsType<CreatedResult>(createResult.Result);
+
+        var result = await controller.GenerateDocumentTemplate(
+            clientCase.Id,
+            new CasesV2Controller.GenerateCaseDocumentTemplateRequest
+            {
+                TemplateKey = "custom-brief",
+                Status = "Draft",
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<ClientCaseDocumentDto>(created.Value);
+
+        Assert.Equal("template-custom-brief", dto.DocumentKey);
+        Assert.Equal("custom-brief", dto.TemplateKey);
+        Assert.Equal("Custom Brief", dto.TemplateLabel);
+        Assert.Equal("Brief", dto.DocumentType);
+
+        var stored = await db.ClientCaseDocuments.SingleAsync(item => item.Id == dto.Id);
+        var fullPath = Path.Combine(contentRoot, "App_Data", "case-documents", stored.StoragePath);
+        var html = await File.ReadAllTextAsync(fullPath, Encoding.UTF8);
+        Assert.Contains("<h1>Custom Case</h1>", html, StringComparison.Ordinal);
+        Assert.Contains("<p>Custom Client</p>", html, StringComparison.Ordinal);
+        Assert.Contains("<p>Brief</p>", html, StringComparison.Ordinal);
+
+        var restrictedCase = new ClientCase
+        {
+            Client = client,
+            Title = "Restricted Case",
+            CaseNumber = "CUSTOM-2",
+            CaseType = "Labor",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.ClientCases.Add(restrictedCase);
+        await db.SaveChangesAsync();
+
+        var restrictedResult = await controller.GenerateDocumentTemplate(
+            restrictedCase.Id,
+            new CasesV2Controller.GenerateCaseDocumentTemplateRequest
+            {
+                TemplateKey = "custom-brief",
+                Status = "Draft",
+            },
+            CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(restrictedResult.Result);
     }
 
     [Fact]
@@ -2165,6 +2963,10 @@ public class CasesV2ControllerTests
         await db.Entry(clientCase).ReloadAsync();
         await db.Entry(document).ReloadAsync();
         Assert.Equal("Отправлен", document.Status);
+        var auditEvent = await db.ObjectAuditEvents.SingleAsync(item => item.ObjectType == "client-case-document");
+        Assert.Equal(document.Id, auditEvent.ObjectId);
+        Assert.Equal("Updated", auditEvent.Action);
+        Assert.Contains("Отправлен", auditEvent.Description, StringComparison.Ordinal);
         Assert.Contains("Документ «claim.pdf»: статус «Подготовлен» → «Отправлен»", clientCase.EventHistory, StringComparison.Ordinal);
         Assert.Contains("Изменил: Владелец", clientCase.EventHistory, StringComparison.Ordinal);
     }
@@ -2287,6 +3089,10 @@ public class CasesV2ControllerTests
         Assert.False(oldDto.IsLatestVersion);
 
         await db.Entry(clientCase).ReloadAsync();
+        var auditEvent = await db.ObjectAuditEvents.SingleAsync(item => item.ObjectType == "client-case-document");
+        Assert.Equal(dto.Id, auditEvent.ObjectId);
+        Assert.Equal("VersionCreated", auditEvent.Action);
+        Assert.Contains(document.DocumentKey, auditEvent.MetadataJson, StringComparison.Ordinal);
         Assert.Contains("Документ «claim-v2.pdf»: загружена новая версия", clientCase.EventHistory, StringComparison.Ordinal);
     }
 
@@ -2999,6 +3805,7 @@ public class CasesV2ControllerTests
         Assert.Equal("WO-TEST-77", dto.Number);
         Assert.Equal(35000, dto.Amount);
         Assert.Equal("invoice_created", dto.WorkOrder.Status);
+        Assert.NotNull(dto.DocumentId);
 
         var payment = await db.Payments
             .Include(item => item.Invoice)
@@ -3018,6 +3825,11 @@ public class CasesV2ControllerTests
         Assert.Contains(payment.InvoiceLineItems, item => item.Name == "Подготовка заявления" && item.Quantity == 2 && item.Price == 10000);
         Assert.Contains(payment.InvoiceClientCases, item => item.ClientCaseId == clientCase.Id);
         Assert.Contains(payment.Responsibles, item => item.UserId == executor.Id);
+
+        var invoiceDocument = await db.ClientCaseDocuments.SingleAsync(item => item.Id == dto.DocumentId);
+        Assert.Equal($"invoice-{payment.Id}", invoiceDocument.DocumentKey);
+        Assert.Equal("Счет", invoiceDocument.DocumentType);
+        Assert.Equal("text/html; charset=utf-8", invoiceDocument.ContentType);
 
         await db.Entry(workOrder).ReloadAsync();
         await db.Entry(clientCase).ReloadAsync();
@@ -3084,6 +3896,66 @@ public class CasesV2ControllerTests
         Assert.Contains("PRINT-1", content.Content, StringComparison.Ordinal);
         Assert.Contains("Подготовка заявления", content.Content, StringComparison.Ordinal);
         Assert.Contains("24", content.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WorkOrder_GeneratesLinkedCaseDocument()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент документа заказ-наряда",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для документа заказ-наряда",
+            CaseNumber = "WO-DOC-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Заказ-наряд для документов",
+            Status = "approved",
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Подготовка позиции",
+                    Quantity = 1,
+                    UnitPrice = 18000,
+                    TotalAmount = 18000,
+                    SortOrder = 1,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GenerateWorkOrderDocument(clientCase.Id, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<ClientCaseDocumentDto>(created.Value);
+        Assert.Equal($"work-order-{workOrder.Id}", dto.DocumentKey);
+        Assert.Equal(workOrder.Id, dto.SourceWorkOrderId);
+        Assert.Equal("Заказ-наряд", dto.DocumentType);
+        Assert.Equal("Согласован", dto.Status);
+        Assert.Equal("text/html; charset=utf-8", dto.ContentType);
+
+        var document = await db.ClientCaseDocuments.SingleAsync(item => item.Id == dto.Id);
+        Assert.Equal($"work-order-{workOrder.Id}", document.DocumentKey);
+        Assert.Contains("work-order", document.StoredFileName, StringComparison.OrdinalIgnoreCase);
+        Assert.True(document.SizeBytes > 0);
     }
 
     [Fact]

@@ -9,6 +9,9 @@ public class ClientCaseDocumentDto
     public string? TemplateLabel { get; set; }
     public int? SourceTaskId { get; set; }
     public int? SourceEventId { get; set; }
+    public int? SourceWorkOrderId { get; set; }
+    public int? SourceInvoiceId { get; set; }
+    public string? SourceStage { get; set; }
     public int Version { get; set; }
     public string DocumentType { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;

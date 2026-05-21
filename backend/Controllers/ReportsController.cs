@@ -7,6 +7,7 @@ using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using System.Text;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -77,6 +78,9 @@ public class ReportsController : ControllerBase
     public async Task<ActionResult<LegalWorkReportDto>> LegalWork(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
         CancellationToken ct)
     {
         var today = DateTime.Today;
@@ -100,12 +104,52 @@ public class ReportsController : ControllerBase
             return Unauthorized();
         }
 
+        var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildLegalWorkReportAsync(start, end, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
+            cancellationToken => BuildLegalWorkReportAsync(start, end, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
             _logger,
             ct);
 
         return Ok(report);
+    }
+
+    [HttpGet("legal-work.csv")]
+    public async Task<IActionResult> ExportLegalWorkCsv(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        CancellationToken ct)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (casesVisibility is null || tasksVisibility is null || accountsVisibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildLegalWorkReportAsync(start, end, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
+            _logger,
+            ct);
+
+        return File(BuildLegalWorkCsv(report), "text/csv; charset=utf-8", "legal-work-report.csv");
     }
 
     [HttpGet("case-activity")]
@@ -659,6 +703,7 @@ public class ReportsController : ControllerBase
     private async Task<LegalWorkReportDto> BuildLegalWorkReportAsync(
         DateTime start,
         DateTime end,
+        LegalWorkReportFilters filters,
         DataVisibilityAccess casesVisibility,
         DataVisibilityAccess tasksVisibility,
         DataVisibilityAccess accountsVisibility,
@@ -667,14 +712,31 @@ public class ReportsController : ControllerBase
         var today = DateTime.UtcNow.Date;
         var endInclusive = end.Date.AddDays(1).AddTicks(-1);
 
-        var cases = await _db.ClientCases
+        var caseQuery = _db.ClientCases
             .AsNoTracking()
             .WithCaseIncludes()
             .ApplyClientCaseVisibility(casesVisibility)
             .Where(item => item.CreatedAt <= endInclusive
                 && (item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost
                     || (item.StartDate.HasValue && item.StartDate.Value >= start.Date)
-                    || (item.DueDate.HasValue && item.DueDate.Value >= start.Date)))
+                    || (item.DueDate.HasValue && item.DueDate.Value >= start.Date)));
+
+        if (TryParseClientCaseStatus(filters.Status, out var statusFilter))
+        {
+            caseQuery = caseQuery.Where(item => item.Status == statusFilter);
+        }
+
+        if (filters.ResponsibleUserId.HasValue)
+        {
+            caseQuery = caseQuery.Where(item => item.ResponsibleUserId == filters.ResponsibleUserId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filters.CaseType))
+        {
+            caseQuery = caseQuery.Where(item => item.CaseType != null && item.CaseType.Contains(filters.CaseType));
+        }
+
+        var cases = await caseQuery
             .ToListAsync(ct);
 
         var caseIds = cases.Select(item => item.Id).Distinct().ToArray();
@@ -728,8 +790,19 @@ public class ReportsController : ControllerBase
         var overdueDeadlineCountsByCase = overdueDeadlines
             .GroupBy(item => item.CaseId)
             .ToDictionary(group => group.Key, group => group.Count());
+        var upcomingDeadlineCountsByCase = upcomingDeadlines
+            .GroupBy(item => item.CaseId)
+            .ToDictionary(group => group.Key, group => group.Count());
 
         var openTaskCountsByCase = openTasks
+            .Where(item => item.ClientCaseId.HasValue)
+            .GroupBy(item => item.ClientCaseId!.Value)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var overdueTaskCountsByCase = overdueTasks
+            .Where(item => item.ClientCaseId.HasValue)
+            .GroupBy(item => item.ClientCaseId!.Value)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var onApprovalTaskCountsByCase = onApprovalTasks
             .Where(item => item.ClientCaseId.HasValue)
             .GroupBy(item => item.ClientCaseId!.Value)
             .ToDictionary(group => group.Key, group => group.Count());
@@ -737,11 +810,22 @@ public class ReportsController : ControllerBase
         var feeTotal = cases.Sum(item => item.FeeAmount);
         var paidTotal = paidByCase.Values.Sum();
         var outstandingTotal = cases.Sum(item => Math.Max(0m, item.FeeAmount - paidByCase.GetValueOrDefault(item.Id)));
+        var caseRows = BuildLegalWorkCaseItems(
+            cases,
+            paidByCase,
+            openTaskCountsByCase,
+            overdueTaskCountsByCase,
+            onApprovalTaskCountsByCase,
+            overdueDeadlineCountsByCase,
+            upcomingDeadlineCountsByCase);
 
         return new LegalWorkReportDto
         {
             From = start,
             To = end,
+            StatusFilter = filters.Status ?? string.Empty,
+            ResponsibleUserIdFilter = filters.ResponsibleUserId,
+            CaseTypeFilter = filters.CaseType ?? string.Empty,
             TotalCases = cases.Count,
             ActiveCases = activeCases.Count(item => item.Status == ClientCaseStatus.Open),
             ClosedCases = cases.Count(item => item.Status == ClientCaseStatus.Closed),
@@ -780,9 +864,207 @@ public class ReportsController : ControllerBase
                 })
                 .ToList(),
             Responsibles = BuildLegalWorkResponsibleItems(cases, openTasks, overdueTasks, onApprovalTasks, overdueDeadlines, paidByCase),
+            FinanceByStatus = caseRows
+                .GroupBy(item => new { item.Status, item.StatusLabel })
+                .OrderBy(group => group.Key.Status)
+                .Select(group => new LegalWorkFinanceItemDto
+                {
+                    Status = group.Key.Status,
+                    StatusLabel = group.Key.StatusLabel,
+                    CaseCount = group.Count(),
+                    FeeTotal = group.Sum(item => item.FeeAmount),
+                    PaidTotal = group.Sum(item => item.PaidTotal),
+                    OutstandingTotal = group.Sum(item => item.OutstandingTotal),
+                })
+                .ToList(),
+            DeadlinesByType = deadlines
+                .GroupBy(item => new { item.DeadlineType, item.DeadlineLabel })
+                .OrderBy(group => group.Key.DeadlineType)
+                .Select(group => new LegalWorkDeadlineSummaryItemDto
+                {
+                    DeadlineType = group.Key.DeadlineType,
+                    DeadlineLabel = group.Key.DeadlineLabel,
+                    TotalCount = group.Count(),
+                    OverdueCount = group.Count(item => item.DueAt.Date < today),
+                    UpcomingCount = group.Count(item => item.DueAt.Date >= today && item.DueAt.Date <= today.AddDays(7)),
+                })
+                .ToList(),
+            Cases = caseRows
+                .OrderByDescending(item => item.OverdueDeadlines)
+                .ThenByDescending(item => item.OverdueTasks)
+                .ThenBy(item => item.DueDate ?? DateTime.MaxValue)
+                .ThenBy(item => item.CaseTitle)
+                .Take(100)
+                .ToList(),
             OverdueDeadlines = overdueDeadlines.Take(15).ToList(),
             UpcomingDeadlines = upcomingDeadlines.Take(15).ToList(),
         };
+    }
+
+    private static IReadOnlyList<LegalWorkCaseItemDto> BuildLegalWorkCaseItems(
+        IReadOnlyCollection<ClientCase> cases,
+        IReadOnlyDictionary<int, decimal> paidByCase,
+        IReadOnlyDictionary<int, int> openTaskCountsByCase,
+        IReadOnlyDictionary<int, int> overdueTaskCountsByCase,
+        IReadOnlyDictionary<int, int> onApprovalTaskCountsByCase,
+        IReadOnlyDictionary<int, int> overdueDeadlineCountsByCase,
+        IReadOnlyDictionary<int, int> upcomingDeadlineCountsByCase)
+        => cases
+            .Select(clientCase =>
+            {
+                var paid = paidByCase.GetValueOrDefault(clientCase.Id);
+                return new LegalWorkCaseItemDto
+                {
+                    CaseId = clientCase.Id,
+                    CaseNumber = clientCase.CaseNumber,
+                    CaseTitle = clientCase.Title,
+                    CaseType = NormalizeReportText(clientCase.CaseType, "Не указан"),
+                    ClientName = ResolveCaseOwnerName(clientCase),
+                    Status = clientCase.Status.ToString(),
+                    StatusLabel = FormatCaseStatus(clientCase.Status),
+                    ResponsibleUserId = clientCase.ResponsibleUserId,
+                    ResponsibleName = ResolveCaseResponsibleName(clientCase),
+                    CreatedAt = clientCase.CreatedAt,
+                    StartDate = clientCase.StartDate,
+                    DueDate = clientCase.DueDate,
+                    FeeAmount = clientCase.FeeAmount,
+                    PaidTotal = paid,
+                    OutstandingTotal = Math.Max(0m, clientCase.FeeAmount - paid),
+                    OpenTasks = openTaskCountsByCase.GetValueOrDefault(clientCase.Id),
+                    OverdueTasks = overdueTaskCountsByCase.GetValueOrDefault(clientCase.Id),
+                    OnApprovalTasks = onApprovalTaskCountsByCase.GetValueOrDefault(clientCase.Id),
+                    OverdueDeadlines = overdueDeadlineCountsByCase.GetValueOrDefault(clientCase.Id),
+                    UpcomingDeadlines = upcomingDeadlineCountsByCase.GetValueOrDefault(clientCase.Id),
+                };
+            })
+            .ToList();
+
+    private static byte[] BuildLegalWorkCsv(LegalWorkReportDto report)
+    {
+        var builder = new StringBuilder();
+        AppendCsvRow(builder, [
+            "Раздел",
+            "Дело",
+            "Клиент",
+            "Ответственный",
+            "Статус",
+            "Тип дела",
+            "Период",
+            "Гонорар",
+            "Оплачено",
+            "Остаток",
+            "Открытые задачи",
+            "Просроченные задачи",
+            "Просроченные сроки",
+            "Ближайшие сроки"
+        ]);
+
+        AppendCsvRow(builder, [
+            "Сводка",
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            $"{report.From:yyyy-MM-dd} - {report.To:yyyy-MM-dd}",
+            report.FeeTotal.ToString("0.##"),
+            report.PaidTotal.ToString("0.##"),
+            report.OutstandingTotal.ToString("0.##"),
+            report.OpenTaskCount.ToString(),
+            report.OverdueTaskCount.ToString(),
+            report.OverdueDeadlineCount.ToString(),
+            report.UpcomingDeadlineCount.ToString()
+        ]);
+
+        foreach (var item in report.Cases)
+        {
+            AppendCsvRow(builder, [
+                "Дела",
+                BuildCaseCsvTitle(item),
+                item.ClientName,
+                item.ResponsibleName,
+                item.StatusLabel,
+                item.CaseType,
+                $"{item.CreatedAt:yyyy-MM-dd}",
+                item.FeeAmount.ToString("0.##"),
+                item.PaidTotal.ToString("0.##"),
+                item.OutstandingTotal.ToString("0.##"),
+                item.OpenTasks.ToString(),
+                item.OverdueTasks.ToString(),
+                item.OverdueDeadlines.ToString(),
+                item.UpcomingDeadlines.ToString()
+            ]);
+        }
+
+        foreach (var item in report.FinanceByStatus)
+        {
+            AppendCsvRow(builder, [
+                "Финансы по статусам",
+                item.StatusLabel,
+                string.Empty,
+                string.Empty,
+                item.Status,
+                string.Empty,
+                $"{item.CaseCount} дел",
+                item.FeeTotal.ToString("0.##"),
+                item.PaidTotal.ToString("0.##"),
+                item.OutstandingTotal.ToString("0.##"),
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty
+            ]);
+        }
+
+        foreach (var item in report.DeadlinesByType)
+        {
+            AppendCsvRow(builder, [
+                "Сроки",
+                item.DeadlineLabel,
+                string.Empty,
+                string.Empty,
+                item.DeadlineType,
+                string.Empty,
+                $"{item.TotalCount} всего",
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                item.OverdueCount.ToString(),
+                item.UpcomingCount.ToString()
+            ]);
+        }
+
+        return Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(builder.ToString())).ToArray();
+    }
+
+    private static string BuildCaseCsvTitle(LegalWorkCaseItemDto item)
+        => string.IsNullOrWhiteSpace(item.CaseNumber)
+            ? item.CaseTitle
+            : $"{item.CaseNumber} {item.CaseTitle}";
+
+    private static void AppendCsvRow(StringBuilder builder, IReadOnlyList<string> values)
+    {
+        for (var index = 0; index < values.Count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(';');
+            }
+
+            builder.Append(EscapeCsvCell(values[index]));
+        }
+
+        builder.AppendLine();
+    }
+
+    private static string EscapeCsvCell(string? value)
+    {
+        var normalized = value ?? string.Empty;
+        return normalized.Contains(';') || normalized.Contains('"') || normalized.Contains('\n') || normalized.Contains('\r')
+            ? $"\"{normalized.Replace("\"", "\"\"", StringComparison.Ordinal)}\""
+            : normalized;
     }
 
     private async Task<IReadOnlyList<LegalWorkPaymentRow>> BuildLegalWorkPaymentRowsAsync(
@@ -1221,6 +1503,23 @@ public class ReportsController : ControllerBase
     {
         var normalized = value?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static bool TryParseClientCaseStatus(string? value, out ClientCaseStatus status)
+    {
+        if (Enum.TryParse(value, ignoreCase: true, out status))
+        {
+            return true;
+        }
+
+        status = default;
+        return false;
     }
 
     private static string FormatCaseStatus(ClientCaseStatus status)
@@ -3428,6 +3727,11 @@ public class ReportsController : ControllerBase
         decimal Amount,
         decimal PaidAmount,
         PaymentStatus Status);
+
+    private sealed record LegalWorkReportFilters(
+        string? Status,
+        int? ResponsibleUserId,
+        string? CaseType);
 
     private sealed record CaseActivityReportSettings(
         int InactivityDays,

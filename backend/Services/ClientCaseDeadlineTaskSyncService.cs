@@ -24,6 +24,7 @@ public static class ClientCaseDeadlineTaskSyncService
         var clientCase = await db.ClientCases
             .Include(item => item.Client)
             .Include(item => item.LegalEntity)
+            .Include(item => item.ProceduralDeadlines)
             .FirstOrDefaultAsync(item => item.Id == clientCaseId, ct);
         if (clientCase is null)
         {
@@ -182,8 +183,24 @@ public static class ClientCaseDeadlineTaskSyncService
     }
 
     private static IReadOnlyList<CaseDeadline> BuildDeadlines(ClientCase clientCase)
-        =>
-        [
+    {
+        var result = new List<CaseDeadline>();
+        var separateDeadlineTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var deadline in clientCase.ProceduralDeadlines.OrderBy(item => item.DueAt).ThenBy(item => item.Id))
+        {
+            separateDeadlineTypes.Add(deadline.DeadlineType);
+            var isClosed = string.Equals(deadline.Status, "closed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(deadline.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
+            result.Add(new CaseDeadline(
+                $"entity-{deadline.Id}",
+                string.IsNullOrWhiteSpace(deadline.Title) ? ResolveDeadlineTitle(deadline.DeadlineType) : deadline.Title,
+                isClosed ? null : deadline.DueAt,
+                deadline.AllDay,
+                deadline.AllDay ? 60 : 90));
+        }
+
+        var legacyDeadlines = new CaseDeadline[]
+        {
             new("due", "Крайний срок по делу", clientCase.DueDate, true, 60),
             new("claim", "Дата подачи иска", clientCase.ClaimFiledAt, true, 60),
             new("appeal", "Срок апелляции", clientCase.AppealDeadlineAt, true, 60),
@@ -191,7 +208,23 @@ public static class ClientCaseDeadlineTaskSyncService
             new("motion", "Срок подачи ходатайства", clientCase.MotionDeadlineAt, true, 60),
             new("objection", "Срок подачи возражений", clientCase.ObjectionDeadlineAt, true, 60),
             new("hearing", "Судебное заседание", clientCase.NextHearingAt, false, 90),
-        ];
+        };
+
+        result.AddRange(legacyDeadlines.Where(item => !separateDeadlineTypes.Contains(item.Key)));
+        return result;
+    }
+
+    private static string ResolveDeadlineTitle(string deadlineType)
+        => deadlineType.ToLowerInvariant() switch
+        {
+            "appeal" => "Срок апелляции",
+            "cassation" => "Срок кассации",
+            "motion" => "Срок подачи ходатайства",
+            "objection" => "Срок подачи возражений",
+            "claim" => "Дата подачи иска",
+            "hearing" => "Судебное заседание",
+            _ => "Процессуальный срок",
+        };
 
     private static string BuildDescription(ClientCase clientCase, CaseDeadline deadline)
     {

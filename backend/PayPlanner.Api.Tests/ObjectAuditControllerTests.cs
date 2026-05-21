@@ -128,6 +128,169 @@ public class ObjectAuditControllerTests
         Assert.IsType<ForbidResult>(result.Result);
     }
 
+    [Fact]
+    public async Task CaseScopedHistory_RequiresVisibleCase()
+    {
+        await using var db = await CreateContextAsync();
+
+        var role = new Role
+        {
+            Name = "lawyer",
+            Description = "Lawyer",
+            CreatedAt = DateTime.UtcNow,
+            PermissionsUpdatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Audit,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var currentUser = new User
+        {
+            Email = "lawyer@example.com",
+            PasswordHash = "hash",
+            FullName = "Юрист",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var otherUser = new User
+        {
+            Email = "other@example.com",
+            PasswordHash = "hash",
+            FullName = "Другой юрист",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.AddRange(currentUser, otherUser);
+        await db.SaveChangesAsync();
+
+        var visibleClient = new Client
+        {
+            Name = "Видимый клиент",
+            IsActive = true,
+            ResponsibleUserId = currentUser.Id,
+        };
+        var hiddenClient = new Client
+        {
+            Name = "Чужой клиент",
+            IsActive = true,
+            ResponsibleUserId = otherUser.Id,
+        };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var visibleCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            Title = "Видимое дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = currentUser.Id,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var hiddenCase = new ClientCase
+        {
+            ClientId = hiddenClient.Id,
+            Title = "Чужое дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = otherUser.Id,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.ClientCases.AddRange(visibleCase, hiddenCase);
+        await db.SaveChangesAsync();
+
+        var visibleDocument = new ClientCaseDocument
+        {
+            ClientCaseId = visibleCase.Id,
+            OriginalFileName = "visible.pdf",
+            StoredFileName = "visible.pdf",
+            StoragePath = "visible.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 10,
+            UploadedAt = DateTime.UtcNow,
+        };
+        var hiddenDocument = new ClientCaseDocument
+        {
+            ClientCaseId = hiddenCase.Id,
+            OriginalFileName = "hidden.pdf",
+            StoredFileName = "hidden.pdf",
+            StoragePath = "hidden.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 10,
+            UploadedAt = DateTime.UtcNow,
+        };
+        db.ClientCaseDocuments.AddRange(visibleDocument, hiddenDocument);
+        await db.SaveChangesAsync();
+
+        db.ObjectAuditEvents.AddRange(
+            new ObjectAuditEvent
+            {
+                ObjectType = "client-case-document",
+                ObjectId = visibleDocument.Id,
+                Action = "Created",
+                Description = "Видимый документ",
+                ActorUserId = currentUser.Id,
+                ActorUserName = currentUser.FullName,
+                CreatedAt = DateTime.UtcNow,
+            },
+            new ObjectAuditEvent
+            {
+                ObjectType = "client-case-document",
+                ObjectId = hiddenDocument.Id,
+                Action = "Created",
+                Description = "Скрытый документ",
+                ActorUserId = otherUser.Id,
+                ActorUserName = otherUser.FullName,
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, currentUser.Id, currentUser.FullName);
+
+        var visibleHistoryResult = await controller.GetHistory("client-case-document", visibleDocument.Id, CancellationToken.None);
+        var visibleOk = Assert.IsType<OkObjectResult>(visibleHistoryResult.Result);
+        var visibleHistory = Assert.IsAssignableFrom<IReadOnlyCollection<ObjectAuditEventDto>>(visibleOk.Value);
+        Assert.Single(visibleHistory);
+
+        var hiddenHistoryResult = await controller.GetHistory("client-case-document", hiddenDocument.Id, CancellationToken.None);
+        Assert.IsType<ForbidResult>(hiddenHistoryResult.Result);
+
+        var feedResult = await controller.GetEvents(
+            search: null,
+            objectType: "client-case-document",
+            action: null,
+            actor: null,
+            from: null,
+            to: null,
+            page: 1,
+            pageSize: 25,
+            ct: CancellationToken.None);
+
+        var feedOk = Assert.IsType<OkObjectResult>(feedResult.Result);
+        var feed = Assert.IsType<PagedResponse<ObjectAuditEventDto>>(feedOk.Value);
+        var item = Assert.Single(feed.Items);
+        Assert.Equal(visibleDocument.Id, item.ObjectId);
+    }
+
     private static ObjectAuditController CreateController(PaymentContext db, int userId, string userName)
     {
         var identity = new ClaimsIdentity(

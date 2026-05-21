@@ -338,6 +338,14 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public ICollection<ClientCaseWorkOrder> WorkOrders { get; set; } = new List<ClientCaseWorkOrder>();
 
+        public ICollection<ClientCaseProceduralDeadline> ProceduralDeadlines { get; set; } = new List<ClientCaseProceduralDeadline>();
+
+        public ICollection<ClientCaseCourtEvent> CourtEvents { get; set; } = new List<ClientCaseCourtEvent>();
+
+        public ICollection<ClientCaseCourtParty> CourtParties { get; set; } = new List<ClientCaseCourtParty>();
+
+        public ICollection<ClientCaseCourtEventHistory> CourtEventHistory { get; set; } = new List<ClientCaseCourtEventHistory>();
+
         /// <summary>
         /// Статус дела (черновик/в работе/закрыто).
         /// </summary>
