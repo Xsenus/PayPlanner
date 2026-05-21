@@ -153,6 +153,51 @@ public sealed class AppVersionControllerTests
         }
     }
 
+    [Fact]
+    public async Task SeedService_RemovesAgentReleaseMissingFromFile()
+    {
+        await using var scope = await CreateScopeAsync();
+        var stale = Release("2026-05-21-accounting-v2");
+        stale.Source = "agent";
+        var manual = Release("2026-05-22-manual");
+        manual.Source = "manual";
+        scope.Db.AppReleases.AddRange(stale, manual);
+        await scope.Db.SaveChangesAsync();
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"payplanner-releases-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempRoot, "AppReleases"));
+        await File.WriteAllTextAsync(
+            Path.Combine(tempRoot, "AppReleases", "releases.json"),
+            """
+            [
+              {
+                "releaseId": "2026-05-23-agent",
+                "version": "1.14.0",
+                "releasedAt": "2026-05-23T00:00:00",
+                "title": "Agent release",
+                "summary": "Seeded by agent",
+                "isActive": true,
+                "items": [
+                  { "type": "improved", "text": "Agent item" }
+                ]
+              }
+            ]
+            """);
+
+        try
+        {
+            await AppReleaseSeedService.SyncAsync(scope.Db, tempRoot);
+
+            Assert.False(await scope.Db.AppReleases.AnyAsync(release => release.ReleaseId == "2026-05-21-accounting-v2"));
+            Assert.True(await scope.Db.AppReleases.AnyAsync(release => release.ReleaseId == "2026-05-22-manual"));
+            Assert.True(await scope.Db.AppReleases.AnyAsync(release => release.ReleaseId == "2026-05-23-agent"));
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
     private static AppVersionController CreateController(PaymentContext db, int userId, params AppRelease[] releases)
     {
         foreach (var release in releases)

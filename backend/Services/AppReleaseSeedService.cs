@@ -35,6 +35,9 @@ public static class AppReleaseSeedService
             .GroupBy(release => release.ReleaseId.Trim(), StringComparer.Ordinal)
             .Select(group => group.Last())
             .ToArray();
+        var seedReleaseIds = normalized
+            .Select(release => release.ReleaseId.Trim())
+            .ToHashSet(StringComparer.Ordinal);
 
         foreach (var seed in normalized)
         {
@@ -83,6 +86,14 @@ public static class AppReleaseSeedService
             {
                 db.AppReleases.Add(target);
             }
+        }
+
+        var staleAgentReleases = await db.AppReleases
+            .Where(release => release.Source == "agent" && !seedReleaseIds.Contains(release.ReleaseId))
+            .ToArrayAsync(ct);
+        if (staleAgentReleases.Length > 0)
+        {
+            db.AppReleases.RemoveRange(staleAgentReleases);
         }
 
         await db.SaveChangesAsync(ct);
