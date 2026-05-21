@@ -3109,6 +3109,59 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task ImportBankStatement_AutoMatchesInvoiceByContractNumberInPurpose()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = new Invoice
+        {
+            Number = "88",
+            Date = new DateTime(2026, 4, 29),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var contract = new Contract
+        {
+            Number = "ДОГ-88/26",
+            Date = new DateTime(2026, 4, 1),
+            Status = ContractStatus.Concluded,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Contract = contract,
+            Account = "88",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 4, 29),
+            CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.ImportBankStatement(
+            CreateFormFile(
+                "Дата;Сумма;Контрагент;Назначение;Номер\n" +
+                "29.04.2026;25000;Ахмедова Айтан Рафик Кызы;Оплата по договору №ДОГ-88/26;101\n",
+                "statement.csv"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        var operationDto = Assert.Single(result.Operations);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, operationDto.MatchStatus);
+
+        var operation = await db.MoneyOperations.SingleAsync();
+        Assert.Equal(invoice.Id, operation.LinkedInvoiceId);
+        Assert.Equal(MoneyOperationMatchStatus.Matched, operation.MatchStatus);
+        Assert.Equal("88", operation.PaidInvoiceNumber);
+        Assert.Contains("номеру договора", operation.MatchComment);
+    }
+
+    [Fact]
     public async Task ImportBankStatement_AutoMatchesExpenseInvoiceByNumberInPurpose()
     {
         await using var db = await CreateContextAsync();
@@ -3483,6 +3536,62 @@ public class MoneyOperationsControllerTests
         Assert.Equal(25_000m, candidate.OutstandingAmount);
         Assert.True(candidate.Score >= 160);
         Assert.Contains("номер счёта", candidate.MatchReason);
+    }
+
+    [Fact]
+    public async Task GetInvoiceCandidates_ReturnsCandidateMatchedByContractNumber()
+    {
+        await using var db = await CreateContextAsync();
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 25_000m,
+            Date = new DateTime(2026, 4, 29),
+            CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+            Purpose = "Оплата по договору №ДОГ-88/26",
+            MatchStatus = MoneyOperationMatchStatus.ClarificationRequired,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var invoice = new Invoice
+        {
+            Number = "88",
+            Date = new DateTime(2026, 4, 20),
+            CreatedAt = DateTime.UtcNow,
+        };
+        var contract = new Contract
+        {
+            Number = "ДОГ-88/26",
+            Date = new DateTime(2026, 4, 1),
+            Status = ContractStatus.Concluded,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        db.Payments.Add(new Payment
+        {
+            Invoice = invoice,
+            Contract = contract,
+            Account = "88",
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 25_000m,
+            PaidAmount = 0m,
+            Date = new DateTime(2026, 4, 20),
+            CounterpartyName = "Ахмедова Айтан Рафик Кызы",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.GetInvoiceCandidates(operation.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var candidate = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<MoneyOperationInvoiceCandidateDto>>(ok.Value));
+        Assert.Equal(invoice.Id, candidate.InvoiceId);
+        Assert.Equal("88", candidate.InvoiceNumber);
+        Assert.Contains("номер договора", candidate.MatchReason);
     }
 
     [Fact]

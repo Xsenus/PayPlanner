@@ -1688,6 +1688,7 @@ public class MoneyOperationsController : ControllerBase
             .Include(payment => payment.Client)
             .Include(payment => payment.ExpenseClient)
             .Include(payment => payment.ExpenseLegalEntity)
+            .Include(payment => payment.Contract)
             .Where(payment =>
                 payment.DocumentKind == DocumentKind.Invoice &&
                 payment.Type == targetPaymentType &&
@@ -1713,7 +1714,8 @@ public class MoneyOperationsController : ControllerBase
             .Select(payment =>
             {
                 var invoiceNumber = payment.Invoice?.Number ?? payment.Account ?? payment.LegacyAccountNumber ?? string.Empty;
-                var numberTokens = BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber);
+                var invoiceNumberTokens = BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber);
+                var contractNumberTokens = BuildInvoiceNumberTokenSet(payment.Contract?.Number);
                 var relatedPayments = aggregatePaymentsByInvoiceId.TryGetValue(payment.InvoiceId!.Value, out var aggregatePayments)
                     ? aggregatePayments
                     : new List<Payment> { payment };
@@ -1730,10 +1732,15 @@ public class MoneyOperationsController : ControllerBase
                 var score = 0;
                 var reasons = new List<string>();
 
-                if (purposeTokens.Count > 0 && numberTokens.Any(purposeTokens.Contains))
+                if (purposeTokens.Count > 0 && invoiceNumberTokens.Any(purposeTokens.Contains))
                 {
                     score += 100;
                     reasons.Add("номер счёта найден в назначении");
+                }
+                else if (purposeTokens.Count > 0 && contractNumberTokens.Any(purposeTokens.Contains))
+                {
+                    score += 90;
+                    reasons.Add("номер договора найден в назначении");
                 }
 
                 if (outstandingAmount > 0m && operationAmount <= outstandingAmount + 0.009m)
@@ -3245,6 +3252,7 @@ public class MoneyOperationsController : ControllerBase
                 .Include(payment => payment.Client)
                 .Include(payment => payment.ExpenseClient)
                 .Include(payment => payment.ExpenseLegalEntity)
+                .Include(payment => payment.Contract)
                 .Where(payment =>
                     payment.DocumentKind == DocumentKind.Invoice &&
                     statementPaymentTypes.Contains(payment.Type) &&
@@ -3263,10 +3271,11 @@ public class MoneyOperationsController : ControllerBase
                     payment.Type == PaymentType.Expense ? payment.ExpenseClientId ?? payment.ClientId : payment.ClientId,
                     ResolveInvoiceCandidateCounterpartyName(payment),
                     payment.CounterpartyName,
-                    BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber)))
+                    BuildInvoiceNumberTokenSet(payment.Invoice?.Number, payment.Account, payment.LegacyAccountNumber),
+                    BuildInvoiceNumberTokenSet(payment.Contract?.Number)))
                 .Where(candidate =>
                     invoiceNumbersFromStatement.Count == 0 ||
-                    candidate.NumberTokens.Any(invoiceNumbersFromStatement.Contains) ||
+                    candidate.MatchingNumberTokens.Any(invoiceNumbersFromStatement.Contains) ||
                     items.Any(item =>
                         item.Direction == MoneyOperationDirection.Income &&
                         Math.Abs(candidate.OutstandingAmount - item.Amount) <= 0.009m &&
@@ -3895,7 +3904,7 @@ public class MoneyOperationsController : ControllerBase
                     candidate.PaymentType == targetPaymentType &&
                     candidate.OutstandingAmount > 0m &&
                     item.Amount <= candidate.OutstandingAmount + 0.009m &&
-                    candidate.NumberTokens.Any(tokens.Contains))
+                    candidate.MatchingNumberTokens.Any(tokens.Contains))
                 .GroupBy(candidate => candidate.InvoiceId)
                 .Select(group => group.First())
                 .ToList();
@@ -3929,9 +3938,14 @@ public class MoneyOperationsController : ControllerBase
     private static string BuildBankStatementAutoMatchComment(BankStatementImportItem item, BankStatementInvoiceCandidate candidate)
     {
         var tokens = ExtractInvoiceNumberTokens(item.Purpose).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (tokens.Count > 0 && candidate.NumberTokens.Any(tokens.Contains))
+        if (tokens.Count > 0 && candidate.InvoiceNumberTokens.Any(tokens.Contains))
         {
             return $"Автоматически сверено по номеру счёта {candidate.InvoiceNumber} из назначения платежа.";
+        }
+
+        if (tokens.Count > 0 && candidate.ContractNumberTokens.Any(tokens.Contains))
+        {
+            return $"Автоматически сверено со счётом {candidate.InvoiceNumber} по номеру договора из назначения платежа.";
         }
 
         return candidate.PaymentType == PaymentType.Expense
@@ -4094,7 +4108,7 @@ public class MoneyOperationsController : ControllerBase
 
         foreach (Match match in Regex.Matches(
                      text,
-                     @"(?:сч[её]т\w*|invoice|inv)\s*(?:№|#|n|no\.?)?\s*([A-Za-zА-Яа-я0-9][A-Za-zА-Яа-я0-9\/\-_]*)",
+                     @"(?:сч[её]т\w*|договор\w*|contract|agreement|invoice|inv)\s*(?:№|#|n|no\.?)?\s*([A-Za-zА-Яа-я0-9][A-Za-zА-Яа-я0-9\/\-_]*)",
                      RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
                      TimeSpan.FromMilliseconds(100)))
         {
@@ -4412,8 +4426,11 @@ public class MoneyOperationsController : ControllerBase
         int? ClientId,
         string? ClientName,
         string? CounterpartyName,
-        HashSet<string> NumberTokens)
+        HashSet<string> InvoiceNumberTokens,
+        HashSet<string> ContractNumberTokens)
     {
+        public IEnumerable<string> MatchingNumberTokens => InvoiceNumberTokens.Concat(ContractNumberTokens);
+
         public decimal OutstandingAmount => CalculateOutstandingAmount(Amount, PaidAmount, Status);
     }
 
