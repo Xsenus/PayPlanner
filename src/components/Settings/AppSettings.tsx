@@ -11,6 +11,7 @@ import { AuthProviderSettings } from './AuthProviderSettings';
 import { BankDirectorySettings } from './BankDirectorySettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
+import { ContractDocumentTemplateSettings } from './ContractDocumentTemplateSettings';
 import { FeatureFlagSettings } from './FeatureFlagSettings';
 import { AppVersionSettings } from './AppVersionSettings';
 import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
@@ -1043,6 +1044,8 @@ export function AppSettings() {
                         </div>
                       </div>
                     </div>
+
+                    <ContractDocumentTemplateSettings />
                   </div>
                 )}
 

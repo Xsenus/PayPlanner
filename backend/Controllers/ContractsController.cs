@@ -28,6 +28,7 @@ public class ContractsController : ControllerBase
     private const string ContractNumberTemplateSettingKey = "contracts.numbering.template";
     private const string ContractAutoGenerateNumberSettingKey = "contracts.rules.autoGenerateWhenEmpty";
     private const string ContractAllowManualNumberEditSettingKey = "contracts.rules.allowManualNumberEdit";
+    private const string ContractDocumentTemplatesSettingKey = "contracts.documentTemplates";
     private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
     private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
@@ -111,13 +112,18 @@ public class ContractsController : ControllerBase
     }
 
     [HttpGet("{id:int}/document")]
-    public async Task<IActionResult> GetDocument(int id, [FromQuery] string? format = "word", CancellationToken ct = default)
+    public async Task<IActionResult> GetDocument(
+        int id,
+        [FromQuery] string? format = "word",
+        [FromQuery] string? templateKey = null,
+        CancellationToken ct = default)
     {
         var contract = await LoadContractForDocumentAsync(id, ct);
         if (contract is null) return NotFound();
 
         var mainCompany = await LoadMainCompanyAsync(ct);
-        var documentHtml = ContractDocumentTemplateEngine.RenderHtml(contract, mainCompany);
+        var template = await GetContractDocumentTemplateAsync(templateKey, ct);
+        var documentHtml = ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany);
         var normalizedFormat = NormalizeDocumentFormat(format);
 
         if (normalizedFormat == "html")
@@ -165,7 +171,8 @@ public class ContractsController : ControllerBase
         }
 
         var mainCompany = await LoadMainCompanyAsync(ct);
-        var documentHtml = ContractDocumentTemplateEngine.RenderHtml(contract, mainCompany);
+        var template = await GetContractDocumentTemplateAsync(preferredTemplateKey: null, ct);
+        var documentHtml = ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany);
         var normalizedFormat = NormalizeDocumentFormat(request.Format);
         if (normalizedFormat == "html")
         {
@@ -206,6 +213,39 @@ public class ContractsController : ControllerBase
             contentType);
 
         return Ok(new { sent = true, recipient = email, fileName, format = normalizedFormat });
+    }
+
+    [HttpGet("document-template-settings")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> GetDocumentTemplateSettings(CancellationToken ct)
+        => Ok(await GetContractDocumentTemplateSettingsAsync(ct));
+
+    [HttpPut("document-template-settings")]
+    public async Task<ActionResult<InvoiceDocumentTemplateSettingsDto>> UpsertDocumentTemplateSettings(
+        [FromBody] InvoiceDocumentTemplateSettingsRequest request,
+        CancellationToken ct)
+    {
+        if (!User.IsInRole("admin"))
+        {
+            return Forbid();
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var storage = ContractDocumentTemplateEngine.NormalizeRequest(request);
+        var validationError = ValidateContractDocumentTemplateSettings(storage);
+        if (validationError is not null)
+        {
+            return BadRequest(validationError);
+        }
+
+        var now = DateTime.UtcNow;
+        await UpsertSystemSettingAsync(ContractDocumentTemplatesSettingKey, ContractDocumentTemplateEngine.Serialize(storage), now, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(ContractDocumentTemplateEngine.CreateResponse(storage));
     }
 
     [HttpPost("{id:int}/send-to-signing")]
@@ -734,6 +774,89 @@ public class ContractsController : ControllerBase
             .AsNoTracking()
             .Include(entity => entity.Addresses)
             .FirstOrDefaultAsync(entity => entity.Id == companyId.Value, ct);
+    }
+
+    private async Task<InvoiceDocumentTemplateSettingsDto> GetContractDocumentTemplateSettingsAsync(CancellationToken ct)
+    {
+        var rawJson = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(setting => setting.Key == ContractDocumentTemplatesSettingKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(ct);
+
+        var storage = ContractDocumentTemplateEngine.Deserialize(rawJson);
+        return storage is null
+            ? ContractDocumentTemplateEngine.CreateDefaultSettings()
+            : ContractDocumentTemplateEngine.CreateResponse(storage);
+    }
+
+    private async Task<InvoiceDocumentTemplateDto> GetContractDocumentTemplateAsync(string? preferredTemplateKey, CancellationToken ct)
+    {
+        var settings = await GetContractDocumentTemplateSettingsAsync(ct);
+        return SelectContractDocumentTemplate(settings, preferredTemplateKey);
+    }
+
+    private static InvoiceDocumentTemplateDto SelectContractDocumentTemplate(
+        InvoiceDocumentTemplateSettingsDto settings,
+        string? preferredTemplateKey)
+    {
+        if (!string.IsNullOrWhiteSpace(preferredTemplateKey))
+        {
+            var preferred = settings.Templates.FirstOrDefault(template =>
+                string.Equals(template.Key, preferredTemplateKey.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (preferred is not null)
+            {
+                return preferred;
+            }
+        }
+
+        return settings.Templates.FirstOrDefault(template =>
+                   string.Equals(template.Key, settings.ActiveTemplateKey, StringComparison.OrdinalIgnoreCase))
+               ?? settings.Templates[0];
+    }
+
+    private static string? ValidateContractDocumentTemplateSettings(ContractDocumentTemplateEngine.ContractDocumentTemplateSettingsStorage storage)
+    {
+        if (storage.Templates.Count == 0)
+        {
+            return "Добавьте хотя бы один шаблон договора.";
+        }
+
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var template in storage.Templates)
+        {
+            if (string.IsNullOrWhiteSpace(template.Key))
+            {
+                return "У каждого шаблона должен быть внутренний ключ.";
+            }
+
+            if (!keys.Add(template.Key))
+            {
+                return $"Шаблон с ключом '{template.Key}' уже существует.";
+            }
+
+            if (string.IsNullOrWhiteSpace(template.Name))
+            {
+                return $"Заполните название шаблона '{template.Key}'.";
+            }
+
+            if (string.IsNullOrWhiteSpace(template.Html))
+            {
+                return $"Шаблон '{template.Name}' не может быть пустым.";
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(storage.ActiveTemplateKey))
+        {
+            return "Выберите активный шаблон договора.";
+        }
+
+        if (!storage.Templates.Any(template => string.Equals(template.Key, storage.ActiveTemplateKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Активный шаблон должен присутствовать в списке шаблонов.";
+        }
+
+        return null;
     }
 
     private static string? ResolveContractRecipientEmail(Contract contract)

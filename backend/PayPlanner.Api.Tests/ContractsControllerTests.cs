@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
@@ -7,6 +8,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using System.Security.Claims;
 using System.Text;
 using Xunit;
 
@@ -418,7 +420,7 @@ public class ContractsControllerTests
         var created = Assert.IsType<CreatedResult>(createResult.Result);
         var createdDto = Assert.IsType<ContractDto>(created.Value);
 
-        var actionResult = await controller.GetDocument(createdDto.Id, "html", CancellationToken.None);
+        var actionResult = await controller.GetDocument(createdDto.Id, "html", templateKey: null, CancellationToken.None);
 
         var content = Assert.IsType<ContentResult>(actionResult);
         Assert.Equal("text/html; charset=utf-8", content.ContentType);
@@ -460,6 +462,80 @@ public class ContractsControllerTests
         Assert.Equal("contract-CT-MAIL-1.doc", emailService.AttachmentFileName);
         Assert.Equal("application/msword", emailService.AttachmentContentType);
         Assert.Contains("Договор № CT-MAIL-1", Encoding.UTF8.GetString(emailService.AttachmentBytes!));
+    }
+
+    [Fact]
+    public async Task DocumentTemplateSettings_StoresCustomActiveTemplate()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateAdminController(db);
+
+        var actionResult = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "custom-contract",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "custom-contract",
+                        Name = "Краткий договор",
+                        Html = "<html><body>Шаблон {{contract.number}} / {{customer.name}}</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var settings = Assert.IsType<InvoiceDocumentTemplateSettingsDto>(ok.Value);
+        Assert.Equal("custom-contract", settings.ActiveTemplateKey);
+        Assert.Contains(settings.Tokens, token => token.Key == "contract.number");
+
+        var stored = await db.SystemSettings.AsNoTracking().SingleAsync(setting => setting.Key == "contracts.documentTemplates");
+        Assert.Contains("custom-contract", stored.Value);
+    }
+
+    [Fact]
+    public async Task GetDocument_UsesConfiguredActiveTemplate()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = CreateAdminController(db);
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-TPL-1",
+                Date = new DateTime(2026, 5, 22),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 19_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "custom-contract",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "custom-contract",
+                        Name = "Краткий договор",
+                        Html = "<html><body>Кастомный договор {{contract.number}} для {{customer.name}}</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        var actionResult = await controller.GetDocument(createdDto.Id, "html", null, CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(actionResult);
+        Assert.Contains("Кастомный договор CT-TPL-1", content.Content);
+        Assert.Contains("Тестовый клиент", content.Content);
     }
 
     [Fact]
@@ -1153,6 +1229,27 @@ public class ContractsControllerTests
         db.Clients.Add(client);
         await db.SaveChangesAsync();
         return client;
+    }
+
+    private static ContractsController CreateAdminController(PaymentContext db)
+    {
+        var controller = new ContractsController(db, new NoopFormRequirementsService())
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, "1"),
+                        new Claim(ClaimTypes.Name, "Администратор"),
+                        new Claim(ClaimTypes.Role, "admin"),
+                    ], "Test")),
+                },
+            },
+        };
+
+        return controller;
     }
 
     private static async Task<Payment> CreateInvoicePaymentAsync(PaymentContext db, string invoiceNumber, DateTime date, decimal amount)

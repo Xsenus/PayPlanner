@@ -1,15 +1,134 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Services.Contracts;
 
 public static class ContractDocumentTemplateEngine
 {
+    public const string DefaultTemplateKey = "contract-standard";
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
+    private static readonly Regex TokenRegex = new("""\{\{\s*([a-zA-Z0-9\._]+)\s*\}\}""", RegexOptions.Compiled);
+
+    public static InvoiceDocumentTemplateSettingsDto CreateDefaultSettings()
+    {
+        return CreateResponse(new ContractDocumentTemplateSettingsStorage
+        {
+            ActiveTemplateKey = DefaultTemplateKey,
+            Templates =
+            [
+                new ContractDocumentTemplateStorageItem
+                {
+                    Key = DefaultTemplateKey,
+                    Name = "Стандартный договор",
+                    Description = "Базовый печатный шаблон договора со сторонами, условиями и подписями.",
+                    Html = DefaultTemplateHtml,
+                },
+            ],
+        });
+    }
+
+    public static InvoiceDocumentTemplateSettingsDto CreateResponse(ContractDocumentTemplateSettingsStorage storage)
+    {
+        var templates = storage.Templates
+            .Where(static item => !string.IsNullOrWhiteSpace(item.Key) && !string.IsNullOrWhiteSpace(item.Name) && !string.IsNullOrWhiteSpace(item.Html))
+            .GroupBy(item => item.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Select(item => new InvoiceDocumentTemplateDto
+            {
+                Key = item.Key.Trim(),
+                Name = item.Name.Trim(),
+                Description = string.IsNullOrWhiteSpace(item.Description) ? null : item.Description.Trim(),
+                Html = item.Html.Trim(),
+            })
+            .ToList();
+
+        if (templates.Count == 0)
+        {
+            return CreateDefaultSettings();
+        }
+
+        var activeTemplateKey = templates.Any(item => string.Equals(item.Key, storage.ActiveTemplateKey, StringComparison.OrdinalIgnoreCase))
+            ? templates.First(item => string.Equals(item.Key, storage.ActiveTemplateKey, StringComparison.OrdinalIgnoreCase)).Key
+            : templates[0].Key;
+
+        return new InvoiceDocumentTemplateSettingsDto
+        {
+            ActiveTemplateKey = activeTemplateKey,
+            PrintWithSignatureAndSealByDefault = false,
+            Templates = templates,
+            Tokens = GetAvailableTokens(),
+            DefaultTemplateHtml = DefaultTemplateHtml,
+        };
+    }
+
+    public static ContractDocumentTemplateSettingsStorage NormalizeRequest(InvoiceDocumentTemplateSettingsRequest request)
+        => new()
+        {
+            ActiveTemplateKey = request.ActiveTemplateKey.Trim(),
+            Templates = request.Templates
+                .Where(static item => !string.IsNullOrWhiteSpace(item.Key) || !string.IsNullOrWhiteSpace(item.Name) || !string.IsNullOrWhiteSpace(item.Html))
+                .Select(item => new ContractDocumentTemplateStorageItem
+                {
+                    Key = item.Key.Trim(),
+                    Name = item.Name.Trim(),
+                    Description = string.IsNullOrWhiteSpace(item.Description) ? null : item.Description.Trim(),
+                    Html = item.Html.Trim(),
+                })
+                .ToList(),
+        };
+
+    public static string Serialize(ContractDocumentTemplateSettingsStorage storage)
+        => JsonSerializer.Serialize(storage);
+
+    public static ContractDocumentTemplateSettingsStorage? Deserialize(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ContractDocumentTemplateSettingsStorage>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static List<InvoiceDocumentTemplateTokenDto> GetAvailableTokens()
+        =>
+        [
+            new() { Key = "contract.number", Category = "Договор", Description = "Номер договора", IsRepeating = false },
+            new() { Key = "contract.date", Category = "Договор", Description = "Дата договора", IsRepeating = false },
+            new() { Key = "contract.title", Category = "Договор", Description = "Предмет или заголовок договора", IsRepeating = false },
+            new() { Key = "contract.description", Category = "Договор", Description = "Описание или условия договора", IsRepeating = false },
+            new() { Key = "contract.status", Category = "Договор", Description = "Текущий статус договора", IsRepeating = false },
+            new() { Key = "contract.startDate", Category = "Договор", Description = "Дата начала действия", IsRepeating = false },
+            new() { Key = "contract.validUntil", Category = "Договор", Description = "Дата окончания или бессрочно", IsRepeating = false },
+            new() { Key = "contract.amount", Category = "Договор", Description = "Сумма договора", IsRepeating = false },
+            new() { Key = "contract.invoiceTotal", Category = "Договор", Description = "Сумма связанных счетов", IsRepeating = false },
+            new() { Key = "contract.actTotal", Category = "Договор", Description = "Сумма связанных актов", IsRepeating = false },
+            new() { Key = "contract.paymentTotal", Category = "Договор", Description = "Сумма связанных оплат", IsRepeating = false },
+            new() { Key = "contract.detailsRowsHtml", Category = "HTML-блоки", Description = "Строки таблицы с основными сведениями", IsRepeating = false },
+            new() { Key = "contract.conditionsHtml", Category = "HTML-блоки", Description = "Блок условий, расторжения и аннулирования", IsRepeating = false },
+            new() { Key = "seller.name", Category = "Исполнитель", Description = "Название исполнителя", IsRepeating = false },
+            new() { Key = "seller.requisites", Category = "Исполнитель", Description = "Реквизиты исполнителя", IsRepeating = false },
+            new() { Key = "customer.name", Category = "Заказчик", Description = "Имя или название заказчика", IsRepeating = false },
+            new() { Key = "customer.requisites", Category = "Заказчик", Description = "Реквизиты заказчика", IsRepeating = false },
+        ];
 
     public static string RenderHtml(Contract contract, LegalEntity? mainCompany)
+        => RenderHtml(DefaultTemplateHtml, contract, mainCompany);
+
+    public static string RenderHtml(string templateHtml, Contract contract, LegalEntity? mainCompany)
     {
         var sellerName = FirstNotEmpty(mainCompany?.FullName, mainCompany?.ShortName, "Исполнитель");
         var sellerRequisites = BuildLegalEntityRequisites(mainCompany, sellerName);
@@ -54,12 +173,57 @@ public static class ContractDocumentTemplateEngine
             AppendSection(conditions, "Дата аннулирования", FormatDate(contract.CancelledAt));
         }
 
-        return $$"""
+        var tokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["contract.number"] = Encode(contract.Number),
+            ["contract.date"] = Encode(FormatDate(contract.Date)),
+            ["contract.title"] = Encode(contract.Title ?? string.Empty),
+            ["contract.description"] = Encode(contract.Description ?? string.Empty),
+            ["contract.status"] = Encode(statusLabel),
+            ["contract.startDate"] = Encode(FormatDate(contract.StartDate)),
+            ["contract.validUntil"] = Encode(validUntil),
+            ["contract.amount"] = Encode(amountText),
+            ["contract.invoiceTotal"] = Encode(FormatMoney(linkedInvoicesTotal)),
+            ["contract.actTotal"] = Encode(FormatMoney(linkedActsTotal)),
+            ["contract.paymentTotal"] = Encode(FormatMoney(linkedPaymentsTotal)),
+            ["contract.detailsRowsHtml"] = rows.ToString(),
+            ["contract.conditionsHtml"] = conditions.Length > 0 ? conditions.ToString() : "<p>Условия договора не заполнены в карточке.</p>",
+            ["seller.name"] = Encode(sellerName),
+            ["seller.requisites"] = Encode(sellerRequisites),
+            ["customer.name"] = Encode(customerName),
+            ["customer.requisites"] = Encode(customerRequisites),
+        };
+
+        return ReplaceTokens(templateHtml, tokens);
+    }
+
+    private static string ReplaceTokens(string templateHtml, IReadOnlyDictionary<string, string> tokens)
+        => TokenRegex.Replace(templateHtml, match =>
+        {
+            var key = match.Groups[1].Value;
+            return tokens.TryGetValue(key, out var value) ? value : string.Empty;
+        });
+
+    public sealed class ContractDocumentTemplateSettingsStorage
+    {
+        public string ActiveTemplateKey { get; set; } = string.Empty;
+        public List<ContractDocumentTemplateStorageItem> Templates { get; set; } = new();
+    }
+
+    public sealed class ContractDocumentTemplateStorageItem
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string Html { get; set; } = string.Empty;
+    }
+
+    public static readonly string DefaultTemplateHtml = """
 <!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>Договор № {{Encode(contract.Number)}}</title>
+  <title>Договор № {{contract.number}}</title>
   <style>
     @page { size: A4; margin: 18mm 16mm; }
     * { box-sizing: border-box; }
@@ -137,31 +301,31 @@ public static class ContractDocumentTemplateEngine
   </style>
 </head>
 <body>
-  <h1>Договор № {{Encode(contract.Number)}}</h1>
-  <div class="subtitle">{{Encode(FormatDate(contract.Date))}}</div>
+  <h1>Договор № {{contract.number}}</h1>
+  <div class="subtitle">{{contract.date}}</div>
 
   <table class="parties">
     <tr>
       <td>
         <div class="party-title">Исполнитель</div>
-        <div>{{Encode(sellerName)}}</div>
-        <div class="muted">{{Encode(sellerRequisites)}}</div>
+        <div>{{seller.name}}</div>
+        <div class="muted">{{seller.requisites}}</div>
       </td>
       <td>
         <div class="party-title">Заказчик</div>
-        <div>{{Encode(customerName)}}</div>
-        <div class="muted">{{Encode(customerRequisites)}}</div>
+        <div>{{customer.name}}</div>
+        <div class="muted">{{customer.requisites}}</div>
       </td>
     </tr>
   </table>
 
   <h2>Основные сведения</h2>
   <table class="details">
-    {{rows}}
+    {{contract.detailsRowsHtml}}
   </table>
 
   <h2>Условия договора</h2>
-  {{(conditions.Length > 0 ? conditions.ToString() : "<p>Условия договора не заполнены в карточке.</p>")}}
+  {{contract.conditionsHtml}}
 
   <h2>Подписи сторон</h2>
   <table class="signatures">
@@ -169,19 +333,18 @@ public static class ContractDocumentTemplateEngine
       <td>
         Исполнитель<br>
         <span class="line"></span><br>
-        <span class="muted">{{Encode(sellerName)}}</span>
+        <span class="muted">{{seller.name}}</span>
       </td>
       <td>
         Заказчик<br>
         <span class="line"></span><br>
-        <span class="muted">{{Encode(customerName)}}</span>
+        <span class="muted">{{customer.name}}</span>
       </td>
     </tr>
   </table>
 </body>
 </html>
 """;
-    }
 
     private static string ResolveCustomerName(Contract contract)
     {

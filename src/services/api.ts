@@ -1317,6 +1317,17 @@ export class ApiService {
     });
   }
 
+  async getContractDocumentTemplateSettings() {
+    return this.request<InvoiceDocumentTemplateSettingsDto>('/contracts/document-template-settings');
+  }
+
+  async updateContractDocumentTemplateSettings(payload: Pick<InvoiceDocumentTemplateSettingsDto, 'activeTemplateKey' | 'templates' | 'printWithSignatureAndSealByDefault'>) {
+    return this.request<InvoiceDocumentTemplateSettingsDto>('/contracts/document-template-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async createContract(payload: ContractInput) {
     return this.request<Contract>('/contracts', {
       method: 'POST',
