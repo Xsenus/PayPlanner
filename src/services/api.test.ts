@@ -62,6 +62,69 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('/features');
   });
 
+  it('loads latest app version from the backend', async () => {
+    const payload = {
+      currentVersion: '1.12.0',
+      latestRelease: {
+        id: 1,
+        releaseId: '2026-05-21-accounting-v2',
+        version: '1.12.0',
+        releasedAt: '2026-05-21T00:00:00',
+        title: 'Обновление',
+        summary: 'Описание',
+        items: [],
+      },
+      seenByCurrentUser: false,
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getLatestAppVersion();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/app-version/latest');
+  });
+
+  it('marks app version release as seen', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.markAppVersionSeen('2026-05-21-accounting-v2');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/app-version/mark-seen');
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBe(JSON.stringify({ releaseId: '2026-05-21-accounting-v2' }));
+  });
+
+  it('creates app release through admin API', async () => {
+    const payload = {
+      releaseId: '2026-05-22-manual',
+      version: '1.13.0',
+      releasedAt: '2026-05-22T00:00:00',
+      title: 'Manual release',
+      summary: 'Created manually',
+      isActive: true,
+      items: [{ type: 'new', text: 'Manual item' }],
+    };
+    const response = { id: 2, ...payload, source: 'manual', createdAt: '2026-05-22T00:00:00', updatedAt: '2026-05-22T00:00:00' };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(response), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.createAdminAppRelease(payload);
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/app-version/admin/releases');
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBe(JSON.stringify(payload));
+  });
+
   it('loads role permission audit from the backend', async () => {
     const payload = {
       generatedAtUtc: '2026-05-20T00:00:00Z',

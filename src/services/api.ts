@@ -101,6 +101,46 @@ export interface AppFeatureFlagsDto {
   };
 }
 
+export type AppReleaseItemType = 'new' | 'improved' | 'fixed' | 'important';
+
+export interface AppReleaseItemDto {
+  type: AppReleaseItemType | string;
+  text: string;
+}
+
+export interface AppReleaseDto {
+  id: number;
+  releaseId: string;
+  version: string;
+  releasedAt: string;
+  title: string;
+  summary: string;
+  items: AppReleaseItemDto[];
+}
+
+export interface AppReleaseAdminDto extends AppReleaseDto {
+  isActive: boolean;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveAppReleaseRequest {
+  releaseId: string;
+  version: string;
+  releasedAt: string;
+  title: string;
+  summary: string;
+  isActive: boolean;
+  items: AppReleaseItemDto[];
+}
+
+export interface AppVersionLatestDto {
+  currentVersion: string;
+  latestRelease?: AppReleaseDto | null;
+  seenByCurrentUser: boolean;
+}
+
 export interface LegalIntegrationDiagnosticsDto {
   generatedAt: string;
   hasEnabledExternalLegalFlags: boolean;
@@ -1077,6 +1117,39 @@ export class ApiService {
 
   async getFeatureFlags() {
     return this.request<AppFeatureFlagsDto>('/features');
+  }
+
+  async getLatestAppVersion() {
+    return this.request<AppVersionLatestDto>('/app-version/latest');
+  }
+
+  async getAppVersionHistory() {
+    return this.request<AppReleaseDto[]>('/app-version/history');
+  }
+
+  async getAdminAppReleases() {
+    return this.request<AppReleaseAdminDto[]>('/app-version/admin/releases');
+  }
+
+  async createAdminAppRelease(payload: SaveAppReleaseRequest) {
+    return this.request<AppReleaseAdminDto>('/app-version/admin/releases', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateAdminAppRelease(id: number, payload: SaveAppReleaseRequest) {
+    return this.request<AppReleaseAdminDto>(`/app-version/admin/releases/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async markAppVersionSeen(releaseId: string) {
+    return this.request<void>('/app-version/mark-seen', {
+      method: 'POST',
+      body: JSON.stringify({ releaseId }),
+    });
   }
 
   async getLegalIntegrationDiagnostics() {

@@ -16,6 +16,7 @@ import { useActivityLogger } from './hooks/useActivityLogger';
 import { useToast } from './hooks/useToast';
 import { DialogProvider } from './contexts/DialogContext';
 import { ToastProvider } from './contexts/ToastContext';
+import { AppVersionGate } from './components/AppVersion/AppVersionGate';
 import type { User as AppUser } from './services/authService';
 import { apiService, type ContactScope } from './services/api';
 import { extractDisplayErrorMessage } from './utils/errorUtils';
@@ -254,6 +255,7 @@ function AppContent() {
     contractId?: number | null;
     actId?: number | null;
   } | null>(null);
+  const [appVersionOpenSignal, setAppVersionOpenSignal] = useState(0);
 
   const accessibleMenuTabs = useMemo(
     () =>
@@ -665,6 +667,10 @@ function AppContent() {
 
   const handleOpenNotifications = useCallback(() => {
     setActiveTab('notifications');
+  }, []);
+
+  const handleOpenAppVersion = useCallback(() => {
+    setAppVersionOpenSignal((value) => value + 1);
   }, []);
 
   const handleCreateUser = useCallback(() => {
@@ -1705,6 +1711,7 @@ function AppContent() {
             onSignOut={signOut}
             onOpenProfile={handleOpenProfile}
             onOpenNotifications={handleOpenNotifications}
+            onOpenAppVersion={handleOpenAppVersion}
           />
           <main className="flex-1">
             <RouteErrorBoundary
@@ -1716,6 +1723,11 @@ function AppContent() {
               </Suspense>
             </RouteErrorBoundary>
           </main>
+          <AppVersionGate
+            userId={user.id}
+            manualOpenSignal={appVersionOpenSignal}
+            onManualOpenHandled={() => setAppVersionOpenSignal(0)}
+          />
         </div>
       </div>
     </TabProvider>

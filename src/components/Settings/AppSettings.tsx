@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bell, ClipboardList, Database, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { Bell, ClipboardList, Database, History, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -12,6 +12,7 @@ import { BankDirectorySettings } from './BankDirectorySettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
 import { FeatureFlagSettings } from './FeatureFlagSettings';
+import { AppVersionSettings } from './AppVersionSettings';
 import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
 import { MainCompanySettings } from './MainCompanySettings';
 import { MoneyAccountSettings } from './MoneyAccountSettings';
@@ -37,6 +38,7 @@ type SettingsSection =
   | 'general'
   | 'integrations'
   | 'notifications'
+  | 'app-releases'
   | 'auth-providers'
   | 'db-maintenance'
   | 'db-import'
@@ -56,6 +58,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'general',
   'integrations',
   'notifications',
+  'app-releases',
   'auth-providers',
   'db-maintenance',
   'db-import',
@@ -165,6 +168,7 @@ export function AppSettings() {
     if (activeSection === 'general') return 'Финансовые правила';
     if (activeSection === 'integrations') return 'Ключи и внешние сервисы';
     if (activeSection === 'notifications') return 'Уведомления';
+    if (activeSection === 'app-releases') return 'Версия приложения и обновления';
     if (activeSection === 'auth-providers') return 'Внешняя авторизация';
     if (activeSection === 'db-maintenance') return 'Обслуживание базы данных';
     if (activeSection === 'db-import') return 'Импорт данных';
@@ -790,6 +794,20 @@ export function AppSettings() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => selectSection('app-releases')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'app-releases'
+                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <History className="h-4 w-4" />
+                      Версия и обновления
+                    </span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => selectSection('auth-providers')}
                     className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
                       activeSection === 'auth-providers'
@@ -1189,6 +1207,8 @@ export function AppSettings() {
             )}
 
             {activeSection === 'notifications' && <NotificationSettings />}
+
+            {activeSection === 'app-releases' && <AppVersionSettings />}
 
             {activeSection === 'auth-providers' && <AuthProviderSettings />}
 

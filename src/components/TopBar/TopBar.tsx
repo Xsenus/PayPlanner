@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, Building2, LogOut, User } from 'lucide-react';
+import { Bell, Building2, Info, LogOut, User } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -12,6 +12,7 @@ type TopBarProps = {
   onSignOut: () => Promise<void>;
   onOpenProfile: () => void;
   onOpenNotifications: () => void;
+  onOpenAppVersion: () => void;
 };
 
 const getInitials = (fullName?: string | null) =>
@@ -23,7 +24,7 @@ const getInitials = (fullName?: string | null) =>
     .join('')
     .toUpperCase();
 
-export default function TopBar({ title, onSignOut, onOpenProfile, onOpenNotifications }: TopBarProps) {
+export default function TopBar({ title, onSignOut, onOpenProfile, onOpenNotifications, onOpenAppVersion }: TopBarProps) {
   const { user, isAdmin } = useAuth();
   const { setActiveTab } = useTabNavigation();
   const { confirm } = useDialog();
@@ -160,6 +161,17 @@ export default function TopBar({ title, onSignOut, onOpenProfile, onOpenNotifica
                   >
                     <User className="h-4 w-4 text-slate-400" />
                     Ваш профиль
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      onOpenAppVersion();
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                  >
+                    <Info className="h-4 w-4 text-slate-400" />
+                    Что нового
                   </button>
                 </div>
 
