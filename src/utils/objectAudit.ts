@@ -7,8 +7,10 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   Comment: 'Комментарий',
   Notes: 'Заметки',
   SystemNotes: 'Служебные заметки',
+  ChannelsJson: 'Каналы уведомлений',
   Type: 'Тип',
   Status: 'Статус',
+  Result: 'Результат',
   Amount: 'Сумма',
   Number: 'Номер',
   Date: 'Дата',
@@ -133,6 +135,7 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     Name: 'Название дела',
     Description: 'Описание дела',
     Status: 'Статус дела',
+    EventHistory: 'История событий',
   },
   'client-case-document': {
     DocumentKey: 'Ключ документа',
@@ -241,10 +244,13 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     Description: 'Описание задачи',
     Status: 'Статус задачи',
     Type: 'Тип задачи',
+    Result: 'Результат задачи',
     Priority: 'Приоритет',
     DueAt: 'Срок выполнения',
     AssigneeUserId: 'Исполнитель',
+    AssigneeName: 'Исполнитель',
     AuthorUserId: 'Автор',
+    ChannelsJson: 'Каналы уведомлений',
   },
 };
 

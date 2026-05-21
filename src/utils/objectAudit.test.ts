@@ -48,6 +48,10 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditFieldLabel('client-case-work-order-item', 'Unit Price')).toBe('Цена');
     expect(getObjectAuditFieldLabel('client-case-related-party', 'Archive Reason')).toBe('Причина архивирования');
     expect(getObjectAuditFieldLabel('client-case-related-party', 'DisplayName')).toBe('Участник');
+    expect(getObjectAuditFieldLabel('client-case', 'Event History')).toBe('История событий');
+    expect(getObjectAuditFieldLabel('task-journal-item', 'Assignee Name')).toBe('Исполнитель');
+    expect(getObjectAuditFieldLabel('task-journal-item', 'Channels Json')).toBe('Каналы уведомлений');
+    expect(getObjectAuditFieldLabel('task-journal-item', 'Result')).toBe('Результат задачи');
   });
 
   it('builds readable change summary', () => {
