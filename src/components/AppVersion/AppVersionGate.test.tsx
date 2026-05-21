@@ -26,6 +26,19 @@ const release = {
   ],
 };
 
+const previousRelease = {
+  ...release,
+  id: 2,
+  releaseId: '2026-05-20-previous',
+  version: '1.11.0',
+  releasedAt: '2026-05-20T14:30:00',
+  title: 'Предыдущее обновление',
+  summary: 'Описание прошлого релиза',
+  items: [
+    { type: 'fixed', text: 'Исправлена старая ошибка.' },
+  ],
+};
+
 function latest(overrides?: Partial<AppVersionLatestDto>): AppVersionLatestDto {
   return {
     currentVersion: '1.12.0',
@@ -37,7 +50,7 @@ function latest(overrides?: Partial<AppVersionLatestDto>): AppVersionLatestDto {
 
 beforeEach(() => {
   vi.mocked(apiService.getLatestAppVersion).mockResolvedValue(latest());
-  vi.mocked(apiService.getAppVersionHistory).mockResolvedValue([release]);
+  vi.mocked(apiService.getAppVersionHistory).mockResolvedValue([release, previousRelease]);
   vi.mocked(apiService.markAppVersionSeen).mockResolvedValue(undefined);
   resetAppVersionSessionDismissalsForTests();
 });
@@ -102,5 +115,22 @@ describe('AppVersionGate', () => {
 
     await waitFor(() => expect(apiService.getLatestAppVersion).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('opens history, shows selected past release, and returns to current release', async () => {
+    render(<AppVersionGate userId={7} manualOpenSignal={0} onManualOpenHandled={vi.fn()} />);
+
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /История обновлений/ }));
+
+    expect(await screen.findByText('Предыдущее обновление')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Версия 1.11.0/ }));
+
+    expect(screen.getByText('Описание прошлого релиза')).toBeTruthy();
+    expect(screen.getByText('Исправлена старая ошибка.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Текущее обновление' }));
+
+    expect(screen.getByText(release.summary)).toBeTruthy();
   });
 });

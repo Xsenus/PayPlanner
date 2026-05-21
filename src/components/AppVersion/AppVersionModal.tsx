@@ -4,12 +4,21 @@ import { type AppReleaseDto, type AppReleaseItemDto } from '../../services/api';
 type ModalState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; currentVersion: string; release: AppReleaseDto; history?: AppReleaseDto[]; historyLoading?: boolean };
+  | {
+    status: 'ready';
+    currentVersion: string;
+    currentRelease: AppReleaseDto;
+    selectedRelease: AppReleaseDto;
+    history?: AppReleaseDto[];
+    historyLoading?: boolean;
+  };
 
 type AppVersionModalProps = {
   state: ModalState;
   onClose: () => void;
   onShowHistory: () => void;
+  onSelectRelease: (release: AppReleaseDto) => void;
+  onShowCurrent: () => void;
 };
 
 const ITEM_GROUPS: Array<{
@@ -24,7 +33,7 @@ const ITEM_GROUPS: Array<{
   { type: 'important', title: 'Важно', icon: AlertTriangle, className: 'text-amber-600 bg-amber-50 border-amber-100' },
 ];
 
-function formatReleaseDate(value: string) {
+function formatReleaseDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
@@ -34,6 +43,8 @@ function formatReleaseDate(value: string) {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(date);
 }
 
@@ -41,7 +52,17 @@ function groupItems(items: AppReleaseItemDto[], type: string) {
   return items.filter((item) => item.type === type && item.text.trim());
 }
 
-function ReleaseDetails({ release, currentVersion }: { release: AppReleaseDto; currentVersion: string }) {
+function ReleaseDetails({
+  release,
+  currentVersion,
+  isCurrent,
+  onShowCurrent,
+}: {
+  release: AppReleaseDto;
+  currentVersion: string;
+  isCurrent: boolean;
+  onShowCurrent: () => void;
+}) {
   return (
     <>
       <div className="border-b border-slate-200 px-5 py-4 sm:px-6">
@@ -49,12 +70,23 @@ function ReleaseDetails({ release, currentVersion }: { release: AppReleaseDto; c
           <div>
             <h2 className="text-xl font-semibold text-slate-950">Что нового</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Версия {release.version || currentVersion} · {formatReleaseDate(release.releasedAt)}
+              Версия {release.version || currentVersion} · {formatReleaseDateTime(release.releasedAt)}
             </p>
           </div>
-          <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-            {release.title}
-          </span>
+          <div className="flex flex-col items-end gap-2">
+            <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+              {release.title}
+            </span>
+            {!isCurrent ? (
+              <button
+                type="button"
+                onClick={onShowCurrent}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Текущее обновление
+              </button>
+            ) : null}
+          </div>
         </div>
         {release.summary ? <p className="mt-3 text-sm leading-6 text-slate-600">{release.summary}</p> : null}
       </div>
@@ -92,8 +124,18 @@ function ReleaseDetails({ release, currentVersion }: { release: AppReleaseDto; c
   );
 }
 
-function HistoryList({ items }: { items: AppReleaseDto[] }) {
-  if (items.length <= 1) {
+function HistoryList({
+  items,
+  selectedReleaseId,
+  currentReleaseId,
+  onSelectRelease,
+}: {
+  items: AppReleaseDto[];
+  selectedReleaseId: string;
+  currentReleaseId: string;
+  onSelectRelease: (release: AppReleaseDto) => void;
+}) {
+  if (items.length === 0) {
     return null;
   }
 
@@ -104,20 +146,37 @@ function HistoryList({ items }: { items: AppReleaseDto[] }) {
         История обновлений
       </div>
       <div className="max-h-36 space-y-2 overflow-y-auto">
-        {items.slice(1).map((release) => (
-          <div key={release.releaseId} className="rounded-lg border border-slate-200 px-3 py-2">
-            <div className="text-sm font-medium text-slate-900">
-              Версия {release.version} · {formatReleaseDate(release.releasedAt)}
+        {items.map((release) => (
+          <button
+            key={release.releaseId}
+            type="button"
+            onClick={() => onSelectRelease(release)}
+            aria-current={release.releaseId === selectedReleaseId ? 'true' : undefined}
+            className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+              release.releaseId === selectedReleaseId
+                ? 'border-blue-200 bg-blue-50'
+                : 'border-slate-200 hover:border-blue-200 hover:bg-slate-50'
+            }`}
+          >
+            <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-900">
+              <span>Версия {release.version} · {formatReleaseDateTime(release.releasedAt)}</span>
+              {release.releaseId === currentReleaseId ? (
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                  текущее
+                </span>
+              ) : null}
             </div>
             <div className="mt-1 text-xs text-slate-500">{release.title}</div>
-          </div>
+          </button>
         ))}
       </div>
     </div>
   );
 }
 
-export function AppVersionModal({ state, onClose, onShowHistory }: AppVersionModalProps) {
+export function AppVersionModal({ state, onClose, onShowHistory, onSelectRelease, onShowCurrent }: AppVersionModalProps) {
+  const isViewingCurrent = state.status === 'ready' && state.selectedRelease.releaseId === state.currentRelease.releaseId;
+
   return (
     <div className="fixed inset-0 z-[2350] flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal="true" aria-labelledby="app-version-title">
       <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
@@ -150,11 +209,21 @@ export function AppVersionModal({ state, onClose, onShowHistory }: AppVersionMod
 
         {state.status === 'ready' ? (
           <>
-            <ReleaseDetails release={state.release} currentVersion={state.currentVersion} />
+            <ReleaseDetails
+              release={state.selectedRelease}
+              currentVersion={state.currentVersion}
+              isCurrent={isViewingCurrent}
+              onShowCurrent={onShowCurrent}
+            />
             {state.historyLoading ? (
               <div className="border-t border-slate-200 px-5 py-3 text-sm text-slate-500 sm:px-6">Загружаем историю...</div>
             ) : state.history ? (
-              <HistoryList items={state.history} />
+              <HistoryList
+                items={state.history}
+                selectedReleaseId={state.selectedRelease.releaseId}
+                currentReleaseId={state.currentRelease.releaseId}
+                onSelectRelease={onSelectRelease}
+              />
             ) : null}
           </>
         ) : null}

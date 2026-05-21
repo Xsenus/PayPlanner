@@ -6,7 +6,14 @@ import { AppVersionModal } from './AppVersionModal';
 type ModalState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; currentVersion: string; release: AppReleaseDto; history?: AppReleaseDto[]; historyLoading?: boolean };
+  | {
+    status: 'ready';
+    currentVersion: string;
+    currentRelease: AppReleaseDto;
+    selectedRelease: AppReleaseDto;
+    history?: AppReleaseDto[];
+    historyLoading?: boolean;
+  };
 
 type AppVersionGateProps = {
   userId?: number | null;
@@ -36,7 +43,8 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
     setModalState({
       status: 'ready',
       currentVersion: data.currentVersion,
-      release: data.latestRelease,
+      currentRelease: data.latestRelease,
+      selectedRelease: data.latestRelease,
     });
   }, []);
 
@@ -99,7 +107,7 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
   }, [latest, manualOpenSignal, onManualOpenHandled, openFromLatest, userId]);
 
   const handleClose = useCallback(() => {
-    const releaseId = modalState?.status === 'ready' ? modalState.release.releaseId : null;
+    const releaseId = modalState?.status === 'ready' ? modalState.currentRelease.releaseId : null;
     setModalState(null);
 
     if (!releaseId) {
@@ -123,6 +131,11 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
       return;
     }
 
+    if (modalState.history) {
+      setModalState({ ...modalState, historyLoading: false });
+      return;
+    }
+
     setModalState({ ...modalState, historyLoading: true });
     apiService.getAppVersionHistory()
       .then((history) => {
@@ -137,12 +150,30 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
       });
   }, [modalState]);
 
+  const handleSelectRelease = useCallback((release: AppReleaseDto) => {
+    setModalState((current) => current?.status === 'ready'
+      ? { ...current, selectedRelease: release }
+      : current);
+  }, []);
+
+  const handleShowCurrent = useCallback(() => {
+    setModalState((current) => current?.status === 'ready'
+      ? { ...current, selectedRelease: current.currentRelease }
+      : current);
+  }, []);
+
   if (!modalState || typeof document === 'undefined') {
     return null;
   }
 
   return createPortal(
-    <AppVersionModal state={modalState} onClose={handleClose} onShowHistory={handleShowHistory} />,
+    <AppVersionModal
+      state={modalState}
+      onClose={handleClose}
+      onShowHistory={handleShowHistory}
+      onSelectRelease={handleSelectRelease}
+      onShowCurrent={handleShowCurrent}
+    />,
     document.body,
   );
 }
