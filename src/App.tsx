@@ -1120,6 +1120,7 @@ function AppContent() {
         return (
           <CaseDetailPage
             caseId={selectedCaseId}
+            canEdit={permissions.cases.canEdit}
             onBack={() => {
               setSelectedCaseId(null);
               setActiveTab(caseReturnTab === 'caseDetail' ? 'cases' : caseReturnTab);

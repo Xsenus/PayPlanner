@@ -32,9 +32,18 @@ vi.mock('../../services/api', () => ({
     createTaskJournalCaseAutomationTask: vi.fn(),
     runCaseCourtSync: vi.fn(),
     createCaseV2: vi.fn(),
+    updateCaseV2: vi.fn(),
     getCaseDocumentTemplates: vi.fn(),
+    getCaseDocuments: vi.fn(),
+    getTaskJournalItems: vi.fn(),
+    getClientCaseFinanceSummaries: vi.fn(),
+    getLegalEntityCaseFinanceSummaries: vi.fn(),
+    markCaseActivity: vi.fn(),
+    getCaseRelatedParties: vi.fn(),
+    getContacts: vi.fn(),
     getClients: vi.fn(),
     getLegalEntities: vi.fn(),
+    getLegalEntitiesPaged: vi.fn(),
     getUserSetting: vi.fn(),
     upsertUserSetting: vi.fn(),
   },
@@ -175,12 +184,39 @@ describe('CasesRegistry', () => {
     });
     vi.mocked(apiService.createCaseV2).mockReset();
     vi.mocked(apiService.createCaseV2).mockResolvedValue(createCase({ id: 99, title: 'Новое дело' }));
+    vi.mocked(apiService.updateCaseV2).mockReset();
+    vi.mocked(apiService.updateCaseV2).mockImplementation(async (id, payload) => createCase({ ...payload, id }));
     vi.mocked(apiService.getCaseDocumentTemplates).mockReset();
     vi.mocked(apiService.getCaseDocumentTemplates).mockResolvedValue([]);
+    vi.mocked(apiService.getCaseDocuments).mockReset();
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([]);
+    vi.mocked(apiService.getTaskJournalItems).mockReset();
+    vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
+    vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReset();
+    vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValue([]);
+    vi.mocked(apiService.markCaseActivity).mockReset();
+    vi.mocked(apiService.markCaseActivity).mockResolvedValue({
+      lastViewedAt: '2026-05-12T10:15:00Z',
+      lastViewedByUserId: 7,
+      lastViewedByUserName: 'Кожеваткин Андрей Владимирович',
+      activityConfirmedAt: null,
+      activityConfirmedByUserId: null,
+      activityConfirmedByUserName: null,
+      inactivityRemindersEnabled: true,
+      eventHistory: '',
+    });
+    vi.mocked(apiService.getCaseRelatedParties).mockReset();
+    vi.mocked(apiService.getCaseRelatedParties).mockResolvedValue([]);
+    vi.mocked(apiService.getContacts).mockReset();
+    vi.mocked(apiService.getContacts).mockResolvedValue([]);
     vi.mocked(apiService.getClients).mockReset();
     vi.mocked(apiService.getClients).mockResolvedValue([createCase().client!]);
     vi.mocked(apiService.getLegalEntities).mockReset();
     vi.mocked(apiService.getLegalEntities).mockResolvedValue([]);
+    vi.mocked(apiService.getLegalEntitiesPaged).mockReset();
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 100 });
     vi.mocked(apiService.getUserSetting).mockReset();
     vi.mocked(apiService.getUserSetting).mockRejectedValue(new Error('not found'));
     vi.mocked(apiService.upsertUserSetting).mockReset();
@@ -581,6 +617,41 @@ describe('CasesRegistry', () => {
 
     fireEvent.click(screen.getAllByLabelText('Открыть финансы дела')[0]);
     expect(onOpenCaseFinance).toHaveBeenCalledWith(expect.objectContaining({ id: 1, caseNumber: '2026-001' }));
+  });
+
+  it('opens a right-click action menu for a registry row and edits the case', async () => {
+    render(
+      <DialogProvider>
+        <CasesRegistry />
+      </DialogProvider>,
+    );
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+
+    const row = screen.getAllByRole('button', { name: '2026-001' })[0].closest('tr');
+    expect(row).toBeTruthy();
+
+    fireEvent.contextMenu(row as HTMLElement, { clientX: 120, clientY: 160 });
+
+    expect(screen.getByRole('menu', { name: 'Действия по делу 2026-001' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Открыть карточку' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Редактировать дело' }));
+
+    const titleInput = await screen.findByLabelText('Название дела');
+    fireEvent.change(titleInput, { target: { value: 'ЗЕМЦОВ - обновленное дело' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Сохранить' }).at(-1) as HTMLElement);
+
+    await waitFor(() => {
+      expect(apiService.updateCaseV2).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          title: 'ЗЕМЦОВ - обновленное дело',
+          clientId: 12,
+          status: 'Open',
+        }),
+      );
+    });
   });
 
   it('renders a compact mobile case list with the key fields', async () => {

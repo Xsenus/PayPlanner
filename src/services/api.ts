@@ -2990,6 +2990,10 @@ export class ApiService {
     return this.request<ClientCase>(`/v2/cases/${id}`);
   }
 
+  async updateCaseV2(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
+    return this.request<ClientCase>(`/v2/cases/${id}`, { method: 'PUT', body: JSON.stringify(model) });
+  }
+
   async updateCase(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
     return this.request<ClientCase>(`/cases/${id}`, { method: 'PUT', body: JSON.stringify(model) });
   }

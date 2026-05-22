@@ -17,6 +17,7 @@ import {
   LockKeyhole,
   Mail,
   MessageSquare,
+  Pencil,
   Phone,
   RefreshCw,
   RotateCw,
@@ -30,6 +31,7 @@ import {
 
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
+import { CaseModal } from '../Clients/CaseModal';
 import type {
   ActResponsible,
   Client,
@@ -62,6 +64,7 @@ interface CaseDetailPageProps {
   onOpenFinance?: (caseItem: ClientCase) => void;
   onCreateInvoice?: (caseItem: ClientCase) => void;
   onCreatePayment?: (caseItem: ClientCase) => void;
+  canEdit?: boolean;
 }
 
 type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
@@ -704,6 +707,48 @@ function isOverdueTask(task: TaskJournalItem) {
   return isActiveTask(task) && Number.isFinite(dueAt) && dueAt < Date.now();
 }
 
+function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): Omit<ClientCase, 'id' | 'createdAt' | 'payments'> {
+  return {
+    clientId: patch.clientId ?? base.clientId ?? null,
+    legalEntityId: patch.legalEntityId ?? base.legalEntityId ?? null,
+    client: patch.client ?? base.client ?? null,
+    legalEntity: patch.legalEntity ?? base.legalEntity ?? null,
+    title: patch.title ?? base.title ?? '',
+    description: patch.description ?? base.description ?? '',
+    status: patch.status ?? base.status ?? 'Open',
+    caseNumber: patch.caseNumber ?? base.caseNumber ?? '',
+    caseType: patch.caseType ?? base.caseType ?? '',
+    stage: patch.stage ?? base.stage ?? '',
+    responsibleUserId: patch.responsibleUserId ?? base.responsibleUserId ?? null,
+    startDate: patch.startDate ?? base.startDate ?? null,
+    dueDate: patch.dueDate ?? base.dueDate ?? null,
+    feeAmount: patch.feeAmount ?? base.feeAmount ?? 0,
+    priority: patch.priority ?? base.priority ?? 'normal',
+    courtName: patch.courtName ?? base.courtName ?? '',
+    courtCaseNumber: patch.courtCaseNumber ?? base.courtCaseNumber ?? '',
+    courtUrl: patch.courtUrl ?? base.courtUrl ?? '',
+    nextHearingAt: patch.nextHearingAt ?? base.nextHearingAt ?? null,
+    claimant: patch.claimant ?? base.claimant ?? '',
+    defendant: patch.defendant ?? base.defendant ?? '',
+    thirdParties: patch.thirdParties ?? base.thirdParties ?? '',
+    representatives: patch.representatives ?? base.representatives ?? '',
+    judgeName: patch.judgeName ?? base.judgeName ?? '',
+    courtroom: patch.courtroom ?? base.courtroom ?? '',
+    courtSecretaryContacts: patch.courtSecretaryContacts ?? base.courtSecretaryContacts ?? '',
+    claimFiledAt: patch.claimFiledAt ?? base.claimFiledAt ?? null,
+    courtDecisionAt: patch.courtDecisionAt ?? base.courtDecisionAt ?? null,
+    appealDeadlineAt: patch.appealDeadlineAt ?? base.appealDeadlineAt ?? null,
+    cassationDeadlineAt: patch.cassationDeadlineAt ?? base.cassationDeadlineAt ?? null,
+    motionDeadlineAt: patch.motionDeadlineAt ?? base.motionDeadlineAt ?? null,
+    objectionDeadlineAt: patch.objectionDeadlineAt ?? base.objectionDeadlineAt ?? null,
+    documentsSummary: patch.documentsSummary ?? base.documentsSummary ?? '',
+    eventHistory: patch.eventHistory ?? base.eventHistory ?? '',
+    strategy: patch.strategy ?? base.strategy ?? '',
+    inactivityRemindersEnabled: patch.inactivityRemindersEnabled ?? base.inactivityRemindersEnabled ?? true,
+    isHiddenFromExecutor: patch.isHiddenFromExecutor ?? base.isHiddenFromExecutor ?? false,
+  } as Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
+}
+
 export function CaseDetailPage({
   caseId,
   onBack,
@@ -712,6 +757,7 @@ export function CaseDetailPage({
   onOpenFinance,
   onCreateInvoice,
   onCreatePayment,
+  canEdit = true,
 }: CaseDetailPageProps) {
   const initialViewState = readCaseDetailViewState(caseId);
   const [caseItem, setCaseItem] = useState<ClientCase | null>(null);
@@ -784,6 +830,7 @@ export function CaseDetailPage({
   const [workOrderApprovalAction, setWorkOrderApprovalAction] = useState<'submit' | 'approve' | 'revision' | null>(null);
   const [workOrderApprovalComment, setWorkOrderApprovalComment] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
   const [statusDraft, setStatusDraft] = useState('Open');
   const [priorityDraft, setPriorityDraft] = useState('normal');
   const [stageDraft, setStageDraft] = useState('');
@@ -1413,6 +1460,16 @@ export function CaseDetailPage({
     } finally {
       setSavingHeader(false);
     }
+  };
+
+  const saveCaseFromModal = async (patch: Partial<ClientCase>) => {
+    if (!caseItem) return;
+
+    setError(null);
+    const updated = await apiService.updateCaseV2(caseItem.id, buildCaseUpdatePayload(caseItem, patch));
+    setCaseItem(updated);
+    setNotice('Карточка дела обновлена.');
+    setReloadToken((value) => value + 1);
   };
 
   const requestCaseAccess = async () => {
@@ -2226,6 +2283,11 @@ export function CaseDetailPage({
             </div>
 
             <div className="flex flex-wrap gap-2">
+              {canEdit ? (
+                <button type="button" onClick={() => setEditModalOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+                  <Pencil className="h-4 w-4" /> Редактировать дело
+                </button>
+              ) : null}
               <button type="button" onClick={() => setReloadToken((value) => value + 1)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 <RefreshCw className="h-4 w-4" /> Обновить
               </button>
@@ -2861,6 +2923,16 @@ export function CaseDetailPage({
           preview={documentPreview}
           onClose={() => setDocumentPreview(null)}
           onDownload={() => void downloadDocument(documentPreview.document)}
+        />
+      ) : null}
+      {editModalOpen ? (
+        <CaseModal
+          isOpen
+          caseData={caseItem}
+          responsibles={responsibles}
+          onClose={() => setEditModalOpen(false)}
+          onSave={saveCaseFromModal}
+          allowEdit={canEdit}
         />
       ) : null}
     </div>

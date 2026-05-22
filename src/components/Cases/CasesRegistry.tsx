@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Archive, ArrowUpDown, Bookmark, Briefcase, ClipboardPlus, Download, Loader2, LockKeyhole, Plus, Printer, RefreshCw, Search, Settings2, Trash2, UserRound, WalletCards } from 'lucide-react';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { Archive, ArrowUpDown, Bookmark, Briefcase, ClipboardPlus, Download, Loader2, LockKeyhole, Pencil, Plus, Printer, RefreshCw, Search, Settings2, Trash2, UserRound, WalletCards } from 'lucide-react';
 
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
@@ -54,6 +54,11 @@ type CaseRegistrySavedView = {
   name: string;
   filters: CaseRegistryViewState;
   updatedAt: string;
+};
+type CaseContextMenuState = {
+  item: ClientCase;
+  x: number;
+  y: number;
 };
 type CaseColumnKey =
   | 'caseNumber'
@@ -306,11 +311,54 @@ function persistSavedRegistryViews(views: CaseRegistrySavedView[]) {
   window.localStorage.setItem(CASE_REGISTRY_VIEW_STORAGE_KEY, JSON.stringify(views.slice(0, 20)));
 }
 
+function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): Omit<ClientCase, 'id' | 'createdAt' | 'payments'> {
+  return {
+    clientId: patch.clientId ?? base.clientId ?? null,
+    legalEntityId: patch.legalEntityId ?? base.legalEntityId ?? null,
+    client: patch.client ?? base.client ?? null,
+    legalEntity: patch.legalEntity ?? base.legalEntity ?? null,
+    title: patch.title ?? base.title ?? '',
+    description: patch.description ?? base.description ?? '',
+    status: patch.status ?? base.status ?? 'Open',
+    caseNumber: patch.caseNumber ?? base.caseNumber ?? '',
+    caseType: patch.caseType ?? base.caseType ?? '',
+    stage: patch.stage ?? base.stage ?? '',
+    responsibleUserId: patch.responsibleUserId ?? base.responsibleUserId ?? null,
+    startDate: patch.startDate ?? base.startDate ?? null,
+    dueDate: patch.dueDate ?? base.dueDate ?? null,
+    feeAmount: patch.feeAmount ?? base.feeAmount ?? 0,
+    priority: patch.priority ?? base.priority ?? 'normal',
+    courtName: patch.courtName ?? base.courtName ?? '',
+    courtCaseNumber: patch.courtCaseNumber ?? base.courtCaseNumber ?? '',
+    courtUrl: patch.courtUrl ?? base.courtUrl ?? '',
+    nextHearingAt: patch.nextHearingAt ?? base.nextHearingAt ?? null,
+    claimant: patch.claimant ?? base.claimant ?? '',
+    defendant: patch.defendant ?? base.defendant ?? '',
+    thirdParties: patch.thirdParties ?? base.thirdParties ?? '',
+    representatives: patch.representatives ?? base.representatives ?? '',
+    judgeName: patch.judgeName ?? base.judgeName ?? '',
+    courtroom: patch.courtroom ?? base.courtroom ?? '',
+    courtSecretaryContacts: patch.courtSecretaryContacts ?? base.courtSecretaryContacts ?? '',
+    claimFiledAt: patch.claimFiledAt ?? base.claimFiledAt ?? null,
+    courtDecisionAt: patch.courtDecisionAt ?? base.courtDecisionAt ?? null,
+    appealDeadlineAt: patch.appealDeadlineAt ?? base.appealDeadlineAt ?? null,
+    cassationDeadlineAt: patch.cassationDeadlineAt ?? base.cassationDeadlineAt ?? null,
+    motionDeadlineAt: patch.motionDeadlineAt ?? base.motionDeadlineAt ?? null,
+    objectionDeadlineAt: patch.objectionDeadlineAt ?? base.objectionDeadlineAt ?? null,
+    documentsSummary: patch.documentsSummary ?? base.documentsSummary ?? '',
+    eventHistory: patch.eventHistory ?? base.eventHistory ?? '',
+    strategy: patch.strategy ?? base.strategy ?? '',
+    inactivityRemindersEnabled: patch.inactivityRemindersEnabled ?? base.inactivityRemindersEnabled ?? true,
+    isHiddenFromExecutor: patch.isHiddenFromExecutor ?? base.isHiddenFromExecutor ?? false,
+  } as Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
+}
+
 export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onOpenCaseFinance, allowCreate = true }: CasesRegistryProps) {
   const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
+  const canEditCases = isAdmin() || permissions.cases.canEdit;
   const canExportCases = isAdmin() || permissions.cases.canExport;
-  const canManageCaseAccess = isAdmin() || permissions.cases.canEdit;
+  const canManageCaseAccess = canEditCases;
   const [items, setItems] = useState<ClientCase[]>([]);
   const [accessRequests, setAccessRequests] = useState<ClientCaseAccessRequest[]>([]);
   const [accessRequestsLoading, setAccessRequestsLoading] = useState(false);
@@ -351,6 +399,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [ownerPickerOpen, setOwnerPickerOpen] = useState(false);
   const [caseDraft, setCaseDraft] = useState<ClientCase | null>(null);
+  const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
+  const [caseContextMenu, setCaseContextMenu] = useState<CaseContextMenuState | null>(null);
   const {
     visibleColumns,
     columnOrder,
@@ -442,6 +492,27 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
   }, [items]);
+
+  useEffect(() => {
+    if (!caseContextMenu) return undefined;
+
+    const closeMenu = () => setCaseContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('click', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [caseContextMenu]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -836,6 +907,35 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     }
   };
 
+  const openCaseContextMenu = (event: MouseEvent<HTMLTableRowElement>, item: ClientCase) => {
+    event.preventDefault();
+    setSelectedIds((current) => (current.includes(item.id) ? current : [item.id]));
+
+    const menuWidth = 250;
+    const menuHeight = 320;
+    const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight;
+    const x = viewportWidth ? Math.min(event.clientX, Math.max(8, viewportWidth - menuWidth - 8)) : event.clientX;
+    const y = viewportHeight ? Math.min(event.clientY, Math.max(8, viewportHeight - menuHeight - 8)) : event.clientY;
+
+    setCaseContextMenu({ item, x, y });
+  };
+
+  const runContextMenuAction = (action: () => void) => {
+    setCaseContextMenu(null);
+    action();
+  };
+
+  const updateCase = async (patch: Partial<ClientCase>) => {
+    if (!editingCase) return;
+
+    const updated = await apiService.updateCaseV2(editingCase.id, buildCaseUpdatePayload(editingCase, patch));
+    setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    setEditingCase(null);
+    setNotice('Дело обновлено.');
+    setReloadToken((value) => value + 1);
+  };
+
   const renderCaseCell = (columnKey: CaseColumnKey, item: ClientCase) => {
     switch (columnKey) {
       case 'caseNumber':
@@ -935,6 +1035,16 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
               className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-blue-700 hover:bg-blue-50">
               <Briefcase className="h-4 w-4" />
             </button>
+            {canEditCases ? (
+              <button
+                type="button"
+                onClick={() => setEditingCase(item)}
+                aria-label="Редактировать дело"
+                title="Редактировать дело"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-blue-200 text-blue-700 hover:bg-blue-50">
+                <Pencil className="h-4 w-4" />
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void createTaskForCase(item)}
@@ -1528,7 +1638,10 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                   </tr>
                 ) : (
                   items.map((item) => (
-                    <tr key={item.id} className="align-top hover:bg-slate-50">
+                    <tr
+                      key={item.id}
+                      onContextMenu={(event) => openCaseContextMenu(event, item)}
+                      className="align-top hover:bg-slate-50">
                       <td className="px-4 py-3">
                         <input
                           type="checkbox"
@@ -1590,6 +1703,81 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           onSave={createCase}
           allowEdit={allowCreate}
         />
+      ) : null}
+      {editingCase ? (
+        <CaseModal
+          isOpen
+          caseData={editingCase}
+          responsibles={responsibles}
+          onClose={() => setEditingCase(null)}
+          onSave={updateCase}
+          allowEdit={canEditCases}
+        />
+      ) : null}
+      {caseContextMenu ? (
+        <div
+          role="menu"
+          aria-label={`Действия по делу ${caseContextMenu.item.caseNumber || caseContextMenu.item.id}`}
+          className="fixed z-[1200] w-[250px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-xl"
+          style={{ left: caseContextMenu.x, top: caseContextMenu.y }}>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runContextMenuAction(() => openCase(caseContextMenu.item))}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50">
+            <Briefcase className="h-4 w-4 text-blue-700" /> Открыть карточку
+          </button>
+          {canEditCases ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runContextMenuAction(() => setEditingCase(caseContextMenu.item))}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50">
+              <Pencil className="h-4 w-4 text-blue-700" /> Редактировать дело
+            </button>
+          ) : null}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runContextMenuAction(() => void createTaskForCase(caseContextMenu.item))}
+            disabled={creatingTaskCaseId === caseContextMenu.item.id}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+            <ClipboardPlus className="h-4 w-4 text-emerald-700" /> Создать задачу
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runContextMenuAction(() => openOwner(caseContextMenu.item))}
+            disabled={!caseContextMenu.item.clientId && !caseContextMenu.item.legalEntityId}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+            <UserRound className="h-4 w-4 text-slate-700" /> Открыть владельца
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runContextMenuAction(() => onOpenCaseFinance?.(caseContextMenu.item))}
+            disabled={!onOpenCaseFinance}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+            <WalletCards className="h-4 w-4 text-indigo-700" /> Финансы дела
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runContextMenuAction(() => void runCourtSyncForCase(caseContextMenu.item))}
+            disabled={courtSyncCaseId === caseContextMenu.item.id}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+            <RefreshCw className="h-4 w-4 text-cyan-700" /> Проверить суд
+          </button>
+          <div className="my-1 border-t border-slate-100" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runContextMenuAction(() => void archiveCase(caseContextMenu.item.id))}
+            disabled={bulkSaving || caseContextMenu.item.status === 'Closed'}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50">
+            <Archive className="h-4 w-4" /> В архив
+          </button>
+        </div>
       ) : null}
     </div>
   );

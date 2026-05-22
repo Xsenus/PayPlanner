@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DialogProvider } from '../../contexts/DialogContext';
 import { apiService } from '../../services/api';
 import type { ClientCase } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
@@ -9,6 +10,7 @@ import { CaseDetailPage } from './CaseDetailPage';
 vi.mock('../../services/api', () => ({
   apiService: {
     getCaseV2: vi.fn(),
+    updateCaseV2: vi.fn(),
     getActResponsibles: vi.fn(),
     getTaskJournalItems: vi.fn(),
     getCaseRelatedParties: vi.fn(),
@@ -47,6 +49,8 @@ vi.mock('../../services/api', () => ({
     closeCaseProceduralDeadline: vi.fn(),
     getCaseTimeline: vi.fn(),
     getCaseFinance: vi.fn(),
+    getClientCaseFinanceSummaries: vi.fn(),
+    getLegalEntityCaseFinanceSummaries: vi.fn(),
     getCaseWorkOrder: vi.fn(),
     createCaseWorkOrder: vi.fn(),
     updateCaseWorkOrder: vi.fn(),
@@ -64,6 +68,7 @@ vi.mock('../../services/api', () => ({
     addCaseRelatedParty: vi.fn(),
     deleteCaseRelatedParty: vi.fn(),
     requestCaseAccess: vi.fn(),
+    markCaseActivity: vi.fn(),
   },
 }));
 
@@ -150,6 +155,8 @@ describe('CaseDetailPage', () => {
     window.sessionStorage.clear();
     vi.mocked(apiService.getCaseV2).mockReset();
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase());
+    vi.mocked(apiService.updateCaseV2).mockReset();
+    vi.mocked(apiService.updateCaseV2).mockImplementation(async (id, payload) => createCase({ ...payload, id }));
     vi.mocked(apiService.getActResponsibles).mockReset();
     vi.mocked(apiService.getActResponsibles).mockResolvedValue([
       { id: 7, fullName: 'Кожеваткин Андрей Владимирович' },
@@ -435,6 +442,17 @@ describe('CaseDetailPage', () => {
       reason: 'Нужно посмотреть или продолжить работу по делу.',
       isHiddenFromExecutor: true,
     });
+    vi.mocked(apiService.markCaseActivity).mockReset();
+    vi.mocked(apiService.markCaseActivity).mockResolvedValue({
+      lastViewedAt: '2026-05-12T10:15:00Z',
+      lastViewedByUserId: 7,
+      lastViewedByUserName: 'Кожеваткин Андрей Владимирович',
+      activityConfirmedAt: null,
+      activityConfirmedByUserId: null,
+      activityConfirmedByUserName: null,
+      inactivityRemindersEnabled: true,
+      eventHistory: '',
+    });
     vi.mocked(apiService.generateCaseDocumentTemplate).mockReset();
     vi.mocked(apiService.generateCaseDocumentTemplate).mockResolvedValue({
       id: 8,
@@ -661,6 +679,10 @@ describe('CaseDetailPage', () => {
         },
       ],
     });
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockReset();
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([]);
+    vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReset();
+    vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValue([]);
     vi.mocked(apiService.getCaseWorkOrder).mockReset();
     vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue(null);
     vi.mocked(apiService.createCaseWorkOrder).mockReset();
@@ -724,6 +746,35 @@ describe('CaseDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'История' }));
     expect(await screen.findByText('Массовое изменение')).toBeTruthy();
+  });
+
+  it('opens full case editing from the detail header and saves changes', async () => {
+    render(
+      <DialogProvider>
+        <CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />
+      </DialogProvider>,
+    );
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+
+    const titleInput = await screen.findByLabelText('Название дела');
+    fireEvent.change(titleInput, { target: { value: 'ЗЕМЦОВ - обновленная карточка' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Сохранить' }).at(-1) as HTMLElement);
+
+    await waitFor(() => {
+      expect(apiService.updateCaseV2).toHaveBeenCalledWith(
+        15,
+        expect.objectContaining({
+          title: 'ЗЕМЦОВ - обновленная карточка',
+          clientId: 12,
+          legalEntityId: null,
+          status: 'Open',
+        }),
+      );
+    });
+    expect(await screen.findByText('Карточка дела обновлена.')).toBeTruthy();
   });
 
   it('shows inactivity and court sync indicators in the summary panel', async () => {
