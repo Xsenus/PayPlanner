@@ -27,6 +27,25 @@ public class SudrfCourtSyncServiceTests
     }
 
     [Fact]
+    public void ParseCaseHtml_ExtractsLiveSudrfIdBlocks()
+    {
+        var data = SudrfCourtSyncService.ParseCaseHtml(
+            BuildLiveStyleCourtHtml(),
+            new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=43326936&case_uid=30d46dc6-6d6c-4514-8aa6-591c3bc63a1a&delo_id=42"));
+
+        Assert.Equal("Хабаровский краевой суд", data.CourtName);
+        Assert.Equal("33а-3390/2026", data.CaseNumber);
+        Assert.Equal("Казарикова Оксана Витальевна", data.JudgeName);
+        Assert.Equal(new DateTime(2026, 4, 16), data.ReceivedAt);
+        Assert.Equal("Краснофлотский районный суд г. Хабаровска", data.LowerCourtName);
+        Assert.Equal("2а-311/2026 (2а-2448/2025;) ~ М-1858/2025", data.LowerCourtCaseNumber);
+        Assert.Equal(new DateTime(2026, 5, 27, 15, 0, 0), data.NextHearingAt);
+        Assert.Equal(2, data.MovementEvents.Count);
+        Assert.Equal(6, data.Participants.Count);
+        Assert.Contains(data.Participants, item => item.Role == "АДМИНИСТРАТИВНЫЙ ОТВЕТЧИК" && item.Name.StartsWith("ОСП по Краснофлотскому району", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task FetchCaseAsync_DecodesWindows1251Response()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -182,6 +201,49 @@ public class SudrfCourtSyncServiceTests
                <tr><td>ПРЕДСТАВИТЕЛЬ</td><td>Кожеваткин Андрей Владимирович</td><td></td></tr>
                <tr><td>ЗАИНТЕРЕСОВАННОЕ ЛИЦО</td><td>Шафорост Виктория Васильевна</td><td></td></tr>
              </table>
+           </body>
+           </html>
+           """;
+
+    private static string BuildLiveStyleCourtHtml()
+        => """
+           <html>
+           <head><meta http-equiv="Content-Type" content="text/html; charset=windows-1251"><title>Хабаровский краевой суд</title></head>
+           <body>
+             <div align="center" class=casenumber>ДЕЛО № 33а-3390/2026</div>
+             <div id="cont1">
+               <table id="tablcont">
+                 <tr><th colspan="2">ДЕЛО</th></tr>
+                 <tr><td><b>Уникальный идентификатор дела</b></td><td><a href="/modules.php?name=sud_delo&amp;name_op=r_juid&amp;judicial_uid=27RS0005-01-2025-002659-56">27RS0005-01-2025-002659-56</a></td></tr>
+                 <tr><td><b>Дата поступления</b></td><td>16.04.2026</td></tr>
+                 <tr><td><b>Категория дела</b></td><td>Об оспаривании решений</td></tr>
+                 <tr><td><b>Судья</b></td><td>Казарикова Оксана Витальевна</td></tr>
+               </table>
+             </div>
+             <div id="cont2">
+               <table id="tablcont">
+                 <tr><th colspan="2">РАССМОТРЕНИЕ В НИЖЕСТОЯЩЕМ СУДЕ</th></tr>
+                 <tr><td><b>Суд (судебный участок) первой инстанции</b></td><td>Краснофлотский районный суд г. Хабаровска</td></tr>
+                 <tr><td><b>Номер дела в первой инстанции</b></td><td>2а-311/2026 (2а-2448/2025;) ~ М-1858/2025</td></tr>
+               </table>
+             </div>
+             <div id='cont3'><table id='tablcont'>
+               <tr><th colspan=10>ДВИЖЕНИЕ ДЕЛА</th></tr>
+               <tr><td><b>Наименование события</b></td><td><b>Дата</b></td><td><b>Время</b></td><td><b>Место проведения</b></td><td><b>Результат события</b></td><td><b>Основание для выбранного результата события</b></td><td><b>Примечание</b></td><td><b>Дата размещения</b></td></tr>
+               <tr><td>Передача дела судье</td><td>16.04.2026</td><td>17:01</td><td></td><td></td><td></td><td></td><td>16.04.2026</td></tr>
+               <tr><td>Судебное заседание</td><td>27.05.2026</td><td>15:00</td><td></td><td></td><td></td><td></td><td>21.04.2026</td></tr>
+             </table></div>
+             <div id='cont4'><table id='tablcont'>
+               <tr><th colspan=10>УЧАСТНИКИ</th></tr>
+               <tr><td><b>Вид лица, участвующего в деле</b></td><td><b>Фамилия / наименование</b></td><td><b>ИНН</b></td><td><b>КПП</b></td><td><b>ОГРН</b></td><td><b>ОГРНИП</b></td></tr>
+               <tr><td>АДМИНИСТРАТИВНЫЙ ОТВЕТЧИК</td><td>Главное управление ФССП по Хабаровскому краю и ЕАО</td><td></td><td></td><td></td><td></td></tr>
+               <tr><td>ПРЕДСТАВИТЕЛЬ</td><td>Кожеваткин Андрей Владимирович</td><td></td><td></td><td></td><td></td></tr>
+               <tr><td>АДМИНИСТРАТИВНЫЙ ОТВЕТЧИК</td><td>ОСП по Краснофлотскому району г. Хабаровска ГУ ФССП России по Хабаровскому краю и Еврейской автономной области</td><td>2721121647</td><td></td><td>1042700170127</td><td></td></tr>
+               <tr><td>АДМИНИСТРАТИВНЫЙ ОТВЕТЧИК</td><td>Поликарпова Юлия Васильевна</td><td></td><td></td><td></td><td></td></tr>
+               <tr><td>АДМИНИСТРАТИВНЫЙ ИСТЕЦ</td><td>Шафорост Антон Евгеньевич</td><td></td><td></td><td></td><td></td></tr>
+               <tr><td>ЗАИНТЕРЕСОВАННОЕ ЛИЦО</td><td>Шафорост Виктория Васильевна</td><td></td><td></td><td></td><td></td></tr>
+             </table></div>
+             <div align="right">print</div>
            </body>
            </html>
            """;

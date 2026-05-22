@@ -204,7 +204,8 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         var judgeName = FirstNotEmpty(GetValue(labelValues, "судья"), GetValue(labelValues, "докладчик"));
         var lowerCourtCaseNumber = FirstNotEmpty(
             GetValue(labelValues, "номер дела в суде нижестоящей инстанции"),
-            GetValue(labelValues, "номер дела нижестоящего суда"));
+            GetValue(labelValues, "номер дела нижестоящего суда"),
+            GetValue(labelValues, "номер дела в первой инстанции"));
         var sourceText = StripTags(html);
 
         return new SudrfCourtCaseData
@@ -215,7 +216,10 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             JudicialUid = FirstNotEmpty(ExtractQueryValue(sourceUri, "judicial_uid"), ExtractJudicialUid(html)),
             Category = category,
             JudgeName = judgeName,
-            LowerCourtName = FirstNotEmpty(GetValue(labelValues, "суд первой инстанции"), GetValue(labelValues, "нижестоящий суд")),
+            LowerCourtName = FirstNotEmpty(
+                GetValue(labelValues, "суд первой инстанции"),
+                GetValue(labelValues, "суд (судебный участок) первой инстанции"),
+                GetValue(labelValues, "нижестоящий суд")),
             LowerCourtCaseNumber = lowerCourtCaseNumber,
             Instance = ResolveInstance(sourceUri, sourceText),
             ReceivedAt = ParseDate(GetValue(labelValues, "дата поступления")),
@@ -377,9 +381,9 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private static Dictionary<string, string> ExtractLabelValues(string html, string className)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (Match tableMatch in TableByClassRegex(className).Matches(html))
+        foreach (var blockHtml in ExtractContentBlocks(html, className))
         {
-            foreach (var row in ExtractRows(tableMatch.Groups["body"].Value))
+            foreach (var row in ExtractRows(blockHtml))
             {
                 if (row.Count < 2)
                 {
@@ -401,9 +405,9 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private static IReadOnlyList<SudrfCourtMovementEvent> ExtractMovementEvents(string html)
     {
         var events = new List<SudrfCourtMovementEvent>();
-        foreach (Match tableMatch in TableByClassRegex("cont3").Matches(html))
+        foreach (var blockHtml in ExtractContentBlocks(html, "cont3"))
         {
-            var rows = ExtractRows(tableMatch.Groups["body"].Value);
+            var rows = ExtractRows(blockHtml);
             var headers = Array.Empty<string>();
             foreach (var row in rows)
             {
@@ -456,9 +460,9 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private static IReadOnlyList<SudrfCourtParticipant> ExtractParticipants(string html)
     {
         var participants = new List<SudrfCourtParticipant>();
-        foreach (Match tableMatch in TableByClassRegex("cont4").Matches(html))
+        foreach (var blockHtml in ExtractContentBlocks(html, "cont4"))
         {
-            foreach (var row in ExtractRows(tableMatch.Groups["body"].Value))
+            foreach (var row in ExtractRows(blockHtml))
             {
                 if (row.Count < 2 || IsHeaderRow(row) || IsParticipantHeaderRow(row))
                 {
@@ -484,15 +488,56 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         return participants;
     }
 
+    private static IReadOnlyList<string> ExtractContentBlocks(string html, string blockName)
+    {
+        var blocks = new List<string>();
+        foreach (Match tableMatch in TableByClassRegex(blockName).Matches(html))
+        {
+            blocks.Add(tableMatch.Groups["body"].Value);
+        }
+
+        var idMatch = ContentDivByIdRegex(blockName).Match(html);
+        if (!idMatch.Success)
+        {
+            return blocks;
+        }
+
+        var start = idMatch.Index + idMatch.Length;
+        var end = html.Length;
+        foreach (Match next in NextContentDivRegex().Matches(html, start))
+        {
+            if (next.Index > start)
+            {
+                end = next.Index;
+                break;
+            }
+        }
+
+        if (string.Equals(blockName, "cont4", StringComparison.OrdinalIgnoreCase))
+        {
+            var printBlockIndex = html.IndexOf("<div align=", start, StringComparison.OrdinalIgnoreCase);
+            if (printBlockIndex > start && printBlockIndex < end)
+            {
+                end = printBlockIndex;
+            }
+        }
+
+        if (end > start)
+        {
+            blocks.Add(html[start..end]);
+        }
+
+        return blocks;
+    }
+
     private static IReadOnlyList<IReadOnlyList<string>> ExtractRows(string tableHtml)
         => RowRegex()
             .Matches(tableHtml)
             .Select(static rowMatch => CellRegex()
                 .Matches(rowMatch.Groups["row"].Value)
                 .Select(static cellMatch => NormalizeText(cellMatch.Groups["cell"].Value))
-                .Where(static value => !string.IsNullOrWhiteSpace(value))
                 .ToList())
-            .Where(static row => row.Count > 0)
+            .Where(static row => row.Any(static value => !string.IsNullOrWhiteSpace(value)))
             .ToList();
 
     private static string GetCell(IReadOnlyList<string> headers, IReadOnlyList<string> row, params string[] headerParts)
@@ -529,6 +574,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         var first = NormalizeLabel(row[0]);
         var second = NormalizeLabel(row[1]);
         return (first.Contains("лицо", StringComparison.OrdinalIgnoreCase)
+                || first.Contains("лица", StringComparison.OrdinalIgnoreCase)
                 || first.Contains("участник", StringComparison.OrdinalIgnoreCase)
                 || first.Contains("тип", StringComparison.OrdinalIgnoreCase))
             && (second.Contains("фио", StringComparison.OrdinalIgnoreCase)
@@ -702,6 +748,13 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private static Regex TableByClassRegex(string className)
         => new($@"<table\b[^>]*class\s*=\s*[""'][^""']*\b{Regex.Escape(className)}\b[^""']*[""'][^>]*>(?<body>.*?)</table>",
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+    private static Regex ContentDivByIdRegex(string id)
+        => new($@"<div\b[^>]*id\s*=\s*[""']{Regex.Escape(id)}[""'][^>]*>",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+    [GeneratedRegex(@"<div\b[^>]*id\s*=\s*[""']cont\d+[""'][^>]*>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    private static partial Regex NextContentDivRegex();
 
     [GeneratedRegex(@"charset\s*=\s*[""']?(?<charset>[a-z0-9_\-]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex CharsetRegex();
