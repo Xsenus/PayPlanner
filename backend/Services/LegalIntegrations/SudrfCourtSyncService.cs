@@ -48,9 +48,20 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
                 return data;
             }
 
+            var linkedCardUri = ExtractCaseCardUri(html, uri, courtCaseNumber);
+            if (linkedCardUri is not null && !UriEquals(linkedCardUri, uri))
+            {
+                var linkedHtml = await ReadHtmlAsync(linkedCardUri, ct);
+                var linkedData = ParseCaseHtml(linkedHtml, linkedCardUri);
+                if (HasCaseCardData(linkedData))
+                {
+                    return linkedData;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(courtCaseNumber))
             {
-                throw new SudrfCourtSyncException("В карточке суда не удалось найти номер дела или движение дела. Для поиска укажите номер дела в суде.");
+                throw new SudrfCourtSyncException("В карточке суда не удалось найти номер дела или движение дела. Для поиска укажите номер дела в суде или ссылку на найденную карточку.");
             }
 
             var resolvedCardUri = await FindCaseCardUriAsync(uri, courtCaseNumber, ct);
@@ -239,12 +250,21 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         }
     }
 
-    private static Uri? ExtractCaseCardUri(string html, Uri sourceUri, string courtCaseNumber)
+    private static bool UriEquals(Uri left, Uri right)
+        => string.Equals(left.GetLeftPart(UriPartial.Path), right.GetLeftPart(UriPartial.Path), StringComparison.OrdinalIgnoreCase)
+            && string.Equals(left.Query, right.Query, StringComparison.OrdinalIgnoreCase);
+
+    private static Uri? ExtractCaseCardUri(string html, Uri sourceUri, string? courtCaseNumber)
     {
         var matches = CaseCardLinkRegex().Matches(html);
         if (matches.Count == 0)
         {
             return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(courtCaseNumber))
+        {
+            return new Uri(sourceUri, WebUtility.HtmlDecode(matches[0].Groups["href"].Value));
         }
 
         var expectedNumbers = BuildCaseNumberSearchValues(courtCaseNumber);
