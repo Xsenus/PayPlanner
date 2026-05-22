@@ -547,6 +547,21 @@ function endOfDay(date: Date) {
   return next;
 }
 
+function getTaskPeriodBounds(date: Date, mode: PeriodMode) {
+  const periodStart = mode === 'day'
+    ? startOfDay(date)
+    : mode === 'week'
+      ? startOfWeek(date)
+      : startOfMonth(date);
+  const periodEnd = mode === 'day'
+    ? endOfDay(date)
+    : mode === 'week'
+      ? endOfDay(addDays(periodStart, 6))
+      : endOfDay(new Date(date.getFullYear(), date.getMonth() + 1, 0));
+
+  return { periodStart, periodEnd };
+}
+
 function getCaseCalendarRange(anchorDate: Date, mode: PeriodMode) {
   if (mode === 'day') {
     return { from: startOfDay(anchorDate), to: endOfDay(anchorDate) };
@@ -1511,15 +1526,9 @@ export function TaskJournal({
 
   const filteredTasks = useMemo(() => {
     const nowDate = new Date();
-    const weekStart = startOfWeek(nowDate);
-    const monthStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
-    const periodEnd =
-      periodMode === 'day'
-        ? endOfDay(nowDate)
-        : periodMode === 'week'
-          ? endOfDay(addDays(weekStart, 6))
-          : endOfDay(new Date(nowDate.getFullYear(), nowDate.getMonth() + 1, 0));
-    const periodStart = periodMode === 'day' ? new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()) : periodMode === 'week' ? weekStart : monthStart;
+    const { periodStart, periodEnd } = getTaskPeriodBounds(nowDate, periodMode);
+    const hasManualDateRange = Boolean(dateFromFilter || dateToFilter);
+    const shouldApplyPeriodFilter = metricFilter === 'none' && !hasManualDateRange;
 
     return scopeFilteredTasks
       .filter((task) => {
@@ -1531,12 +1540,18 @@ export function TaskJournal({
               ? isTaskJournalActive(task.status)
               : task.status === statusFilter;
         const metricOk = matchesMetricFilter(task, metricFilter, nowDate);
-        const periodOk = viewMode !== 'board' || due < periodStart || (due >= periodStart && due <= periodEnd);
+        const periodOk = !shouldApplyPeriodFilter
+          ? true
+          : viewMode === 'list'
+            ? due >= periodStart && due <= periodEnd
+            : viewMode === 'board'
+              ? due < periodStart || (due >= periodStart && due <= periodEnd)
+              : true;
 
         return statusOk && metricOk && periodOk;
       })
       .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
-  }, [metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
+  }, [dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
 
   useEffect(() => {
     setSelectedTaskIds((previous) => {
@@ -2306,6 +2321,8 @@ export function TaskJournal({
                     key={mode}
                     type="button"
                     onClick={() => setPeriodMode(mode)}
+                    aria-pressed={periodMode === mode}
+                    data-testid={`task-period-${mode}`}
                     className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${periodMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                   >
                     {mode === 'day' ? 'День' : mode === 'week' ? 'Неделя' : 'Месяц'}
@@ -2318,6 +2335,8 @@ export function TaskJournal({
               <button
                 type="button"
                 onClick={() => setViewMode('list')}
+                aria-pressed={viewMode === 'list'}
+                data-testid="task-view-list"
                 className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${viewMode === 'list' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
               >
                 <ListFilter className="h-4 w-4" />
@@ -2326,6 +2345,8 @@ export function TaskJournal({
               <button
                 type="button"
                 onClick={() => setViewMode('board')}
+                aria-pressed={viewMode === 'board'}
+                data-testid="task-view-board"
                 className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${viewMode === 'board' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
               >
                 <LayoutGrid className="h-4 w-4" />
@@ -2334,6 +2355,8 @@ export function TaskJournal({
               <button
                 type="button"
                 onClick={() => setViewMode('calendar')}
+                aria-pressed={viewMode === 'calendar'}
+                data-testid="task-view-calendar"
                 className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${viewMode === 'calendar' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
               >
                 <CalendarDays className="h-4 w-4" />
@@ -2342,6 +2365,8 @@ export function TaskJournal({
               <button
                 type="button"
                 onClick={() => setViewMode('timeline')}
+                aria-pressed={viewMode === 'timeline'}
+                data-testid="task-view-timeline"
                 className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition ${viewMode === 'timeline' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
               >
                 <CalendarClock className="h-4 w-4" />
@@ -2790,7 +2815,7 @@ function TaskTable({
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <table className="min-w-[1280px] w-full">
+        <table data-testid="task-table" className="min-w-[1280px] w-full">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <th className="w-12 px-4 py-4">
@@ -2985,7 +3010,7 @@ function TaskBoard({
   onDone: (task: TaskJournalItem) => void;
 }) {
   return (
-    <div className="grid gap-4 xl:grid-cols-4">
+    <div data-testid="task-board" className="grid gap-4 xl:grid-cols-4">
       {columns.map((column) => (
         <section key={column.key} className="min-h-[360px] rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-4 py-4">

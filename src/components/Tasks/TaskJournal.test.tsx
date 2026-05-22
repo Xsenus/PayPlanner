@@ -159,6 +159,44 @@ function dateKey(date: Date) {
   ].join('-');
 }
 
+function dateAt(date: Date, hours = 11) {
+  const value = new Date(date);
+  value.setHours(hours, 0, 0, 0);
+  return value.toISOString();
+}
+
+function getWeekStartForTest(date: Date) {
+  const value = new Date(date);
+  const day = value.getDay() || 7;
+  value.setDate(value.getDate() - day + 1);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function getSameWeekDateOutsideTodayForTest(date: Date) {
+  const value = new Date(date);
+  const day = value.getDay() || 7;
+  value.setDate(value.getDate() + (day === 1 ? 1 : -1));
+  return value;
+}
+
+function getSameMonthDateOutsideCurrentWeekForTest(date: Date) {
+  const weekStart = getWeekStartForTest(date);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  weekEnd.setHours(23, 59, 59, 999);
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+
+  for (let day = 1; day <= lastDay; day += 1) {
+    const candidate = new Date(date.getFullYear(), date.getMonth(), day, 11, 0, 0, 0);
+    if (candidate < weekStart || candidate > weekEnd) {
+      return candidate;
+    }
+  }
+
+  return new Date(date);
+}
+
 function createDataTransfer() {
   const values = new Map<string, string>();
   return {
@@ -214,7 +252,7 @@ async function renderJournal(
     mode?: 'journal' | 'approvals';
     assignees?: TaskJournalAssignee[];
     withRoute?: boolean;
-    waitForTitle?: string;
+    waitForTitle?: string | null;
     onOpenClient?: (clientId: number, caseId?: number | null) => void;
     onOpenLegalEntity?: (legalEntityId: number) => void;
   } = {},
@@ -263,7 +301,11 @@ async function renderJournal(
       onOpenLegalEntity={options.onOpenLegalEntity}
     />
   ));
-  await screen.findAllByText(options.waitForTitle ?? tasks[0]?.title ?? 'Тестовая задача');
+  if (options.waitForTitle === null) {
+    await screen.findByTestId('task-view-controls');
+  } else {
+    await screen.findAllByText(options.waitForTitle ?? tasks[0]?.title ?? 'Тестовая задача');
+  }
 }
 
 async function openFirstTaskForEdit() {
@@ -702,10 +744,7 @@ describe('TaskJournal', () => {
         title: 'June task',
         dueAt: new Date(2026, 5, 10, 10, 0, 0, 0).toISOString(),
       }),
-    ]);
-
-    expect(screen.getByText('May task')).toBeTruthy();
-    expect(screen.getByText('June task')).toBeTruthy();
+    ], { waitForTitle: null });
 
     fireEvent.change(screen.getByTestId('task-date-from-filter'), { target: { value: '2026-05-01' } });
     fireEvent.change(screen.getByTestId('task-date-to-filter'), { target: { value: '2026-05-31' } });
@@ -763,6 +802,65 @@ describe('TaskJournal', () => {
     expect(dateAndViewRow.className).toContain('flex-col');
   });
 
+  it('applies day, week and month period buttons to the list view', async () => {
+    const now = new Date();
+    const sameWeekDate = getSameWeekDateOutsideTodayForTest(now);
+    const sameMonthDate = getSameMonthDateOutsideCurrentWeekForTest(now);
+    const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 10, 11, 0, 0, 0);
+
+    await renderJournal([
+      createTask({ id: 101, title: 'Today task', dueAt: dateAt(now) }),
+      createTask({ id: 102, title: 'Same week task', dueAt: dateAt(sameWeekDate) }),
+      createTask({ id: 103, title: 'Same month task', dueAt: dateAt(sameMonthDate) }),
+      createTask({ id: 104, title: 'Next month task', dueAt: dateAt(nextMonthDate) }),
+    ]);
+
+    expect(screen.getByText('Today task')).toBeTruthy();
+    expect(screen.queryByText('Same week task')).toBeNull();
+    expect(screen.queryByText('Same month task')).toBeNull();
+    expect(screen.getByTestId('task-period-day').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('task-period-week'));
+
+    await waitFor(() => expect(screen.getByText('Same week task')).toBeTruthy());
+    expect(screen.queryByText('Same month task')).toBeNull();
+    expect(screen.getByTestId('task-period-week').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('task-period-month'));
+
+    await waitFor(() => expect(screen.getByText('Same month task')).toBeTruthy());
+    expect(screen.queryByText('Next month task')).toBeNull();
+    expect(screen.getByTestId('task-period-month').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('switches journal presentation modes from the view controls', async () => {
+    await renderJournal();
+
+    expect(screen.getByTestId('task-table')).toBeTruthy();
+    expect(screen.getByTestId('task-view-list').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('task-view-board'));
+
+    await waitFor(() => expect(screen.getByTestId('task-board')).toBeTruthy());
+    expect(screen.queryByTestId('task-table')).toBeNull();
+    expect(screen.getByTestId('task-view-board').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('task-view-calendar'));
+
+    await waitFor(() => expect(screen.getByTestId(`task-calendar-task-101`)).toBeTruthy());
+    expect(screen.getByTestId('task-view-calendar').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('task-view-timeline'));
+
+    await waitFor(() => expect(screen.getByTestId('task-timeline-body-grid')).toBeTruthy());
+    expect(screen.getByTestId('task-view-timeline').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('task-view-list'));
+
+    await waitFor(() => expect(screen.getByTestId('task-table')).toBeTruthy());
+    expect(screen.getByTestId('task-view-list').getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('filters tasks authored by the current user from the quick controls', async () => {
     await renderJournal([
       createTask(),
@@ -791,28 +889,27 @@ describe('TaskJournal', () => {
     overdue.setHours(10, 0, 0, 0);
 
     const future = new Date();
-    future.setDate(future.getDate() + 2);
-    future.setHours(10, 0, 0, 0);
+    future.setHours(23, 30, 0, 0);
 
     await renderJournal([
-      createTask({ dueAt: overdue.toISOString() }),
+      createTask({ title: 'Overdue task', dueAt: overdue.toISOString() }),
       createTask({
         id: 102,
-        title: 'Будущая задача',
+        title: 'Future task',
         dueAt: future.toISOString(),
         assigneeUserId: 7,
         participants: [
           { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
         ],
       }),
-    ]);
+    ], { waitForTitle: 'Future task' });
 
-    expect(screen.getByText('Будущая задача')).toBeTruthy();
+    expect(screen.getByText('Future task')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /Просрочены/i }));
 
-    expect(screen.getByText('Тестовая задача')).toBeTruthy();
-    await waitFor(() => expect(screen.queryByText('Будущая задача')).toBeNull());
+    expect(screen.getByText('Overdue task')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Future task')).toBeNull());
   });
 
   it('does not save a new task without a required counterparty', async () => {
@@ -892,7 +989,7 @@ describe('TaskJournal', () => {
           { userId: 8, role: 'assignee', displayName: 'Другой исполнитель', approvalStatus: 'pending' },
         ],
       }),
-    ], { waitForTitle: 'Busy slot' });
+    ], { waitForTitle: null });
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
     await screen.findByRole('heading', { name: 'Новая задача' });
