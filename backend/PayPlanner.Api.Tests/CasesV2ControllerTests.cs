@@ -4448,7 +4448,7 @@ public class CasesV2ControllerTests
         public bool CanHandle(string? sourceUrl)
             => sourceUrl?.Contains("sudrf.ru", StringComparison.OrdinalIgnoreCase) == true;
 
-        public Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct)
+        public Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
             => Task.FromResult(data);
     }
 

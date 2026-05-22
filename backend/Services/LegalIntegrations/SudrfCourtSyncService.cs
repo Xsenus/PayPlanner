@@ -32,7 +32,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     public bool CanHandle(string? sourceUrl)
         => TryCreateSudrfUri(sourceUrl, out _);
 
-    public async Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct)
+    public async Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
     {
         if (!TryCreateSudrfUri(sourceUrl, out var uri))
         {
@@ -41,21 +41,32 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
         try
         {
-            using var response = await _httpClient.GetAsync(uri, ct);
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new SudrfCourtSyncException($"Сайт суда вернул статус {(int)response.StatusCode}.");
-            }
-
-            var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-            var html = ResolveEncoding(response.Content.Headers.ContentType?.CharSet, bytes).GetString(bytes);
+            var html = await ReadHtmlAsync(uri, ct);
             var data = ParseCaseHtml(html, uri);
-            if (string.IsNullOrWhiteSpace(data.CaseNumber) && data.MovementEvents.Count == 0)
+            if (HasCaseCardData(data))
             {
-                throw new SudrfCourtSyncException("В карточке суда не удалось найти номер дела или движение дела.");
+                return data;
             }
 
-            return data;
+            if (string.IsNullOrWhiteSpace(courtCaseNumber))
+            {
+                throw new SudrfCourtSyncException("В карточке суда не удалось найти номер дела или движение дела. Для поиска укажите номер дела в суде.");
+            }
+
+            var resolvedCardUri = await FindCaseCardUriAsync(uri, courtCaseNumber, ct);
+            if (resolvedCardUri is null)
+            {
+                throw new SudrfCourtSyncException($"На сайте суда не удалось найти карточку по номеру {courtCaseNumber}.");
+            }
+
+            var resolvedHtml = await ReadHtmlAsync(resolvedCardUri, ct);
+            var resolvedData = ParseCaseHtml(resolvedHtml, resolvedCardUri);
+            if (!HasCaseCardData(resolvedData))
+            {
+                throw new SudrfCourtSyncException("Найденная ссылка суда не содержит карточку дела.");
+            }
+
+            return resolvedData;
         }
         catch (SudrfCourtSyncException)
         {
@@ -70,6 +81,63 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             _logger.LogWarning(ex, "Failed to fetch SUDRF court case from {SourceUrl}", uri);
             throw new SudrfCourtSyncException("Не удалось прочитать карточку дела на сайте суда.", ex);
         }
+    }
+
+    private async Task<string> ReadHtmlAsync(Uri uri, CancellationToken ct)
+    {
+        using var response = await _httpClient.GetAsync(uri, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new SudrfCourtSyncException($"Сайт суда вернул статус {(int)response.StatusCode}.");
+        }
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        return ResolveEncoding(response.Content.Headers.ContentType?.CharSet, bytes).GetString(bytes);
+    }
+
+    private async Task<Uri?> FindCaseCardUriAsync(Uri sourceUri, string courtCaseNumber, CancellationToken ct)
+    {
+        foreach (var deloId in BuildDeloIdCandidates(sourceUri, courtCaseNumber))
+        {
+            foreach (var queryNumber in BuildCaseNumberSearchValues(courtCaseNumber))
+            {
+                var resultHtml = await PostCaseSearchAsync(sourceUri, deloId, queryNumber, ct);
+                var cardUri = ExtractCaseCardUri(resultHtml, sourceUri, courtCaseNumber);
+                if (cardUri is not null)
+                {
+                    return cardUri;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<string> PostCaseSearchAsync(Uri sourceUri, string deloId, string courtCaseNumber, CancellationToken ct)
+    {
+        var srvNum = FirstNotEmpty(ExtractQueryValue(sourceUri, "srv_num"), "1");
+        var modulesUri = new Uri(sourceUri, "/modules.php");
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["name"] = "sud_delo",
+            ["srv_num"] = srvNum,
+            ["name_op"] = "r",
+            ["delo_id"] = deloId,
+            ["case_type"] = "0",
+            ["new"] = "0",
+            ["delo_table"] = "p2_case",
+            ["p2_case__CASE_NUMBERSS"] = courtCaseNumber,
+            ["list"] = "ON",
+        });
+
+        using var response = await _httpClient.PostAsync(modulesUri, content, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new SudrfCourtSyncException($"Поиск на сайте суда вернул статус {(int)response.StatusCode}.");
+        }
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        return ResolveEncoding(response.Content.Headers.ContentType?.CharSet, bytes).GetString(bytes);
     }
 
     public static SudrfCourtCaseData ParseCaseHtml(string html, Uri sourceUri)
@@ -108,6 +176,88 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             MovementEvents = movements,
             Participants = participants,
         };
+    }
+
+    private static bool HasCaseCardData(SudrfCourtCaseData data)
+        => !string.IsNullOrWhiteSpace(data.CaseNumber) || data.MovementEvents.Count > 0;
+
+    private static IReadOnlyList<string> BuildDeloIdCandidates(Uri sourceUri, string courtCaseNumber)
+    {
+        var values = new List<string>();
+        AddIfPresent(ExtractQueryValue(sourceUri, "delo_id"));
+
+        var normalized = courtCaseNumber.Trim().ToLowerInvariant();
+        if (normalized.StartsWith("33", StringComparison.Ordinal)
+            || normalized.Contains("апелля", StringComparison.OrdinalIgnoreCase))
+        {
+            AddIfPresent("42");
+        }
+
+        AddIfPresent("1540005");
+        AddIfPresent("1540001");
+        AddIfPresent("41");
+        return values;
+
+        void AddIfPresent(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || values.Contains(value, StringComparer.Ordinal))
+            {
+                return;
+            }
+
+            values.Add(value);
+        }
+    }
+
+    private static IReadOnlyList<string> BuildCaseNumberSearchValues(string courtCaseNumber)
+    {
+        var values = new List<string>();
+        AddIfPresent(courtCaseNumber);
+        var dashIndex = courtCaseNumber.IndexOf('-', StringComparison.Ordinal);
+        if (dashIndex >= 0 && dashIndex + 1 < courtCaseNumber.Length)
+        {
+            AddIfPresent(courtCaseNumber[(dashIndex + 1)..]);
+        }
+
+        var normalized = courtCaseNumber.Replace('–', '-').Replace('—', '-');
+        if (!string.Equals(normalized, courtCaseNumber, StringComparison.Ordinal))
+        {
+            AddIfPresent(normalized);
+        }
+
+        return values;
+
+        void AddIfPresent(string? value)
+        {
+            var normalizedValue = NormalizeOptional(value);
+            if (normalizedValue is null || values.Contains(normalizedValue, StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            values.Add(normalizedValue);
+        }
+    }
+
+    private static Uri? ExtractCaseCardUri(string html, Uri sourceUri, string courtCaseNumber)
+    {
+        var matches = CaseCardLinkRegex().Matches(html);
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        var expectedNumbers = BuildCaseNumberSearchValues(courtCaseNumber);
+        foreach (Match match in matches)
+        {
+            var rowText = NormalizeText(match.Groups["row"].Value);
+            if (expectedNumbers.Any(number => rowText.Contains(number, StringComparison.OrdinalIgnoreCase)))
+            {
+                return new Uri(sourceUri, WebUtility.HtmlDecode(match.Groups["href"].Value));
+            }
+        }
+
+        return new Uri(sourceUri, WebUtility.HtmlDecode(matches[0].Groups["href"].Value));
     }
 
     private static bool TryCreateSudrfUri(string? sourceUrl, out Uri uri)
@@ -456,6 +606,12 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private static string GetValue(IReadOnlyDictionary<string, string> values, string key)
         => values.TryGetValue(NormalizeLabel(key), out var value) ? value : string.Empty;
 
+    private static string? NormalizeOptional(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
     private static string FirstNotEmpty(params string?[] values)
         => values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
@@ -491,6 +647,9 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
     [GeneratedRegex(@"<tr\b[^>]*>(?<row>.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex RowRegex();
+
+    [GeneratedRegex(@"<tr\b[^>]*>(?<row>.*?<a\b[^>]*href\s*=\s*[""'](?<href>[^""']*name_op=case[^""']*case_id=[^""']*)[""'][^>]*>.*?</tr>)", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    private static partial Regex CaseCardLinkRegex();
 
     [GeneratedRegex(@"<t[dh]\b[^>]*>(?<cell>.*?)</t[dh]>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex CellRegex();

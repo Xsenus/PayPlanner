@@ -4790,7 +4790,7 @@ public class CasesV2Controller : ControllerBase
         {
             try
             {
-                var courtData = await _sudrfCourtSyncService.FetchCaseAsync(clientCase.CourtUrl, ct);
+                var courtData = await _sudrfCourtSyncService.FetchCaseAsync(clientCase.CourtUrl, ct, clientCase.CourtCaseNumber);
                 var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, actorName, checkedAt, ct);
                 var syncMessage = syncResult.ChangedFields.Count == 0 && syncResult.CreatedCourtEvents == 0 && syncResult.UpdatedCourtEvents == 0
                     ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."

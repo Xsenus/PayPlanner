@@ -6,5 +6,5 @@ public interface ISudrfCourtSyncService
 {
     bool CanHandle(string? sourceUrl);
 
-    Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct);
+    Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null);
 }

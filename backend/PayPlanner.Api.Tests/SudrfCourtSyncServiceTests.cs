@@ -31,7 +31,7 @@ public class SudrfCourtSyncServiceTests
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         var bytes = Encoding.GetEncoding("windows-1251").GetBytes(BuildCourtHtml());
-        using var httpClient = new HttpClient(new FixedResponseHandler(bytes))
+        using var httpClient = new HttpClient(new FixedResponseHandler(_ => bytes))
         {
             BaseAddress = new Uri("https://kraevoy--hbr.sudrf.ru"),
         };
@@ -44,12 +44,42 @@ public class SudrfCourtSyncServiceTests
         Assert.Equal("Шафорост Виктория Васильевна", data.Participants.Single(item => item.Role == "ЗАИНТЕРЕСОВАННОЕ ЛИЦО").Name);
     }
 
+    [Fact]
+    public async Task FetchCaseAsync_SearchesCardByCaseNumberWhenSourceIsSearchPage()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var handler = new RecordingResponseHandler(request =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                return BuildSearchResultHtml();
+            }
+
+            return request.RequestUri?.Query.Contains("name_op=case", StringComparison.OrdinalIgnoreCase) == true
+                ? BuildCourtHtml()
+                : BuildSearchPageHtml();
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
+
+        var data = await service.FetchCaseAsync(
+            "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=sf&delo_id=42",
+            CancellationToken.None,
+            "33а-3390/2026");
+
+        Assert.Equal("33а-3390/2026", data.CaseNumber);
+        Assert.Equal(new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=43326936&case_uid=30d46dc6-6d6c-4514-8aa6-591c3bc63a1a&delo_id=42"), handler.Requests.Last().RequestUri);
+        var searchRequest = Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post);
+        Assert.Contains("p2_case__CASE_NUMBERSS=33", searchRequest.Body, StringComparison.Ordinal);
+        Assert.Contains("%D0%B0-3390%2F2026", searchRequest.Body, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo")]
     [InlineData("http://example.sudrf.ru/modules.php?name=sud_delo")]
     public void CanHandle_AcceptsSudrfHosts(string sourceUrl)
     {
-        using var httpClient = new HttpClient(new FixedResponseHandler([]));
+        using var httpClient = new HttpClient(new FixedResponseHandler(_ => []));
         var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
 
         Assert.True(service.CanHandle(sourceUrl));
@@ -61,7 +91,7 @@ public class SudrfCourtSyncServiceTests
     [InlineData("")]
     public void CanHandle_RejectsUnsupportedSources(string sourceUrl)
     {
-        using var httpClient = new HttpClient(new FixedResponseHandler([]));
+        using var httpClient = new HttpClient(new FixedResponseHandler(_ => []));
         var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
 
         Assert.False(service.CanHandle(sourceUrl));
@@ -102,13 +132,40 @@ public class SudrfCourtSyncServiceTests
            </html>
            """;
 
-    private sealed class FixedResponseHandler(byte[] bytes) : HttpMessageHandler
+    private static string BuildSearchPageHtml()
+        => """
+           <html>
+           <head><meta http-equiv="Content-Type" content="text/html; charset=windows-1251"></head>
+           <body>
+             <form method="post" action="/modules.php">
+               <input name="p2_case__CASE_NUMBERSS">
+             </form>
+           </body>
+           </html>
+           """;
+
+    private static string BuildSearchResultHtml()
+        => """
+           <html>
+           <head><meta http-equiv="Content-Type" content="text/html; charset=windows-1251"></head>
+           <body>
+             <table>
+               <tr>
+                 <td>33а-3390/2026</td>
+                 <td><a href="/modules.php?name=sud_delo&amp;srv_num=1&amp;name_op=case&amp;case_id=43326936&amp;case_uid=30d46dc6-6d6c-4514-8aa6-591c3bc63a1a&amp;delo_id=42">дело</a></td>
+               </tr>
+             </table>
+           </body>
+           </html>
+           """;
+
+    private sealed class FixedResponseHandler(Func<HttpRequestMessage, byte[]> resolveBytes) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new ByteArrayContent(bytes),
+                Content = new ByteArrayContent(resolveBytes(request)),
             };
             response.Content.Headers.ContentType = new("text/html")
             {
@@ -117,4 +174,30 @@ public class SudrfCourtSyncServiceTests
             return Task.FromResult(response);
         }
     }
+
+    private sealed class RecordingResponseHandler(Func<HttpRequestMessage, string> resolveHtml) : HttpMessageHandler
+    {
+        public List<RecordedRequest> Requests { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            Requests.Add(new RecordedRequest(request.Method, request.RequestUri, body));
+
+            var bytes = Encoding.GetEncoding("windows-1251").GetBytes(resolveHtml(request));
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(bytes),
+            };
+            response.Content.Headers.ContentType = new("text/html")
+            {
+                CharSet = "windows-1251",
+            };
+            return response;
+        }
+    }
+
+    private sealed record RecordedRequest(HttpMethod Method, Uri? RequestUri, string Body);
 }
