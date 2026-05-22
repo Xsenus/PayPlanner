@@ -300,7 +300,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   }, [permissions, t]);
 
   const canManageRoles = isAdmin() || permissions.roles.canView;
-  const canViewSettings = isAdmin() || permissions.audit.canView;
+  const canViewSettings = isAdmin() || permissions.audit.canView || permissions.notifications.canView;
 
   const adminItems = useMemo<SidebarItem[]>(() => {
     if (!isAdmin() && !canManageRoles && !canViewSettings) {

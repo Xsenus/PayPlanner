@@ -193,6 +193,23 @@ export interface NotificationPurposeDto {
   description: string;
 }
 
+export interface NotificationTemplateVariableDto {
+  key: string;
+  label: string;
+}
+
+export interface NotificationTemplateDto {
+  key: string;
+  label: string;
+  description: string;
+  isEnabled: boolean;
+  subject: string;
+  body: string;
+  defaultSubject: string;
+  defaultBody: string;
+  variables: NotificationTemplateVariableDto[];
+}
+
 export interface EmailNotificationSettingsDto {
   enabled: boolean;
   ready: boolean;
@@ -273,6 +290,7 @@ export interface NotificationSettingsDto {
   telegram: TelegramNotificationSettingsDto;
   senders: NotificationSenderDto[];
   purposes: NotificationPurposeDto[];
+  templates: NotificationTemplateDto[];
 }
 
 export interface UpdateEmailNotificationSettingsRequest {
@@ -286,6 +304,12 @@ export interface UpdateEmailNotificationSettingsRequest {
   fromEmail?: string | null;
   fromName?: string | null;
   enableSsl: boolean;
+}
+
+export interface UpdateNotificationTemplateRequest {
+  isEnabled: boolean;
+  subject?: string | null;
+  body?: string | null;
 }
 
 export interface UserNotificationDto {
@@ -1480,6 +1504,23 @@ export class ApiService {
     return this.request<NotificationSettingsDto>('/notifications/settings/email', {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async getNotificationTemplates() {
+    return this.request<NotificationTemplateDto[]>('/notifications/templates');
+  }
+
+  async updateNotificationTemplate(key: string, payload: UpdateNotificationTemplateRequest) {
+    return this.request<NotificationTemplateDto>(`/notifications/templates/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async resetNotificationTemplate(key: string) {
+    return this.request<NotificationTemplateDto>(`/notifications/templates/${encodeURIComponent(key)}/reset`, {
+      method: 'POST',
     });
   }
 

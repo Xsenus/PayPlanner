@@ -15,6 +15,7 @@ using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Contracts;
 using PayPlanner.Api.Services.Invoices;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -39,17 +40,20 @@ public class ContractsController : ControllerBase
     private readonly IFormRequirementsService _formRequirements;
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
     private readonly IEmailService? _emailService;
+    private readonly INotificationService? _notificationService;
 
     public ContractsController(
         PaymentContext db,
         IFormRequirementsService formRequirements,
         IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
-        IEmailService? emailService = null)
+        IEmailService? emailService = null,
+        INotificationService? notificationService = null)
     {
         _db = db;
         _formRequirements = formRequirements;
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
         _emailService = emailService;
+        _notificationService = notificationService;
     }
 
     private Task<DataVisibilityAccess?> ResolveContractsVisibilityAsync(CancellationToken ct)
@@ -1019,11 +1023,41 @@ public class ContractsController : ControllerBase
             lines.Add($"Финансовые условия: {contract.TerminationFinancialTerms.Trim()}");
         }
 
+        var fallbackSubject = $"Договор № {contract.Number} расторгнут";
+        var fallbackBody = string.Join(Environment.NewLine + Environment.NewLine, lines);
+        var message = _notificationService is null
+            ? new NotificationMessage(fallbackSubject, fallbackBody, Purpose: NotificationPurposes.ContractClient)
+            : await _notificationService.RenderTemplateAsync(
+                NotificationTemplateKeys.ContractTerminationClient,
+                fallbackSubject,
+                fallbackBody,
+                BuildContractTerminationTemplateValues(contract, terminationDate),
+                purpose: NotificationPurposes.ContractClient,
+                cancellationToken: ct);
+
         await _emailService.SendEmailAsync(
             email,
-            $"Договор № {contract.Number} расторгнут",
-            string.Join(Environment.NewLine + Environment.NewLine, lines),
+            message.Subject,
+            message.Body,
             cancellationToken: ct);
+    }
+
+    private static Dictionary<string, string?> BuildContractTerminationTemplateValues(Contract contract, string terminationDate)
+    {
+        var reason = contract.TerminationReason?.Trim() ?? string.Empty;
+        var terms = contract.TerminationTerms?.Trim() ?? string.Empty;
+        var financialTerms = contract.TerminationFinancialTerms?.Trim() ?? string.Empty;
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["contract.number"] = contract.Number,
+            ["contract.terminationDate"] = terminationDate,
+            ["contract.reason"] = reason,
+            ["contract.terminationTerms"] = terms,
+            ["contract.financialTerms"] = financialTerms,
+            ["contract.reasonBlock"] = string.IsNullOrWhiteSpace(reason) ? string.Empty : $"Причина: {reason}.{Environment.NewLine}",
+            ["contract.termsBlock"] = string.IsNullOrWhiteSpace(terms) ? string.Empty : $"Условия расторжения: {terms}{Environment.NewLine}",
+            ["contract.financialTermsBlock"] = string.IsNullOrWhiteSpace(financialTerms) ? string.Empty : $"Финансовые условия: {financialTerms}",
+        };
     }
 
     private async Task<bool> IsContractTerminationClientEmailEnabledAsync(CancellationToken ct)

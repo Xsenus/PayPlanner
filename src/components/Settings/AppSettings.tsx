@@ -150,7 +150,10 @@ export function AppSettings() {
   const [detailsPage, setDetailsPage] = useState(1);
   const [detailsPageSize, setDetailsPageSize] = useState(DETAILS_PAGE_SIZE_OPTIONS[1]);
   const isAdminRole = isAdmin();
-  const auditOnlyMode = !isAdminRole && permissions.audit.canView;
+  const canViewNotificationSettings = isAdminRole || permissions.notifications.canView;
+  const canEditNotificationSettings = isAdminRole || permissions.notifications.canEdit;
+  const canViewMaintenanceSettings = isAdminRole || permissions.audit.canView;
+  const restrictedSettingsMode = !isAdminRole;
 
   const selectSection = useCallback((section: SettingsSection) => {
     setActiveSection(section);
@@ -179,10 +182,22 @@ export function AppSettings() {
   }, [activeSection]);
 
   useEffect(() => {
-    if (auditOnlyMode && activeSection !== 'db-maintenance') {
-      selectSection('db-maintenance');
+    if (!restrictedSettingsMode) return;
+
+    if (canViewNotificationSettings && activeSection !== 'notifications' && !canViewMaintenanceSettings) {
+      selectSection('notifications');
+      return;
     }
-  }, [activeSection, auditOnlyMode, selectSection]);
+
+    if (canViewMaintenanceSettings && activeSection !== 'db-maintenance' && !canViewNotificationSettings) {
+      selectSection('db-maintenance');
+      return;
+    }
+
+    if (activeSection !== 'notifications' && activeSection !== 'db-maintenance') {
+      selectSection(canViewNotificationSettings ? 'notifications' : 'db-maintenance');
+    }
+  }, [activeSection, canViewMaintenanceSettings, canViewNotificationSettings, restrictedSettingsMode, selectSection]);
 
   const migrationDetails = useMemo(() => result?.details ?? [], [result]);
   const migrationDetailsTotalPages = useMemo(
@@ -693,7 +708,7 @@ export function AppSettings() {
             </div>
 
             <nav aria-label="Разделы настроек" className="mt-4 space-y-3">
-              {!auditOnlyMode && (
+              {!restrictedSettingsMode && (
               <div className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-3 shadow-sm">
                 <div className="flex items-center gap-3 rounded-xl border border-sky-100 bg-white/90 px-3 py-3 shadow-sm">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
@@ -756,7 +771,7 @@ export function AppSettings() {
               </div>
               )}
 
-              {!auditOnlyMode && (
+              {(canViewNotificationSettings || !restrictedSettingsMode) && (
               <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3 shadow-sm">
                 <div className="flex items-center gap-3 rounded-xl border border-violet-100 bg-white/90 px-3 py-3 shadow-sm">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
@@ -844,7 +859,7 @@ export function AppSettings() {
                   >
                     Обслуживание
                   </button>
-                  {!auditOnlyMode && (
+                  {!restrictedSettingsMode && (
                     <>
                   <button
                     type="button"
@@ -1209,14 +1224,16 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'notifications' && <NotificationSettings />}
+            {activeSection === 'notifications' && canViewNotificationSettings && (
+              <NotificationSettings canEdit={canEditNotificationSettings} />
+            )}
 
             {activeSection === 'app-releases' && <AppVersionSettings />}
 
             {activeSection === 'auth-providers' && <AuthProviderSettings />}
 
 
-            {activeSection === 'db-maintenance' && <DatabaseMaintenanceSettings />}
+            {activeSection === 'db-maintenance' && canViewMaintenanceSettings && <DatabaseMaintenanceSettings />}
 
             {activeSection === 'db-import' && <SpreadsheetImportSettings />}
 

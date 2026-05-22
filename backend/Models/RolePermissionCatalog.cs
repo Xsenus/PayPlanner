@@ -17,6 +17,7 @@ public static class RolePermissionCatalog
     public const string Payments = "payments";
     public const string Contracts = "contracts";
     public const string Dictionaries = "dictionaries";
+    public const string Notifications = "notifications";
     public const string Roles = "roles";
     public const string Audit = "audit";
 
@@ -34,6 +35,7 @@ public static class RolePermissionCatalog
         Payments,
         Contracts,
         Dictionaries,
+        Notifications,
         Roles,
         Audit
     ];
@@ -78,6 +80,14 @@ public static class RolePermissionCatalog
             [Payments] = new(true, true, true, true, true, false, GetDefaultViewScope(Payments, allowRoleManagement)),
             [Contracts] = new(true, true, true, true, true, false, GetDefaultViewScope(Contracts, allowRoleManagement)),
             [Dictionaries] = new(true, true, true, true, true, false, GetDefaultViewScope(Dictionaries, allowRoleManagement)),
+            [Notifications] = new(
+                allowRoleManagement,
+                false,
+                allowRoleManagement,
+                false,
+                false,
+                false,
+                GetDefaultViewScope(Notifications, allowRoleManagement)),
             [Roles] = new(
                 allowRoleManagement,
                 allowRoleManagement,
@@ -114,6 +124,7 @@ public static class RolePermissionCatalog
             Payments = ToSection(defaults[Payments]),
             Contracts = ToSection(defaults[Contracts]),
             Dictionaries = ToSection(defaults[Dictionaries]),
+            Notifications = ToSection(defaults[Notifications]),
             Roles = ToSection(defaults[Roles]),
             Audit = ToSection(defaults[Audit])
         };

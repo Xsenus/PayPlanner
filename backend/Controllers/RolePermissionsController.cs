@@ -300,6 +300,9 @@ public class RolePermissionsController : ControllerBase
                 case RolePermissionCatalog.Dictionaries:
                     dto.Dictionaries = ToSection(permission);
                     break;
+                case RolePermissionCatalog.Notifications:
+                    dto.Notifications = ToSection(permission);
+                    break;
                 case RolePermissionCatalog.Roles:
                     dto.Roles = ToSection(permission);
                     break;
@@ -491,6 +494,8 @@ public class RolePermissionsController : ControllerBase
             || (string.Equals(permission.Section, RolePermissionCatalog.Roles, StringComparison.OrdinalIgnoreCase)
                 && permission.CanExport)
             || (string.Equals(permission.Section, RolePermissionCatalog.Audit, StringComparison.OrdinalIgnoreCase)
+                && (permission.CanCreate || permission.CanDelete || permission.CanExport || permission.CanViewAnalytics))
+            || (string.Equals(permission.Section, RolePermissionCatalog.Notifications, StringComparison.OrdinalIgnoreCase)
                 && (permission.CanCreate || permission.CanDelete || permission.CanExport || permission.CanViewAnalytics));
 
     private static string FormatSectionScope(RolePermission permission)
@@ -511,6 +516,7 @@ public class RolePermissionsController : ControllerBase
             [RolePermissionCatalog.Payments] = ToValues(dto.Payments),
             [RolePermissionCatalog.Contracts] = ToValues(dto.Contracts),
             [RolePermissionCatalog.Dictionaries] = ToValues(dto.Dictionaries),
+            [RolePermissionCatalog.Notifications] = ToValues(dto.Notifications),
             [RolePermissionCatalog.Roles] = ToValues(dto.Roles),
             [RolePermissionCatalog.Audit] = ToValues(dto.Audit),
         };
@@ -552,6 +558,18 @@ public class RolePermissionsController : ControllerBase
             : false;
 
         if (string.Equals(section, RolePermissionCatalog.Audit, StringComparison.OrdinalIgnoreCase))
+        {
+            return values with
+            {
+                CanCreate = false,
+                CanDelete = false,
+                CanExport = false,
+                CanViewAnalytics = false,
+                ViewScope = viewScope,
+            };
+        }
+
+        if (string.Equals(section, RolePermissionCatalog.Notifications, StringComparison.OrdinalIgnoreCase))
         {
             return values with
             {

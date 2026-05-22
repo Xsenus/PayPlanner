@@ -175,7 +175,7 @@ function AppContent() {
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
   const canManageRoles = isAdminRole || permissions.roles.canView;
   const canViewAudit = isAdminRole || permissions.audit.canView;
-  const canViewSettings = canViewAudit;
+  const canViewSettings = canViewAudit || permissions.notifications.canView;
 
   const tabNames: Record<string, string> = useMemo(
     () => ({

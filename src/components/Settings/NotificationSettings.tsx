@@ -8,6 +8,7 @@ import {
   type NotificationPurposeDto,
   type NotificationSenderDto,
   type NotificationSettingsDto,
+  type NotificationTemplateDto,
   type UpsertNotificationSenderRequest,
 } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
@@ -108,6 +109,17 @@ function pushNotificationRoute(route: SenderRoute) {
   window.history.pushState(null, '', buildNotificationRouteHref(route));
 }
 
+type NotificationTemplateDraft = {
+  key: string;
+  isEnabled: boolean;
+  subject: string;
+  body: string;
+};
+
+interface NotificationSettingsProps {
+  canEdit?: boolean;
+}
+
 function createBlankForm(channel: NotificationChannel = 'email', nextOrder = 10): SenderForm {
   return {
     channel,
@@ -182,7 +194,7 @@ function statusClass(ready: boolean, enabled: boolean) {
   return ready ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200';
 }
 
-export function NotificationSettings() {
+export function NotificationSettings({ canEdit = true }: NotificationSettingsProps) {
   const toast = useToast();
   const { confirm } = useDialog();
   const [settings, setSettings] = useState<NotificationSettingsDto | null>(null);
@@ -191,6 +203,9 @@ export function NotificationSettings() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [emailPolicySaving, setEmailPolicySaving] = useState(false);
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState('');
+  const [templateDraft, setTemplateDraft] = useState<NotificationTemplateDraft | null>(null);
   const [testing, setTesting] = useState(false);
   const [testRecipient, setTestRecipient] = useState('');
   const [testSubject, setTestSubject] = useState('Тестовое уведомление PayPlanner');
@@ -258,9 +273,35 @@ export function NotificationSettings() {
   const emailSenders = useMemo(() => senders.filter((item) => item.channel === 'email'), [senders]);
   const telegramSenders = useMemo(() => senders.filter((item) => item.channel === 'telegram'), [senders]);
   const selectedSender = form.id ? senders.find((item) => item.id === form.id) : null;
+  const templates = useMemo(() => settings?.templates ?? [], [settings?.templates]);
+  const selectedTemplate = useMemo(
+    () => templates.find((item) => item.key === selectedTemplateKey) ?? templates[0] ?? null,
+    [selectedTemplateKey, templates],
+  );
+
+  useEffect(() => {
+    if (!templates.length) return;
+    if (!selectedTemplateKey || !templates.some((item) => item.key === selectedTemplateKey)) {
+      setSelectedTemplateKey(templates[0].key);
+    }
+  }, [selectedTemplateKey, templates]);
+
+  useEffect(() => {
+    if (!selectedTemplate) {
+      setTemplateDraft(null);
+      return;
+    }
+
+    setTemplateDraft({
+      key: selectedTemplate.key,
+      isEnabled: selectedTemplate.isEnabled,
+      subject: selectedTemplate.subject,
+      body: selectedTemplate.body,
+    });
+  }, [selectedTemplate]);
 
   const updateContractTerminationClientEmails = async (enabled: boolean) => {
-    if (!settings) return;
+    if (!settings || !canEdit) return;
 
     setEmailPolicySaving(true);
     try {
@@ -291,6 +332,51 @@ export function NotificationSettings() {
     }
   };
 
+  const replaceTemplate = (template: NotificationTemplateDto) => {
+    setSettings((current) => current
+      ? {
+          ...current,
+          templates: current.templates.map((item) => (item.key === template.key ? template : item)),
+        }
+      : current);
+  };
+
+  const saveTemplate = async () => {
+    if (!templateDraft || !canEdit) return;
+
+    setTemplateSaving(true);
+    try {
+      const updated = await apiService.updateNotificationTemplate(templateDraft.key, {
+        isEnabled: templateDraft.isEnabled,
+        subject: templateDraft.subject,
+        body: templateDraft.body,
+      });
+      replaceTemplate(updated);
+      toast.success('Шаблон уведомления сохранён.', 'Уведомления');
+    } catch (error) {
+      const text = extractDisplayErrorMessage(error, 'Не удалось сохранить шаблон уведомления.');
+      toast.error(text, 'Уведомления');
+    } finally {
+      setTemplateSaving(false);
+    }
+  };
+
+  const resetTemplate = async () => {
+    if (!selectedTemplate || !canEdit) return;
+
+    setTemplateSaving(true);
+    try {
+      const updated = await apiService.resetNotificationTemplate(selectedTemplate.key);
+      replaceTemplate(updated);
+      toast.success('Шаблон восстановлен по умолчанию.', 'Уведомления');
+    } catch (error) {
+      const text = extractDisplayErrorMessage(error, 'Не удалось восстановить шаблон уведомления.');
+      toast.error(text, 'Уведомления');
+    } finally {
+      setTemplateSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (!settings || route.mode === 'list') return;
 
@@ -313,6 +399,7 @@ export function NotificationSettings() {
   };
 
   const openNewSender = (channel: NotificationChannel) => {
+    if (!canEdit) return;
     const nextOrder = resolveNextOrder(senders.filter((item) => item.channel === channel));
     setForm(createBlankForm(channel, nextOrder));
     const nextRoute: SenderRoute = { mode: 'new', channel };
@@ -378,6 +465,7 @@ export function NotificationSettings() {
   });
 
   const saveSender = async () => {
+    if (!canEdit) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -434,7 +522,7 @@ export function NotificationSettings() {
   };
 
   const deleteSender = async () => {
-    if (!form.id) return;
+    if (!form.id || !canEdit) return;
     const approved = await confirm({
       title: 'Удалить отправителя',
       description: `Удалить "${form.name}" из настроек уведомлений`,
@@ -462,6 +550,7 @@ export function NotificationSettings() {
   };
 
   const sendTest = async () => {
+    if (!canEdit) return;
     if (!testRecipient.trim()) {
       const text = form.channel === 'telegram' ? 'Укажите Telegram chat id' : 'Укажите email получателя';
       setMessage(text);
@@ -500,6 +589,7 @@ export function NotificationSettings() {
   };
 
   const retryDelivery = async (delivery: NotificationDeliveryDto) => {
+    if (!canEdit) return;
     setRetryingDeliveryId(delivery.id);
     try {
       const result = await apiService.retryNotificationDelivery(delivery.id);
@@ -522,7 +612,7 @@ export function NotificationSettings() {
   };
 
   const syncTelegramWebhook = async () => {
-    if (!form.id) return;
+    if (!form.id || !canEdit) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -541,7 +631,7 @@ export function NotificationSettings() {
   };
 
   const deleteTelegramWebhook = async () => {
-    if (!form.id) return;
+    if (!form.id || !canEdit) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -560,7 +650,7 @@ export function NotificationSettings() {
   };
 
   const syncTelegramProfile = async () => {
-    if (!form.id) return;
+    if (!form.id || !canEdit) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -584,7 +674,7 @@ export function NotificationSettings() {
   };
 
   const applyTelegramProfile = async () => {
-    if (!form.id) return;
+    if (!form.id || !canEdit) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -642,7 +732,7 @@ export function NotificationSettings() {
                   type="checkbox"
                   className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   checked={settings?.email.contractTerminationClientEmailsEnabled ?? false}
-                  disabled={loading || emailPolicySaving}
+                  disabled={!canEdit || loading || emailPolicySaving}
                   onChange={(event) => void updateContractTerminationClientEmails(event.target.checked)}
                 />
                 Письмо клиенту при расторжении договора
@@ -652,6 +742,127 @@ export function NotificationSettings() {
               Пока настройка выключена, расторжение договора только сохранит статус и условия. Письмо не уйдёт, даже если у клиента указан email.
               Для фактической отправки также должен быть включён и настроен Email-отправитель.
             </p>
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h4 className="text-base font-semibold text-gray-900">Шаблоны уведомлений</h4>
+                <p className="mt-1 max-w-3xl text-sm text-gray-500">
+                  Единое место для тем и текстов email/Telegram-уведомлений. Переменные вставляются в формате {'{{поле}}'}.
+                </p>
+              </div>
+              {!canEdit && (
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                  Только просмотр
+                </span>
+              )}
+            </div>
+
+            {templates.length === 0 ? (
+              <div className="mt-4 rounded-xl border border-dashed border-gray-200 px-4 py-6 text-sm text-gray-500">
+                Шаблоны пока не загружены.
+              </div>
+            ) : (
+              <div className="mt-5 grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+                <div className="space-y-2">
+                  {templates.map((template) => (
+                    <button
+                      key={template.key}
+                      type="button"
+                      onClick={() => setSelectedTemplateKey(template.key)}
+                      className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                        selectedTemplate?.key === template.key
+                          ? 'border-blue-200 bg-blue-50 text-blue-900'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">{template.label}</span>
+                      <span className="mt-1 block text-xs text-gray-500">{template.description}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {selectedTemplate && templateDraft && (
+                  <div className="rounded-xl border border-gray-200 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h5 className="text-sm font-semibold text-gray-900">{selectedTemplate.label}</h5>
+                        <p className="mt-1 text-xs text-gray-500">{selectedTemplate.description}</p>
+                      </div>
+                      <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          checked={templateDraft.isEnabled}
+                          disabled={!canEdit || templateSaving}
+                          onChange={(event) => setTemplateDraft((current) => current ? { ...current, isEnabled: event.target.checked } : current)}
+                        />
+                        Использовать шаблон
+                      </label>
+                    </div>
+
+                    <div className="mt-4 grid gap-4">
+                      <label className="text-sm font-medium text-gray-700">
+                        Тема
+                        <input
+                          value={templateDraft.subject}
+                          disabled={!canEdit || templateSaving}
+                          onChange={(event) => setTemplateDraft((current) => current ? { ...current, subject: event.target.value } : current)}
+                          className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50"
+                        />
+                      </label>
+                      <label className="text-sm font-medium text-gray-700">
+                        Текст
+                        <textarea
+                          value={templateDraft.body}
+                          disabled={!canEdit || templateSaving}
+                          onChange={(event) => setTemplateDraft((current) => current ? { ...current, body: event.target.value } : current)}
+                          rows={8}
+                          className="mt-1 w-full resize-y rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm disabled:bg-gray-50"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {selectedTemplate.variables.map((variable) => (
+                        <button
+                          key={variable.key}
+                          type="button"
+                          onClick={() => setTemplateDraft((current) => current ? { ...current, body: `${current.body}${current.body.endsWith(' ') || current.body.endsWith('\n') ? '' : ' '}{{${variable.key}}}` } : current)}
+                          disabled={!canEdit || templateSaving}
+                          className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+                          title={variable.label}
+                        >
+                          {'{{'}{variable.key}{'}}'}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-5 flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void resetTemplate()}
+                        disabled={!canEdit || templateSaving}
+                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                        По умолчанию
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void saveTemplate()}
+                        disabled={!canEdit || templateSaving}
+                        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        <Save className="h-4 w-4" />
+                        Сохранить шаблон
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -680,6 +891,7 @@ export function NotificationSettings() {
                 purposes={purposes}
                 onCreate={openNewSender}
                 onOpen={openEditSender}
+                canEdit={canEdit}
               />
               <SenderTable
                 channel="telegram"
@@ -689,6 +901,7 @@ export function NotificationSettings() {
                 purposes={purposes}
                 onCreate={openNewSender}
                 onOpen={openEditSender}
+                canEdit={canEdit}
               />
             </div>
           </div>
@@ -699,6 +912,7 @@ export function NotificationSettings() {
             status={deliveryStatus}
             loading={deliveriesLoading}
             retryingId={retryingDeliveryId}
+            canEdit={canEdit}
             onStatusChange={setDeliveryStatus}
             onRefresh={loadDeliveries}
             onRetry={retryDelivery}
@@ -723,7 +937,7 @@ export function NotificationSettings() {
                 <button
                   type="button"
                   onClick={() => void deleteSender()}
-                  disabled={saving}
+                  disabled={!canEdit || saving}
                   className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -733,7 +947,7 @@ export function NotificationSettings() {
               <button
                 type="button"
                 onClick={() => void saveSender()}
-                disabled={saving}
+                disabled={!canEdit || saving}
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
               >
                 <Save className="h-4 w-4" />
@@ -755,7 +969,7 @@ export function NotificationSettings() {
                   <select
                     value={form.channel}
                     onChange={(event) => openNewSender(event.target.value as NotificationChannel)}
-                    disabled={Boolean(form.id)}
+                    disabled={!canEdit || Boolean(form.id)}
                     className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                   >
                     <option value="email">Email</option>
@@ -858,7 +1072,7 @@ export function NotificationSettings() {
                 <button
                   type="button"
                   onClick={() => void sendTest()}
-                  disabled={testing || !form.id}
+                  disabled={!canEdit || testing || !form.id}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
                 >
                   <Send className="h-4 w-4" />
@@ -941,6 +1155,7 @@ function DeliveryLogPanel({
   status,
   loading,
   retryingId,
+  canEdit,
   onStatusChange,
   onRefresh,
   onRetry,
@@ -950,6 +1165,7 @@ function DeliveryLogPanel({
   status: string;
   loading: boolean;
   retryingId: number | null;
+  canEdit: boolean;
   onStatusChange: (status: string) => void;
   onRefresh: () => void | Promise<void>;
   onRetry: (delivery: NotificationDeliveryDto) => void | Promise<void>;
@@ -1030,7 +1246,7 @@ function DeliveryLogPanel({
                         <button
                           type="button"
                           onClick={() => void onRetry(item)}
-                          disabled={retryingId === item.id}
+                          disabled={!canEdit || retryingId === item.id}
                           className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60"
                         >
                           <Send className="h-3.5 w-3.5" />
@@ -1061,6 +1277,7 @@ function SenderTable({
   purposes,
   onCreate,
   onOpen,
+  canEdit,
 }: {
   channel: NotificationChannel;
   title: string;
@@ -1069,6 +1286,7 @@ function SenderTable({
   purposes: NotificationPurposeDto[];
   onCreate: (channel: NotificationChannel) => void;
   onOpen: (sender: NotificationSenderDto) => void;
+  canEdit: boolean;
 }) {
   const Icon = channel === 'telegram' ? Bot : Mail;
 
@@ -1086,10 +1304,13 @@ function SenderTable({
           href={buildNotificationRouteHref({ mode: 'new', channel })}
           onClick={(event) => {
             event.preventDefault();
+            if (!canEdit) return;
             onCreate(channel);
           }}
           className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold ${
-            channel === 'telegram'
+            !canEdit
+              ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'
+              : channel === 'telegram'
               ? 'border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100'
               : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
           }`}

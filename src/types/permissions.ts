@@ -11,6 +11,7 @@ export type MenuSectionKey =
   | 'payments'
   | 'contracts'
   | 'dictionaries'
+  | 'notifications'
   | 'roles'
   | 'audit';
 
@@ -57,6 +58,7 @@ export const MENU_SECTION_KEYS: MenuSectionKey[] = [
   'payments',
   'contracts',
   'dictionaries',
+  'notifications',
   'roles',
   'audit',
 ];
@@ -103,6 +105,7 @@ export const defaultRolePermissions: RolePermissions = {
   payments: { ...defaultMenuPermissions },
   contracts: { ...defaultMenuPermissions },
   dictionaries: { ...defaultMenuPermissions },
+  notifications: { ...defaultRestrictedMenuPermissions },
   roles: { ...defaultRestrictedMenuPermissions },
   audit: { ...defaultRestrictedMenuPermissions },
 };

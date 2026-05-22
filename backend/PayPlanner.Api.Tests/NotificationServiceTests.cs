@@ -47,6 +47,43 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyPasswordIssuedAsync_UsesConfiguredNotificationTemplate()
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "notifications.templates.v1",
+            Value = JsonSerializer.Serialize(new
+            {
+                templates = new[]
+                {
+                    new
+                    {
+                        key = NotificationTemplateKeys.PasswordIssued,
+                        isEnabled = true,
+                        subject = "Пароль для {{user.email}}",
+                        body = "Здравствуйте, {{user.name}}. Ваш пароль: {{password}}"
+                    }
+                }
+            }, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var user = await CreateUserAsync(db, "templated@example.com");
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+
+        await service.NotifyPasswordIssuedAsync(user, "Template-Password-1", [NotificationChannels.Email]);
+
+        var message = Assert.Single(emailService.Messages);
+        Assert.Equal("Пароль для templated@example.com", message.Subject);
+        Assert.Contains("Template-Password-1", message.Body);
+    }
+
+    [Fact]
     public async Task NotifyTaskReminderAsync_DoesNotSendDuplicateReminderForSameEvent()
     {
         await using var db = await CreateContextAsync();

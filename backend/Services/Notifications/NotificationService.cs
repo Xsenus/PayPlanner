@@ -19,6 +19,7 @@ public sealed class NotificationService : INotificationService
         new(NotificationPurposes.RegistrationAdmin, "Новая регистрация для админов", "Уведомления администраторам о новой заявке на регистрацию."),
         new(NotificationPurposes.PasswordIssue, "Выдача пароля", "Служебные сообщения с новым временным паролем сотрудника."),
         new(NotificationPurposes.TaskReminder, "Напоминания по задачам", "Плановые уведомления из журнала задач."),
+        new(NotificationPurposes.ContractClient, "Письма клиентам по договорам", "Автоматические сообщения клиентам по событиям договора."),
         new(NotificationPurposes.ManualTest, "Ручные и тестовые сообщения", "Проверочные отправки из настроек уведомлений.")
     ];
 
@@ -35,6 +36,7 @@ public sealed class NotificationService : INotificationService
     private const string TelegramEnabledKey = "notifications.telegram.enabled";
     private const string TelegramBotTokenKey = "notifications.telegram.botToken";
     private const string RegistrationNotifyAdminsKey = "notifications.registration.notifyAdmins";
+    private const string NotificationTemplatesKey = "notifications.templates.v1";
 
     private readonly PaymentContext _context;
     private readonly IConfiguration _configuration;
@@ -61,6 +63,19 @@ public sealed class NotificationService : INotificationService
         public string FromEmail { get; set; } = string.Empty;
         public string FromName { get; set; } = "PayPlanner";
         public bool EnableSsl { get; set; } = true;
+    }
+
+    private sealed class NotificationTemplateStorage
+    {
+        public List<NotificationTemplateStorageItem> Templates { get; set; } = [];
+    }
+
+    private sealed class NotificationTemplateStorageItem
+    {
+        public string Key { get; set; } = string.Empty;
+        public bool IsEnabled { get; set; } = true;
+        public string Subject { get; set; } = string.Empty;
+        public string Body { get; set; } = string.Empty;
     }
 
     public NotificationService(
@@ -104,7 +119,8 @@ public sealed class NotificationService : INotificationService
                 Key = item.Key,
                 Label = item.Label,
                 Description = item.Description
-            }).ToList()
+            }).ToList(),
+            Templates = await GetTemplatesAsync(cancellationToken)
         };
     }
 
@@ -145,6 +161,79 @@ public sealed class NotificationService : INotificationService
 
         await _context.SaveChangesAsync(cancellationToken);
         return await GetSettingsAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<NotificationTemplateDto>> GetTemplatesAsync(CancellationToken cancellationToken = default)
+    {
+        var storage = await LoadTemplateStorageAsync(cancellationToken);
+        return NotificationTemplateCatalog.All.Select(definition => MapTemplate(definition, storage)).ToList();
+    }
+
+    public async Task<NotificationTemplateDto> UpdateTemplateAsync(
+        string key,
+        UpdateNotificationTemplateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var definition = NotificationTemplateCatalog.Find(key)
+            ?? throw new InvalidOperationException("NotificationTemplateNotFound");
+        var storage = await LoadTemplateStorageAsync(cancellationToken);
+        var item = storage.Templates.FirstOrDefault(template => string.Equals(template.Key, definition.Key, StringComparison.OrdinalIgnoreCase));
+        if (item is null)
+        {
+            item = new NotificationTemplateStorageItem { Key = definition.Key };
+            storage.Templates.Add(item);
+        }
+
+        item.IsEnabled = request.IsEnabled;
+        item.Subject = NormalizeTemplateText(request.Subject, definition.DefaultSubject);
+        item.Body = NormalizeTemplateText(request.Body, definition.DefaultBody);
+
+        await SaveTemplateStorageAsync(storage, cancellationToken);
+        return MapTemplate(definition, storage);
+    }
+
+    public async Task<NotificationTemplateDto> ResetTemplateAsync(string key, CancellationToken cancellationToken = default)
+    {
+        var definition = NotificationTemplateCatalog.Find(key)
+            ?? throw new InvalidOperationException("NotificationTemplateNotFound");
+        var storage = await LoadTemplateStorageAsync(cancellationToken);
+        storage.Templates.RemoveAll(template => string.Equals(template.Key, definition.Key, StringComparison.OrdinalIgnoreCase));
+        await SaveTemplateStorageAsync(storage, cancellationToken);
+        return MapTemplate(definition, storage);
+    }
+
+    public async Task<NotificationMessage> RenderTemplateAsync(
+        string key,
+        string fallbackSubject,
+        string fallbackBody,
+        IReadOnlyDictionary<string, string?> values,
+        bool isSensitive = false,
+        string purpose = NotificationPurposes.ManualTest,
+        CancellationToken cancellationToken = default)
+    {
+        var definition = NotificationTemplateCatalog.Find(key);
+        if (definition is null)
+        {
+            return new NotificationMessage(fallbackSubject, fallbackBody, IsSensitive: isSensitive, Purpose: purpose);
+        }
+
+        var storage = await LoadTemplateStorageAsync(cancellationToken);
+        var item = storage.Templates.FirstOrDefault(template => string.Equals(template.Key, definition.Key, StringComparison.OrdinalIgnoreCase));
+        if (item is { IsEnabled: false })
+        {
+            return new NotificationMessage(fallbackSubject, fallbackBody, IsSensitive: isSensitive, Purpose: purpose);
+        }
+
+        var subjectTemplate = string.IsNullOrWhiteSpace(item?.Subject) ? definition.DefaultSubject : item.Subject;
+        var bodyTemplate = string.IsNullOrWhiteSpace(item?.Body) ? definition.DefaultBody : item.Body;
+        var subject = NotificationTemplateCatalog.Render(subjectTemplate, values);
+        var body = NotificationTemplateCatalog.CompactBlankLines(NotificationTemplateCatalog.Render(bodyTemplate, values));
+
+        return new NotificationMessage(
+            string.IsNullOrWhiteSpace(subject) ? fallbackSubject : subject,
+            string.IsNullOrWhiteSpace(body) ? fallbackBody : body,
+            IsSensitive: isSensitive,
+            Purpose: purpose);
     }
 
     public async Task<NotificationSettingsDto> UpsertSenderAsync(
@@ -232,12 +321,17 @@ public sealed class NotificationService : INotificationService
     {
         var deliveries = new List<NotificationDelivery>();
         var recipient = await ResolveRecipientAsync(user.Id, user, cancellationToken);
+        var userValues = BuildUserTemplateValues(user);
+        var pendingMessage = await RenderTemplateAsync(
+            NotificationTemplateKeys.RegistrationPending,
+            "Регистрация ожидает подтверждения",
+            $"Здравствуйте, {DisplayName(user)}!\n\nВаша заявка на регистрацию получена и ожидает проверки администратором.",
+            userValues,
+            purpose: NotificationPurposes.RegistrationUser,
+            cancellationToken: cancellationToken);
         deliveries.AddRange(await SendAsync(
             recipient,
-            new NotificationMessage(
-                "Регистрация ожидает подтверждения",
-                $"Здравствуйте, {DisplayName(user)}!\n\nВаша заявка на регистрацию получена и ожидает проверки администратором.",
-                Purpose: NotificationPurposes.RegistrationUser),
+            pendingMessage,
             [NotificationChannels.Email, NotificationChannels.Telegram],
             $"registration:{user.Id}:pending",
             cancellationToken));
@@ -253,12 +347,16 @@ public sealed class NotificationService : INotificationService
 
             foreach (var admin in admins)
             {
+                var adminMessage = await RenderTemplateAsync(
+                    NotificationTemplateKeys.RegistrationAdminNewUser,
+                    "Новая регистрация в CRM",
+                    $"В системе зарегистрировался новый пользователь.\n\nИмя: {DisplayName(user)}\nEmail: {user.Email}",
+                    userValues,
+                    purpose: NotificationPurposes.RegistrationAdmin,
+                    cancellationToken: cancellationToken);
                 deliveries.AddRange(await SendAsync(
                     BuildRecipient(admin),
-                    new NotificationMessage(
-                        "Новая регистрация в CRM",
-                        $"В системе зарегистрировался новый пользователь.\n\nИмя: {DisplayName(user)}\nEmail: {user.Email}",
-                        Purpose: NotificationPurposes.RegistrationAdmin),
+                    adminMessage,
                     [NotificationChannels.Email, NotificationChannels.Telegram],
                     $"registration:{user.Id}:admin:{admin.Id}",
                     cancellationToken));
@@ -271,12 +369,16 @@ public sealed class NotificationService : INotificationService
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyRegistrationApprovedAsync(User user, CancellationToken cancellationToken = default)
     {
         var recipient = await ResolveRecipientAsync(user.Id, user, cancellationToken);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.RegistrationApproved,
+            "Регистрация одобрена",
+            $"Здравствуйте, {DisplayName(user)}!\n\nДоступ к PayPlanner одобрен. Теперь можно войти в систему.",
+            BuildUserTemplateValues(user),
+            purpose: NotificationPurposes.RegistrationUser,
+            cancellationToken: cancellationToken);
         return await SendAsync(
             recipient,
-            new NotificationMessage(
-                "Регистрация одобрена",
-                $"Здравствуйте, {DisplayName(user)}!\n\nДоступ к PayPlanner одобрен. Теперь можно войти в систему.",
-                Purpose: NotificationPurposes.RegistrationUser),
+            message,
             [NotificationChannels.Email, NotificationChannels.Telegram],
             $"registration:{user.Id}:approved:{DateTime.UtcNow:yyyyMMddHHmmss}",
             cancellationToken);
@@ -286,12 +388,18 @@ public sealed class NotificationService : INotificationService
     {
         var reasonText = string.IsNullOrWhiteSpace(reason) ? "Причина не указана." : reason.Trim();
         var recipient = await ResolveRecipientAsync(user.Id, user, cancellationToken);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.RegistrationRejected,
+            "Регистрация отклонена",
+            $"Здравствуйте, {DisplayName(user)}!\n\nЗаявка на регистрацию отклонена.\nПричина: {reasonText}",
+            NotificationTemplateCatalog.MergeValues(
+                BuildUserTemplateValues(user),
+                new Dictionary<string, string?> { ["registration.reason"] = reasonText }),
+            purpose: NotificationPurposes.RegistrationUser,
+            cancellationToken: cancellationToken);
         return await SendAsync(
             recipient,
-            new NotificationMessage(
-                "Регистрация отклонена",
-                $"Здравствуйте, {DisplayName(user)}!\n\nЗаявка на регистрацию отклонена.\nПричина: {reasonText}",
-                Purpose: NotificationPurposes.RegistrationUser),
+            message,
             [NotificationChannels.Email, NotificationChannels.Telegram],
             $"registration:{user.Id}:rejected:{DateTime.UtcNow:yyyyMMddHHmmss}",
             cancellationToken);
@@ -304,13 +412,19 @@ public sealed class NotificationService : INotificationService
         CancellationToken cancellationToken = default)
     {
         var recipient = await ResolveRecipientAsync(user.Id, user, cancellationToken);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.PasswordIssued,
+            "Выдан новый пароль",
+            $"Здравствуйте, {DisplayName(user)}!\n\nДля вашей учетной записи выдан новый пароль:\n{password}\n\nПосле входа рекомендуем сменить его в профиле.",
+            NotificationTemplateCatalog.MergeValues(
+                BuildUserTemplateValues(user),
+                new Dictionary<string, string?> { ["password"] = password }),
+            isSensitive: true,
+            purpose: NotificationPurposes.PasswordIssue,
+            cancellationToken: cancellationToken);
         return await SendAsync(
             recipient,
-            new NotificationMessage(
-                "Выдан новый пароль",
-                $"Здравствуйте, {DisplayName(user)}!\n\nДля вашей учетной записи выдан новый пароль:\n{password}\n\nПосле входа рекомендуем сменить его в профиле.",
-                IsSensitive: true,
-                Purpose: NotificationPurposes.PasswordIssue),
+            message,
             channels ?? [NotificationChannels.Email, NotificationChannels.Telegram],
             $"password-issued:{user.Id}:{DateTime.UtcNow:yyyyMMddHHmmss}",
             cancellationToken);
@@ -334,10 +448,21 @@ public sealed class NotificationService : INotificationService
             ? $"task:{task.Id}:reminder:{reminderKey}:{nowUtc:yyyyMMdd}"
             : $"task:{task.Id}:reminder:{reminderKey}";
 
-        var message = new NotificationMessage(
-            BuildTaskReminderSubject(task, reminderKey, nowUtc),
-            BuildTaskReminderBody(task, reminderKey, nowUtc),
-            Purpose: NotificationPurposes.TaskReminder);
+        var reminderSubject = BuildTaskReminderSubject(task, reminderKey, nowUtc);
+        var reminderBody = BuildTaskReminderBody(task, reminderKey, nowUtc);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.TaskReminder,
+            reminderSubject,
+            reminderBody,
+            NotificationTemplateCatalog.MergeValues(
+                BuildTaskTemplateValues(task),
+                new Dictionary<string, string?>
+                {
+                    ["reminder.subject"] = reminderSubject,
+                    ["reminder.body"] = reminderBody,
+                }),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
 
         if (inAppEnabled)
         {
@@ -374,10 +499,15 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<NotificationDelivery>();
         }
 
-        var message = new NotificationMessage(
-            $"Новая задача: {task.Title}",
-            BuildTaskAssignedBody(task, actorName),
-            Purpose: NotificationPurposes.TaskReminder);
+        var taskAssignedSubject = $"Новая задача: {task.Title}";
+        var taskAssignedBody = BuildTaskAssignedBody(task, actorName);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.TaskAssigned,
+            taskAssignedSubject,
+            taskAssignedBody,
+            BuildTaskTemplateValues(task, actorName),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
         var eventKey = $"task:{task.Id}:assigned";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
@@ -414,10 +544,15 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<NotificationDelivery>();
         }
 
-        var message = new NotificationMessage(
-            $"Задача выполнена: {task.Title}",
-            BuildTaskCompletedBody(task),
-            Purpose: NotificationPurposes.TaskReminder);
+        var taskCompletedSubject = $"Задача выполнена: {task.Title}";
+        var taskCompletedBody = BuildTaskCompletedBody(task);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.TaskCompleted,
+            taskCompletedSubject,
+            taskCompletedBody,
+            BuildTaskTemplateValues(task),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
 
         if (HasTaskChannel(task, NotificationChannels.InApp))
         {
@@ -461,10 +596,17 @@ public sealed class NotificationService : INotificationService
             .Distinct()
             .ToList();
         var eventKey = $"case:{task.ClientCaseId ?? 0}:inactivity-control:{task.Id}";
-        var message = new NotificationMessage(
-            $"Автоконтроль дела: {task.ObjectName}",
-            BuildCaseInactivityControlBody(task, daysWithoutActiveTask),
-            Purpose: NotificationPurposes.TaskReminder);
+        var caseInactivitySubject = $"Автоконтроль дела: {task.ObjectName}";
+        var caseInactivityBody = BuildCaseInactivityControlBody(task, daysWithoutActiveTask);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.CaseInactivityControl,
+            caseInactivitySubject,
+            caseInactivityBody,
+            NotificationTemplateCatalog.MergeValues(
+                BuildTaskTemplateValues(task),
+                new Dictionary<string, string?> { ["case.daysWithoutActiveTask"] = daysWithoutActiveTask.ToString(CultureInfo.InvariantCulture) }),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
 
         if (HasTaskChannel(task, NotificationChannels.InApp))
         {
@@ -528,10 +670,17 @@ public sealed class NotificationService : INotificationService
         }
 
         var channels = ResolveTaskMessageChannels(task);
-        var message = new NotificationMessage(
-            $"Конфликт расписания: {task.Title}",
-            BuildTaskScheduleConflictBody(task, effectiveConflicts, actorName),
-            Purpose: NotificationPurposes.TaskReminder);
+        var conflictSubject = $"Конфликт расписания: {task.Title}";
+        var conflictBody = BuildTaskScheduleConflictBody(task, effectiveConflicts, actorName);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.TaskScheduleConflict,
+            conflictSubject,
+            conflictBody,
+            NotificationTemplateCatalog.MergeValues(
+                BuildTaskTemplateValues(task, actorName),
+                new Dictionary<string, string?> { ["conflicts"] = BuildConflictSummary(effectiveConflicts) }),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
         var conflictKey = string.Join('-', effectiveConflicts.Select(item => item.Id).OrderBy(id => id));
         var eventKey = $"task:{task.Id}:schedule-conflict:{task.DueAt:yyyyMMddHHmm}:{task.PlannedDurationMinutes}:{conflictKey}";
         var deliveries = new List<NotificationDelivery>();
@@ -580,10 +729,17 @@ public sealed class NotificationService : INotificationService
 
         var channels = ResolveTaskMessageChannels(task);
         var currentApprover = GetCurrentApprover(task);
-        var message = new NotificationMessage(
-            $"Задача ожидает согласования: {task.Title}",
-            BuildTaskApprovalRequestedBody(task, actorName, currentApprover),
-            Purpose: NotificationPurposes.TaskReminder);
+        var approvalSubject = $"Задача ожидает согласования: {task.Title}";
+        var approvalBody = BuildTaskApprovalRequestedBody(task, actorName, currentApprover);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.TaskApprovalRequested,
+            approvalSubject,
+            approvalBody,
+            NotificationTemplateCatalog.MergeValues(
+                BuildTaskTemplateValues(task, actorName),
+                new Dictionary<string, string?> { ["approval.approverName"] = currentApprover?.User?.FullName ?? currentApprover?.User?.Email ?? "не указан" }),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
         var eventKey = $"task:{task.Id}:approval-request:{currentApprover?.Id ?? 0}:{DateTime.UtcNow:yyyyMMddHHmmssfff}";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
@@ -639,10 +795,16 @@ public sealed class NotificationService : INotificationService
         }
 
         var channels = ResolveTaskMessageChannels(task);
-        var message = new NotificationMessage(
+        var approvalDecisionBody = BuildTaskApprovalDecisionBody(task, approver, decision, actorName, resolution);
+        var message = await RenderTemplateAsync(
+            isRevision ? NotificationTemplateKeys.TaskRevisionRequested : NotificationTemplateKeys.TaskApproved,
             subject,
-            BuildTaskApprovalDecisionBody(task, approver, decision, actorName, resolution),
-            Purpose: NotificationPurposes.TaskReminder);
+            approvalDecisionBody,
+            NotificationTemplateCatalog.MergeValues(
+                BuildTaskTemplateValues(task, actorName),
+                new Dictionary<string, string?> { ["approval.resolution"] = string.IsNullOrWhiteSpace(resolution) ? "Без комментария." : resolution.Trim() }),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
         var eventKey = $"task:{task.Id}:approval-decision:{approver.Id}:{decision}:{DateTime.UtcNow:yyyyMMddHHmmssfff}";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
@@ -685,10 +847,21 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<NotificationDelivery>();
         }
 
-        var message = new NotificationMessage(
-            $"Изменения по задаче: {task.Title}",
-            BuildTaskChangedBody(task, changeLabels, actorName, comment),
-            Purpose: NotificationPurposes.TaskReminder);
+        var taskChangedSubject = $"Изменения по задаче: {task.Title}";
+        var taskChangedBody = BuildTaskChangedBody(task, changeLabels, actorName, comment);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.TaskChanged,
+            taskChangedSubject,
+            taskChangedBody,
+            NotificationTemplateCatalog.MergeValues(
+                BuildTaskTemplateValues(task, actorName),
+                new Dictionary<string, string?>
+                {
+                    ["task.changes"] = string.Join(Environment.NewLine, changeLabels.Select(label => $"- {label}")),
+                    ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
+                }),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
         var eventKey = $"task:{task.Id}:changed:{DateTime.UtcNow:yyyyMMddHHmmssfff}:{actorUserId}";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
@@ -729,10 +902,21 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<NotificationDelivery>();
         }
 
-        var message = new NotificationMessage(
-            $"Комментарий по задаче: {task.Title}",
-            BuildTaskCommentBody(task, comment),
-            Purpose: NotificationPurposes.TaskReminder);
+        var taskCommentSubject = $"Комментарий по задаче: {task.Title}";
+        var taskCommentBody = BuildTaskCommentBody(task, comment);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.TaskComment,
+            taskCommentSubject,
+            taskCommentBody,
+            NotificationTemplateCatalog.MergeValues(
+                BuildTaskTemplateValues(task, comment.AuthorName),
+                new Dictionary<string, string?>
+                {
+                    ["comment.authorName"] = comment.AuthorName,
+                    ["comment.text"] = comment.Text,
+                }),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
         var eventKey = $"task:{task.Id}:comment:{comment.Id}";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
@@ -1533,6 +1717,63 @@ public sealed class NotificationService : INotificationService
         setting.UpdatedAt = nowUtc;
     }
 
+    private async Task<NotificationTemplateStorage> LoadTemplateStorageAsync(CancellationToken cancellationToken)
+    {
+        var raw = await _context.SystemSettings
+            .AsNoTracking()
+            .Where(setting => setting.Key == NotificationTemplatesKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return DeserializeConfig<NotificationTemplateStorage>(raw);
+    }
+
+    private async Task SaveTemplateStorageAsync(NotificationTemplateStorage storage, CancellationToken cancellationToken)
+    {
+        var catalog = NotificationTemplateCatalog.All.Select(item => item.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        storage.Templates = storage.Templates
+            .Where(item => catalog.Contains(item.Key))
+            .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+
+        await UpsertSettingAsync(
+            NotificationTemplatesKey,
+            JsonSerializer.Serialize(storage, JsonOptions),
+            DateTime.UtcNow,
+            cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static NotificationTemplateDto MapTemplate(
+        NotificationTemplateDefinition definition,
+        NotificationTemplateStorage storage)
+    {
+        var item = storage.Templates.FirstOrDefault(template => string.Equals(template.Key, definition.Key, StringComparison.OrdinalIgnoreCase));
+        return new NotificationTemplateDto
+        {
+            Key = definition.Key,
+            Label = definition.Label,
+            Description = definition.Description,
+            IsEnabled = item?.IsEnabled ?? true,
+            Subject = string.IsNullOrWhiteSpace(item?.Subject) ? definition.DefaultSubject : item.Subject,
+            Body = string.IsNullOrWhiteSpace(item?.Body) ? definition.DefaultBody : item.Body,
+            DefaultSubject = definition.DefaultSubject,
+            DefaultBody = definition.DefaultBody,
+            Variables = definition.Variables.Select(variable => new NotificationTemplateVariableDto
+            {
+                Key = variable.Key,
+                Label = variable.Label
+            }).ToList()
+        };
+    }
+
+    private static string NormalizeTemplateText(string? value, string fallback)
+    {
+        var normalized = NotificationTemplateCatalog.NormalizeLineBreaks(value ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
+    }
+
     private async Task<bool> ShouldNotifyAdminsOnRegistrationAsync(CancellationToken cancellationToken)
     {
         var settings = await LoadSettingsAsync(cancellationToken);
@@ -1577,6 +1818,32 @@ public sealed class NotificationService : INotificationService
             ? value
             : fallback;
     }
+
+    private static Dictionary<string, string?> BuildUserTemplateValues(User user)
+        => new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["user.name"] = DisplayName(user),
+            ["user.email"] = user.Email ?? string.Empty,
+        };
+
+    private static Dictionary<string, string?> BuildTaskTemplateValues(TaskJournalItem task, string? actorName = null)
+        => new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["task.title"] = task.Title,
+            ["task.objectName"] = task.ObjectName,
+            ["task.dueAt"] = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture),
+            ["task.status"] = task.Status,
+            ["task.priority"] = task.Priority,
+            ["task.assigneeName"] = string.IsNullOrWhiteSpace(task.AssigneeName) ? "не указан" : task.AssigneeName.Trim(),
+            ["task.authorName"] = string.IsNullOrWhiteSpace(task.AuthorName) ? "не указан" : task.AuthorName.Trim(),
+            ["actor.name"] = string.IsNullOrWhiteSpace(actorName) ? "Система" : actorName.Trim(),
+        };
+
+    private static string BuildConflictSummary(IReadOnlyList<TaskJournalItem> conflicts)
+        => string.Join(
+            Environment.NewLine,
+            conflicts.Select(item =>
+                $"- {item.Title} · {DateTime.SpecifyKind(item.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture)}"));
 
     private static string BuildTaskReminderSubject(TaskJournalItem task, string reminderKey, DateTime nowUtc)
         => reminderKey switch

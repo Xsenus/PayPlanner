@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -14,7 +15,7 @@ namespace PayPlanner.Api.Controllers;
 
 [ApiController]
 [Route("api/notifications")]
-[Authorize(Policy = "Admin")]
+[Authorize]
 public class NotificationsController : ControllerBase
 {
     private readonly PaymentContext _context;
@@ -36,25 +37,73 @@ public class NotificationsController : ControllerBase
 
     [HttpGet("settings")]
     public async Task<ActionResult<NotificationSettingsDto>> GetSettings(CancellationToken ct)
-        => Ok(await _notificationService.GetSettingsAsync(ct));
+    {
+        if (!await CanViewNotificationSettingsAsync(ct)) return Forbid();
+        return Ok(await _notificationService.GetSettingsAsync(ct));
+    }
 
     [HttpPut("settings/email")]
     public async Task<ActionResult<NotificationSettingsDto>> UpdateEmailSettings(
         [FromBody] UpdateEmailNotificationSettingsRequest request,
         CancellationToken ct)
-        => Ok(await _notificationService.UpdateEmailSettingsAsync(request, ct));
+    {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
+        return Ok(await _notificationService.UpdateEmailSettingsAsync(request, ct));
+    }
 
     [HttpPut("settings/telegram")]
     public async Task<ActionResult<NotificationSettingsDto>> UpdateTelegramSettings(
         [FromBody] UpdateTelegramNotificationSettingsRequest request,
         CancellationToken ct)
-        => Ok(await _notificationService.UpdateTelegramSettingsAsync(request, ct));
+    {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
+        return Ok(await _notificationService.UpdateTelegramSettingsAsync(request, ct));
+    }
+
+    [HttpGet("templates")]
+    public async Task<ActionResult<IReadOnlyList<NotificationTemplateDto>>> GetTemplates(CancellationToken ct)
+    {
+        if (!await CanViewNotificationSettingsAsync(ct)) return Forbid();
+        return Ok(await _notificationService.GetTemplatesAsync(ct));
+    }
+
+    [HttpPut("templates/{key}")]
+    public async Task<ActionResult<NotificationTemplateDto>> UpdateTemplate(
+        string key,
+        [FromBody] UpdateNotificationTemplateRequest request,
+        CancellationToken ct)
+    {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
+        try
+        {
+            return Ok(await _notificationService.UpdateTemplateAsync(key, request, ct));
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "NotificationTemplateNotFound")
+        {
+            return NotFound();
+        }
+    }
+
+    [HttpPost("templates/{key}/reset")]
+    public async Task<ActionResult<NotificationTemplateDto>> ResetTemplate(string key, CancellationToken ct)
+    {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
+        try
+        {
+            return Ok(await _notificationService.ResetTemplateAsync(key, ct));
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "NotificationTemplateNotFound")
+        {
+            return NotFound();
+        }
+    }
 
     [HttpPost("senders")]
     public async Task<ActionResult<NotificationSettingsDto>> CreateSender(
         [FromBody] UpsertNotificationSenderRequest request,
         CancellationToken ct)
     {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
         try
         {
             return Ok(await _notificationService.UpsertSenderAsync(request, cancellationToken: ct));
@@ -71,6 +120,7 @@ public class NotificationsController : ControllerBase
         [FromBody] UpsertNotificationSenderRequest request,
         CancellationToken ct)
     {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
         try
         {
             return Ok(await _notificationService.UpsertSenderAsync(request, id, ct));
@@ -87,11 +137,15 @@ public class NotificationsController : ControllerBase
 
     [HttpDelete("senders/{id:int}")]
     public async Task<IActionResult> DeleteSender(int id, CancellationToken ct)
-        => await _notificationService.DeleteSenderAsync(id, ct) ? NoContent() : NotFound();
+    {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
+        return await _notificationService.DeleteSenderAsync(id, ct) ? NoContent() : NotFound();
+    }
 
     [HttpPost("senders/{id:int}/telegram/webhook/sync")]
     public async Task<ActionResult<TelegramWebhookSyncResultDto>> SyncTelegramWebhook(int id, CancellationToken ct)
     {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
         try
         {
             var result = await _telegramBotUpdateService.SyncWebhookAsync(id, Request, ct);
@@ -114,6 +168,7 @@ public class NotificationsController : ControllerBase
     [HttpDelete("senders/{id:int}/telegram/webhook")]
     public async Task<ActionResult<TelegramWebhookSyncResultDto>> DeleteTelegramWebhook(int id, CancellationToken ct)
     {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
         try
         {
             var result = await _telegramBotUpdateService.DeleteWebhookAsync(id, ct);
@@ -136,6 +191,7 @@ public class NotificationsController : ControllerBase
     [HttpPost("senders/{id:int}/telegram/profile/sync")]
     public async Task<ActionResult<TelegramBotProfileSyncResultDto>> SyncTelegramBotProfile(int id, CancellationToken ct)
     {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
         try
         {
             var result = await _telegramBotUpdateService.SyncBotProfileAsync(id, ct);
@@ -161,6 +217,7 @@ public class NotificationsController : ControllerBase
         [FromBody] UpdateTelegramBotProfileRequest request,
         CancellationToken ct)
     {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
         try
         {
             var result = await _telegramBotUpdateService.ApplyBotProfileAsync(id, request, ct);
@@ -183,6 +240,7 @@ public class NotificationsController : ControllerBase
     [HttpGet("senders/{id:int}/telegram/photo")]
     public async Task<IActionResult> GetTelegramBotProfilePhoto(int id, CancellationToken ct)
     {
+        if (!await CanViewNotificationSettingsAsync(ct)) return Forbid();
         try
         {
             var photo = await _telegramBotUpdateService.GetBotProfilePhotoAsync(id, ct);
@@ -230,6 +288,7 @@ public class NotificationsController : ControllerBase
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
+        if (!await CanViewNotificationSettingsAsync(ct)) return Forbid();
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
 
@@ -266,6 +325,7 @@ public class NotificationsController : ControllerBase
     [HttpPost("deliveries/{id:int}/retry")]
     public async Task<ActionResult<IReadOnlyList<NotificationDeliveryDto>>> RetryDelivery(int id, CancellationToken ct)
     {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
         try
         {
             var deliveries = await _notificationService.RetryDeliveryAsync(id, ct);
@@ -298,6 +358,7 @@ public class NotificationsController : ControllerBase
         [FromBody] SendNotificationTestRequest request,
         CancellationToken ct)
     {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
         var channel = NormalizeChannel(request.Channel);
         if (channel is not (NotificationChannels.Email or NotificationChannels.Telegram))
         {
@@ -353,6 +414,7 @@ public class NotificationsController : ControllerBase
         [FromBody] IssuePasswordRequest? request,
         CancellationToken ct)
     {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
         var user = await _context.Users
             .Include(item => item.ExternalIdentities)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
@@ -380,6 +442,40 @@ public class NotificationsController : ControllerBase
             Password = request?.IncludePasswordInResponse == true ? password : null,
             Deliveries = deliveries.Select(MapDelivery).ToList()
         });
+    }
+
+    private async Task<bool> CanViewNotificationSettingsAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return false;
+        }
+
+        if (await _context.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _context.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Notifications, ct);
+        return permission?.CanView == true;
+    }
+
+    private async Task<bool> CanEditNotificationSettingsAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return false;
+        }
+
+        if (await _context.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _context.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Notifications, ct);
+        return permission?.CanEdit == true;
     }
 
     private static NotificationRecipient? BuildManualRecipient(SendNotificationTestRequest request, string channel)

@@ -21,6 +21,13 @@ public class UpdateTelegramNotificationSettingsRequest
     public bool KeepExistingToken { get; set; } = true;
 }
 
+public class UpdateNotificationTemplateRequest
+{
+    public bool IsEnabled { get; set; } = true;
+    public string? Subject { get; set; }
+    public string? Body { get; set; }
+}
+
 public class SendNotificationTestRequest
 {
     public string Channel { get; set; } = "email";

@@ -6,6 +6,7 @@ public class NotificationSettingsDto
     public TelegramNotificationSettingsDto Telegram { get; set; } = new();
     public IReadOnlyList<NotificationSenderDto> Senders { get; set; } = Array.Empty<NotificationSenderDto>();
     public IReadOnlyList<NotificationPurposeDto> Purposes { get; set; } = Array.Empty<NotificationPurposeDto>();
+    public IReadOnlyList<NotificationTemplateDto> Templates { get; set; } = Array.Empty<NotificationTemplateDto>();
 }
 
 public class EmailNotificationSettingsDto
@@ -186,4 +187,23 @@ public class NotificationPurposeDto
     public string Key { get; set; } = string.Empty;
     public string Label { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
+}
+
+public class NotificationTemplateDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; } = true;
+    public string Subject { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+    public string DefaultSubject { get; set; } = string.Empty;
+    public string DefaultBody { get; set; } = string.Empty;
+    public IReadOnlyList<NotificationTemplateVariableDto> Variables { get; set; } = Array.Empty<NotificationTemplateVariableDto>();
+}
+
+public class NotificationTemplateVariableDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
 }

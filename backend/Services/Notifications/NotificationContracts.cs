@@ -38,6 +38,7 @@ public static class NotificationPurposes
     public const string RegistrationAdmin = "registrationAdmin";
     public const string PasswordIssue = "passwordIssue";
     public const string TaskReminder = "taskReminder";
+    public const string ContractClient = "contractClient";
     public const string ManualTest = "manualTest";
 
     public static readonly IReadOnlyList<string> All =
@@ -47,6 +48,7 @@ public static class NotificationPurposes
         RegistrationAdmin,
         PasswordIssue,
         TaskReminder,
+        ContractClient,
         ManualTest
     ];
 }
@@ -245,6 +247,20 @@ public interface INotificationService
         CancellationToken cancellationToken = default);
     Task<NotificationSettingsDto> UpdateTelegramSettingsAsync(
         PayPlanner.Api.Models.Requests.UpdateTelegramNotificationSettingsRequest request,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationTemplateDto>> GetTemplatesAsync(CancellationToken cancellationToken = default);
+    Task<NotificationTemplateDto> UpdateTemplateAsync(
+        string key,
+        PayPlanner.Api.Models.Requests.UpdateNotificationTemplateRequest request,
+        CancellationToken cancellationToken = default);
+    Task<NotificationTemplateDto> ResetTemplateAsync(string key, CancellationToken cancellationToken = default);
+    Task<NotificationMessage> RenderTemplateAsync(
+        string key,
+        string fallbackSubject,
+        string fallbackBody,
+        IReadOnlyDictionary<string, string?> values,
+        bool isSensitive = false,
+        string purpose = NotificationPurposes.ManualTest,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<NotificationDelivery>> SendToUserAsync(

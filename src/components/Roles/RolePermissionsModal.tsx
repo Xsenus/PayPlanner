@@ -10,6 +10,7 @@ import {
   FileSignature,
   ListTodo,
   Lock,
+  Mail,
   RotateCcw,
   Settings,
   Shield,
@@ -139,6 +140,12 @@ const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
     description: 'Настройка и поддержка справочников системы.',
     icon: Settings,
   },
+  notifications: {
+    key: 'notifications',
+    title: 'Уведомления',
+    description: 'Настройка отправителей, шаблонов и журнала доставки уведомлений.',
+    icon: Mail,
+  },
   roles: {
     key: 'roles',
     title: 'Роли и правила',
@@ -175,8 +182,8 @@ const GROUPS: GroupConfig[] = [
   {
     key: 'administration',
     title: 'Администрирование прав',
-    description: 'Просмотр ролей и делегирование управления правилами.',
-    sections: ['roles', 'audit'],
+    description: 'Просмотр ролей, уведомлений и делегирование управления правилами.',
+    sections: ['notifications', 'roles', 'audit'],
   },
 ];
 
@@ -273,6 +280,19 @@ const AUDIT_PERMISSION_META: PermissionMeta[] = [
   },
 ];
 
+const NOTIFICATION_PERMISSION_META: PermissionMeta[] = [
+  {
+    key: 'canView',
+    label: 'Просмотр настроек',
+    description: 'Открывать отправителей, шаблоны и журнал доставки уведомлений.',
+  },
+  {
+    key: 'canEdit',
+    label: 'Настройка уведомлений',
+    description: 'Менять отправителей, шаблоны писем и выполнять повторные отправки.',
+  },
+];
+
 type PermissionToggleProps = {
   label: string;
   description: string;
@@ -338,7 +358,7 @@ function getOpenedSectionsCount(permissions: RolePermissions, sections: MenuSect
 function getEnabledPermissionCount(sectionKey: MenuSectionKey, permissions: RolePermissions) {
   const section = permissions[sectionKey];
 
-  if (sectionKey === 'audit') {
+  if (sectionKey === 'audit' || sectionKey === 'notifications') {
     let count = 0;
     if (section.canView) {
       count += 1;
@@ -365,6 +385,10 @@ function getTotalPermissionCount(sectionKey: MenuSectionKey) {
 
   if (sectionKey === 'audit') {
     return AUDIT_PERMISSION_META.length;
+  }
+
+  if (sectionKey === 'notifications') {
+    return NOTIFICATION_PERMISSION_META.length;
   }
 
   return MENU_PERMISSION_KEYS.length;
@@ -477,7 +501,7 @@ export function RolePermissionsModal({
 
   const setSectionAll = (sectionKey: MenuSectionKey, value: boolean) => {
     updateSection(sectionKey, (section) => {
-      if (sectionKey === 'audit') {
+      if (sectionKey === 'audit' || sectionKey === 'notifications') {
         return {
           ...section,
           canView: value,
@@ -513,6 +537,18 @@ export function RolePermissionsModal({
         if (key === 'audit') {
           next.audit = {
             ...prev.audit,
+            canView: value,
+            canCreate: false,
+            canEdit: value,
+            canDelete: false,
+            canExport: false,
+          };
+          continue;
+        }
+
+        if (key === 'notifications') {
+          next.notifications = {
+            ...prev.notifications,
             canView: value,
             canCreate: false,
             canEdit: value,
@@ -763,7 +799,9 @@ export function RolePermissionsModal({
                       ? ROLES_PERMISSION_META
                       : sectionKey === 'audit'
                         ? AUDIT_PERMISSION_META
-                        : DEFAULT_PERMISSION_META;
+                        : sectionKey === 'notifications'
+                          ? NOTIFICATION_PERMISSION_META
+                          : DEFAULT_PERMISSION_META;
                   const Icon = sectionConfig.icon;
                   const enabledPermissionCount = getEnabledPermissionCount(sectionKey, permissions);
                   const totalPermissionCount = getTotalPermissionCount(sectionKey);

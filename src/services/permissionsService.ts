@@ -46,6 +46,7 @@ function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePerm
     payments: normalizeSectionPermissions(defaultRolePermissions.payments, source.payments),
     contracts: normalizeSectionPermissions(defaultRolePermissions.contracts, source.contracts),
     dictionaries: normalizeSectionPermissions(defaultRolePermissions.dictionaries, source.dictionaries),
+    notifications: normalizeSectionPermissions(defaultRolePermissions.notifications, source.notifications),
     roles: normalizeSectionPermissions(defaultRolePermissions.roles, source.roles),
     audit: normalizeSectionPermissions(defaultRolePermissions.audit, source.audit),
   };
@@ -65,6 +66,7 @@ function clonePermissions(perms: RolePermissions): RolePermissions {
     payments: { ...perms.payments },
     contracts: { ...perms.contracts },
     dictionaries: { ...perms.dictionaries },
+    notifications: { ...perms.notifications },
     roles: { ...perms.roles },
     audit: { ...perms.audit },
   };
