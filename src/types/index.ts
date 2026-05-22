@@ -1014,6 +1014,7 @@ export interface ClientCaseCourtSyncRun {
   updatedFields?: string[];
   createdCourtEvents?: number;
   updatedCourtEvents?: number;
+  createdCourtParties?: number;
   nextHearingAt?: string | null;
 }
 

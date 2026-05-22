@@ -4816,6 +4816,7 @@ public class CasesV2Controller : ControllerBase
                     UpdatedFields = syncResult.ChangedFields,
                     CreatedCourtEvents = syncResult.CreatedCourtEvents,
                     UpdatedCourtEvents = syncResult.UpdatedCourtEvents,
+                    CreatedCourtParties = syncResult.CreatedCourtParties,
                     NextHearingAt = clientCase.NextHearingAt,
                 });
             }
@@ -4875,6 +4876,7 @@ public class CasesV2Controller : ControllerBase
         var changedFields = new List<string>();
         var createdEvents = new List<ClientCaseCourtEvent>();
         var updatedCourtEvents = 0;
+        var createdCourtParties = 0;
 
         UpdateString("суд", clientCase.CourtName, courtData.CourtName, value => clientCase.CourtName = value, 200);
         UpdateString("номер дела в суде", clientCase.CourtCaseNumber, courtData.CaseNumber, value => clientCase.CourtCaseNumber = value, 100);
@@ -4976,7 +4978,58 @@ public class CasesV2Controller : ControllerBase
             }
         }
 
-        return new CourtSyncApplyResult(changedFields, createdEvents.Count, updatedCourtEvents);
+        var partyCandidates = BuildSudrfCourtPartyCandidates(courtData.Participants);
+        if (partyCandidates.Count > 0)
+        {
+            var existingParties = await _db.ClientCaseCourtParties
+                .Where(item => item.ClientCaseId == clientCase.Id)
+                .ToListAsync(ct);
+            foreach (var candidate in partyCandidates)
+            {
+                var existing = existingParties.FirstOrDefault(item =>
+                    string.Equals(NormalizeCourtPartyName(item.DisplayName), NormalizeCourtPartyName(candidate.DisplayName), StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(item.Side, candidate.Side, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(NormalizeCourtPartyName(item.ProcessRole), NormalizeCourtPartyName(candidate.ProcessRole), StringComparison.OrdinalIgnoreCase));
+                if (existing is not null)
+                {
+                    if (existing.IsArchived)
+                    {
+                        existing.IsArchived = false;
+                        existing.UpdatedAt = checkedAt;
+                        existing.UpdatedByUserId = actorUserId;
+                        existing.UpdatedByUserName = Truncate(actorName, 256);
+                    }
+
+                    continue;
+                }
+
+                var courtParty = new ClientCaseCourtParty
+                {
+                    ClientCaseId = clientCase.Id,
+                    DisplayName = candidate.DisplayName,
+                    Side = candidate.Side,
+                    ProcessRole = candidate.ProcessRole,
+                    RepresentativeName = candidate.RepresentativeName,
+                    Notes = candidate.Notes,
+                    CreatedAt = checkedAt,
+                    CreatedByUserId = actorUserId,
+                    CreatedByUserName = Truncate(actorName, 256),
+                    UpdatedAt = checkedAt,
+                    UpdatedByUserId = actorUserId,
+                    UpdatedByUserName = Truncate(actorName, 256),
+                };
+                _db.ClientCaseCourtParties.Add(courtParty);
+                existingParties.Add(courtParty);
+                createdCourtParties++;
+            }
+
+            if (createdCourtParties > 0)
+            {
+                changedFields.Add("участники процесса");
+            }
+        }
+
+        return new CourtSyncApplyResult(changedFields, createdEvents.Count, updatedCourtEvents, createdCourtParties);
 
         void UpdateString(string label, string currentValue, string sourceValue, Action<string> setValue, int maxLength)
         {
@@ -5033,8 +5086,87 @@ public class CasesV2Controller : ControllerBase
             parts.Add($"обновлено судебных событий: {result.UpdatedCourtEvents}");
         }
 
+        if (result.CreatedCourtParties > 0)
+        {
+            parts.Add($"добавлено участников процесса: {result.CreatedCourtParties}");
+        }
+
         return string.Join("; ", parts) + ".";
     }
+
+    private static IReadOnlyList<SudrfCourtPartyCandidate> BuildSudrfCourtPartyCandidates(
+        IReadOnlyList<SudrfCourtParticipant> participants)
+    {
+        var candidates = new List<SudrfCourtPartyCandidate>();
+        foreach (var participant in participants)
+        {
+            var name = NormalizeOptional(participant.Name);
+            if (name is null)
+            {
+                continue;
+            }
+
+            var side = ResolveSudrfCourtPartySide(participant.Role);
+            var processRole = Truncate(NormalizeOptional(participant.Role) ?? "Участник процесса", 120);
+            var notesParts = new List<string> { "Добавлено из ГАС «Правосудие»." };
+            if (!string.IsNullOrWhiteSpace(participant.Role))
+            {
+                notesParts.Add($"Роль на сайте суда: {participant.Role}.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(participant.Details))
+            {
+                notesParts.Add(participant.Details);
+            }
+
+            candidates.Add(new SudrfCourtPartyCandidate(
+                Truncate(name, 300),
+                side,
+                processRole,
+                string.Empty,
+                Truncate(string.Join(' ', notesParts), 1000)));
+        }
+
+        return candidates
+            .GroupBy(static item => new
+            {
+                Name = NormalizeCourtPartyName(item.DisplayName),
+                item.Side,
+                Role = NormalizeCourtPartyName(item.ProcessRole),
+            })
+            .Select(static group => group.First())
+            .ToList();
+    }
+
+    private static string ResolveSudrfCourtPartySide(string role)
+    {
+        if (role.Contains("ОТВЕТЧИК", StringComparison.OrdinalIgnoreCase)
+            || role.Contains("ДОЛЖНИК", StringComparison.OrdinalIgnoreCase))
+        {
+            return "respondent";
+        }
+
+        if (role.Contains("ТРЕТ", StringComparison.OrdinalIgnoreCase)
+            || role.Contains("ЗАИНТЕРЕС", StringComparison.OrdinalIgnoreCase))
+        {
+            return "thirdParty";
+        }
+
+        if (role.Contains("ЗАЯВИТЕЛ", StringComparison.OrdinalIgnoreCase))
+        {
+            return "applicant";
+        }
+
+        if (role.Contains("ИСТЕЦ", StringComparison.OrdinalIgnoreCase))
+        {
+            return "claimant";
+        }
+
+        return "other";
+    }
+
+    private static string NormalizeCourtPartyName(string value)
+        => NormalizeHistoryText(value).ToUpperInvariant();
 
     private static string JoinParticipants(
         IReadOnlyList<SudrfCourtParticipant> participants,
@@ -8693,6 +8825,7 @@ public class CasesV2Controller : ControllerBase
         public IReadOnlyList<string> UpdatedFields { get; set; } = [];
         public int CreatedCourtEvents { get; set; }
         public int UpdatedCourtEvents { get; set; }
+        public int CreatedCourtParties { get; set; }
         public DateTime? NextHearingAt { get; set; }
     }
 
@@ -8828,7 +8961,15 @@ public class CasesV2Controller : ControllerBase
     private readonly record struct CourtSyncApplyResult(
         IReadOnlyList<string> ChangedFields,
         int CreatedCourtEvents,
-        int UpdatedCourtEvents);
+        int UpdatedCourtEvents,
+        int CreatedCourtParties);
+
+    private readonly record struct SudrfCourtPartyCandidate(
+        string DisplayName,
+        string Side,
+        string ProcessRole,
+        string RepresentativeName,
+        string Notes);
 
     private readonly record struct CourtPartyValidationResult(
         string? Error,

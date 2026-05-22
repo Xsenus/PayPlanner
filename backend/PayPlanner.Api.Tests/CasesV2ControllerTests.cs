@@ -3351,6 +3351,7 @@ public class CasesV2ControllerTests
         Assert.Equal("external-sync-completed", dto.Status);
         Assert.True(dto.SyncedFromExternalSource);
         Assert.Equal(1, dto.CreatedCourtEvents);
+        Assert.Equal(3, dto.CreatedCourtParties);
         Assert.Contains("обновлены поля", dto.Message, StringComparison.Ordinal);
 
         await db.Entry(clientCase).ReloadAsync();
@@ -3371,6 +3372,24 @@ public class CasesV2ControllerTests
 
         var history = await db.ClientCaseCourtEventHistory.SingleAsync(item => item.ClientCaseCourtEventId == courtEvent.Id);
         Assert.Contains("ГАС «Правосудие»", history.Summary, StringComparison.Ordinal);
+
+        var courtParties = await db.ClientCaseCourtParties
+            .Where(item => item.ClientCaseId == clientCase.Id)
+            .OrderBy(item => item.DisplayName)
+            .ToListAsync();
+        Assert.Equal(3, courtParties.Count);
+        Assert.Contains(courtParties, item =>
+            item.DisplayName == "Шафорост Антон Евгеньевич"
+            && item.Side == "claimant"
+            && item.ProcessRole == "АДМИНИСТРАТИВНЫЙ ИСТЕЦ"
+            && item.Notes.Contains("ГАС «Правосудие»", StringComparison.Ordinal));
+        Assert.Contains(courtParties, item =>
+            item.DisplayName == "Главное управление ФССП по Хабаровскому краю и ЕАО"
+            && item.Side == "respondent");
+        Assert.Contains(courtParties, item =>
+            item.DisplayName == "Кожеваткин Андрей Владимирович"
+            && item.Side == "other"
+            && item.ProcessRole == "ПРЕДСТАВИТЕЛЬ");
     }
 
     [Fact]
