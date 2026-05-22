@@ -12,6 +12,8 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.LegalIntegrations;
+using PayPlanner.Api.Services.LegalIntegrations.Models;
 using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
@@ -3285,12 +3287,90 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.Id, dto.ClientCaseId);
         Assert.Equal("manual-check-recorded", dto.Status);
         Assert.True(dto.HasCourtBinding);
-        Assert.Contains("Внешняя синхронизация пока не подключена", dto.Message, StringComparison.Ordinal);
+        Assert.Contains("автоматическое обновление сейчас поддерживает ссылки на сайты sudrf.ru", dto.Message, StringComparison.Ordinal);
         Assert.Equal("Владелец", dto.CheckedByUserName);
 
         await db.Entry(clientCase).ReloadAsync();
         Assert.Contains("Ручная проверка судебного источника зафиксирована", clientCase.EventHistory, StringComparison.Ordinal);
         Assert.Contains("Инициатор: Владелец", clientCase.EventHistory, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunCourtSync_UpdatesCaseAndCreatesCourtEventFromSudrf()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Шафорост Антон Евгеньевич",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Шафорост - апелляция",
+            CourtUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = clientCase.CourtUrl,
+            CourtName = "Хабаровский краевой суд",
+            CaseNumber = "33а-3390/2026",
+            JudgeName = "Казарикова Оксана Витальевна",
+            Instance = "appeal",
+            NextHearingAt = new DateTime(2026, 5, 27, 15, 0, 0),
+            NextHearingPlace = "зал 12",
+            Participants =
+            [
+                new() { Role = "АДМИНИСТРАТИВНЫЙ ИСТЕЦ", Name = "Шафорост Антон Евгеньевич" },
+                new() { Role = "АДМИНИСТРАТИВНЫЙ ОТВЕТЧИК", Name = "Главное управление ФССП по Хабаровскому краю и ЕАО" },
+                new() { Role = "ПРЕДСТАВИТЕЛЬ", Name = "Кожеваткин Андрей Владимирович" },
+            ],
+            MovementEvents =
+            [
+                new()
+                {
+                    Title = "Судебное заседание",
+                    ScheduledAt = new DateTime(2026, 5, 27, 15, 0, 0),
+                    Place = "зал 12",
+                    SourceSummary = "Судебное заседание; 27.05.2026 15:00; место: зал 12",
+                },
+            ],
+        };
+        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
+
+        var result = await controller.RunCourtSync(clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
+        Assert.Equal("external-sync-completed", dto.Status);
+        Assert.True(dto.SyncedFromExternalSource);
+        Assert.Equal(1, dto.CreatedCourtEvents);
+        Assert.Contains("обновлены поля", dto.Message, StringComparison.Ordinal);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
+        Assert.Equal("33а-3390/2026", clientCase.CourtCaseNumber);
+        Assert.Equal("Казарикова Оксана Витальевна", clientCase.JudgeName);
+        Assert.Equal("Шафорост Антон Евгеньевич", clientCase.Claimant);
+        Assert.Equal("Главное управление ФССП по Хабаровскому краю и ЕАО", clientCase.Defendant);
+        Assert.Equal("Кожеваткин Андрей Владимирович", clientCase.Representatives);
+        Assert.Equal(new DateTime(2026, 5, 27, 15, 0, 0), clientCase.NextHearingAt);
+        Assert.Contains("Судебный источник обновлен", clientCase.EventHistory, StringComparison.Ordinal);
+
+        var courtEvent = await db.ClientCaseCourtEvents.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal("sudrf", courtEvent.SourceType);
+        Assert.Equal("appeal", courtEvent.CourtInstance);
+        Assert.Equal(new DateTime(2026, 5, 27, 15, 0, 0), courtEvent.ScheduledAt);
+        Assert.Equal("зал 12", courtEvent.Courtroom);
+
+        var history = await db.ClientCaseCourtEventHistory.SingleAsync(item => item.ClientCaseCourtEventId == courtEvent.Id);
+        Assert.Contains("ГАС «Правосудие»", history.Summary, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -4319,11 +4399,15 @@ public class CasesV2ControllerTests
         return Assert.IsType<int>(property.GetValue(value));
     }
 
-    private static CasesV2Controller CreateController(PaymentContext db, User user, string? contentRootPath = null)
+    private static CasesV2Controller CreateController(
+        PaymentContext db,
+        User user,
+        string? contentRootPath = null,
+        ISudrfCourtSyncService? sudrfCourtSyncService = null)
         => new(db, new TestWebHostEnvironment
         {
             ContentRootPath = contentRootPath ?? Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N")),
-        })
+        }, sudrfCourtSyncService: sudrfCourtSyncService)
         {
             ControllerContext = new ControllerContext
             {
@@ -4357,6 +4441,15 @@ public class CasesV2ControllerTests
         public string EnvironmentName { get; set; } = "Development";
         public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
         public string WebRootPath { get; set; } = Path.GetTempPath();
+    }
+
+    private sealed class FixedSudrfCourtSyncService(SudrfCourtCaseData data) : ISudrfCourtSyncService
+    {
+        public bool CanHandle(string? sourceUrl)
+            => sourceUrl?.Contains("sudrf.ru", StringComparison.OrdinalIgnoreCase) == true;
+
+        public Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct)
+            => Task.FromResult(data);
     }
 
     private static async Task<User> CreateUserAsync(

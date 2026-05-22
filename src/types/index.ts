@@ -1001,7 +1001,7 @@ export interface ClientCaseWorkOrderItem {
 
 export interface ClientCaseCourtSyncRun {
   clientCaseId: number;
-  status: 'manual-check-recorded' | 'binding-required' | string;
+  status: 'manual-check-recorded' | 'binding-required' | 'external-sync-completed' | 'external-sync-error' | string;
   hasCourtBinding: boolean;
   message: string;
   checkedAt: string;
@@ -1010,12 +1010,17 @@ export interface ClientCaseCourtSyncRun {
   courtName?: string | null;
   courtCaseNumber?: string | null;
   courtUrl?: string | null;
+  syncedFromExternalSource?: boolean;
+  updatedFields?: string[];
+  createdCourtEvents?: number;
+  updatedCourtEvents?: number;
+  nextHearingAt?: string | null;
 }
 
 export interface ClientCaseCourtSyncLog {
   id: number;
   clientCaseId: number;
-  status: 'manual-check-recorded' | 'binding-required' | 'history' | string;
+  status: 'manual-check-recorded' | 'binding-required' | 'external-sync-completed' | 'external-sync-error' | 'history' | string;
   message: string;
   occurredAt?: string | null;
   actorName?: string | null;

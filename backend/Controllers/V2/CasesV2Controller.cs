@@ -10,6 +10,8 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.LegalIntegrations;
+using PayPlanner.Api.Services.LegalIntegrations.Models;
 using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers.V2;
@@ -91,14 +93,17 @@ public class CasesV2Controller : ControllerBase
 
     private readonly PaymentContext _db;
     private readonly ICaseDocumentStorage _caseDocumentStorage;
+    private readonly ISudrfCourtSyncService? _sudrfCourtSyncService;
 
     public CasesV2Controller(
         PaymentContext db,
         IWebHostEnvironment? environment = null,
-        ICaseDocumentStorage? caseDocumentStorage = null)
+        ICaseDocumentStorage? caseDocumentStorage = null,
+        ISudrfCourtSyncService? sudrfCourtSyncService = null)
     {
         _db = db;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
+        _sudrfCourtSyncService = sudrfCourtSyncService;
     }
 
     private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
@@ -4758,10 +4763,88 @@ public class CasesV2Controller : ControllerBase
         var hasCourtBinding =
             !string.IsNullOrWhiteSpace(clientCase.CourtCaseNumber)
             || !string.IsNullOrWhiteSpace(clientCase.CourtUrl);
-        var status = hasCourtBinding ? "manual-check-recorded" : "binding-required";
-        var message = hasCourtBinding
-            ? $"Ручная проверка судебного источника зафиксирована. Внешняя синхронизация пока не подключена; проверьте данные суда вручную. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
-            : "Ручная проверка судебного источника не выполнена: в деле не указан номер дела в суде или ссылка на первоисточник.";
+        if (!hasCourtBinding)
+        {
+            const string missingBindingMessage = "Ручная проверка судебного источника не выполнена: в деле не указан номер дела в суде или ссылка на первоисточник.";
+            AppendCaseEvent(clientCase, $"{missingBindingMessage} Инициатор: {actorName}.");
+            await _db.SaveChangesAsync(ct);
+
+            return Ok(new ClientCaseCourtSyncRunDto
+            {
+                ClientCaseId = clientCase.Id,
+                Status = "binding-required",
+                HasCourtBinding = false,
+                Message = missingBindingMessage,
+                CheckedAt = checkedAt,
+                CheckedByUserId = User.GetUserId(),
+                CheckedByUserName = actorName,
+                CourtName = clientCase.CourtName,
+                CourtCaseNumber = clientCase.CourtCaseNumber,
+                CourtUrl = clientCase.CourtUrl,
+            });
+        }
+
+        if (_sudrfCourtSyncService is not null
+            && !string.IsNullOrWhiteSpace(clientCase.CourtUrl)
+            && _sudrfCourtSyncService.CanHandle(clientCase.CourtUrl))
+        {
+            try
+            {
+                var courtData = await _sudrfCourtSyncService.FetchCaseAsync(clientCase.CourtUrl, ct);
+                var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, actorName, checkedAt, ct);
+                var syncMessage = syncResult.ChangedFields.Count == 0 && syncResult.CreatedCourtEvents == 0 && syncResult.UpdatedCourtEvents == 0
+                    ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
+                    : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult)}";
+
+                AppendCaseEvent(clientCase, $"{syncMessage} Инициатор: {actorName}.");
+                _db.SetAuditReason($"Обновление дела #{clientCase.Id} из ГАС «Правосудие».");
+                await _db.SaveChangesAsync(ct);
+
+                return Ok(new ClientCaseCourtSyncRunDto
+                {
+                    ClientCaseId = clientCase.Id,
+                    Status = "external-sync-completed",
+                    HasCourtBinding = true,
+                    Message = syncMessage,
+                    CheckedAt = checkedAt,
+                    CheckedByUserId = User.GetUserId(),
+                    CheckedByUserName = actorName,
+                    CourtName = clientCase.CourtName,
+                    CourtCaseNumber = clientCase.CourtCaseNumber,
+                    CourtUrl = clientCase.CourtUrl,
+                    SyncedFromExternalSource = true,
+                    UpdatedFields = syncResult.ChangedFields,
+                    CreatedCourtEvents = syncResult.CreatedCourtEvents,
+                    UpdatedCourtEvents = syncResult.UpdatedCourtEvents,
+                    NextHearingAt = clientCase.NextHearingAt,
+                });
+            }
+            catch (SudrfCourtSyncException ex)
+            {
+                var errorMessage = $"Проверка судебного источника не выполнена: {ex.Message} Проверьте ссылку на карточку дела суда и повторите попытку.";
+                AppendCaseEvent(clientCase, $"{errorMessage} Инициатор: {actorName}.");
+                await _db.SaveChangesAsync(ct);
+
+                return Ok(new ClientCaseCourtSyncRunDto
+                {
+                    ClientCaseId = clientCase.Id,
+                    Status = "external-sync-error",
+                    HasCourtBinding = true,
+                    Message = errorMessage,
+                    CheckedAt = checkedAt,
+                    CheckedByUserId = User.GetUserId(),
+                    CheckedByUserName = actorName,
+                    CourtName = clientCase.CourtName,
+                    CourtCaseNumber = clientCase.CourtCaseNumber,
+                    CourtUrl = clientCase.CourtUrl,
+                });
+            }
+        }
+
+        var status = "manual-check-recorded";
+        var message = string.IsNullOrWhiteSpace(clientCase.CourtUrl)
+            ? $"Ручная проверка судебного источника зафиксирована: для автоматического обновления добавьте ссылку на карточку дела суда. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
+            : $"Ручная проверка судебного источника зафиксирована: автоматическое обновление сейчас поддерживает ссылки на сайты sudrf.ru. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.";
 
         AppendCaseEvent(clientCase, $"{message} Инициатор: {actorName}.");
         await _db.SaveChangesAsync(ct);
@@ -4779,6 +4862,215 @@ public class CasesV2Controller : ControllerBase
             CourtCaseNumber = clientCase.CourtCaseNumber,
             CourtUrl = clientCase.CourtUrl,
         });
+    }
+
+    private async Task<CourtSyncApplyResult> ApplySudrfCourtSyncAsync(
+        ClientCase clientCase,
+        SudrfCourtCaseData courtData,
+        string actorName,
+        DateTime checkedAt,
+        CancellationToken ct)
+    {
+        var actorUserId = User.GetUserId();
+        var changedFields = new List<string>();
+        var createdEvents = new List<ClientCaseCourtEvent>();
+        var updatedCourtEvents = 0;
+
+        UpdateString("суд", clientCase.CourtName, courtData.CourtName, value => clientCase.CourtName = value, 200);
+        UpdateString("номер дела в суде", clientCase.CourtCaseNumber, courtData.CaseNumber, value => clientCase.CourtCaseNumber = value, 100);
+        UpdateString("ссылка на источник", clientCase.CourtUrl, courtData.SourceUrl, value => clientCase.CourtUrl = value, 1000);
+        UpdateString("судья", clientCase.JudgeName, courtData.JudgeName, value => clientCase.JudgeName = value, 200);
+        UpdateString("зал/место заседания", clientCase.Courtroom, courtData.NextHearingPlace, value => clientCase.Courtroom = value, 120);
+        UpdateString("истец/заявитель", clientCase.Claimant, JoinParticipants(courtData.Participants, "ИСТЕЦ", "ЗАЯВИТЕЛ"), value => clientCase.Claimant = value, 300);
+        UpdateString("ответчик", clientCase.Defendant, JoinParticipants(courtData.Participants, "ОТВЕТЧИК", "ДОЛЖНИК"), value => clientCase.Defendant = value, 300);
+        UpdateString("третьи лица", clientCase.ThirdParties, JoinParticipants(courtData.Participants, "ТРЕТ", "ЗАИНТЕРЕС"), value => clientCase.ThirdParties = value, 1000);
+        UpdateString("представители", clientCase.Representatives, JoinParticipants(courtData.Participants, "ПРЕДСТАВИТЕЛ"), value => clientCase.Representatives = value, 1000);
+
+        if (courtData.NextHearingAt.HasValue && clientCase.NextHearingAt != courtData.NextHearingAt)
+        {
+            clientCase.NextHearingAt = courtData.NextHearingAt;
+            changedFields.Add("ближайшее заседание");
+        }
+
+        var hearings = courtData.MovementEvents
+            .Where(static item => item.ScheduledAt.HasValue && item.Title.Contains("судебное заседание", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(static item => item.ScheduledAt)
+            .ToList();
+        if (hearings.Count > 0)
+        {
+            var existingEvents = await _db.ClientCaseCourtEvents
+                .Where(item => item.ClientCaseId == clientCase.Id && item.SourceType == "sudrf")
+                .ToListAsync(ct);
+
+            foreach (var hearing in hearings)
+            {
+                var scheduledAt = hearing.ScheduledAt!.Value;
+                var title = Truncate(NormalizeOptional(hearing.Title) ?? "Судебное заседание", 200);
+                var existing = existingEvents.FirstOrDefault(item =>
+                    item.ScheduledAt == scheduledAt
+                    && item.Title.Equals(title, StringComparison.OrdinalIgnoreCase));
+                var summary = Truncate(hearing.SourceSummary, 1000);
+
+                if (existing is null)
+                {
+                    var courtEvent = new ClientCaseCourtEvent
+                    {
+                        ClientCaseId = clientCase.Id,
+                        EventType = "hearing",
+                        Title = title,
+                        Description = Truncate(hearing.SourceSummary, 1000),
+                        ScheduledAt = scheduledAt,
+                        AllDay = scheduledAt.TimeOfDay == TimeSpan.Zero,
+                        CourtInstance = courtData.Instance,
+                        CourtName = Truncate(NormalizeOptional(courtData.CourtName) ?? clientCase.CourtName, 200),
+                        CourtCaseNumber = Truncate(NormalizeOptional(courtData.CaseNumber) ?? clientCase.CourtCaseNumber, 100),
+                        Courtroom = Truncate(hearing.Place, 120),
+                        JudgeName = Truncate(NormalizeOptional(courtData.JudgeName) ?? clientCase.JudgeName, 200),
+                        MovementStatus = ResolveSudrfMovementStatus(hearing.Result),
+                        ResultSummary = Truncate(hearing.Result, 1000),
+                        SourceType = "sudrf",
+                        CreatedAt = checkedAt,
+                        CreatedByUserId = actorUserId,
+                        CreatedByUserName = Truncate(actorName, 256),
+                        UpdatedAt = checkedAt,
+                        UpdatedByUserId = actorUserId,
+                        UpdatedByUserName = Truncate(actorName, 256),
+                    };
+                    _db.ClientCaseCourtEvents.Add(courtEvent);
+                    existingEvents.Add(courtEvent);
+                    createdEvents.Add(courtEvent);
+                    continue;
+                }
+
+                var updated = false;
+                updated |= UpdateCourtEventString(existing.CourtName, courtData.CourtName, value => existing.CourtName = value, 200);
+                updated |= UpdateCourtEventString(existing.CourtCaseNumber, courtData.CaseNumber, value => existing.CourtCaseNumber = value, 100);
+                updated |= UpdateCourtEventString(existing.Courtroom, hearing.Place, value => existing.Courtroom = value, 120);
+                updated |= UpdateCourtEventString(existing.JudgeName, courtData.JudgeName, value => existing.JudgeName = value, 200);
+                updated |= UpdateCourtEventString(existing.Description, hearing.SourceSummary, value => existing.Description = value, 1000);
+                updated |= UpdateCourtEventString(existing.ResultSummary, hearing.Result, value => existing.ResultSummary = value, 1000);
+                var movementStatus = ResolveSudrfMovementStatus(hearing.Result);
+                if (!existing.MovementStatus.Equals(movementStatus, StringComparison.OrdinalIgnoreCase))
+                {
+                    existing.MovementStatus = movementStatus;
+                    updated = true;
+                }
+
+                if (updated)
+                {
+                    existing.UpdatedAt = checkedAt;
+                    existing.UpdatedByUserId = actorUserId;
+                    existing.UpdatedByUserName = Truncate(actorName, 256);
+                    AddCourtEventHistory(existing, "updated", $"Событие обновлено из ГАС «Правосудие»: {summary}.", actorUserId, actorName);
+                    updatedCourtEvents++;
+                }
+            }
+        }
+
+        if (createdEvents.Count > 0)
+        {
+            await _db.SaveChangesAsync(ct);
+            foreach (var courtEvent in createdEvents)
+            {
+                AddCourtEventHistory(courtEvent, "created", $"Событие создано из ГАС «Правосудие»: {courtEvent.Title}.", actorUserId, actorName);
+            }
+        }
+
+        return new CourtSyncApplyResult(changedFields, createdEvents.Count, updatedCourtEvents);
+
+        void UpdateString(string label, string currentValue, string sourceValue, Action<string> setValue, int maxLength)
+        {
+            var normalized = NormalizeOptional(sourceValue);
+            if (normalized is null)
+            {
+                return;
+            }
+
+            var next = Truncate(normalized, maxLength);
+            if (string.Equals(currentValue, next, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            setValue(next);
+            changedFields.Add(label);
+        }
+
+        static bool UpdateCourtEventString(string currentValue, string sourceValue, Action<string> setValue, int maxLength)
+        {
+            var normalized = NormalizeOptional(sourceValue);
+            if (normalized is null)
+            {
+                return false;
+            }
+
+            var next = Truncate(normalized, maxLength);
+            if (string.Equals(currentValue, next, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            setValue(next);
+            return true;
+        }
+    }
+
+    private static string FormatCourtSyncResult(CourtSyncApplyResult result)
+    {
+        var parts = new List<string>();
+        if (result.ChangedFields.Count > 0)
+        {
+            parts.Add($"обновлены поля: {string.Join(", ", result.ChangedFields.Distinct(StringComparer.OrdinalIgnoreCase))}");
+        }
+
+        if (result.CreatedCourtEvents > 0)
+        {
+            parts.Add($"добавлено судебных событий: {result.CreatedCourtEvents}");
+        }
+
+        if (result.UpdatedCourtEvents > 0)
+        {
+            parts.Add($"обновлено судебных событий: {result.UpdatedCourtEvents}");
+        }
+
+        return string.Join("; ", parts) + ".";
+    }
+
+    private static string JoinParticipants(
+        IReadOnlyList<SudrfCourtParticipant> participants,
+        params string[] roleMarkers)
+    {
+        var names = participants
+            .Where(item => roleMarkers.Any(marker => item.Role.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+            .Select(static item => item.Name)
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return string.Join("; ", names);
+    }
+
+    private static string ResolveSudrfMovementStatus(string result)
+    {
+        if (result.Contains("отлож", StringComparison.OrdinalIgnoreCase))
+        {
+            return "postponed";
+        }
+
+        if (result.Contains("отмен", StringComparison.OrdinalIgnoreCase)
+            || result.Contains("снят", StringComparison.OrdinalIgnoreCase))
+        {
+            return "cancelled";
+        }
+
+        if (result.Contains("рассмотр", StringComparison.OrdinalIgnoreCase)
+            || result.Contains("решен", StringComparison.OrdinalIgnoreCase)
+            || result.Contains("вынес", StringComparison.OrdinalIgnoreCase))
+        {
+            return "completed";
+        }
+
+        return string.IsNullOrWhiteSpace(result) ? "scheduled" : "held";
     }
 
     [HttpPost]
@@ -7601,6 +7893,7 @@ public class CasesV2Controller : ControllerBase
 
     private static bool IsCourtSyncHistoryLine(string line)
         => line.Contains("проверка судебного источника", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("судебный источник", StringComparison.OrdinalIgnoreCase)
             || line.Contains("судебного источника", StringComparison.OrdinalIgnoreCase);
 
     private static ClientCaseTimelineEntryDto MapTimelineEntry(int clientCaseId, string line, int index)
@@ -7684,10 +7977,15 @@ public class CasesV2Controller : ControllerBase
 
         var actorName = ExtractCaseHistoryMarker(message, "Инициатор:");
         var status = message.Contains("не выполнена", StringComparison.OrdinalIgnoreCase)
-            ? "binding-required"
-            : message.Contains("зафиксирована", StringComparison.OrdinalIgnoreCase)
-                ? "manual-check-recorded"
-                : "history";
+            ? message.Contains("не указан номер дела", StringComparison.OrdinalIgnoreCase)
+                ? "binding-required"
+                : "external-sync-error"
+            : message.Contains("обновлен", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("новых изменений не найдено", StringComparison.OrdinalIgnoreCase)
+                    ? "external-sync-completed"
+                    : message.Contains("зафиксирована", StringComparison.OrdinalIgnoreCase)
+                        ? "manual-check-recorded"
+                        : "history";
 
         return new ClientCaseCourtSyncLogDto
         {
@@ -8391,6 +8689,11 @@ public class CasesV2Controller : ControllerBase
         public string CourtName { get; set; } = string.Empty;
         public string CourtCaseNumber { get; set; } = string.Empty;
         public string CourtUrl { get; set; } = string.Empty;
+        public bool SyncedFromExternalSource { get; set; }
+        public IReadOnlyList<string> UpdatedFields { get; set; } = [];
+        public int CreatedCourtEvents { get; set; }
+        public int UpdatedCourtEvents { get; set; }
+        public DateTime? NextHearingAt { get; set; }
     }
 
     public sealed class ClientCaseCourtSyncLogDto
@@ -8521,6 +8824,11 @@ public class CasesV2Controller : ControllerBase
         string MovementStatus = "",
         string ResultSummary = "",
         string SourceType = "manual");
+
+    private readonly record struct CourtSyncApplyResult(
+        IReadOnlyList<string> ChangedFields,
+        int CreatedCourtEvents,
+        int UpdatedCourtEvents);
 
     private readonly record struct CourtPartyValidationResult(
         string? Error,
