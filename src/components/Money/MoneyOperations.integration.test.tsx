@@ -1281,6 +1281,55 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Новый поставщик');
   }, 15000);
 
+  it('creates an accountable advance from the money operation form', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Cash" />);
+
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalled());
+    await waitFor(() => expect(getIncomeTypesMock).toHaveBeenCalledWith('Expense', true));
+
+    await user.click(screen.getByRole('button', { name: 'Добавить' }));
+    await screen.findByText('Добавить операцию по кассе');
+
+    await user.click(screen.getByTestId('money-accountable-advance-preset'));
+    expect(screen.getByTestId('money-advance-checkbox')).toHaveProperty('checked', true);
+
+    await user.clear(screen.getByTestId('money-operation-counterparty'));
+    await user.type(screen.getByTestId('money-operation-counterparty'), 'Анна Иванова');
+    await user.selectOptions(screen.getByLabelText('Ответственный'), '12');
+    await user.clear(screen.getByLabelText('Сумма, RUB'));
+    await user.type(screen.getByLabelText('Сумма, RUB'), '5000');
+
+    const modalSaveButton = screen
+      .getAllByRole('button', { name: 'Сохранить' })
+      .find((button) => button.className.includes('bg-blue-600'));
+    expect(modalSaveButton).toBeTruthy();
+    await user.click(modalSaveButton as HTMLElement);
+
+    await waitFor(() => expect(createMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(createMoneyOperationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 0,
+        source: 'Cash',
+        direction: 'Expense',
+        date: '2026-04-21',
+        moneyAccountId: 103,
+        accountName: 'Основная касса',
+        counterpartyName: 'Анна Иванова',
+        responsibleUserId: 12,
+        responsibleName: 'Анна Иванова',
+        isAdvancePayment: true,
+        categoryName: 'Подотчетные суммы',
+        purpose: 'Выдача денежных средств под отчет',
+        linkedInvoiceId: null,
+        paidInvoiceNumber: '',
+        paidAmount: 0,
+      }),
+    );
+    expect(toastSuccessMock).toHaveBeenCalledWith('Операция создана.', 'Деньги');
+  }, 15000);
+
   it('creates a paired transfer between money accounts from the operation form', async () => {
     const user = userEvent.setup();
 

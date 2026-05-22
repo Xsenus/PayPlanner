@@ -114,6 +114,9 @@ const DEFAULT_CASH_LIMIT_SETTINGS: CashLimitSettings = {
   amount: null,
 };
 
+const ACCOUNTABLE_ADVANCE_CATEGORY = 'Подотчетные суммы';
+const ACCOUNTABLE_ADVANCE_PURPOSE = 'Выдача денежных средств под отчет';
+
 const SOURCE_LABELS: Record<MoneyTab, string> = {
   Bank: 'Банк',
   Cash: 'Касса',
@@ -1672,6 +1675,26 @@ function MoneyOperationModal({
     });
   };
 
+  const applyAccountableAdvancePreset = () => {
+    setForm((prev) => {
+      const selectedCategory = findCategoryOption(categoryOptions, 'Expense', ACCOUNTABLE_ADVANCE_CATEGORY);
+
+      return {
+        ...prev,
+        direction: 'Expense',
+        isAdvancePayment: true,
+        incomeTypeId: selectedCategory?.id ?? null,
+        categoryName: ACCOUNTABLE_ADVANCE_CATEGORY,
+        purpose: prev.purpose?.trim() ? prev.purpose : ACCOUNTABLE_ADVANCE_PURPOSE,
+        linkedInvoiceId: null,
+        paidInvoiceNumber: '',
+        paidAccountName: '',
+        paidAmount: 0,
+        matchStatus: prev.matchStatus === 'Matched' ? 'None' : prev.matchStatus,
+      };
+    });
+  };
+
   const handleCategoryChange = (value: string) => {
     setForm((prev) => {
       const selectedCategory = findCategoryOption(categoryOptions, prev.direction, value);
@@ -1739,6 +1762,16 @@ function MoneyOperationModal({
     ? `Редактировать операцию по ${SOURCE_MODAL_LABELS[source]}`
     : `Добавить операцию по ${SOURCE_MODAL_LABELS[source]}`;
   const appliedInvoiceLocked = initialData ? isAppliedToInvoice(initialData) : false;
+  const isAccountableAdvance = form.direction === 'Expense' && form.isAdvancePayment;
+  const counterpartyLabel =
+    form.direction === 'Income'
+      ? 'Покупатель'
+      : form.direction === 'Transfer'
+        ? 'Получатель'
+        : isAccountableAdvance
+          ? 'Подотчётное лицо'
+          : 'Поставщик';
+  const counterpartyPlaceholder = isAccountableAdvance ? 'Сотрудник или получатель' : 'Контрагент';
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
@@ -1792,6 +1825,23 @@ function MoneyOperationModal({
             ))}
           </div>
 
+          {form.direction !== 'Transfer' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="money-accountable-advance-preset"
+                aria-pressed={isAccountableAdvance}
+                onClick={applyAccountableAdvancePreset}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                  isAccountableAdvance
+                    ? 'border-amber-300 bg-amber-100 text-amber-900'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}>
+                Выдача под отчёт
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               {SOURCE_ACCOUNT_FILTER_LABELS[source]}
@@ -1835,12 +1885,13 @@ function MoneyOperationModal({
               </label>
             )}
             <label className="flex flex-col gap-1 text-sm text-slate-600">
-              {form.direction === 'Income' ? 'Покупатель' : form.direction === 'Transfer' ? 'Получатель' : 'Поставщик'}
+              {counterpartyLabel}
               <input
+                data-testid="money-operation-counterparty"
                 value={form.counterpartyName ?? ''}
                 onChange={(event) => setField('counterpartyName', event.target.value)}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
-                placeholder="Контрагент"
+                placeholder={counterpartyPlaceholder}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
@@ -1942,10 +1993,11 @@ function MoneyOperationModal({
             <label className="flex items-center gap-2 text-sm text-slate-600">
               <input
                 type="checkbox"
+                data-testid="money-advance-checkbox"
                 checked={form.isAdvancePayment}
                 onChange={(event) => setField('isAdvancePayment', event.target.checked)}
               />
-              Авансовый платёж
+              {form.direction === 'Expense' ? 'Выдача под отчёт / аванс' : 'Авансовый платёж'}
             </label>
           </div>
 
