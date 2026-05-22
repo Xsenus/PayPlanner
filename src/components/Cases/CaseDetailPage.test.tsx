@@ -21,6 +21,7 @@ vi.mock('../../services/api', () => ({
     getCaseDocumentTypes: vi.fn(),
     getDocumentStatuses: vi.fn(),
     createTaskJournalCaseAutomationTask: vi.fn(),
+    createTaskJournalItem: vi.fn(),
     bulkUpdateCases: vi.fn(),
     generateCaseDocumentTemplate: vi.fn(),
     uploadCaseDocument: vi.fn(),
@@ -430,6 +431,8 @@ describe('CaseDetailPage', () => {
     ]);
     vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockReset();
     vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockResolvedValue(createTask());
+    vi.mocked(apiService.createTaskJournalItem).mockReset();
+    vi.mocked(apiService.createTaskJournalItem).mockResolvedValue(createTask());
     vi.mocked(apiService.bulkUpdateCases).mockReset();
     vi.mocked(apiService.bulkUpdateCases).mockResolvedValue({ requested: 1, updated: 1 });
     vi.mocked(apiService.requestCaseAccess).mockReset();
@@ -1049,14 +1052,20 @@ describe('CaseDetailPage', () => {
     expect(onCreatePayment).toHaveBeenCalledWith(expect.objectContaining({ id: 15 }));
   });
 
-  it('creates an automation task from the case card', async () => {
+  it('creates a regular task from the case card', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
     fireEvent.click(screen.getByRole('button', { name: /Создать задачу/u }));
 
     await waitFor(() => {
-      expect(apiService.createTaskJournalCaseAutomationTask).toHaveBeenCalledWith(15);
+      expect(apiService.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+        clientCaseId: 15,
+        clientId: 12,
+        title: expect.stringContaining('ЗЕМЦОВ - банкротство'),
+        type: 'task',
+      }));
+      expect(apiService.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
       expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
     });
   });
@@ -1089,7 +1098,11 @@ describe('CaseDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^Создать$/u }));
     await waitFor(() => {
-      expect(apiService.createTaskJournalCaseAutomationTask).toHaveBeenCalledWith(15);
+      expect(apiService.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+        clientCaseId: 15,
+        clientId: 12,
+      }));
+      expect(apiService.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
     });
   });
 

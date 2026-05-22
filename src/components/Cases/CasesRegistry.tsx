@@ -6,6 +6,7 @@ import { apiService } from '../../services/api';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import type { ActResponsible, ClientCase, ClientCaseAccessRequest } from '../../types';
+import { buildCaseTaskPayload } from '../../utils/caseTaskPayload';
 import { toRuDate } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -808,7 +809,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     setError(null);
     setNotice(null);
     try {
-      await apiService.createTaskJournalCaseAutomationTask(item.id);
+      await apiService.createTaskJournalItem(buildCaseTaskPayload(item));
+      setNotice('Задача по делу создана.');
       setReloadToken((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось создать задачу по делу.');

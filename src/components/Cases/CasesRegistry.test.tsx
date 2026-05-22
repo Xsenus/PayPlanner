@@ -30,6 +30,7 @@ vi.mock('../../services/api', () => ({
     getCaseAccessRequests: vi.fn(),
     resolveCaseAccessRequest: vi.fn(),
     createTaskJournalCaseAutomationTask: vi.fn(),
+    createTaskJournalItem: vi.fn(),
     runCaseCourtSync: vi.fn(),
     createCaseV2: vi.fn(),
     updateCaseV2: vi.fn(),
@@ -169,6 +170,8 @@ describe('CasesRegistry', () => {
     });
     vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockReset();
     vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockResolvedValue({ id: 501 });
+    vi.mocked(apiService.createTaskJournalItem).mockReset();
+    vi.mocked(apiService.createTaskJournalItem).mockResolvedValue({ id: 501 });
     vi.mocked(apiService.runCaseCourtSync).mockReset();
     vi.mocked(apiService.runCaseCourtSync).mockResolvedValue({
       clientCaseId: 1,
@@ -607,7 +610,13 @@ describe('CasesRegistry', () => {
 
     fireEvent.click(screen.getAllByLabelText('Создать задачу по делу')[0]);
     await waitFor(() => {
-      expect(apiService.createTaskJournalCaseAutomationTask).toHaveBeenCalledWith(1);
+      expect(apiService.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+        clientCaseId: 1,
+        clientId: 12,
+        title: expect.stringContaining('ЗЕМЦОВ - банкротство'),
+        type: 'task',
+      }));
+      expect(apiService.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
     });
 
     fireEvent.click(screen.getAllByLabelText('Проверить суд по делу')[0]);

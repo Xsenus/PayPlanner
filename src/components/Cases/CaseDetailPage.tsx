@@ -53,6 +53,7 @@ import type {
 } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { buildCaseTaskPayload } from '../../utils/caseTaskPayload';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 
 interface CaseDetailPageProps {
@@ -2365,9 +2366,10 @@ export function CaseDetailPage({
     setCreatingTask(true);
     setError(null);
     try {
-      await apiService.createTaskJournalCaseAutomationTask(caseItem.id);
+      await apiService.createTaskJournalItem(buildCaseTaskPayload(caseItem));
       setReloadToken((value) => value + 1);
       setActiveTab('tasks');
+      setNotice('Задача по делу создана.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось создать задачу по делу.');
     } finally {

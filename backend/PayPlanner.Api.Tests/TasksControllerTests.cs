@@ -961,6 +961,45 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateTask_AllowsManualCaseTaskWhenAutomationControlIsNotRequired()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var automationResult = await controller.CreateAutomationTaskForCase(clientCase.Id, CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(automationResult.Result);
+
+        var manualResult = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            Title = "Manual case task",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            AssigneeUserId = author.Id,
+            PlannedDurationMinutes = 60,
+            Type = "task",
+            Priority = "normal",
+            Status = "new",
+            Reminders = ["atDue"],
+            Channels = ["inApp"],
+            Tags = ["case"],
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(manualResult.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+
+        Assert.Equal(client.Id, dto.ClientId);
+        Assert.Equal(clientCase.Id, dto.ClientCaseId);
+        Assert.Equal("task", dto.Type);
+        Assert.Equal("Manual case task", dto.Title);
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
+    }
+
+    [Fact]
     public async Task CreateAutomationTasksForCandidates_CreatesTasksForCasesWithoutActiveTasks()
     {
         await using var db = await CreateContextAsync();
