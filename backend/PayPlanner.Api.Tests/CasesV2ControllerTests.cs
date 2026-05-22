@@ -3322,6 +3322,7 @@ public class CasesV2ControllerTests
             CourtName = "Хабаровский краевой суд",
             CaseNumber = "33а-3390/2026",
             JudgeName = "Казарикова Оксана Витальевна",
+            SecretaryName = "Иванова И.И.",
             Instance = "appeal",
             NextHearingAt = new DateTime(2026, 5, 27, 15, 0, 0),
             NextHearingPlace = "зал 12",
@@ -3339,6 +3340,19 @@ public class CasesV2ControllerTests
                     ScheduledAt = new DateTime(2026, 5, 27, 15, 0, 0),
                     Place = "зал 12",
                     SourceSummary = "Судебное заседание; 27.05.2026 15:00; место: зал 12",
+                    SecretaryName = "Иванова И.И.",
+                },
+            ],
+            CourtActs =
+            [
+                new()
+                {
+                    Title = "Апелляционное определение",
+                    ActDate = new DateTime(2026, 6, 1),
+                    PostedAt = new DateTime(2026, 6, 2),
+                    Result = "Решение оставлено без изменения",
+                    Summary = "Апелляционное определение; 01.06.2026; Решение оставлено без изменения",
+                    SourceUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
                 },
             ],
         };
@@ -3352,6 +3366,8 @@ public class CasesV2ControllerTests
         Assert.True(dto.SyncedFromExternalSource);
         Assert.Equal(1, dto.CreatedCourtEvents);
         Assert.Equal(3, dto.CreatedCourtParties);
+        Assert.Equal(1, dto.CreatedCourtActDocuments);
+        Assert.Equal(1, dto.CreatedProceduralDeadlines);
         Assert.Contains("обновлены поля", dto.Message, StringComparison.Ordinal);
 
         await db.Entry(clientCase).ReloadAsync();
@@ -3369,6 +3385,7 @@ public class CasesV2ControllerTests
         Assert.Equal("appeal", courtEvent.CourtInstance);
         Assert.Equal(new DateTime(2026, 5, 27, 15, 0, 0), courtEvent.ScheduledAt);
         Assert.Equal("зал 12", courtEvent.Courtroom);
+        Assert.Equal("Иванова И.И.", courtEvent.SecretaryName);
 
         var history = await db.ClientCaseCourtEventHistory.SingleAsync(item => item.ClientCaseCourtEventId == courtEvent.Id);
         Assert.Contains("ГАС «Правосудие»", history.Summary, StringComparison.Ordinal);
@@ -3390,6 +3407,15 @@ public class CasesV2ControllerTests
             item.DisplayName == "Кожеваткин Андрей Владимирович"
             && item.Side == "other"
             && item.ProcessRole == "ПРЕДСТАВИТЕЛЬ");
+
+        var document = await db.ClientCaseDocuments.SingleAsync(item => item.ClientCaseId == clientCase.Id && item.DocumentType == "Судебный акт");
+        Assert.Equal("received", document.Status);
+        Assert.StartsWith("sudrf-act-", document.DocumentKey, StringComparison.Ordinal);
+
+        var deadline = await db.ClientCaseProceduralDeadlines.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal("cassation", deadline.DeadlineType);
+        Assert.Equal(new DateTime(2026, 9, 1), deadline.DueAt);
+        Assert.Equal(document.Id, deadline.ClientCaseDocumentId);
     }
 
     [Fact]

@@ -22,6 +22,7 @@ public class SudrfCourtSyncServiceTests
         Assert.Equal(new DateTime(2026, 4, 16), data.ReceivedAt);
         Assert.Equal(new DateTime(2026, 5, 27, 15, 0, 0), data.NextHearingAt);
         Assert.Equal("зал 12", data.NextHearingPlace);
+        Assert.Contains(data.CourtActs, item => item.Title == "Решение суда" && item.ActDate == new DateTime(2026, 6, 1));
         Assert.Contains(data.MovementEvents, item => item.Title == "Судебное заседание" && item.ScheduledAt == new DateTime(2026, 5, 27, 15, 0, 0));
         Assert.Contains(data.Participants, item => item.Role == "АДМИНИСТРАТИВНЫЙ ИСТЕЦ" && item.Name == "Шафорост Антон Евгеньевич");
     }
@@ -193,6 +194,7 @@ public class SudrfCourtSyncServiceTests
                <tr><th>Наименование события</th><th>Дата</th><th>Время</th><th>Место</th><th>Результат события</th><th>Основания</th><th>Дата размещения</th></tr>
                <tr><td>Передача дела судье</td><td>16.04.2026</td><td>17:01</td><td></td><td></td><td></td><td>16.04.2026</td></tr>
                <tr><td>Судебное заседание</td><td>27.05.2026</td><td>15:00</td><td>зал 12</td><td></td><td></td><td>21.04.2026</td></tr>
+               <tr><td>Вынесено решение</td><td>01.06.2026</td><td></td><td></td><td>Решение удовлетворено частично</td><td></td><td>02.06.2026</td></tr>
              </table>
              <table class="cont4">
                <tr><th>Лицо</th><th>ФИО / наименование</th><th>Данные</th></tr>

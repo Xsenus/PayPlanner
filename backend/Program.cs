@@ -128,6 +128,7 @@ builder.Services.AddHostedService<TaskJournalReminderNotificationService>();
 builder.Services.AddHostedService<TaskJournalAutomationSchedulerService>();
 builder.Services.AddHostedService<TelegramBotPollingService>();
 builder.Services.AddHostedService<MoneyBalanceReconciliationSchedulerService>();
+builder.Services.AddHostedService<ClientCaseCourtSyncSchedulerService>();
 builder.Services.AddHostedService<UserActivityRetentionService>();
 
 builder.Services.AddCors(options =>

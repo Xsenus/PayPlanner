@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
 using System.Globalization;
 using System.Net;
 using System.Text;
@@ -4817,6 +4818,8 @@ public class CasesV2Controller : ControllerBase
                     CreatedCourtEvents = syncResult.CreatedCourtEvents,
                     UpdatedCourtEvents = syncResult.UpdatedCourtEvents,
                     CreatedCourtParties = syncResult.CreatedCourtParties,
+                    CreatedCourtActDocuments = syncResult.CreatedCourtActDocuments,
+                    CreatedProceduralDeadlines = syncResult.CreatedProceduralDeadlines,
                     NextHearingAt = clientCase.NextHearingAt,
                 });
             }
@@ -4877,6 +4880,8 @@ public class CasesV2Controller : ControllerBase
         var createdEvents = new List<ClientCaseCourtEvent>();
         var updatedCourtEvents = 0;
         var createdCourtParties = 0;
+        var createdCourtActDocuments = 0;
+        var createdProceduralDeadlines = 0;
 
         UpdateString("суд", clientCase.CourtName, courtData.CourtName, value => clientCase.CourtName = value, 200);
         UpdateString("номер дела в суде", clientCase.CourtCaseNumber, courtData.CaseNumber, value => clientCase.CourtCaseNumber = value, 100);
@@ -4928,6 +4933,7 @@ public class CasesV2Controller : ControllerBase
                         CourtCaseNumber = Truncate(NormalizeOptional(courtData.CaseNumber) ?? clientCase.CourtCaseNumber, 100),
                         Courtroom = Truncate(hearing.Place, 120),
                         JudgeName = Truncate(NormalizeOptional(courtData.JudgeName) ?? clientCase.JudgeName, 200),
+                        SecretaryName = Truncate(NormalizeOptional(hearing.SecretaryName) ?? courtData.SecretaryName, 200),
                         MovementStatus = ResolveSudrfMovementStatus(hearing.Result),
                         ResultSummary = Truncate(hearing.Result, 1000),
                         SourceType = "sudrf",
@@ -4949,6 +4955,7 @@ public class CasesV2Controller : ControllerBase
                 updated |= UpdateCourtEventString(existing.CourtCaseNumber, courtData.CaseNumber, value => existing.CourtCaseNumber = value, 100);
                 updated |= UpdateCourtEventString(existing.Courtroom, hearing.Place, value => existing.Courtroom = value, 120);
                 updated |= UpdateCourtEventString(existing.JudgeName, courtData.JudgeName, value => existing.JudgeName = value, 200);
+                updated |= UpdateCourtEventString(existing.SecretaryName, FirstNonEmpty(hearing.SecretaryName, courtData.SecretaryName), value => existing.SecretaryName = value, 200);
                 updated |= UpdateCourtEventString(existing.Description, hearing.SourceSummary, value => existing.Description = value, 1000);
                 updated |= UpdateCourtEventString(existing.ResultSummary, hearing.Result, value => existing.ResultSummary = value, 1000);
                 var movementStatus = ResolveSudrfMovementStatus(hearing.Result);
@@ -5029,7 +5036,52 @@ public class CasesV2Controller : ControllerBase
             }
         }
 
-        return new CourtSyncApplyResult(changedFields, createdEvents.Count, updatedCourtEvents, createdCourtParties);
+        foreach (var courtAct in courtData.CourtActs)
+        {
+            var documentKey = BuildSudrfCourtActDocumentKey(courtAct);
+            var existingDocument = await _db.ClientCaseDocuments
+                .Where(item => item.ClientCaseId == clientCase.Id && item.DocumentKey == documentKey)
+                .OrderByDescending(item => item.Version)
+                .FirstOrDefaultAsync(ct);
+            var document = existingDocument;
+            if (document is null)
+            {
+                document = await SaveGeneratedCaseDocumentAsync(
+                    clientCase,
+                    documentKey,
+                    "Судебный акт",
+                    "received",
+                    BuildSudrfCourtActFileName(courtAct),
+                    BuildSudrfCourtActHtml(clientCase, courtData, courtAct),
+                    "Created",
+                    $"Судебный акт «{courtAct.Title}» добавлен из ГАС «Правосудие».",
+                    $"Судебный акт «{courtAct.Title}» добавлен из ГАС «Правосудие».",
+                    ct);
+                createdCourtActDocuments++;
+            }
+
+            createdProceduralDeadlines += await SyncSudrfCourtActDeadlinesAsync(
+                clientCase,
+                courtData,
+                courtAct,
+                document,
+                actorUserId,
+                actorName,
+                checkedAt,
+                ct);
+        }
+
+        if (createdCourtActDocuments > 0)
+        {
+            changedFields.Add("судебные акты");
+        }
+
+        if (createdProceduralDeadlines > 0)
+        {
+            changedFields.Add("процессуальные сроки");
+        }
+
+        return new CourtSyncApplyResult(changedFields, createdEvents.Count, updatedCourtEvents, createdCourtParties, createdCourtActDocuments, createdProceduralDeadlines);
 
         void UpdateString(string label, string currentValue, string sourceValue, Action<string> setValue, int maxLength)
         {
@@ -5068,6 +5120,153 @@ public class CasesV2Controller : ControllerBase
         }
     }
 
+    private async Task<int> SyncSudrfCourtActDeadlinesAsync(
+        ClientCase clientCase,
+        SudrfCourtCaseData courtData,
+        SudrfCourtAct courtAct,
+        ClientCaseDocument document,
+        int? actorUserId,
+        string actorName,
+        DateTime checkedAt,
+        CancellationToken ct)
+    {
+        if (!courtAct.ActDate.HasValue)
+        {
+            return 0;
+        }
+
+        var deadlineSpecs = BuildSudrfCourtActDeadlineSpecs(courtData, courtAct).ToList();
+        if (deadlineSpecs.Count == 0)
+        {
+            return 0;
+        }
+
+        var created = 0;
+        foreach (var spec in deadlineSpecs)
+        {
+            var exists = await _db.ClientCaseProceduralDeadlines.AnyAsync(item =>
+                item.ClientCaseId == clientCase.Id
+                && item.SourceType == "sudrf"
+                && item.ClientCaseDocumentId == document.Id
+                && item.DeadlineType == spec.DeadlineType, ct);
+            if (exists)
+            {
+                continue;
+            }
+
+            var deadline = new ClientCaseProceduralDeadline
+            {
+                ClientCaseId = clientCase.Id,
+                DeadlineType = spec.DeadlineType,
+                Title = spec.Title,
+                Description = spec.Description,
+                DueAt = spec.DueAt,
+                AllDay = true,
+                Status = "active",
+                WarningDaysBefore = 7,
+                ClientCaseDocumentId = document.Id,
+                SourceType = "sudrf",
+                Notes = $"Создано автоматически из ГАС «Правосудие». Документ: {courtAct.Title}.",
+                CreatedAt = checkedAt,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = Truncate(actorName, 256),
+                UpdatedAt = checkedAt,
+                UpdatedByUserId = actorUserId,
+                UpdatedByUserName = Truncate(actorName, 256),
+            };
+            _db.ClientCaseProceduralDeadlines.Add(deadline);
+            created++;
+
+            if (spec.DeadlineType == "appeal")
+            {
+                clientCase.CourtDecisionAt ??= courtAct.ActDate.Value.Date;
+                clientCase.AppealDeadlineAt ??= spec.DueAt.Date;
+            }
+            else if (spec.DeadlineType == "cassation")
+            {
+                clientCase.CassationDeadlineAt ??= spec.DueAt.Date;
+            }
+        }
+
+        if (created > 0)
+        {
+            AppendCaseEvent(clientCase, $"Процессуальные сроки по судебному акту «{courtAct.Title}» добавлены из ГАС «Правосудие». Добавлено: {created}.");
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return created;
+    }
+
+    private static IEnumerable<SudrfCourtActDeadlineSpec> BuildSudrfCourtActDeadlineSpecs(
+        SudrfCourtCaseData courtData,
+        SudrfCourtAct courtAct)
+    {
+        if (!courtAct.ActDate.HasValue)
+        {
+            yield break;
+        }
+
+        var title = courtAct.Title;
+        var result = $"{courtAct.Title} {courtAct.Result}";
+        if (courtData.Instance.Equals("appeal", StringComparison.OrdinalIgnoreCase)
+            || result.Contains("апелляцион", StringComparison.OrdinalIgnoreCase))
+        {
+            var dueAt = ProceduralDeadlineCalculator.CalculateByMonths(courtAct.ActDate.Value, 3);
+            yield return new SudrfCourtActDeadlineSpec(
+                "cassation",
+                "Срок кассационного обжалования",
+                $"Срок рассчитан от даты судебного акта «{title}» из ГАС «Правосудие».",
+                dueAt);
+            yield break;
+        }
+
+        if (result.Contains("решение", StringComparison.OrdinalIgnoreCase))
+        {
+            var dueAt = ProceduralDeadlineCalculator.CalculateByMonths(courtAct.ActDate.Value, 1);
+            yield return new SudrfCourtActDeadlineSpec(
+                "appeal",
+                "Срок апелляционного обжалования",
+                $"Срок рассчитан от даты судебного акта «{title}» из ГАС «Правосудие».",
+                dueAt);
+        }
+    }
+
+    private static string BuildSudrfCourtActDocumentKey(SudrfCourtAct courtAct)
+    {
+        var raw = $"{courtAct.Title}|{courtAct.ActDate:yyyy-MM-dd}|{courtAct.Result}|{courtAct.SourceUrl}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();
+        return $"sudrf-act-{hash[..24]}";
+    }
+
+    private static string BuildSudrfCourtActFileName(SudrfCourtAct courtAct)
+    {
+        var date = courtAct.ActDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "без-даты";
+        return $"{date} - {courtAct.Title}.html";
+    }
+
+    private static string BuildSudrfCourtActHtml(ClientCase clientCase, SudrfCourtCaseData courtData, SudrfCourtAct courtAct)
+        => $"""
+           <!doctype html>
+           <html lang="ru">
+           <head>
+             <meta charset="utf-8">
+             <title>{Html(courtAct.Title)}</title>
+           </head>
+           <body>
+             <h1>{Html(courtAct.Title)}</h1>
+             <p><strong>Дело CRM:</strong> {Html(clientCase.Title)}</p>
+             <p><strong>Суд:</strong> {Html(courtData.CourtName)}</p>
+             <p><strong>Номер дела в суде:</strong> {Html(courtData.CaseNumber)}</p>
+             <p><strong>Дата судебного акта:</strong> {Html(FormatTemplateDate(courtAct.ActDate))}</p>
+             <p><strong>Дата размещения:</strong> {Html(FormatTemplateDate(courtAct.PostedAt))}</p>
+             <p><strong>Результат:</strong> {Html(courtAct.Result)}</p>
+             <p><strong>Источник:</strong> <a href="{Html(courtAct.SourceUrl)}">{Html(courtAct.SourceUrl)}</a></p>
+             <hr>
+             <p>{Html(courtAct.Summary)}</p>
+           </body>
+           </html>
+           """;
+
     private static string FormatCourtSyncResult(CourtSyncApplyResult result)
     {
         var parts = new List<string>();
@@ -5089,6 +5288,16 @@ public class CasesV2Controller : ControllerBase
         if (result.CreatedCourtParties > 0)
         {
             parts.Add($"добавлено участников процесса: {result.CreatedCourtParties}");
+        }
+
+        if (result.CreatedCourtActDocuments > 0)
+        {
+            parts.Add($"добавлено судебных актов: {result.CreatedCourtActDocuments}");
+        }
+
+        if (result.CreatedProceduralDeadlines > 0)
+        {
+            parts.Add($"добавлено процессуальных сроков: {result.CreatedProceduralDeadlines}");
         }
 
         return string.Join("; ", parts) + ".";
@@ -8826,6 +9035,8 @@ public class CasesV2Controller : ControllerBase
         public int CreatedCourtEvents { get; set; }
         public int UpdatedCourtEvents { get; set; }
         public int CreatedCourtParties { get; set; }
+        public int CreatedCourtActDocuments { get; set; }
+        public int CreatedProceduralDeadlines { get; set; }
         public DateTime? NextHearingAt { get; set; }
     }
 
@@ -8962,7 +9173,15 @@ public class CasesV2Controller : ControllerBase
         IReadOnlyList<string> ChangedFields,
         int CreatedCourtEvents,
         int UpdatedCourtEvents,
-        int CreatedCourtParties);
+        int CreatedCourtParties,
+        int CreatedCourtActDocuments,
+        int CreatedProceduralDeadlines);
+
+    private readonly record struct SudrfCourtActDeadlineSpec(
+        string DeadlineType,
+        string Title,
+        string Description,
+        DateTime DueAt);
 
     private readonly record struct SudrfCourtPartyCandidate(
         string DisplayName,

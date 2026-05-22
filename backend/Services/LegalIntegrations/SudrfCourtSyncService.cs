@@ -195,6 +195,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             .ToDictionary(item => NormalizeLabel(item.Key), item => item.Value, StringComparer.OrdinalIgnoreCase);
         var movements = ExtractMovementEvents(html);
         var participants = ExtractParticipants(html);
+        var courtActs = ExtractCourtActs(movements, sourceUri);
         var nextHearing = ResolveNextHearing(movements);
         var caseNumber = FirstNotEmpty(
             GetValue(labelValues, "номер дела"),
@@ -216,6 +217,10 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             JudicialUid = FirstNotEmpty(ExtractQueryValue(sourceUri, "judicial_uid"), ExtractJudicialUid(html)),
             Category = category,
             JudgeName = judgeName,
+            SecretaryName = FirstNotEmpty(
+                GetValue(labelValues, "секретарь"),
+                GetValue(labelValues, "секретарь судебного заседания"),
+                GetValue(labelValues, "помощник судьи")),
             LowerCourtName = FirstNotEmpty(
                 GetValue(labelValues, "суд первой инстанции"),
                 GetValue(labelValues, "суд (судебный участок) первой инстанции"),
@@ -227,6 +232,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             NextHearingPlace = nextHearing?.Place ?? string.Empty,
             MovementEvents = movements,
             Participants = participants,
+            CourtActs = courtActs,
         };
     }
 
@@ -440,6 +446,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
                 var result = GetCell(headers, row, "результат");
                 var reason = GetCell(headers, row, "основание", "причина");
                 var posted = ParseDate(GetCell(headers, row, "дата размещения", "размещено"));
+                var secretary = GetCell(headers, row, "секретар");
 
                 events.Add(new SudrfCourtMovementEvent
                 {
@@ -450,12 +457,99 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
                     Reason = reason,
                     PostedAt = posted,
                     SourceSummary = BuildMovementSummary(title, scheduledAt, place, result, reason),
+                    SecretaryName = secretary,
                 });
             }
         }
 
         return events;
     }
+
+    private static IReadOnlyList<SudrfCourtAct> ExtractCourtActs(IReadOnlyList<SudrfCourtMovementEvent> movements, Uri sourceUri)
+    {
+        var acts = new List<SudrfCourtAct>();
+        foreach (var movement in movements)
+        {
+            var actTitle = ResolveCourtActTitle(movement);
+            if (string.IsNullOrWhiteSpace(actTitle))
+            {
+                continue;
+            }
+
+            var actDate = movement.ScheduledAt?.Date ?? movement.PostedAt?.Date;
+            var result = FirstNotEmpty(movement.Result, movement.Reason);
+            acts.Add(new SudrfCourtAct
+            {
+                Title = actTitle,
+                ActDate = actDate,
+                PostedAt = movement.PostedAt?.Date,
+                Result = result,
+                Summary = BuildCourtActSummary(actTitle, actDate, result, movement.SourceSummary),
+                SourceUrl = sourceUri.ToString(),
+            });
+        }
+
+        return acts
+            .GroupBy(static item => BuildCourtActKey(item.Title, item.ActDate, item.Result), StringComparer.OrdinalIgnoreCase)
+            .Select(static group => group.First())
+            .ToList();
+    }
+
+    private static string ResolveCourtActTitle(SudrfCourtMovementEvent movement)
+    {
+        var text = $"{movement.Title} {movement.Result} {movement.Reason}";
+        if (text.Contains("апелляционное определение", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Апелляционное определение";
+        }
+
+        if (text.Contains("кассационное определение", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("кассационное постановление", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Кассационный судебный акт";
+        }
+
+        if (text.Contains("решение", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Решение суда";
+        }
+
+        if (text.Contains("определение", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Определение суда";
+        }
+
+        if (text.Contains("постановление", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Постановление суда";
+        }
+
+        return string.Empty;
+    }
+
+    private static string BuildCourtActSummary(string title, DateTime? actDate, string result, string sourceSummary)
+    {
+        var parts = new List<string> { title };
+        if (actDate.HasValue)
+        {
+            parts.Add(actDate.Value.ToString("dd.MM.yyyy", RussianCulture));
+        }
+
+        if (!string.IsNullOrWhiteSpace(result))
+        {
+            parts.Add(result);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceSummary))
+        {
+            parts.Add(sourceSummary);
+        }
+
+        return string.Join("; ", parts);
+    }
+
+    private static string BuildCourtActKey(string title, DateTime? actDate, string result)
+        => $"{NormalizeText(title)}|{actDate:yyyy-MM-dd}|{NormalizeText(result)}";
 
     private static IReadOnlyList<SudrfCourtParticipant> ExtractParticipants(string html)
     {
