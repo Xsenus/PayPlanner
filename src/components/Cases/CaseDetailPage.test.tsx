@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { DialogProvider } from '../../contexts/DialogContext';
 import { apiService } from '../../services/api';
 import type { ClientCase } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
@@ -749,19 +748,19 @@ describe('CaseDetailPage', () => {
   });
 
   it('opens full case editing from the detail header and saves changes', async () => {
-    render(
-      <DialogProvider>
-        <CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />
-      </DialogProvider>,
-    );
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
 
     expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
 
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(await screen.findByRole('heading', { name: 'Редактирование дела' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Карточка дела' })).toBeTruthy();
+
     const titleInput = await screen.findByLabelText('Название дела');
     fireEvent.change(titleInput, { target: { value: 'ЗЕМЦОВ - обновленная карточка' } });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Сохранить' }).at(-1) as HTMLElement);
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
 
     await waitFor(() => {
       expect(apiService.updateCaseV2).toHaveBeenCalledWith(

@@ -31,7 +31,6 @@ import {
 
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
-import { CaseModal } from '../Clients/CaseModal';
 import type {
   ActResponsible,
   Client,
@@ -72,6 +71,42 @@ type CaseTaskFilter = 'active' | 'all' | 'overdue' | 'done';
 type SummaryTone = 'slate' | 'emerald' | 'amber' | 'rose' | 'cyan';
 type ParticipantSourceType = 'client' | 'legalEntity' | 'externalContact';
 type DocumentSourceType = 'case' | 'task' | 'courtEvent' | 'workOrder' | 'invoice' | 'stage';
+
+interface CaseEditDraft {
+  title: string;
+  description: string;
+  status: string;
+  caseNumber: string;
+  caseType: string;
+  stage: string;
+  responsibleUserId: string;
+  startDate: string;
+  dueDate: string;
+  feeAmount: string;
+  priority: string;
+  courtName: string;
+  courtCaseNumber: string;
+  courtUrl: string;
+  nextHearingAt: string;
+  claimant: string;
+  defendant: string;
+  thirdParties: string;
+  representatives: string;
+  judgeName: string;
+  courtroom: string;
+  courtSecretaryContacts: string;
+  claimFiledAt: string;
+  courtDecisionAt: string;
+  appealDeadlineAt: string;
+  cassationDeadlineAt: string;
+  motionDeadlineAt: string;
+  objectionDeadlineAt: string;
+  documentsSummary: string;
+  eventHistory: string;
+  strategy: string;
+  isHiddenFromExecutor: boolean;
+  inactivityRemindersEnabled: boolean;
+}
 
 interface ParticipantDirectoryOption {
   key: string;
@@ -707,6 +742,107 @@ function isOverdueTask(task: TaskJournalItem) {
   return isActiveTask(task) && Number.isFinite(dueAt) && dueAt < Date.now();
 }
 
+function toDateInput(value: string | null | undefined) {
+  return value ? String(value).slice(0, 10) : '';
+}
+
+function toDateTimeInput(value: string | null | undefined) {
+  if (!value) return '';
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) {
+    return text.slice(0, 16);
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const offsetMs = parsed.getTimezoneOffset() * 60_000;
+  return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function fromDateInput(value: string) {
+  return value || null;
+}
+
+function fromDateTimeInput(value: string) {
+  return value ? new Date(value).toISOString() : null;
+}
+
+function buildCaseEditDraft(caseItem: ClientCase): CaseEditDraft {
+  return {
+    title: caseItem.title ?? '',
+    description: caseItem.description ?? '',
+    status: caseItem.status ?? 'Open',
+    caseNumber: caseItem.caseNumber ?? '',
+    caseType: caseItem.caseType ?? '',
+    stage: caseItem.stage ?? '',
+    responsibleUserId: caseItem.responsibleUserId ? String(caseItem.responsibleUserId) : '',
+    startDate: toDateInput(caseItem.startDate),
+    dueDate: toDateInput(caseItem.dueDate),
+    feeAmount: typeof caseItem.feeAmount === 'number' ? String(caseItem.feeAmount) : '',
+    priority: caseItem.priority ?? 'normal',
+    courtName: caseItem.courtName ?? '',
+    courtCaseNumber: caseItem.courtCaseNumber ?? '',
+    courtUrl: caseItem.courtUrl ?? '',
+    nextHearingAt: toDateTimeInput(caseItem.nextHearingAt),
+    claimant: caseItem.claimant ?? '',
+    defendant: caseItem.defendant ?? '',
+    thirdParties: caseItem.thirdParties ?? '',
+    representatives: caseItem.representatives ?? '',
+    judgeName: caseItem.judgeName ?? '',
+    courtroom: caseItem.courtroom ?? '',
+    courtSecretaryContacts: caseItem.courtSecretaryContacts ?? '',
+    claimFiledAt: toDateInput(caseItem.claimFiledAt),
+    courtDecisionAt: toDateInput(caseItem.courtDecisionAt),
+    appealDeadlineAt: toDateInput(caseItem.appealDeadlineAt),
+    cassationDeadlineAt: toDateInput(caseItem.cassationDeadlineAt),
+    motionDeadlineAt: toDateInput(caseItem.motionDeadlineAt),
+    objectionDeadlineAt: toDateInput(caseItem.objectionDeadlineAt),
+    documentsSummary: caseItem.documentsSummary ?? '',
+    eventHistory: caseItem.eventHistory ?? '',
+    strategy: caseItem.strategy ?? '',
+    isHiddenFromExecutor: Boolean(caseItem.isHiddenFromExecutor),
+    inactivityRemindersEnabled: caseItem.inactivityRemindersEnabled !== false,
+  };
+}
+
+function buildCasePatchFromEditDraft(draft: CaseEditDraft): Partial<ClientCase> {
+  return {
+    title: draft.title.trim(),
+    description: draft.description.trim(),
+    status: draft.status,
+    caseNumber: draft.caseNumber.trim(),
+    caseType: draft.caseType.trim(),
+    stage: draft.stage.trim(),
+    responsibleUserId: draft.responsibleUserId ? Number(draft.responsibleUserId) : null,
+    startDate: fromDateInput(draft.startDate),
+    dueDate: fromDateInput(draft.dueDate),
+    feeAmount: Number(draft.feeAmount.replace(',', '.')) || 0,
+    priority: draft.priority,
+    courtName: draft.courtName.trim(),
+    courtCaseNumber: draft.courtCaseNumber.trim(),
+    courtUrl: draft.courtUrl.trim(),
+    nextHearingAt: fromDateTimeInput(draft.nextHearingAt),
+    claimant: draft.claimant.trim(),
+    defendant: draft.defendant.trim(),
+    thirdParties: draft.thirdParties.trim(),
+    representatives: draft.representatives.trim(),
+    judgeName: draft.judgeName.trim(),
+    courtroom: draft.courtroom.trim(),
+    courtSecretaryContacts: draft.courtSecretaryContacts.trim(),
+    claimFiledAt: fromDateInput(draft.claimFiledAt),
+    courtDecisionAt: fromDateInput(draft.courtDecisionAt),
+    appealDeadlineAt: fromDateInput(draft.appealDeadlineAt),
+    cassationDeadlineAt: fromDateInput(draft.cassationDeadlineAt),
+    motionDeadlineAt: fromDateInput(draft.motionDeadlineAt),
+    objectionDeadlineAt: fromDateInput(draft.objectionDeadlineAt),
+    documentsSummary: draft.documentsSummary.trim(),
+    eventHistory: draft.eventHistory.trim(),
+    strategy: draft.strategy.trim(),
+    isHiddenFromExecutor: draft.isHiddenFromExecutor,
+    inactivityRemindersEnabled: draft.inactivityRemindersEnabled,
+  };
+}
+
 function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): Omit<ClientCase, 'id' | 'createdAt' | 'payments'> {
   return {
     clientId: patch.clientId ?? base.clientId ?? null,
@@ -830,7 +966,9 @@ export function CaseDetailPage({
   const [workOrderApprovalAction, setWorkOrderApprovalAction] = useState<'submit' | 'approve' | 'revision' | null>(null);
   const [workOrderApprovalComment, setWorkOrderApprovalComment] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
-  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editPageOpen, setEditPageOpen] = useState(false);
+  const [caseEditDraft, setCaseEditDraft] = useState<CaseEditDraft | null>(null);
+  const [savingCaseEdit, setSavingCaseEdit] = useState(false);
   const [statusDraft, setStatusDraft] = useState('Open');
   const [priorityDraft, setPriorityDraft] = useState('normal');
   const [stageDraft, setStageDraft] = useState('');
@@ -1462,14 +1600,41 @@ export function CaseDetailPage({
     }
   };
 
-  const saveCaseFromModal = async (patch: Partial<ClientCase>) => {
+  const openCaseEditPage = () => {
     if (!caseItem) return;
-
+    setCaseEditDraft(buildCaseEditDraft(caseItem));
+    setEditPageOpen(true);
     setError(null);
-    const updated = await apiService.updateCaseV2(caseItem.id, buildCaseUpdatePayload(caseItem, patch));
-    setCaseItem(updated);
-    setNotice('Карточка дела обновлена.');
-    setReloadToken((value) => value + 1);
+    setNotice(null);
+  };
+
+  const closeCaseEditPage = () => {
+    setEditPageOpen(false);
+    setCaseEditDraft(null);
+  };
+
+  const saveCaseFromPage = async () => {
+    if (!caseItem || !caseEditDraft) return;
+    if (!caseEditDraft.title.trim()) {
+      setError('Введите название дела.');
+      return;
+    }
+
+    setSavingCaseEdit(true);
+    setError(null);
+    try {
+      const patch = buildCasePatchFromEditDraft(caseEditDraft);
+      const updated = await apiService.updateCaseV2(caseItem.id, buildCaseUpdatePayload(caseItem, patch));
+      setCaseItem(updated);
+      setCaseEditDraft(buildCaseEditDraft(updated));
+      setEditPageOpen(false);
+      setNotice('Карточка дела обновлена.');
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить карточку дела.');
+    } finally {
+      setSavingCaseEdit(false);
+    }
   };
 
   const requestCaseAccess = async () => {
@@ -2257,12 +2422,27 @@ export function CaseDetailPage({
   const inactivitySummary = getInactivitySummary(caseItem);
   const courtSyncSummary = getCourtSyncSummary(caseItem);
 
+  if (editPageOpen && caseEditDraft) {
+    return (
+      <CaseEditPage
+        caseItem={caseItem}
+        draft={caseEditDraft}
+        responsibles={responsibles}
+        saving={savingCaseEdit}
+        error={error}
+        onBack={closeCaseEditPage}
+        onChange={setCaseEditDraft}
+        onSave={() => void saveCaseFromPage()}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1500px] space-y-5">
+      <div className="w-full max-w-none space-y-5">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(520px,auto)] xl:items-start">
+            <div className="min-w-0">
               <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 <ArrowLeft className="h-4 w-4" /> Реестр дел
               </button>
@@ -2282,34 +2462,34 @@ export function CaseDetailPage({
               <p className="mt-2 max-w-3xl text-sm text-slate-600">{caseItem.description || 'Описание по делу пока не заполнено.'}</p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:justify-end">
               {canEdit ? (
-                <button type="button" onClick={() => setEditModalOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+                <button type="button" onClick={openCaseEditPage} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">
                   <Pencil className="h-4 w-4" /> Редактировать дело
                 </button>
               ) : null}
-              <button type="button" onClick={() => setReloadToken((value) => value + 1)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <button type="button" onClick={() => setReloadToken((value) => value + 1)} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 <RefreshCw className="h-4 w-4" /> Обновить
               </button>
-              <button type="button" onClick={() => void copyCaseLink()} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <button type="button" onClick={() => void copyCaseLink()} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 {copiedLink ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />} {copiedLink ? 'Ссылка скопирована' : 'Ссылка'}
               </button>
-              <button type="button" onClick={() => void createTaskForCase()} disabled={creatingTask} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+              <button type="button" onClick={() => void createTaskForCase()} disabled={creatingTask} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
                 {creatingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPlus className="h-4 w-4" />} Создать задачу
               </button>
-              <button type="button" onClick={() => void generateDocument()} disabled={generatingDocument} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+              <button type="button" onClick={() => void generateDocument()} disabled={generatingDocument} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-blue-200 px-4 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
                 {generatingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Документ
               </button>
-              <button type="button" onClick={() => void runCourtSync()} disabled={syncingCourt} aria-label="Проверить суд по делу" className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 px-4 py-2 text-sm font-medium text-cyan-700 hover:bg-cyan-50 disabled:opacity-50">
+              <button type="button" onClick={() => void runCourtSync()} disabled={syncingCourt} aria-label="Проверить суд по делу" className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-cyan-200 px-4 text-sm font-medium text-cyan-700 hover:bg-cyan-50 disabled:opacity-50">
                 {syncingCourt ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Суд
               </button>
-              <button type="button" onClick={openOwner} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <button type="button" onClick={openOwner} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 <UserRound className="h-4 w-4" /> Клиент
               </button>
-              <button type="button" onClick={() => onOpenFinance?.(caseItem)} disabled={!onOpenFinance} className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
+              <button type="button" onClick={() => onOpenFinance?.(caseItem)} disabled={!onOpenFinance} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-indigo-200 px-4 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
                 <WalletCards className="h-4 w-4" /> Финансы
               </button>
-              <button type="button" onClick={() => void archiveCase()} disabled={savingHeader || caseItem.status === 'Closed'} className="inline-flex items-center gap-2 rounded-lg border border-amber-200 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50">
+              <button type="button" onClick={() => void archiveCase()} disabled={savingHeader || caseItem.status === 'Closed'} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-amber-200 px-4 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50">
                 {savingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />} Архив
               </button>
             </div>
@@ -2320,55 +2500,55 @@ export function CaseDetailPage({
         {notice ? <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">{notice}</div> : null}
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[160px_1fr_150px_210px_190px_190px_auto]">
-            <label className="text-sm font-medium text-slate-700">
+          <div className="grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-[170px_minmax(260px,1fr)_170px_230px_190px_190px_150px]">
+            <label className="flex h-full flex-col justify-between gap-1 text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
               <select
                 aria-label="Статус дела"
                 value={statusDraft}
                 onChange={(event) => setStatusDraft(event.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
                 {CASE_STATUS_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
             </label>
-            <label className="text-sm font-medium text-slate-700">
+            <label className="flex h-full flex-col justify-between gap-1 text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Стадия</span>
               <input
                 aria-label="Стадия дела"
                 value={stageDraft}
                 onChange={(event) => setStageDraft(event.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                 placeholder="Например: судебное производство"
               />
             </label>
-            <label className="text-sm font-medium text-slate-700">
+            <label className="flex h-full flex-col justify-between gap-1 text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Приоритет</span>
               <select
                 aria-label="Приоритет дела"
                 value={priorityDraft}
                 onChange={(event) => setPriorityDraft(event.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
                 {CASE_PRIORITY_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
             </label>
-            <label className="text-sm font-medium text-slate-700">
+            <label className="flex h-full flex-col justify-between gap-1 text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Ответственный</span>
               <select
                 aria-label="Ответственный по делу"
                 value={responsibleDraft}
                 onChange={(event) => setResponsibleDraft(event.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
                 <option value="">Не выбран</option>
                 {responsibles.map((responsible) => (
                   <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>
                 ))}
               </select>
             </label>
-            <label className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 xl:self-end">
+            <label className="flex h-full min-h-[58px] flex-col justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
               <span className="mb-2 block text-xs uppercase tracking-[0.12em] text-slate-400">Доступ</span>
               <span className="inline-flex items-center gap-2">
                 <input
@@ -2381,7 +2561,7 @@ export function CaseDetailPage({
                 Скрыть от исполнителя
               </span>
             </label>
-            <label className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 xl:self-end">
+            <label className="flex h-full min-h-[58px] flex-col justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
               <span className="mb-2 block text-xs uppercase tracking-[0.12em] text-slate-400">Автоконтроль</span>
               <span className="inline-flex items-center gap-2">
                 <input
@@ -2398,7 +2578,7 @@ export function CaseDetailPage({
               type="button"
               onClick={() => void saveHeaderChanges()}
               disabled={savingHeader}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 xl:self-end">
+              className="inline-flex h-full min-h-[58px] items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
               {savingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Сохранить
             </button>
           </div>
@@ -2925,16 +3105,247 @@ export function CaseDetailPage({
           onDownload={() => void downloadDocument(documentPreview.document)}
         />
       ) : null}
-      {editModalOpen ? (
-        <CaseModal
-          isOpen
-          caseData={caseItem}
-          responsibles={responsibles}
-          onClose={() => setEditModalOpen(false)}
-          onSave={saveCaseFromModal}
-          allowEdit={canEdit}
-        />
-      ) : null}
+    </div>
+  );
+}
+
+function CaseEditPage({
+  caseItem,
+  draft,
+  responsibles,
+  saving,
+  error,
+  onBack,
+  onChange,
+  onSave,
+}: {
+  caseItem: ClientCase;
+  draft: CaseEditDraft;
+  responsibles: ActResponsible[];
+  saving: boolean;
+  error: string | null;
+  onBack: () => void;
+  onChange: (draft: CaseEditDraft) => void;
+  onSave: () => void;
+}) {
+  const setField = <K extends keyof CaseEditDraft>(key: K, value: CaseEditDraft[K]) => {
+    onChange({ ...draft, [key]: value });
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="w-full max-w-none space-y-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <button type="button" onClick={onBack} className="mb-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <ArrowLeft className="h-4 w-4" /> Карточка дела
+              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">
+                  <Briefcase className="h-4 w-4" /> {caseItem.caseNumber || `#${caseItem.id}`}
+                </span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">Редактирование</span>
+              </div>
+              <h1 className="mt-3 text-3xl font-bold text-slate-900">Редактирование дела</h1>
+              <p className="mt-2 max-w-3xl text-sm text-slate-600">{caseItem.title || 'Без названия'}</p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={onBack}
+                disabled={saving}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <X className="h-4 w-4" /> Отмена
+              </button>
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={saving}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Сохранить дело
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Основные данные</h2>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <label className="md:col-span-2 text-sm font-medium text-slate-700">
+                Название дела <span className="text-rose-500">*</span>
+                <input
+                  aria-label="Название дела"
+                  value={draft.title}
+                  onChange={(event) => setField('title', event.target.value)}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+              <label className="md:col-span-2 text-sm font-medium text-slate-700">
+                Описание
+                <textarea
+                  aria-label="Описание дела"
+                  value={draft.description}
+                  onChange={(event) => setField('description', event.target.value)}
+                  rows={3}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                Номер дела
+                <input value={draft.caseNumber} onChange={(event) => setField('caseNumber', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                Тип дела
+                <input value={draft.caseType} onChange={(event) => setField('caseType', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                Статус
+                <select aria-label="Статус дела" value={draft.status} onChange={(event) => setField('status', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm">
+                  {CASE_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                Приоритет
+                <select aria-label="Приоритет дела" value={draft.priority} onChange={(event) => setField('priority', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm">
+                  {CASE_PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="md:col-span-2 text-sm font-medium text-slate-700">
+                Стадия
+                <input value={draft.stage} onChange={(event) => setField('stage', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" placeholder="Например: судебное производство" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                Ответственный
+                <select aria-label="Ответственный" value={draft.responsibleUserId} onChange={(event) => setField('responsibleUserId', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm">
+                  <option value="">Не выбран</option>
+                  {responsibles.map((responsible) => <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>)}
+                </select>
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                Сумма гонорара
+                <input aria-label="Сумма гонорара" type="number" value={draft.feeAmount} onChange={(event) => setField('feeAmount', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Сроки и доступ</h2>
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+              <label className="text-sm font-medium text-slate-700">
+                Дата начала
+                <input type="date" value={draft.startDate} onChange={(event) => setField('startDate', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                Срок
+                <input type="date" value={draft.dueDate} onChange={(event) => setField('dueDate', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+              </label>
+              <label className="flex min-h-[58px] items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
+                <input type="checkbox" checked={draft.isHiddenFromExecutor} onChange={(event) => setField('isHiddenFromExecutor', event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                Скрыть от исполнителя
+              </label>
+              <label className="flex min-h-[58px] items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
+                <input type="checkbox" checked={draft.inactivityRemindersEnabled} onChange={(event) => setField('inactivityRemindersEnabled', event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                Автоконтроль включен
+              </label>
+            </div>
+          </section>
+        </div>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Суд и участники процесса</h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <label className="text-sm font-medium text-slate-700">
+              Суд
+              <input value={draft.courtName} onChange={(event) => setField('courtName', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              № в суде
+              <input value={draft.courtCaseNumber} onChange={(event) => setField('courtCaseNumber', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Заседание
+              <input type="datetime-local" value={draft.nextHearingAt} onChange={(event) => setField('nextHearingAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="md:col-span-2 xl:col-span-3 text-sm font-medium text-slate-700">
+              Ссылка на источник
+              <input value={draft.courtUrl} onChange={(event) => setField('courtUrl', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Истец
+              <input value={draft.claimant} onChange={(event) => setField('claimant', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Ответчик
+              <input value={draft.defendant} onChange={(event) => setField('defendant', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Судья
+              <input value={draft.judgeName} onChange={(event) => setField('judgeName', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Третьи лица
+              <input value={draft.thirdParties} onChange={(event) => setField('thirdParties', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Представители
+              <input value={draft.representatives} onChange={(event) => setField('representatives', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Зал суда
+              <input value={draft.courtroom} onChange={(event) => setField('courtroom', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+            <label className="md:col-span-2 xl:col-span-3 text-sm font-medium text-slate-700">
+              Контакты секретаря
+              <input value={draft.courtSecretaryContacts} onChange={(event) => setField('courtSecretaryContacts', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            </label>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Процессуальные даты</h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <label className="text-sm font-medium text-slate-700">Иск подан<input type="date" value={draft.claimFiledAt} onChange={(event) => setField('claimFiledAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <label className="text-sm font-medium text-slate-700">Решение суда<input type="date" value={draft.courtDecisionAt} onChange={(event) => setField('courtDecisionAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <label className="text-sm font-medium text-slate-700">Апелляция<input type="date" value={draft.appealDeadlineAt} onChange={(event) => setField('appealDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <label className="text-sm font-medium text-slate-700">Кассация<input type="date" value={draft.cassationDeadlineAt} onChange={(event) => setField('cassationDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <label className="text-sm font-medium text-slate-700">Возражения<input type="date" value={draft.objectionDeadlineAt} onChange={(event) => setField('objectionDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Рабочие материалы</h2>
+          <div className="mt-4 grid gap-4 lg:grid-cols-3">
+            <label className="text-sm font-medium text-slate-700">
+              Стратегия и план действий
+              <textarea value={draft.strategy} onChange={(event) => setField('strategy', event.target.value)} rows={6} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Документы
+              <textarea value={draft.documentsSummary} onChange={(event) => setField('documentsSummary', event.target.value)} rows={6} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              История событий
+              <textarea value={draft.eventHistory} onChange={(event) => setField('eventHistory', event.target.value)} rows={6} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            </label>
+          </div>
+        </section>
+
+        <div className="sticky bottom-0 -mx-4 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.08)] backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onBack} disabled={saving} className="h-10 rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              Отмена
+            </button>
+            <button type="button" onClick={onSave} disabled={saving} className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Сохранить дело
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
