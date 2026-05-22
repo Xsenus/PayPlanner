@@ -51,7 +51,7 @@ public class InvoiceDeletionTests
     }
 
     [Fact]
-    public async Task Delete_ReturnsBadRequest_WhenInvoiceHasLinkedAct()
+    public async Task Delete_DetachesLinkedAct_WhenInvoiceHasLinkedAct()
     {
         await using var db = await CreateContextAsync();
         var invoice = await CreateInvoiceAggregateAsync(db);
@@ -73,15 +73,12 @@ public class InvoiceDeletionTests
         var result = await controller.Delete(parentPaymentId, CancellationToken.None);
         db.ChangeTracker.Clear();
 
-        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-        var message = badRequest.Value?.GetType().GetProperty("message")?.GetValue(badRequest.Value)?.ToString();
-        Assert.False(string.IsNullOrWhiteSpace(message));
-        Assert.Contains("Нельзя удалить счёт", message!);
-        Assert.Contains("акты: 1", message!);
-        Assert.NotNull(await db.Payments.FindAsync(parentPaymentId));
-        Assert.NotNull(await db.Invoices.FindAsync(invoiceEntityId));
+        Assert.IsType<NoContentResult>(result);
+        Assert.Null(await db.Payments.FindAsync(parentPaymentId));
+        Assert.Null(await db.Invoices.FindAsync(invoiceEntityId));
         var act = await db.Acts.SingleAsync();
-        Assert.Equal(parentPaymentId, act.InvoiceId);
+        Assert.Null(act.InvoiceId);
+        Assert.Null(act.InvoiceNumber);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

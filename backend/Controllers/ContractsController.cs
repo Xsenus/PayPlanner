@@ -33,6 +33,7 @@ public class ContractsController : ControllerBase
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
     private const string DefaultMainCompanyIdSettingKey = "legalEntities.defaultMainCompanyId";
     private const string DefaultContractNumberTemplate = "{N}-{DD}/{MM}-{YY}";
+    private const string ContractTerminationClientEmailsEnabledKey = "notifications.email.contractTerminationClientEnabled";
 
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
@@ -985,6 +986,11 @@ public class ContractsController : ControllerBase
             return;
         }
 
+        if (!await IsContractTerminationClientEmailEnabledAsync(ct))
+        {
+            return;
+        }
+
         var email = ResolveContractRecipientEmail(contract);
         if (string.IsNullOrWhiteSpace(email))
         {
@@ -1018,6 +1024,17 @@ public class ContractsController : ControllerBase
             $"Договор № {contract.Number} расторгнут",
             string.Join(Environment.NewLine + Environment.NewLine, lines),
             cancellationToken: ct);
+    }
+
+    private async Task<bool> IsContractTerminationClientEmailEnabledAsync(CancellationToken ct)
+    {
+        var value = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(setting => setting.Key == ContractTerminationClientEmailsEnabledKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(ct);
+
+        return bool.TryParse(value, out var enabled) && enabled;
     }
 
     private void ApplyContractCancellationSideEffects(Contract contract, string reason, DateTime now)

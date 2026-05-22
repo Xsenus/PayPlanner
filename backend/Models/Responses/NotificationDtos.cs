@@ -12,6 +12,7 @@ public class EmailNotificationSettingsDto
 {
     public bool Enabled { get; set; }
     public bool Ready { get; set; }
+    public bool ContractTerminationClientEmailsEnabled { get; set; }
     public string SmtpHost { get; set; } = string.Empty;
     public int SmtpPort { get; set; }
     public string SmtpUsername { get; set; } = string.Empty;

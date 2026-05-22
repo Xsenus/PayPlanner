@@ -23,6 +23,7 @@ public sealed class NotificationService : INotificationService
     ];
 
     private const string EmailEnabledKey = "notifications.email.enabled";
+    private const string EmailContractTerminationClientEnabledKey = "notifications.email.contractTerminationClientEnabled";
     private const string EmailSmtpHostKey = "notifications.email.smtpHost";
     private const string EmailSmtpPortKey = "notifications.email.smtpPort";
     private const string EmailSmtpUsernameKey = "notifications.email.smtpUsername";
@@ -113,6 +114,7 @@ public sealed class NotificationService : INotificationService
     {
         var now = DateTime.UtcNow;
         await UpsertSettingAsync(EmailEnabledKey, request.Enabled ? "true" : "false", now, cancellationToken);
+        await UpsertSettingAsync(EmailContractTerminationClientEnabledKey, request.ContractTerminationClientEmailsEnabled ? "true" : "false", now, cancellationToken);
         await UpsertSettingAsync(EmailSmtpHostKey, NormalizeOptional(request.SmtpHost) ?? string.Empty, now, cancellationToken);
         await UpsertSettingAsync(EmailSmtpPortKey, Math.Clamp(request.SmtpPort ?? 587, 1, 65535).ToString(CultureInfo.InvariantCulture), now, cancellationToken);
         await UpsertSettingAsync(EmailSmtpUsernameKey, NormalizeOptional(request.SmtpUsername) ?? string.Empty, now, cancellationToken);
@@ -1460,6 +1462,7 @@ public sealed class NotificationService : INotificationService
     private EmailNotificationSettingsDto BuildEmailSettings(IReadOnlyDictionary<string, string> settings)
     {
         var enabled = ResolveBool(settings, EmailEnabledKey, "Email:Enabled", false);
+        var contractTerminationClientEmailsEnabled = ResolveBool(settings, EmailContractTerminationClientEnabledKey, "Email:ContractTerminationClientEmailsEnabled", false);
         var host = ResolveValue(settings, EmailSmtpHostKey, "Email:SmtpHost") ?? string.Empty;
         var port = ResolveInt(settings, EmailSmtpPortKey, "Email:SmtpPort", 587);
         var username = ResolveValue(settings, EmailSmtpUsernameKey, "Email:SmtpUsername") ?? string.Empty;
@@ -1478,6 +1481,7 @@ public sealed class NotificationService : INotificationService
             FromEmail = fromEmail,
             FromName = fromName,
             EnableSsl = enableSsl,
+            ContractTerminationClientEmailsEnabled = contractTerminationClientEmailsEnabled,
             Ready = enabled
                     && !string.IsNullOrWhiteSpace(host)
                     && !string.IsNullOrWhiteSpace(username)
@@ -1491,6 +1495,7 @@ public sealed class NotificationService : INotificationService
         var keys = new[]
         {
             EmailEnabledKey,
+            EmailContractTerminationClientEnabledKey,
             EmailSmtpHostKey,
             EmailSmtpPortKey,
             EmailSmtpUsernameKey,

@@ -190,6 +190,7 @@ export function NotificationSettings() {
   const [route, setRoute] = useState<SenderRoute>(() => readNotificationRoute());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [emailPolicySaving, setEmailPolicySaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testRecipient, setTestRecipient] = useState('');
   const [testSubject, setTestSubject] = useState('Тестовое уведомление PayPlanner');
@@ -257,6 +258,38 @@ export function NotificationSettings() {
   const emailSenders = useMemo(() => senders.filter((item) => item.channel === 'email'), [senders]);
   const telegramSenders = useMemo(() => senders.filter((item) => item.channel === 'telegram'), [senders]);
   const selectedSender = form.id ? senders.find((item) => item.id === form.id) : null;
+
+  const updateContractTerminationClientEmails = async (enabled: boolean) => {
+    if (!settings) return;
+
+    setEmailPolicySaving(true);
+    try {
+      const next = await apiService.updateEmailNotificationSettings({
+        enabled: settings.email.enabled,
+        contractTerminationClientEmailsEnabled: enabled,
+        smtpHost: settings.email.smtpHost,
+        smtpPort: settings.email.smtpPort,
+        smtpUsername: settings.email.smtpUsername,
+        smtpPassword: '',
+        keepExistingPassword: true,
+        fromEmail: settings.email.fromEmail,
+        fromName: settings.email.fromName,
+        enableSsl: settings.email.enableSsl,
+      });
+      setSettings(next);
+      toast.success(
+        enabled
+          ? 'Автоматические письма клиентам при расторжении договора включены.'
+          : 'Автоматические письма клиентам при расторжении договора отключены.',
+        'Уведомления',
+      );
+    } catch (error) {
+      const text = extractDisplayErrorMessage(error, 'Не удалось сохранить настройку email-уведомлений клиентов.');
+      toast.error(text, 'Уведомления');
+    } finally {
+      setEmailPolicySaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!settings || route.mode === 'list') return;
@@ -594,6 +627,32 @@ export function NotificationSettings() {
               {message}
             </div>
           )}
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h4 className="text-base font-semibold text-gray-900">Автоматические письма клиентам</h4>
+                <p className="mt-1 max-w-3xl text-sm text-gray-500">
+                  Отдельный выключатель для писем, которые система отправляет клиентам без ручного подтверждения.
+                  Общая отправка Email и SMTP-настройки по-прежнему управляются отправителями ниже.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  checked={settings?.email.contractTerminationClientEmailsEnabled ?? false}
+                  disabled={loading || emailPolicySaving}
+                  onChange={(event) => void updateContractTerminationClientEmails(event.target.checked)}
+                />
+                Письмо клиенту при расторжении договора
+              </label>
+            </div>
+            <p className="mt-3 text-xs text-gray-500">
+              Пока настройка выключена, расторжение договора только сохранит статус и условия. Письмо не уйдёт, даже если у клиента указан email.
+              Для фактической отправки также должен быть включён и настроен Email-отправитель.
+            </p>
+          </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">

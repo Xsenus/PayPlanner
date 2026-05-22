@@ -721,6 +721,7 @@ public class ContractsControllerTests
     {
         await using var db = await CreateContextAsync();
         var client = await CreateClientAsync(db, email: "client@example.com");
+        await EnableContractTerminationClientEmailsAsync(db);
         var emailService = new CapturingEmailService();
         var controller = CreateAdminController(db, emailService);
 
@@ -754,6 +755,43 @@ public class ContractsControllerTests
         Assert.Contains("Дата расторжения: 22.05.2026", emailService.Body);
         Assert.Contains("Стороны прекращают обязательства", emailService.Body);
         Assert.Contains("Возвратов нет", emailService.Body);
+    }
+
+    [Fact]
+    public async Task Terminate_DoesNotSendClientEmailNotification_WhenSettingDisabled()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db, email: "client@example.com");
+        var emailService = new CapturingEmailService();
+        var controller = CreateAdminController(db, emailService);
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-NOTIFY-OFF",
+                Date = new DateTime(2026, 5, 1),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 18_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var terminateResult = await controller.Terminate(
+            createdDto.Id,
+            new TerminateContractRequest
+            {
+                TerminationDate = new DateTime(2026, 5, 22),
+                Terms = "Стороны прекращают обязательства.",
+                Reason = "Соглашение сторон",
+                FinancialTerms = "Возвратов нет.",
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(terminateResult.Result);
+        Assert.Null(emailService.ToEmail);
+        Assert.Null(emailService.Subject);
     }
 
     [Fact]
@@ -1484,6 +1522,18 @@ public class ContractsControllerTests
         };
 
         return controller;
+    }
+
+    private static async Task EnableContractTerminationClientEmailsAsync(PaymentContext db)
+    {
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "notifications.email.contractTerminationClientEnabled",
+            Value = "true",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
     }
 
     private static async Task<Payment> CreateInvoicePaymentAsync(PaymentContext db, string invoiceNumber, DateTime date, decimal amount)

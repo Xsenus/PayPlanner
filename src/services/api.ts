@@ -196,6 +196,7 @@ export interface NotificationPurposeDto {
 export interface EmailNotificationSettingsDto {
   enabled: boolean;
   ready: boolean;
+  contractTerminationClientEmailsEnabled: boolean;
   smtpHost: string;
   smtpPort: number;
   smtpUsername: string;
@@ -272,6 +273,19 @@ export interface NotificationSettingsDto {
   telegram: TelegramNotificationSettingsDto;
   senders: NotificationSenderDto[];
   purposes: NotificationPurposeDto[];
+}
+
+export interface UpdateEmailNotificationSettingsRequest {
+  enabled: boolean;
+  contractTerminationClientEmailsEnabled: boolean;
+  smtpHost?: string | null;
+  smtpPort?: number | null;
+  smtpUsername?: string | null;
+  smtpPassword?: string | null;
+  keepExistingPassword?: boolean;
+  fromEmail?: string | null;
+  fromName?: string | null;
+  enableSsl: boolean;
 }
 
 export interface UserNotificationDto {
@@ -1460,6 +1474,13 @@ export class ApiService {
   // ===== Notifications =====
   async getNotificationSettings() {
     return this.request<NotificationSettingsDto>('/notifications/settings');
+  }
+
+  async updateEmailNotificationSettings(payload: UpdateEmailNotificationSettingsRequest) {
+    return this.request<NotificationSettingsDto>('/notifications/settings/email', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
   }
 
   async createNotificationSender(payload: UpsertNotificationSenderRequest) {

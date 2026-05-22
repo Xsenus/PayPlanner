@@ -3,6 +3,7 @@ namespace PayPlanner.Api.Models.Requests;
 public class UpdateEmailNotificationSettingsRequest
 {
     public bool Enabled { get; set; }
+    public bool ContractTerminationClientEmailsEnabled { get; set; }
     public string? SmtpHost { get; set; }
     public int? SmtpPort { get; set; }
     public string? SmtpUsername { get; set; }

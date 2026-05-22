@@ -2228,8 +2228,6 @@ public class InvoicesController : ControllerBase
         }
 
         var invoiceEntityIds = GetInvoiceEntityIdsToDelete(paymentList);
-        var linkedActCount = await _db.Acts
-            .CountAsync(act => act.InvoiceId.HasValue && paymentIds.Contains(act.InvoiceId.Value), ct);
         var linkedContractCount = await _db.ContractInvoices
             .CountAsync(link => paymentIds.Contains(link.InvoiceId), ct);
         linkedContractCount += paymentList.Count(payment => payment.ContractId.HasValue && payment.ContractId.Value > 0);
@@ -2238,17 +2236,12 @@ public class InvoicesController : ControllerBase
             : await _db.MoneyOperations
                 .CountAsync(operation => operation.LinkedInvoiceId.HasValue && invoiceEntityIds.Contains(operation.LinkedInvoiceId.Value), ct);
 
-        if (linkedActCount == 0 && linkedContractCount == 0 && linkedMoneyOperationCount == 0)
+        if (linkedContractCount == 0 && linkedMoneyOperationCount == 0)
         {
             return null;
         }
 
         var linkedParts = new List<string>();
-        if (linkedActCount > 0)
-        {
-            linkedParts.Add($"акты: {linkedActCount}");
-        }
-
         if (linkedContractCount > 0)
         {
             linkedParts.Add($"договоры: {linkedContractCount}");
