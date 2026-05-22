@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlarmClock,
+  ArrowLeft,
   Bell,
   CalendarDays,
   CalendarClock,
@@ -1840,13 +1841,19 @@ export function TaskJournal({
 
     try {
       if (taskId) {
-        await apiService.updateTaskJournalItem(taskId, normalized);
+        const updated = await apiService.updateTaskJournalItem(taskId, normalized);
         toast.success('Задача обновлена.', 'Журнал задач');
+        if (routeTaskId === taskId) {
+          setModal({ mode: 'view', task: updated });
+          setHighlightedTaskId(updated.id);
+        } else {
+          closeTaskModal();
+        }
       } else {
         await apiService.createTaskJournalItem(normalized);
         toast.success('Задача создана.', 'Журнал задач');
+        closeTaskModal();
       }
-      closeTaskModal();
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
@@ -2103,6 +2110,46 @@ export function TaskJournal({
   const pageDescription = isApprovalsMode
     ? 'Задачи, которые находятся на согласовании и требуют решения текущего согласующего. Они остаются в общем журнале задач.'
     : 'Задачи по контрагентам, делам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.';
+  const isRouteTaskPage = !isApprovalsMode && Boolean(routeTaskId && routeTaskId > 0);
+  const routeTaskState = isRouteTaskPage && modal?.task?.id === routeTaskId ? modal : null;
+
+  if (isRouteTaskPage) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        {routeTaskState ? (
+          <TaskModal
+            key={`page-${routeTaskState.task!.id}-${routeTaskState.mode}`}
+            presentation="page"
+            state={routeTaskState}
+            tasks={tasks}
+            assignees={assignees}
+            clients={clients}
+            legalEntities={legalEntities}
+            counterpartyOptions={counterpartyOptions}
+            currentUserId={currentUserId}
+            currentUserName={currentUserName}
+            taskSettings={taskSettings}
+            notificationDefaults={taskNotificationDefaults}
+            canSwitchToEdit={canEditModalTask}
+            onClose={closeTaskModal}
+            onEnableEdit={() => setModal((current) => current?.task ? { ...current, mode: 'edit' } : current)}
+            onSave={handleSave}
+            onResultSave={handleResultSave}
+            onApprovalDecision={handleApprovalDecision}
+            onDelete={handleDelete}
+            onDuplicate={handleDuplicateTask}
+          />
+        ) : (
+          <div className="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
+            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+              <div className="mx-auto inline-block h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-slate-900" />
+              <p className="mt-4 text-sm text-slate-600">Загружаем карточку задачи...</p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -2500,6 +2547,7 @@ export function TaskJournal({
       {modal ? (
         <TaskModal
           key={modal.task ? `edit-${modal.task.id}` : 'create'}
+          presentation="modal"
           state={modal}
           tasks={tasks}
           assignees={assignees}
@@ -4239,6 +4287,7 @@ function TaskDaySchedulePanel({
 }
 
 function TaskModal({
+  presentation = 'modal',
   state,
   tasks,
   assignees,
@@ -4258,6 +4307,7 @@ function TaskModal({
   onDelete,
   onDuplicate,
 }: {
+  presentation?: 'modal' | 'page';
   state: ModalState;
   tasks: TaskJournalItem[];
   assignees: TaskJournalAssignee[];
@@ -4284,6 +4334,7 @@ function TaskModal({
 }) {
   const toast = useToast();
   const { confirm } = useDialog();
+  const isPage = presentation === 'page';
   const taskId = state?.task?.id ?? null;
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const newFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -4782,10 +4833,20 @@ function TaskModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+    <div className={isPage ? 'mx-auto max-w-[1320px] p-4 sm:p-6 lg:p-8' : 'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm'}>
+      <div className={isPage ? 'flex w-full flex-col overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm' : 'flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl'}>
         <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
+            {isPage ? (
+              <button
+                type="button"
+                onClick={onClose}
+                className="mb-4 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Журнал задач
+              </button>
+            ) : null}
             <h2 className="text-2xl font-semibold text-slate-900">{state?.mode === 'view' ? 'Просмотр задачи' : state?.mode === 'edit' ? 'Редактировать задачу' : 'Новая задача'}</h2>
             <p className="mt-1 text-sm text-slate-500">Заполните контрагента, исполнителя, срок и правила напоминаний.</p>
           </div>
@@ -4866,13 +4927,15 @@ function TaskModal({
                 ) : null}
               </>
             ) : null}
-            <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Закрыть">
-              <X className="h-5 w-5" />
-            </button>
+            {!isPage ? (
+              <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Закрыть">
+                <X className="h-5 w-5" />
+              </button>
+            ) : null}
           </div>
         </div>
 
-        <div className="min-h-0 overflow-y-auto px-6 py-5">
+        <div className={isPage ? 'px-6 py-5' : 'min-h-0 overflow-y-auto px-6 py-5'}>
           {quickPanel === 'assignee' ? (
             <section className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
               <Field label="Новый исполнитель">
@@ -5584,7 +5647,7 @@ function TaskModal({
         </div>
 
         <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-4 sm:flex-row sm:justify-end">
-          <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Отмена</button>
+          <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">{isPage ? 'К журналу задач' : 'Отмена'}</button>
           {isLockedViewWithEditAccess ? (
             <button type="button" onClick={onEnableEdit} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               Редактировать задачу

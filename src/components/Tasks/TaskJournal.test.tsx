@@ -433,6 +433,21 @@ describe('TaskJournal', () => {
     expect((screen.getByTestId('task-author-display') as HTMLInputElement).value).toBe('Диденко Анна Владимировна');
   });
 
+  it('opens an existing task as a full page when the route is synced', async () => {
+    await renderJournal(undefined, { withRoute: true });
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+
+    await screen.findByRole('heading', { name: 'Просмотр задачи' });
+
+    expect(screen.queryByTestId('task-table')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Журнал задач' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Журнал задач' }));
+
+    await screen.findByTestId('task-table');
+  });
+
   it('hides task export buttons when export permission is denied', async () => {
     authState.isAdmin = false;
     permissionsState.taskCanExport = false;
@@ -722,6 +737,12 @@ describe('TaskJournal', () => {
     await screen.findByRole('heading', { name: 'Просмотр задачи' });
 
     expect(searchInput.value).toBe('EGOROV');
+    expect(screen.queryByTestId('task-table')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Журнал задач' }));
+
+    const restoredSearchInput = await screen.findByRole('textbox') as HTMLInputElement;
+    expect(restoredSearchInput.value).toBe('EGOROV');
     expect(screen.getByText('Egor task')).toBeTruthy();
     expect(screen.queryByText('Other task')).toBeNull();
 
