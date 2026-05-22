@@ -94,6 +94,40 @@ public class SudrfCourtSyncServiceTests
         Assert.Equal(new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=43326936&case_uid=30d46dc6-6d6c-4514-8aa6-591c3bc63a1a&delo_id=42"), handler.Requests.Last().RequestUri);
     }
 
+    [Fact]
+    public async Task FetchCaseAsync_SearchesByJudicialUidWhenCourtNumberContainsUid()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var handler = new RecordingResponseHandler(request =>
+        {
+            if (request.RequestUri?.Query.Contains("name_op=case", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return BuildCourtHtml();
+            }
+
+            if (request.RequestUri?.Query.Contains("name_op=r_juid", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return BuildJudicialUidResultHtml();
+            }
+
+            return BuildSearchPageHtml();
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
+
+        var data = await service.FetchCaseAsync(
+            "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=sf",
+            CancellationToken.None,
+            "27RS0005-01-2025-002659-56");
+
+        Assert.Equal("33а-3390/2026", data.CaseNumber);
+        Assert.DoesNotContain(handler.Requests, item => item.Method == HttpMethod.Post);
+        Assert.Contains(handler.Requests, item =>
+            item.RequestUri?.Query.Contains("name_op=r_juid", StringComparison.OrdinalIgnoreCase) == true
+            && item.RequestUri.Query.Contains("judicial_uid=27RS0005-01-2025-002659-56", StringComparison.Ordinal));
+        Assert.Equal(new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=43326936&case_uid=30d46dc6-6d6c-4514-8aa6-591c3bc63a1a&delo_id=42"), handler.Requests.Last().RequestUri);
+    }
+
     [Theory]
     [InlineData("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo")]
     [InlineData("http://example.sudrf.ru/modules.php?name=sud_delo")]

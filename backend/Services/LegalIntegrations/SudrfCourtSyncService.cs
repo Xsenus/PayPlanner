@@ -108,11 +108,34 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
     private async Task<Uri?> FindCaseCardUriAsync(Uri sourceUri, string courtCaseNumber, CancellationToken ct)
     {
+        if (IsJudicialUid(courtCaseNumber))
+        {
+            foreach (var deloId in BuildDeloIdCandidates(sourceUri, courtCaseNumber))
+            {
+                var resultHtml = await GetJudicialUidSearchAsync(sourceUri, deloId, courtCaseNumber, ct);
+                var cardUri = ExtractCaseCardUri(resultHtml, sourceUri, courtCaseNumber);
+                if (cardUri is not null)
+                {
+                    return cardUri;
+                }
+            }
+
+            foreach (var deloId in BuildDeloIdCandidates(sourceUri, courtCaseNumber))
+            {
+                var resultHtml = await PostCaseSearchAsync(sourceUri, deloId, courtCaseNumber, ct, searchByJudicialUid: true);
+                var cardUri = ExtractCaseCardUri(resultHtml, sourceUri, courtCaseNumber);
+                if (cardUri is not null)
+                {
+                    return cardUri;
+                }
+            }
+        }
+
         foreach (var deloId in BuildDeloIdCandidates(sourceUri, courtCaseNumber))
         {
             foreach (var queryNumber in BuildCaseNumberSearchValues(courtCaseNumber))
             {
-                var resultHtml = await PostCaseSearchAsync(sourceUri, deloId, queryNumber, ct);
+                var resultHtml = await PostCaseSearchAsync(sourceUri, deloId, queryNumber, ct, searchByJudicialUid: false);
                 var cardUri = ExtractCaseCardUri(resultHtml, sourceUri, courtCaseNumber);
                 if (cardUri is not null)
                 {
@@ -124,10 +147,24 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         return null;
     }
 
-    private async Task<string> PostCaseSearchAsync(Uri sourceUri, string deloId, string courtCaseNumber, CancellationToken ct)
+    private async Task<string> GetJudicialUidSearchAsync(Uri sourceUri, string deloId, string judicialUid, CancellationToken ct)
+    {
+        var srvNum = FirstNotEmpty(ExtractQueryValue(sourceUri, "srv_num"), "1");
+        var modulesUri = new Uri(sourceUri,
+            $"/modules.php?name=sud_delo&srv_num={Uri.EscapeDataString(srvNum)}&name_op=r_juid&delo_id={Uri.EscapeDataString(deloId)}&case_type=0&judicial_uid={Uri.EscapeDataString(judicialUid.Trim())}");
+        return await ReadHtmlAsync(modulesUri, ct);
+    }
+
+    private async Task<string> PostCaseSearchAsync(
+        Uri sourceUri,
+        string deloId,
+        string searchValue,
+        CancellationToken ct,
+        bool searchByJudicialUid)
     {
         var srvNum = FirstNotEmpty(ExtractQueryValue(sourceUri, "srv_num"), "1");
         var modulesUri = new Uri(sourceUri, "/modules.php");
+        var searchField = searchByJudicialUid ? "p2_case__JUDICIAL_UIDSS" : "p2_case__CASE_NUMBERSS";
         using var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["name"] = "sud_delo",
@@ -137,7 +174,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             ["case_type"] = "0",
             ["new"] = "0",
             ["delo_table"] = "p2_case",
-            ["p2_case__CASE_NUMBERSS"] = courtCaseNumber,
+            [searchField] = searchValue,
             ["list"] = "ON",
         });
 
@@ -199,6 +236,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
         var normalized = courtCaseNumber.Trim().ToLowerInvariant();
         if (normalized.StartsWith("33", StringComparison.Ordinal)
+            || IsJudicialUid(courtCaseNumber)
             || normalized.Contains("апелля", StringComparison.OrdinalIgnoreCase))
         {
             AddIfPresent("42");
@@ -253,6 +291,9 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
     private static bool UriEquals(Uri left, Uri right)
         => string.Equals(left.GetLeftPart(UriPartial.Path), right.GetLeftPart(UriPartial.Path), StringComparison.OrdinalIgnoreCase)
             && string.Equals(left.Query, right.Query, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsJudicialUid(string value)
+        => JudicialUidValueRegex().IsMatch(value.Trim());
 
     private static Uri? ExtractCaseCardUri(string html, Uri sourceUri, string? courtCaseNumber)
     {
@@ -682,6 +723,9 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
 
     [GeneratedRegex(@"judicial_uid=(?<uid>[0-9A-ZА-Яa-zа-я\-_]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex JudicialUidRegex();
+
+    [GeneratedRegex(@"^\d{2}[A-ZА-Я]{2}\d{4}-\d{2}-\d{4}-\d{6}-\d{2}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex JudicialUidValueRegex();
 
     [GeneratedRegex(@"\d{2}\.\d{2}\.\d{4}", RegexOptions.CultureInvariant)]
     private static partial Regex DateRegex();
