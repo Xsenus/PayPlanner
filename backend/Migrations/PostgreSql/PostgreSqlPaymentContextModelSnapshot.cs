@@ -391,6 +391,146 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         });
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.AppRelease", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ReleaseId")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTime>("ReleasedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasDefaultValue("manual");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReleaseId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_AppReleases_ReleaseId");
+
+                    b.HasIndex("IsActive", "ReleasedAt")
+                        .HasDatabaseName("IX_AppReleases_IsActive_ReleasedAt");
+
+                    b.ToTable("AppReleases");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.AppReleaseItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AppReleaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppReleaseId", "SortOrder")
+                        .HasDatabaseName("IX_AppReleaseItems_Release_SortOrder");
+
+                    b.ToTable("AppReleaseItems");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.AppReleaseSeen", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AppReleaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("SeenAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppReleaseId")
+                        .HasDatabaseName("IX_AppReleaseSeen_ReleaseId");
+
+                    b.HasIndex("UserId", "AppReleaseId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_AppReleaseSeen_User_Release");
+
+                    b.ToTable("AppReleaseSeen");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Bank", b =>
                 {
                     b.Property<int>("Id")
@@ -1411,6 +1551,612 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         });
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourt", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Contacts")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Instance")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_ClientCaseCourt_DeletedAt_Audit");
+
+                    b.HasIndex("Instance")
+                        .HasDatabaseName("IX_ClientCaseCourts_Instance");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_ClientCaseCourts_IsActive");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_ClientCaseCourt_IsDeleted");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_ClientCaseCourts_Name");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_ClientCaseCourt_UpdatedAt_Audit");
+
+                    b.HasIndex("IsActive", "SortOrder", "Name")
+                        .HasDatabaseName("IX_ClientCaseCourts_Active_Sort_Name");
+
+                    b.ToTable("ClientCaseCourts");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtComplaint", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ClientCaseDocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ComplaintType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("CourtInstanceId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("FiledAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("TargetInstance")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseDocumentId")
+                        .HasDatabaseName("IX_ClientCaseCourtComplaints_DocumentId");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_ClientCaseCourtComplaints_ClientCaseId");
+
+                    b.HasIndex("CourtInstanceId")
+                        .HasDatabaseName("IX_ClientCaseCourtComplaints_CourtInstanceId");
+
+                    b.HasIndex("ClientCaseId", "TargetInstance", "IsArchived")
+                        .HasDatabaseName("IX_ClientCaseCourtComplaints_Case_Target_Archived");
+
+                    b.ToTable("ClientCaseCourtComplaints");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("AllDay")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("ClientCaseDocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CourtCaseNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int?>("CourtId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CourtInstance")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("CourtName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Courtroom")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("JudgeName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("MovementStatus")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("ProceduralDeadlineId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ResultSummary")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("ScheduledAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("SecretaryName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseDocumentId")
+                        .HasDatabaseName("IX_ClientCaseCourtEvents_DocumentId");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_ClientCaseCourtEvents_ClientCaseId");
+
+                    b.HasIndex("CourtId")
+                        .HasDatabaseName("IX_ClientCaseCourtEvents_CourtId");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_ClientCaseCourtEvent_DeletedAt_Audit");
+
+                    b.HasIndex("EventType")
+                        .HasDatabaseName("IX_ClientCaseCourtEvents_EventType");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_ClientCaseCourtEvent_IsDeleted");
+
+                    b.HasIndex("MovementStatus")
+                        .HasDatabaseName("IX_ClientCaseCourtEvents_MovementStatus");
+
+                    b.HasIndex("ProceduralDeadlineId")
+                        .HasDatabaseName("IX_ClientCaseCourtEvents_DeadlineId");
+
+                    b.HasIndex("ScheduledAt")
+                        .HasDatabaseName("IX_ClientCaseCourtEvents_ScheduledAt");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_ClientCaseCourtEvent_UpdatedAt_Audit");
+
+                    b.HasIndex("ClientCaseId", "MovementStatus", "ScheduledAt")
+                        .HasDatabaseName("IX_ClientCaseCourtEvents_Case_Status_ScheduledAt");
+
+                    b.ToTable("ClientCaseCourtEvents");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtEventHistory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("ActorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ActorUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("ClientCaseCourtEventId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseCourtEventId")
+                        .HasDatabaseName("IX_ClientCaseCourtEventHistory_CourtEventId");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_ClientCaseCourtEventHistory_ClientCaseId");
+
+                    b.HasIndex("OccurredAt")
+                        .HasDatabaseName("IX_ClientCaseCourtEventHistory_OccurredAt");
+
+                    b.HasIndex("ClientCaseId", "OccurredAt")
+                        .HasDatabaseName("IX_ClientCaseCourtEventHistory_Case_OccurredAt");
+
+                    b.ToTable("ClientCaseCourtEventHistory");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtInstance", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CourtCaseNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int?>("CourtId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CourtName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("CourtUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Courtroom")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Instance")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("JudgeName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("SecretaryName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_ClientCaseCourtInstances_ClientCaseId");
+
+                    b.HasIndex("CourtId")
+                        .HasDatabaseName("IX_ClientCaseCourtInstances_CourtId");
+
+                    b.HasIndex("Instance")
+                        .HasDatabaseName("IX_ClientCaseCourtInstances_Instance");
+
+                    b.HasIndex("ClientCaseId", "Instance")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ClientCaseCourtInstances_Case_Instance");
+
+                    b.ToTable("ClientCaseCourtInstances");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtParty", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("ProcessRole")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int?>("RelatedPartyId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RepresentativeName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Side")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_ClientCaseCourtParties_ClientCaseId");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_ClientCaseCourtParty_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_ClientCaseCourtParty_IsDeleted");
+
+                    b.HasIndex("RelatedPartyId")
+                        .HasDatabaseName("IX_ClientCaseCourtParties_RelatedPartyId");
+
+                    b.HasIndex("Side")
+                        .HasDatabaseName("IX_ClientCaseCourtParties_Side");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_ClientCaseCourtParty_UpdatedAt_Audit");
+
+                    b.HasIndex("ClientCaseId", "Side", "IsArchived")
+                        .HasDatabaseName("IX_ClientCaseCourtParties_Case_Side_Archived");
+
+                    b.ToTable("ClientCaseCourtParties");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseDocument", b =>
                 {
                     b.Property<int>("Id")
@@ -1492,6 +2238,153 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasDatabaseName("IX_ClientCaseDocuments_Case_Document_Version");
 
                     b.ToTable("ClientCaseDocuments");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseProceduralDeadline", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("AllDay")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("ClientCaseDocumentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CloseReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ClosedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ClosedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("DeadlineType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("DueAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("SourceId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int?>("TaskJournalItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("WarningDaysBefore")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientCaseDocumentId")
+                        .HasDatabaseName("IX_ClientCaseProceduralDeadlines_DocumentId");
+
+                    b.HasIndex("ClientCaseId")
+                        .HasDatabaseName("IX_ClientCaseProceduralDeadlines_ClientCaseId");
+
+                    b.HasIndex("DeadlineType")
+                        .HasDatabaseName("IX_ClientCaseProceduralDeadlines_DeadlineType");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_ClientCaseProceduralDeadline_DeletedAt_Audit");
+
+                    b.HasIndex("DueAt")
+                        .HasDatabaseName("IX_ClientCaseProceduralDeadlines_DueAt");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_ClientCaseProceduralDeadline_IsDeleted");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_ClientCaseProceduralDeadlines_Status");
+
+                    b.HasIndex("TaskJournalItemId")
+                        .HasDatabaseName("IX_ClientCaseProceduralDeadlines_TaskJournalItemId");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_ClientCaseProceduralDeadline_UpdatedAt_Audit");
+
+                    b.HasIndex("ClientCaseId", "Status", "DueAt")
+                        .HasDatabaseName("IX_ClientCaseProceduralDeadlines_Case_Status_DueAt");
+
+                    b.ToTable("ClientCaseProceduralDeadlines");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseRelatedParty", b =>
@@ -5142,8 +6035,20 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("AuthorUserId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ChannelsJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("[]");
+
+                    b.Property<int?>("ClientCaseId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ClientId")
+                        .HasColumnType("integer");
+
                     b.Property<decimal?>("ContractorPaymentAmount")
-                        .HasColumnType("numeric(18,2)");
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("ContractorPaymentDueDate")
                         .HasColumnType("date");
@@ -5160,18 +6065,6 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
-
-                    b.Property<string>("ChannelsJson")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text")
-                        .HasDefaultValue("[]");
-
-                    b.Property<int?>("ClientCaseId")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("ClientId")
-                        .HasColumnType("integer");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -5283,17 +6176,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("AuthorUserId")
                         .HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
 
-                    b.HasIndex("ContractorPaymentDueDate")
-                        .HasDatabaseName("IX_TaskJournalItems_ContractorPaymentDueDate");
-
-                    b.HasIndex("ContractorPaymentId")
-                        .HasDatabaseName("IX_TaskJournalItems_ContractorPaymentId");
-
                     b.HasIndex("ClientCaseId")
                         .HasDatabaseName("IX_TaskJournalItems_ClientCaseId");
 
                     b.HasIndex("ClientId")
                         .HasDatabaseName("IX_TaskJournalItems_ClientId");
+
+                    b.HasIndex("ContractorPaymentDueDate")
+                        .HasDatabaseName("IX_TaskJournalItems_ContractorPaymentDueDate");
+
+                    b.HasIndex("ContractorPaymentId")
+                        .HasDatabaseName("IX_TaskJournalItems_ContractorPaymentId");
 
                     b.HasIndex("DeletedAt")
                         .HasDatabaseName("IX_TaskJournalItem_DeletedAt_Audit");
@@ -6162,6 +7055,36 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("LegalEntity");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.AppReleaseItem", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.AppRelease", "AppRelease")
+                        .WithMany("Items")
+                        .HasForeignKey("AppReleaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AppRelease");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.AppReleaseSeen", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.AppRelease", "AppRelease")
+                        .WithMany("SeenByUsers")
+                        .HasForeignKey("AppReleaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AppRelease");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.BankStatementImportRow", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.BankStatementImportBatch", "Batch")
@@ -6300,6 +7223,119 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("ResponsibleUser");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtComplaint", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseDocument", "ClientCaseDocument")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseDocumentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("CourtComplaints")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseCourtInstance", "CourtInstance")
+                        .WithMany("Complaints")
+                        .HasForeignKey("CourtInstanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("ClientCaseDocument");
+
+                    b.Navigation("CourtInstance");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtEvent", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseDocument", "ClientCaseDocument")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseDocumentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("CourtEvents")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseCourt", "Court")
+                        .WithMany()
+                        .HasForeignKey("CourtId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseProceduralDeadline", "ProceduralDeadline")
+                        .WithMany()
+                        .HasForeignKey("ProceduralDeadlineId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("ClientCaseDocument");
+
+                    b.Navigation("Court");
+
+                    b.Navigation("ProceduralDeadline");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtEventHistory", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseCourtEvent", "ClientCaseCourtEvent")
+                        .WithMany("History")
+                        .HasForeignKey("ClientCaseCourtEventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("CourtEventHistory")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("ClientCaseCourtEvent");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtInstance", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("CourtInstances")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseCourt", "Court")
+                        .WithMany()
+                        .HasForeignKey("CourtId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("Court");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtParty", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("CourtParties")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseRelatedParty", "RelatedParty")
+                        .WithMany()
+                        .HasForeignKey("RelatedPartyId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("RelatedParty");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseDocument", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
@@ -6316,6 +7352,31 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("ClientCase");
 
                     b.Navigation("UploadedByUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseProceduralDeadline", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.ClientCaseDocument", "ClientCaseDocument")
+                        .WithMany()
+                        .HasForeignKey("ClientCaseDocumentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
+                        .WithMany("ProceduralDeadlines")
+                        .HasForeignKey("ClientCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("ClientCase");
+
+                    b.Navigation("ClientCaseDocument");
+
+                    b.Navigation("TaskJournalItem");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseRelatedParty", b =>
@@ -7025,6 +8086,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("LineItems");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.AppRelease", b =>
+                {
+                    b.Navigation("Items");
+
+                    b.Navigation("SeenByUsers");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.BankStatementImportBatch", b =>
                 {
                     b.Navigation("Rows");
@@ -7049,15 +8117,37 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCase", b =>
                 {
+                    b.Navigation("CourtComplaints");
+
+                    b.Navigation("CourtEventHistory");
+
+                    b.Navigation("CourtEvents");
+
+                    b.Navigation("CourtInstances");
+
+                    b.Navigation("CourtParties");
+
                     b.Navigation("Documents");
 
                     b.Navigation("InvoiceClientCases");
 
                     b.Navigation("Payments");
 
+                    b.Navigation("ProceduralDeadlines");
+
                     b.Navigation("RelatedParties");
 
                     b.Navigation("WorkOrders");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtEvent", b =>
+                {
+                    b.Navigation("History");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseCourtInstance", b =>
+                {
+                    b.Navigation("Complaints");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.ClientCaseWorkOrder", b =>

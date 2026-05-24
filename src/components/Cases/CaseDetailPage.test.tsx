@@ -35,6 +35,11 @@ vi.mock('../../services/api', () => ({
     runCaseCourtSync: vi.fn(),
     getCaseCourtSyncLogs: vi.fn(),
     getCaseCourtDirectory: vi.fn(),
+    getCaseCourtInstances: vi.fn(),
+    updateCaseCourtInstance: vi.fn(),
+    createCaseCourtComplaint: vi.fn(),
+    updateCaseCourtComplaint: vi.fn(),
+    archiveCaseCourtComplaint: vi.fn(),
     getCaseCourtEvents: vi.fn(),
     createCaseCourtEvent: vi.fn(),
     updateCaseCourtEvent: vi.fn(),
@@ -307,6 +312,71 @@ describe('CaseDetailPage', () => {
         createdAt: '2026-05-21T00:00:00Z',
       },
     ]);
+    vi.mocked(apiService.getCaseCourtInstances).mockReset();
+    vi.mocked(apiService.getCaseCourtInstances).mockResolvedValue([
+      {
+        id: 0,
+        clientCaseId: 15,
+        instance: 'first',
+        instanceLabel: 'Первая инстанция',
+        courtName: 'Арбитражный суд Самарской области',
+        courtCaseNumber: 'А55-12345/2026',
+        courtUrl: 'https://kad.arbitr.ru/card',
+        judgeName: '',
+        courtroom: '',
+        secretaryName: '',
+        notes: '',
+        createdAt: '2026-05-21T00:00:00Z',
+        complaints: [],
+      },
+      { id: 0, clientCaseId: 15, instance: 'appeal', instanceLabel: 'Апелляция', createdAt: '2026-05-21T00:00:00Z', complaints: [] },
+      { id: 0, clientCaseId: 15, instance: 'cassation', instanceLabel: 'Кассация', createdAt: '2026-05-21T00:00:00Z', complaints: [] },
+      { id: 0, clientCaseId: 15, instance: 'supreme', instanceLabel: 'Верховный суд', createdAt: '2026-05-21T00:00:00Z', complaints: [] },
+    ]);
+    vi.mocked(apiService.updateCaseCourtInstance).mockReset();
+    vi.mocked(apiService.updateCaseCourtInstance).mockResolvedValue({
+      id: 81,
+      clientCaseId: 15,
+      instance: 'appeal',
+      instanceLabel: 'Апелляция',
+      courtName: 'Самарский областной суд',
+      courtCaseNumber: '33-123/2026',
+      courtUrl: 'https://example.test/appeal',
+      createdAt: '2026-05-21T00:00:00Z',
+      complaints: [],
+    });
+    vi.mocked(apiService.createCaseCourtComplaint).mockReset();
+    vi.mocked(apiService.createCaseCourtComplaint).mockResolvedValue({
+      id: 91,
+      clientCaseId: 15,
+      courtInstanceId: 81,
+      complaintType: 'privateComplaint',
+      complaintTypeLabel: 'Частная жалоба',
+      title: 'Частная жалоба',
+      targetInstance: 'appeal',
+      targetInstanceLabel: 'Апелляция',
+      status: 'draft',
+      statusLabel: 'Черновик',
+      isArchived: false,
+      createdAt: '2026-05-21T00:00:00Z',
+    });
+    vi.mocked(apiService.updateCaseCourtComplaint).mockReset();
+    vi.mocked(apiService.updateCaseCourtComplaint).mockResolvedValue({
+      id: 91,
+      clientCaseId: 15,
+      courtInstanceId: 81,
+      complaintType: 'privateComplaint',
+      complaintTypeLabel: 'Частная жалоба',
+      title: 'Частная жалоба',
+      targetInstance: 'appeal',
+      targetInstanceLabel: 'Апелляция',
+      status: 'accepted',
+      statusLabel: 'Принята',
+      isArchived: false,
+      createdAt: '2026-05-21T00:00:00Z',
+    });
+    vi.mocked(apiService.archiveCaseCourtComplaint).mockReset();
+    vi.mocked(apiService.archiveCaseCourtComplaint).mockResolvedValue(undefined);
     vi.mocked(apiService.createCaseCourtEvent).mockReset();
     vi.mocked(apiService.createCaseCourtEvent).mockResolvedValue({
       id: 42,
@@ -1588,8 +1658,8 @@ describe('CaseDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
 
     expect(screen.getByText('Судебный блок')).toBeTruthy();
-    expect(screen.getAllByText('Арбитражный суд Самарской области').length).toBeGreaterThan(0);
-    expect(screen.getByText('https://kad.arbitr.ru/card')).toBeTruthy();
+    expect(await screen.findByDisplayValue('Арбитражный суд Самарской области')).toBeTruthy();
+    expect(await screen.findByDisplayValue('https://kad.arbitr.ru/card')).toBeTruthy();
     expect(screen.getByText('Судебная хронология')).toBeTruthy();
     expect(screen.getAllByText('Ближайшее заседание').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Апелляция').length).toBeGreaterThan(0);

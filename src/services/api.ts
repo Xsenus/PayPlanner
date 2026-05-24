@@ -3366,6 +3366,35 @@ export class ApiService {
     });
   }
 
+  async getCaseCourtInstances(caseId: number) {
+    return this.request<ClientCaseCourtInstance[]>(`/v2/cases/${caseId}/court-instances`);
+  }
+
+  async updateCaseCourtInstance(caseId: number, instance: string, payload: UpsertClientCaseCourtInstancePayload) {
+    return this.request<ClientCaseCourtInstance>(`/v2/cases/${caseId}/court-instances/${encodeURIComponent(instance)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async createCaseCourtComplaint(caseId: number, instance: string, payload: UpsertClientCaseCourtComplaintPayload) {
+    return this.request<ClientCaseCourtComplaint>(`/v2/cases/${caseId}/court-instances/${encodeURIComponent(instance)}/complaints`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCaseCourtComplaint(caseId: number, instance: string, complaintId: number, payload: UpsertClientCaseCourtComplaintPayload) {
+    return this.request<ClientCaseCourtComplaint>(`/v2/cases/${caseId}/court-instances/${encodeURIComponent(instance)}/complaints/${complaintId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async archiveCaseCourtComplaint(caseId: number, instance: string, complaintId: number) {
+    return this.request<void>(`/v2/cases/${caseId}/court-instances/${encodeURIComponent(instance)}/complaints/${complaintId}`, { method: 'DELETE' });
+  }
+
   async getCaseCourtEvents(caseId: number) {
     return this.request<ClientCaseCourtEvent[]>(`/v2/cases/${caseId}/court-events`);
   }
@@ -4712,13 +4741,17 @@ import type {
   CaseCalendarEvent,
   CaseCalendarSummary,
   ClientCaseCourt,
+  ClientCaseCourtComplaint,
   ClientCaseCourtEvent,
   ClientCaseCourtEventHistory,
+  ClientCaseCourtInstance,
   ClientCaseCourtParty,
   ClientCaseProceduralDeadline,
   ProceduralDeadlineCalculationPayload,
   ProceduralDeadlineCalculationResult,
+  UpsertClientCaseCourtComplaintPayload,
   UpsertClientCaseCourtEventPayload,
+  UpsertClientCaseCourtInstancePayload,
   UpsertClientCaseCourtPayload,
   UpsertClientCaseCourtPartyPayload,
   UpsertClientCaseProceduralDeadlinePayload,

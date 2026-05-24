@@ -91,6 +91,13 @@ public class CasesV2Controller : ControllerBase
         "Договорной/финансовый документ",
         "Внутренний служебный файл",
     ];
+    private static readonly string[] CourtInstanceOrder =
+    [
+        "first",
+        "appeal",
+        "cassation",
+        "supreme",
+    ];
 
     private readonly PaymentContext _db;
     private readonly ICaseDocumentStorage _caseDocumentStorage;
@@ -1749,6 +1756,310 @@ public class CasesV2Controller : ControllerBase
         await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "closed", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
         return Ok(MapProceduralDeadline(deadline));
+    }
+
+    [HttpGet("{id:int}/court-instances")]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseCourtInstanceDto>>> GetCourtInstances(int id, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var savedInstances = await _db.ClientCaseCourtInstances
+            .AsNoTracking()
+            .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
+            .Where(item => item.ClientCaseId == id)
+            .ToListAsync(ct);
+
+        var items = CourtInstanceOrder
+            .Select(instance =>
+            {
+                var saved = savedInstances.FirstOrDefault(item =>
+                    string.Equals(item.Instance, instance, StringComparison.OrdinalIgnoreCase));
+                return saved is not null
+                    ? MapCourtInstance(saved)
+                    : MapCourtInstance(BuildDefaultCourtInstance(clientCase, instance));
+            })
+            .ToList();
+
+        return Ok(items);
+    }
+
+    [HttpPut("{id:int}/court-instances/{instance}")]
+    public async Task<ActionResult<ClientCaseCourtInstanceDto>> UpsertCourtInstance(
+        int id,
+        string instance,
+        [FromBody] UpsertClientCaseCourtInstanceRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var normalizedInstance = NormalizeCourtInstance(instance);
+        var court = await ResolveCourtDirectoryItemForRequestAsync(request?.CourtId, ct);
+        if (request?.CourtId is not null && court is null)
+        {
+            return BadRequest(new { message = "Судебная инстанция не найдена в справочнике." });
+        }
+
+        var validation = ValidateCourtInstanceRequest(request, clientCase, normalizedInstance, court);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        var now = DateTime.UtcNow;
+        var courtInstance = await _db.ClientCaseCourtInstances
+            .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.Instance == normalizedInstance, ct);
+        if (courtInstance is null)
+        {
+            courtInstance = new ClientCaseCourtInstance
+            {
+                ClientCaseId = id,
+                Instance = normalizedInstance,
+                CreatedAt = now,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = Truncate(actorName, 256),
+            };
+            _db.ClientCaseCourtInstances.Add(courtInstance);
+        }
+
+        courtInstance.CourtId = court?.Id;
+        courtInstance.CourtName = validation.CourtName;
+        courtInstance.CourtCaseNumber = validation.CourtCaseNumber;
+        courtInstance.CourtUrl = validation.CourtUrl;
+        courtInstance.JudgeName = validation.JudgeName;
+        courtInstance.Courtroom = validation.Courtroom;
+        courtInstance.SecretaryName = validation.SecretaryName;
+        courtInstance.Notes = validation.Notes;
+        courtInstance.UpdatedAt = now;
+        courtInstance.UpdatedByUserId = actorUserId;
+        courtInstance.UpdatedByUserName = Truncate(actorName, 256);
+
+        AppendCaseEvent(clientCase, $"Обновлена судебная инстанция «{ResolveCourtInstanceLabel(normalizedInstance)}». Автор: {actorName}.");
+        _db.SetAuditReason($"Обновлена судебная инстанция дела: {ResolveCourtInstanceLabel(normalizedInstance)}");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapCourtInstance(courtInstance));
+    }
+
+    [HttpPost("{id:int}/court-instances/{instance}/complaints")]
+    public async Task<ActionResult<ClientCaseCourtComplaintDto>> CreateCourtComplaint(
+        int id,
+        string instance,
+        [FromBody] UpsertClientCaseCourtComplaintRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var normalizedInstance = NormalizeCourtInstance(instance);
+        var validation = await ValidateCourtComplaintRequestAsync(id, normalizedInstance, request, ct);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        var now = DateTime.UtcNow;
+        var courtInstance = await EnsureCourtInstanceAsync(clientCase, normalizedInstance, actorUserId, actorName, ct);
+        var complaint = new ClientCaseCourtComplaint
+        {
+            ClientCaseId = id,
+            CourtInstanceId = courtInstance.Id,
+            ComplaintType = validation.ComplaintType,
+            Title = validation.Title,
+            TargetInstance = validation.TargetInstance,
+            FiledAt = validation.FiledAt,
+            Status = validation.Status,
+            ClientCaseDocumentId = validation.ClientCaseDocumentId,
+            Notes = validation.Notes,
+            CreatedAt = now,
+            CreatedByUserId = actorUserId,
+            CreatedByUserName = Truncate(actorName, 256),
+            UpdatedAt = now,
+            UpdatedByUserId = actorUserId,
+            UpdatedByUserName = Truncate(actorName, 256),
+        };
+
+        _db.ClientCaseCourtComplaints.Add(complaint);
+        AppendCaseEvent(clientCase, $"Добавлена жалоба «{complaint.Title}» в блок {ResolveCourtInstanceLabel(normalizedInstance)}. Автор: {actorName}.");
+        _db.SetAuditReason($"Добавлена жалоба по судебной инстанции: {complaint.Title}");
+        await _db.SaveChangesAsync(ct);
+
+        return Created($"/api/v2/cases/{id}/court-instances/{normalizedInstance}/complaints/{complaint.Id}", MapCourtComplaint(complaint));
+    }
+
+    [HttpPut("{id:int}/court-instances/{instance}/complaints/{complaintId:int}")]
+    public async Task<ActionResult<ClientCaseCourtComplaintDto>> UpdateCourtComplaint(
+        int id,
+        string instance,
+        int complaintId,
+        [FromBody] UpsertClientCaseCourtComplaintRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var normalizedInstance = NormalizeCourtInstance(instance);
+        var complaint = await _db.ClientCaseCourtComplaints
+            .Include(item => item.CourtInstance)
+            .FirstOrDefaultAsync(item =>
+                item.Id == complaintId &&
+                item.ClientCaseId == id &&
+                item.CourtInstance.Instance == normalizedInstance &&
+                !item.IsArchived,
+                ct);
+        if (complaint is null)
+        {
+            return NotFound();
+        }
+
+        var validation = await ValidateCourtComplaintRequestAsync(id, normalizedInstance, request, ct);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        complaint.ComplaintType = validation.ComplaintType;
+        complaint.Title = validation.Title;
+        complaint.TargetInstance = validation.TargetInstance;
+        complaint.FiledAt = validation.FiledAt;
+        complaint.Status = validation.Status;
+        complaint.ClientCaseDocumentId = validation.ClientCaseDocumentId;
+        complaint.Notes = validation.Notes;
+        complaint.UpdatedAt = DateTime.UtcNow;
+        complaint.UpdatedByUserId = actorUserId;
+        complaint.UpdatedByUserName = Truncate(actorName, 256);
+
+        AppendCaseEvent(clientCase, $"Обновлена жалоба «{complaint.Title}». Автор: {actorName}.");
+        _db.SetAuditReason($"Обновлена жалоба по судебной инстанции: {complaint.Title}");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapCourtComplaint(complaint));
+    }
+
+    [HttpDelete("{id:int}/court-instances/{instance}/complaints/{complaintId:int}")]
+    public async Task<IActionResult> ArchiveCourtComplaint(
+        int id,
+        string instance,
+        int complaintId,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var normalizedInstance = NormalizeCourtInstance(instance);
+        var complaint = await _db.ClientCaseCourtComplaints
+            .Include(item => item.CourtInstance)
+            .FirstOrDefaultAsync(item =>
+                item.Id == complaintId &&
+                item.ClientCaseId == id &&
+                item.CourtInstance.Instance == normalizedInstance &&
+                !item.IsArchived,
+                ct);
+        if (complaint is null)
+        {
+            return NotFound();
+        }
+
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        complaint.IsArchived = true;
+        complaint.UpdatedAt = DateTime.UtcNow;
+        complaint.UpdatedByUserId = actorUserId;
+        complaint.UpdatedByUserName = Truncate(actorName, 256);
+        AppendCaseEvent(clientCase, $"Жалоба «{complaint.Title}» перенесена в архив. Автор: {actorName}.");
+        _db.SetAuditReason($"Жалоба по судебной инстанции перенесена в архив: {complaint.Title}");
+        await _db.SaveChangesAsync(ct);
+
+        return NoContent();
     }
 
     [HttpGet("{id:int}/court-events")]
@@ -7488,6 +7799,117 @@ public class CasesV2Controller : ControllerBase
             UpdatedByUserName = item.UpdatedByUserName,
         };
 
+    private static ClientCaseCourtInstanceDto MapCourtInstance(ClientCaseCourtInstance item)
+        => new()
+        {
+            Id = item.Id,
+            ClientCaseId = item.ClientCaseId,
+            Instance = item.Instance,
+            InstanceLabel = ResolveCourtInstanceLabel(item.Instance),
+            CourtId = item.CourtId,
+            CourtName = item.CourtName,
+            CourtCaseNumber = item.CourtCaseNumber,
+            CourtUrl = item.CourtUrl,
+            JudgeName = item.JudgeName,
+            Courtroom = item.Courtroom,
+            SecretaryName = item.SecretaryName,
+            Notes = item.Notes,
+            CreatedAt = item.CreatedAt,
+            CreatedByUserId = item.CreatedByUserId,
+            CreatedByUserName = item.CreatedByUserName,
+            UpdatedAt = item.UpdatedAt,
+            UpdatedByUserId = item.UpdatedByUserId,
+            UpdatedByUserName = item.UpdatedByUserName,
+            Complaints = item.Complaints
+                .Where(complaint => !complaint.IsArchived)
+                .OrderByDescending(complaint => complaint.FiledAt ?? complaint.CreatedAt)
+                .ThenByDescending(complaint => complaint.Id)
+                .Select(MapCourtComplaint)
+                .ToList(),
+        };
+
+    private static ClientCaseCourtComplaintDto MapCourtComplaint(ClientCaseCourtComplaint item)
+        => new()
+        {
+            Id = item.Id,
+            ClientCaseId = item.ClientCaseId,
+            CourtInstanceId = item.CourtInstanceId,
+            ComplaintType = item.ComplaintType,
+            ComplaintTypeLabel = ResolveCourtComplaintTypeLabel(item.ComplaintType),
+            Title = item.Title,
+            TargetInstance = item.TargetInstance,
+            TargetInstanceLabel = ResolveCourtInstanceLabel(item.TargetInstance),
+            FiledAt = item.FiledAt,
+            Status = item.Status,
+            StatusLabel = ResolveCourtComplaintStatusLabel(item.Status),
+            ClientCaseDocumentId = item.ClientCaseDocumentId,
+            Notes = item.Notes,
+            IsArchived = item.IsArchived,
+            CreatedAt = item.CreatedAt,
+            CreatedByUserId = item.CreatedByUserId,
+            CreatedByUserName = item.CreatedByUserName,
+            UpdatedAt = item.UpdatedAt,
+            UpdatedByUserId = item.UpdatedByUserId,
+            UpdatedByUserName = item.UpdatedByUserName,
+        };
+
+    private static ClientCaseCourtInstance BuildDefaultCourtInstance(ClientCase clientCase, string instance)
+    {
+        var normalizedInstance = NormalizeCourtInstance(instance);
+        var isFirstInstance = normalizedInstance == "first";
+        return new ClientCaseCourtInstance
+        {
+            ClientCaseId = clientCase.Id,
+            Instance = normalizedInstance,
+            CourtName = isFirstInstance ? clientCase.CourtName : string.Empty,
+            CourtCaseNumber = isFirstInstance ? clientCase.CourtCaseNumber : string.Empty,
+            CourtUrl = isFirstInstance ? clientCase.CourtUrl : string.Empty,
+            JudgeName = isFirstInstance ? clientCase.JudgeName : string.Empty,
+            Courtroom = isFirstInstance ? clientCase.Courtroom : string.Empty,
+            SecretaryName = isFirstInstance ? clientCase.CourtSecretaryContacts : string.Empty,
+            Complaints = [],
+        };
+    }
+
+    private async Task<ClientCaseCourtInstance> EnsureCourtInstanceAsync(
+        ClientCase clientCase,
+        string instance,
+        int? actorUserId,
+        string actorName,
+        CancellationToken ct)
+    {
+        var normalizedInstance = NormalizeCourtInstance(instance);
+        var courtInstance = await _db.ClientCaseCourtInstances
+            .FirstOrDefaultAsync(item => item.ClientCaseId == clientCase.Id && item.Instance == normalizedInstance, ct);
+        if (courtInstance is not null)
+        {
+            return courtInstance;
+        }
+
+        var defaults = BuildDefaultCourtInstance(clientCase, normalizedInstance);
+        var now = DateTime.UtcNow;
+        courtInstance = new ClientCaseCourtInstance
+        {
+            ClientCaseId = clientCase.Id,
+            Instance = normalizedInstance,
+            CourtName = defaults.CourtName,
+            CourtCaseNumber = defaults.CourtCaseNumber,
+            CourtUrl = defaults.CourtUrl,
+            JudgeName = defaults.JudgeName,
+            Courtroom = defaults.Courtroom,
+            SecretaryName = defaults.SecretaryName,
+            CreatedAt = now,
+            CreatedByUserId = actorUserId,
+            CreatedByUserName = Truncate(actorName, 256),
+            UpdatedAt = now,
+            UpdatedByUserId = actorUserId,
+            UpdatedByUserName = Truncate(actorName, 256),
+        };
+        _db.ClientCaseCourtInstances.Add(courtInstance);
+        await _db.SaveChangesAsync(ct);
+        return courtInstance;
+    }
+
     private static ClientCaseCourtPartyDto MapCourtParty(ClientCaseCourtParty item)
         => new()
         {
@@ -7608,6 +8030,64 @@ public class CasesV2Controller : ControllerBase
             request.SortOrder ?? 0);
     }
 
+    private static CourtInstanceValidationResult ValidateCourtInstanceRequest(
+        UpsertClientCaseCourtInstanceRequest? request,
+        ClientCase clientCase,
+        string instance,
+        ClientCaseCourt? court)
+    {
+        if (request is null)
+        {
+            return new("Укажите параметры судебной инстанции.");
+        }
+
+        var defaults = BuildDefaultCourtInstance(clientCase, instance);
+        return new(
+            null,
+            Truncate(NormalizeOptional(request.CourtName) ?? NormalizeOptional(court?.Name) ?? defaults.CourtName, 200),
+            Truncate(NormalizeOptional(request.CourtCaseNumber) ?? defaults.CourtCaseNumber, 100),
+            Truncate(NormalizeOptional(request.CourtUrl) ?? NormalizeOptional(court?.Url) ?? defaults.CourtUrl, 1000),
+            Truncate(NormalizeOptional(request.JudgeName) ?? defaults.JudgeName, 200),
+            Truncate(NormalizeOptional(request.Courtroom) ?? defaults.Courtroom, 120),
+            Truncate(NormalizeOptional(request.SecretaryName) ?? defaults.SecretaryName, 200),
+            Truncate(NormalizeOptional(request.Notes) ?? string.Empty, 1000));
+    }
+
+    private async Task<CourtComplaintValidationResult> ValidateCourtComplaintRequestAsync(
+        int clientCaseId,
+        string instance,
+        UpsertClientCaseCourtComplaintRequest? request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return new("Укажите параметры жалобы.");
+        }
+
+        if (request.ClientCaseDocumentId is { } documentId)
+        {
+            var documentExists = await _db.ClientCaseDocuments
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == documentId && item.ClientCaseId == clientCaseId, ct);
+            if (!documentExists)
+            {
+                return new("Документ жалобы не найден в этом деле.");
+            }
+        }
+
+        var complaintType = NormalizeCourtComplaintType(request.ComplaintType);
+        var title = NormalizeOptional(request.Title) ?? ResolveCourtComplaintTypeLabel(complaintType);
+        return new(
+            null,
+            complaintType,
+            Truncate(title, 200),
+            NormalizeCourtInstance(request.TargetInstance ?? ResolveNextCourtInstance(instance)),
+            request.FiledAt,
+            NormalizeCourtComplaintStatus(request.Status),
+            request.ClientCaseDocumentId,
+            Truncate(NormalizeOptional(request.Notes) ?? string.Empty, 1000));
+    }
+
     private static CourtEventValidationResult ValidateCourtEventRequest(UpsertClientCaseCourtEventRequest? request, ClientCase clientCase, ClientCaseCourt? court)
     {
         if (request is null)
@@ -7667,7 +8147,8 @@ public class CasesV2Controller : ControllerBase
         var normalized = NormalizeOptional(value)?.ToLowerInvariant();
         return normalized switch
         {
-            "first" or "appeal" or "cassation" or "supervision" => normalized,
+            "first" or "appeal" or "cassation" or "supreme" => normalized,
+            "supervision" => "supreme",
             _ => "first",
         };
     }
@@ -7677,8 +8158,61 @@ public class CasesV2Controller : ControllerBase
         {
             "appeal" => "Апелляция",
             "cassation" => "Кассация",
-            "supervision" => "Надзор",
+            "supreme" or "supervision" => "Верховный суд",
             _ => "Первая инстанция",
+        };
+
+    private static string ResolveNextCourtInstance(string value)
+        => NormalizeCourtInstance(value) switch
+        {
+            "first" => "appeal",
+            "appeal" => "cassation",
+            "cassation" => "supreme",
+            _ => "supreme",
+        };
+
+    private static string NormalizeCourtComplaintType(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
+        return normalized switch
+        {
+            "appealcomplaint" or "appeal-complaint" or "appeal_complaint" => "appealComplaint",
+            "privatecomplaint" or "private-complaint" or "private_complaint" => "privateComplaint",
+            "cassationcomplaint" or "cassation-complaint" or "cassation_complaint" => "cassationComplaint",
+            "supervisorycomplaint" or "supervisory-complaint" or "supervisory_complaint" => "supervisoryComplaint",
+            _ => "other",
+        };
+    }
+
+    private static string ResolveCourtComplaintTypeLabel(string value)
+        => value switch
+        {
+            "appealComplaint" => "Апелляционная жалоба",
+            "privateComplaint" => "Частная жалоба",
+            "cassationComplaint" => "Кассационная жалоба",
+            "supervisoryComplaint" => "Жалоба в Верховный суд",
+            _ => "Иная жалоба",
+        };
+
+    private static string NormalizeCourtComplaintStatus(string? value)
+    {
+        var normalized = NormalizeOptional(value)?.ToLowerInvariant();
+        return normalized switch
+        {
+            "draft" or "filed" or "accepted" or "returned" or "satisfied" or "rejected" => normalized,
+            _ => "draft",
+        };
+    }
+
+    private static string ResolveCourtComplaintStatusLabel(string value)
+        => value switch
+        {
+            "filed" => "Подана",
+            "accepted" => "Принята",
+            "returned" => "Возвращена",
+            "satisfied" => "Удовлетворена",
+            "rejected" => "Отклонена",
+            _ => "Черновик",
         };
 
     private static string NormalizeCourtMovementStatus(string? value)
@@ -8728,6 +9262,76 @@ public class CasesV2Controller : ControllerBase
         public int? SortOrder { get; set; }
     }
 
+    public sealed class ClientCaseCourtInstanceDto
+    {
+        public int Id { get; set; }
+        public int ClientCaseId { get; set; }
+        public string Instance { get; set; } = string.Empty;
+        public string InstanceLabel { get; set; } = string.Empty;
+        public int? CourtId { get; set; }
+        public string CourtName { get; set; } = string.Empty;
+        public string CourtCaseNumber { get; set; } = string.Empty;
+        public string CourtUrl { get; set; } = string.Empty;
+        public string JudgeName { get; set; } = string.Empty;
+        public string Courtroom { get; set; } = string.Empty;
+        public string SecretaryName { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+        public int? CreatedByUserId { get; set; }
+        public string CreatedByUserName { get; set; } = string.Empty;
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedByUserId { get; set; }
+        public string UpdatedByUserName { get; set; } = string.Empty;
+        public IReadOnlyList<ClientCaseCourtComplaintDto> Complaints { get; set; } = [];
+    }
+
+    public sealed class UpsertClientCaseCourtInstanceRequest
+    {
+        public int? CourtId { get; set; }
+        public string? CourtName { get; set; }
+        public string? CourtCaseNumber { get; set; }
+        public string? CourtUrl { get; set; }
+        public string? JudgeName { get; set; }
+        public string? Courtroom { get; set; }
+        public string? SecretaryName { get; set; }
+        public string? Notes { get; set; }
+    }
+
+    public sealed class ClientCaseCourtComplaintDto
+    {
+        public int Id { get; set; }
+        public int ClientCaseId { get; set; }
+        public int CourtInstanceId { get; set; }
+        public string ComplaintType { get; set; } = string.Empty;
+        public string ComplaintTypeLabel { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string TargetInstance { get; set; } = string.Empty;
+        public string TargetInstanceLabel { get; set; } = string.Empty;
+        public DateTime? FiledAt { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public string StatusLabel { get; set; } = string.Empty;
+        public int? ClientCaseDocumentId { get; set; }
+        public string Notes { get; set; } = string.Empty;
+        public bool IsArchived { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public int? CreatedByUserId { get; set; }
+        public string CreatedByUserName { get; set; } = string.Empty;
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedByUserId { get; set; }
+        public string UpdatedByUserName { get; set; } = string.Empty;
+    }
+
+    public sealed class UpsertClientCaseCourtComplaintRequest
+    {
+        public string? ComplaintType { get; set; }
+        public string? Title { get; set; }
+        public string? TargetInstance { get; set; }
+        public DateTime? FiledAt { get; set; }
+        public string? Status { get; set; }
+        public int? ClientCaseDocumentId { get; set; }
+        public string? Notes { get; set; }
+    }
+
     public sealed class ClientCaseCourtEventDto
     {
         public int Id { get; set; }
@@ -9168,6 +9772,26 @@ public class CasesV2Controller : ControllerBase
         string MovementStatus = "",
         string ResultSummary = "",
         string SourceType = "manual");
+
+    private readonly record struct CourtInstanceValidationResult(
+        string? Error,
+        string CourtName = "",
+        string CourtCaseNumber = "",
+        string CourtUrl = "",
+        string JudgeName = "",
+        string Courtroom = "",
+        string SecretaryName = "",
+        string Notes = "");
+
+    private readonly record struct CourtComplaintValidationResult(
+        string? Error,
+        string ComplaintType = "appealComplaint",
+        string Title = "",
+        string TargetInstance = "appeal",
+        DateTime? FiledAt = null,
+        string Status = "draft",
+        int? ClientCaseDocumentId = null,
+        string Notes = "");
 
     private readonly record struct CourtSyncApplyResult(
         IReadOnlyList<string> ChangedFields,

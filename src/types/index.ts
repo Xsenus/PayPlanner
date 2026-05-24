@@ -763,6 +763,72 @@ export interface UpsertClientCaseCourtPayload {
   sortOrder?: number;
 }
 
+export interface ClientCaseCourtInstance {
+  id: number;
+  clientCaseId: number;
+  instance: string;
+  instanceLabel: string;
+  courtId?: number | null;
+  courtName?: string | null;
+  courtCaseNumber?: string | null;
+  courtUrl?: string | null;
+  judgeName?: string | null;
+  courtroom?: string | null;
+  secretaryName?: string | null;
+  notes?: string | null;
+  createdAt: string;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  updatedAt?: string | null;
+  updatedByUserId?: number | null;
+  updatedByUserName?: string | null;
+  complaints: ClientCaseCourtComplaint[];
+}
+
+export interface UpsertClientCaseCourtInstancePayload {
+  courtId?: number | null;
+  courtName?: string;
+  courtCaseNumber?: string;
+  courtUrl?: string;
+  judgeName?: string;
+  courtroom?: string;
+  secretaryName?: string;
+  notes?: string;
+}
+
+export interface ClientCaseCourtComplaint {
+  id: number;
+  clientCaseId: number;
+  courtInstanceId: number;
+  complaintType: string;
+  complaintTypeLabel: string;
+  title: string;
+  targetInstance: string;
+  targetInstanceLabel: string;
+  filedAt?: string | null;
+  status: string;
+  statusLabel: string;
+  clientCaseDocumentId?: number | null;
+  notes?: string | null;
+  isArchived: boolean;
+  createdAt: string;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
+  updatedAt?: string | null;
+  updatedByUserId?: number | null;
+  updatedByUserName?: string | null;
+}
+
+export interface UpsertClientCaseCourtComplaintPayload {
+  complaintType?: string;
+  title?: string;
+  targetInstance?: string;
+  filedAt?: string | null;
+  status?: string;
+  clientCaseDocumentId?: number | null;
+  notes?: string;
+}
+
 export interface ClientCaseCourtParty {
   id: number;
   clientCaseId: number;

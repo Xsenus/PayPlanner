@@ -3296,6 +3296,131 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetCourtInstances_ReturnsFourTabsAndLegacyFirstInstance()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Кирпита Наталья Андреевна",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Кирпита - взыскание",
+            Status = ClientCaseStatus.Open,
+            CourtName = "Центральный районный суд",
+            CourtCaseNumber = "2-100/2026",
+            CourtUrl = "https://example.test/first",
+            JudgeName = "Иванов И.И.",
+            Courtroom = "зал 5",
+            CourtSecretaryContacts = "секретарь Петрова",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetCourtInstances(clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var items = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtInstanceDto>>(ok.Value);
+        Assert.Equal(4, items.Count);
+        Assert.Equal(["first", "appeal", "cassation", "supreme"], items.Select(item => item.Instance).ToArray());
+        var first = Assert.Single(items, item => item.Instance == "first");
+        Assert.Equal("Центральный районный суд", first.CourtName);
+        Assert.Equal("2-100/2026", first.CourtCaseNumber);
+        Assert.Equal("https://example.test/first", first.CourtUrl);
+        Assert.Equal("Верховный суд", items.Single(item => item.Instance == "supreme").InstanceLabel);
+    }
+
+    [Fact]
+    public async Task CourtInstanceComplaintFlow_CreatesUpdatesAndArchivesComplaint()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Кирпита Наталья Андреевна",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Кирпита - апелляция",
+            Status = ClientCaseStatus.Open,
+        };
+        var document = new ClientCaseDocument
+        {
+            ClientCase = clientCase,
+            DocumentKey = "appeal-complaint",
+            OriginalFileName = "appeal.pdf",
+            StoredFileName = "appeal.pdf",
+            StoragePath = "appeal.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 100,
+            DocumentType = "Жалоба",
+            Status = "prepared",
+            UploadedByName = owner.FullName,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var instanceResult = await controller.UpsertCourtInstance(clientCase.Id, "appeal", new CasesV2Controller.UpsertClientCaseCourtInstanceRequest
+        {
+            CourtName = "Самарский областной суд",
+            CourtCaseNumber = "33-123/2026",
+            CourtUrl = "https://example.test/appeal",
+            JudgeName = "Сидоров С.С.",
+        }, CancellationToken.None);
+        var instanceOk = Assert.IsType<OkObjectResult>(instanceResult.Result);
+        var instanceDto = Assert.IsType<CasesV2Controller.ClientCaseCourtInstanceDto>(instanceOk.Value);
+        Assert.Equal("appeal", instanceDto.Instance);
+        Assert.Equal("Самарский областной суд", instanceDto.CourtName);
+
+        var complaintResult = await controller.CreateCourtComplaint(clientCase.Id, "appeal", new CasesV2Controller.UpsertClientCaseCourtComplaintRequest
+        {
+            ComplaintType = "privateComplaint",
+            Title = "Частная жалоба на определение",
+            TargetInstance = "cassation",
+            FiledAt = new DateTime(2026, 5, 24),
+            Status = "filed",
+            ClientCaseDocumentId = document.Id,
+            Notes = "Подана через суд первой инстанции",
+        }, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(complaintResult.Result);
+        var complaintDto = Assert.IsType<CasesV2Controller.ClientCaseCourtComplaintDto>(created.Value);
+        Assert.Equal("privateComplaint", complaintDto.ComplaintType);
+        Assert.Equal("Частная жалоба", complaintDto.ComplaintTypeLabel);
+        Assert.Equal("cassation", complaintDto.TargetInstance);
+        Assert.Equal(document.Id, complaintDto.ClientCaseDocumentId);
+
+        var updateResult = await controller.UpdateCourtComplaint(clientCase.Id, "appeal", complaintDto.Id, new CasesV2Controller.UpsertClientCaseCourtComplaintRequest
+        {
+            ComplaintType = "privateComplaint",
+            Title = "Частная жалоба на определение суда",
+            TargetInstance = "cassation",
+            Status = "accepted",
+        }, CancellationToken.None);
+        var updateOk = Assert.IsType<OkObjectResult>(updateResult.Result);
+        var updated = Assert.IsType<CasesV2Controller.ClientCaseCourtComplaintDto>(updateOk.Value);
+        Assert.Equal("accepted", updated.Status);
+        Assert.Equal("Принята", updated.StatusLabel);
+
+        var archiveResult = await controller.ArchiveCourtComplaint(clientCase.Id, "appeal", complaintDto.Id, CancellationToken.None);
+        Assert.IsType<NoContentResult>(archiveResult);
+
+        var archived = await db.ClientCaseCourtComplaints.SingleAsync(item => item.Id == complaintDto.Id);
+        Assert.True(archived.IsArchived);
+    }
+
+    [Fact]
     public async Task RunCourtSync_UpdatesCaseAndCreatesCourtEventFromSudrf()
     {
         await using var db = await CreateContextAsync();

@@ -1502,6 +1502,70 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.IsActive, e.SortOrder, e.Name }).HasDatabaseName("IX_ClientCaseCourts_Active_Sort_Name");
         });
 
+        // ------------------ ClientCaseCourtInstance ------------------
+        modelBuilder.Entity<ClientCaseCourtInstance>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Instance).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.CourtName).HasMaxLength(200);
+            entity.Property(e => e.CourtCaseNumber).HasMaxLength(100);
+            entity.Property(e => e.CourtUrl).HasMaxLength(1000);
+            entity.Property(e => e.JudgeName).HasMaxLength(200);
+            entity.Property(e => e.Courtroom).HasMaxLength(120);
+            entity.Property(e => e.SecretaryName).HasMaxLength(200);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.UpdatedByUserName).HasMaxLength(256);
+
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.CourtInstances)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Court)
+                .WithMany()
+                .HasForeignKey(e => e.CourtId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_ClientCaseCourtInstances_ClientCaseId");
+            entity.HasIndex(e => e.Instance).HasDatabaseName("IX_ClientCaseCourtInstances_Instance");
+            entity.HasIndex(e => new { e.ClientCaseId, e.Instance }).IsUnique().HasDatabaseName("IX_ClientCaseCourtInstances_Case_Instance");
+            entity.HasIndex(e => e.CourtId).HasDatabaseName("IX_ClientCaseCourtInstances_CourtId");
+        });
+
+        // ------------------ ClientCaseCourtComplaint ------------------
+        modelBuilder.Entity<ClientCaseCourtComplaint>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ComplaintType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.TargetInstance).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(256);
+            entity.Property(e => e.UpdatedByUserName).HasMaxLength(256);
+
+            entity.HasOne(e => e.ClientCase)
+                .WithMany(e => e.CourtComplaints)
+                .HasForeignKey(e => e.ClientCaseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.CourtInstance)
+                .WithMany(e => e.Complaints)
+                .HasForeignKey(e => e.CourtInstanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ClientCaseDocument)
+                .WithMany()
+                .HasForeignKey(e => e.ClientCaseDocumentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_ClientCaseCourtComplaints_ClientCaseId");
+            entity.HasIndex(e => e.CourtInstanceId).HasDatabaseName("IX_ClientCaseCourtComplaints_CourtInstanceId");
+            entity.HasIndex(e => e.ClientCaseDocumentId).HasDatabaseName("IX_ClientCaseCourtComplaints_DocumentId");
+            entity.HasIndex(e => new { e.ClientCaseId, e.TargetInstance, e.IsArchived }).HasDatabaseName("IX_ClientCaseCourtComplaints_Case_Target_Archived");
+        });
+
         // ------------------ ClientCaseCourtEventHistory ------------------
         modelBuilder.Entity<ClientCaseCourtEventHistory>(entity =>
         {
@@ -2863,6 +2927,10 @@ public class PaymentContext : DbContext
     public DbSet<ClientCaseCourtParty> ClientCaseCourtParties { get; set; }
 
     public DbSet<ClientCaseCourt> ClientCaseCourts { get; set; }
+
+    public DbSet<ClientCaseCourtInstance> ClientCaseCourtInstances { get; set; }
+
+    public DbSet<ClientCaseCourtComplaint> ClientCaseCourtComplaints { get; set; }
 
     /// <summary>
     /// Карточки клиентов.

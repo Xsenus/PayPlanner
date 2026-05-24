@@ -346,6 +346,10 @@ namespace PayPlanner.Api.Models
 
         public ICollection<ClientCaseCourtEventHistory> CourtEventHistory { get; set; } = new List<ClientCaseCourtEventHistory>();
 
+        public ICollection<ClientCaseCourtInstance> CourtInstances { get; set; } = new List<ClientCaseCourtInstance>();
+
+        public ICollection<ClientCaseCourtComplaint> CourtComplaints { get; set; } = new List<ClientCaseCourtComplaint>();
+
         /// <summary>
         /// Статус дела (черновик/в работе/закрыто).
         /// </summary>

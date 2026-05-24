@@ -37,7 +37,9 @@ import type {
   ClientCase,
   ClientCaseConversationEntry,
   ClientCaseCourt,
+  ClientCaseCourtComplaint,
   ClientCaseCourtEvent,
+  ClientCaseCourtInstance,
   ClientCaseCourtParty,
   ClientCaseCourtSyncLog,
   ClientCaseDocument,
@@ -72,6 +74,27 @@ type CaseTaskFilter = 'active' | 'all' | 'overdue' | 'done';
 type SummaryTone = 'slate' | 'emerald' | 'amber' | 'rose' | 'cyan';
 type ParticipantSourceType = 'client' | 'legalEntity' | 'externalContact';
 type DocumentSourceType = 'case' | 'task' | 'courtEvent' | 'workOrder' | 'invoice' | 'stage';
+
+interface CourtInstanceDraft {
+  courtId: string;
+  courtName: string;
+  courtCaseNumber: string;
+  courtUrl: string;
+  judgeName: string;
+  courtroom: string;
+  secretaryName: string;
+  notes: string;
+}
+
+interface CourtComplaintDraft {
+  complaintType: string;
+  title: string;
+  targetInstance: string;
+  filedAt: string;
+  status: string;
+  clientCaseDocumentId: string;
+  notes: string;
+}
 
 interface CaseEditDraft {
   title: string;
@@ -213,6 +236,30 @@ const CASE_TASK_FILTERS: Array<{ value: CaseTaskFilter; label: string }> = [
   { value: 'overdue', label: 'Просроченные' },
   { value: 'done', label: 'Закрытые' },
   { value: 'all', label: 'Все' },
+];
+
+const COURT_INSTANCE_TABS = [
+  { value: 'first', label: '1-я инстанция', hint: 'Городской, районный или мировой суд' },
+  { value: 'appeal', label: 'Апелляция', hint: 'Апелляционная инстанция' },
+  { value: 'cassation', label: 'Кассация', hint: 'Кассационная инстанция' },
+  { value: 'supreme', label: 'Верховный суд', hint: 'Верховный суд РФ' },
+];
+
+const COURT_COMPLAINT_TYPES = [
+  { value: 'appealComplaint', label: 'Апелляционная жалоба' },
+  { value: 'privateComplaint', label: 'Частная жалоба' },
+  { value: 'cassationComplaint', label: 'Кассационная жалоба' },
+  { value: 'supervisoryComplaint', label: 'Жалоба в Верховный суд' },
+  { value: 'other', label: 'Иная жалоба' },
+];
+
+const COURT_COMPLAINT_STATUSES = [
+  { value: 'draft', label: 'Черновик' },
+  { value: 'filed', label: 'Подана' },
+  { value: 'accepted', label: 'Принята' },
+  { value: 'returned', label: 'Возвращена' },
+  { value: 'satisfied', label: 'Удовлетворена' },
+  { value: 'rejected', label: 'Отклонена' },
 ];
 
 const WORK_ORDER_STATUS_OPTIONS = [
@@ -768,6 +815,37 @@ function fromDateTimeInput(value: string) {
   return value ? new Date(value).toISOString() : null;
 }
 
+function getNextCourtInstance(instance: string) {
+  if (instance === 'first') return 'appeal';
+  if (instance === 'appeal') return 'cassation';
+  return 'supreme';
+}
+
+function buildCourtInstanceDraft(instance?: ClientCaseCourtInstance | null): CourtInstanceDraft {
+  return {
+    courtId: instance?.courtId ? String(instance.courtId) : '',
+    courtName: instance?.courtName ?? '',
+    courtCaseNumber: instance?.courtCaseNumber ?? '',
+    courtUrl: instance?.courtUrl ?? '',
+    judgeName: instance?.judgeName ?? '',
+    courtroom: instance?.courtroom ?? '',
+    secretaryName: instance?.secretaryName ?? '',
+    notes: instance?.notes ?? '',
+  };
+}
+
+function buildCourtComplaintDraft(instance = 'first', complaint?: ClientCaseCourtComplaint | null): CourtComplaintDraft {
+  return {
+    complaintType: complaint?.complaintType ?? (instance === 'cassation' ? 'supervisoryComplaint' : instance === 'appeal' ? 'cassationComplaint' : 'appealComplaint'),
+    title: complaint?.title ?? '',
+    targetInstance: complaint?.targetInstance ?? getNextCourtInstance(instance),
+    filedAt: toDateInput(complaint?.filedAt),
+    status: complaint?.status ?? 'draft',
+    clientCaseDocumentId: complaint?.clientCaseDocumentId ? String(complaint.clientCaseDocumentId) : '',
+    notes: complaint?.notes ?? '',
+  };
+}
+
 function buildCaseEditDraft(caseItem: ClientCase): CaseEditDraft {
   return {
     title: caseItem.title ?? '',
@@ -904,6 +982,7 @@ export function CaseDetailPage({
   const [showArchivedParties, setShowArchivedParties] = useState(false);
   const [documents, setDocuments] = useState<ClientCaseDocument[]>([]);
   const [courtEvents, setCourtEvents] = useState<ClientCaseCourtEvent[]>([]);
+  const [courtInstances, setCourtInstances] = useState<ClientCaseCourtInstance[]>([]);
   const [courtDirectory, setCourtDirectory] = useState<ClientCaseCourt[]>([]);
   const [courtParties, setCourtParties] = useState<ClientCaseCourtParty[]>([]);
   const [proceduralDeadlines, setProceduralDeadlines] = useState<ClientCaseProceduralDeadline[]>([]);
@@ -921,6 +1000,7 @@ export function CaseDetailPage({
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [courtEventsLoading, setCourtEventsLoading] = useState(false);
+  const [courtInstancesLoading, setCourtInstancesLoading] = useState(false);
   const [courtDirectoryLoading, setCourtDirectoryLoading] = useState(false);
   const [courtPartiesLoading, setCourtPartiesLoading] = useState(false);
   const [proceduralDeadlinesLoading, setProceduralDeadlinesLoading] = useState(false);
@@ -946,6 +1026,10 @@ export function CaseDetailPage({
   const [updatingDocumentId, setUpdatingDocumentId] = useState<number | null>(null);
   const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
   const [syncingCourt, setSyncingCourt] = useState(false);
+  const [savingCourtInstance, setSavingCourtInstance] = useState(false);
+  const [savingCourtComplaint, setSavingCourtComplaint] = useState(false);
+  const [editingCourtComplaint, setEditingCourtComplaint] = useState<ClientCaseCourtComplaint | null>(null);
+  const [archivingCourtComplaintId, setArchivingCourtComplaintId] = useState<number | null>(null);
   const [savingCourtEvent, setSavingCourtEvent] = useState(false);
   const [savingCourtParty, setSavingCourtParty] = useState(false);
   const [archivingCourtPartyId, setArchivingCourtPartyId] = useState<number | null>(null);
@@ -1008,6 +1092,9 @@ export function CaseDetailPage({
   const [courtEventCourtIdDraft, setCourtEventCourtIdDraft] = useState('');
   const [courtEventResultDraft, setCourtEventResultDraft] = useState('');
   const [courtEventDocumentIdDraft, setCourtEventDocumentIdDraft] = useState('');
+  const [activeCourtInstance, setActiveCourtInstance] = useState('first');
+  const [courtInstanceDraft, setCourtInstanceDraft] = useState<CourtInstanceDraft>(() => buildCourtInstanceDraft(null));
+  const [courtComplaintDraft, setCourtComplaintDraft] = useState<CourtComplaintDraft>(() => buildCourtComplaintDraft('first'));
   const [courtPartyNameDraft, setCourtPartyNameDraft] = useState('');
   const [courtPartySideDraft, setCourtPartySideDraft] = useState('claimant');
   const [courtPartyRoleDraft, setCourtPartyRoleDraft] = useState('');
@@ -1058,6 +1145,11 @@ export function CaseDetailPage({
     setWorkOrderDraft(buildWorkOrderHeaderDraft(null));
     setNewWorkOrderItemDraft(buildWorkOrderItemDraft(null));
     setWorkOrderItemDrafts({});
+    setCourtInstances([]);
+    setActiveCourtInstance('first');
+    setCourtInstanceDraft(buildCourtInstanceDraft(null));
+    setCourtComplaintDraft(buildCourtComplaintDraft('first'));
+    setEditingCourtComplaint(null);
     setDeadlineTypeDraft('motion');
     setDeadlineTitleDraft('');
     setDeadlineDueAtDraft('');
@@ -1370,6 +1462,34 @@ export function CaseDetailPage({
       cancelled = true;
     };
   }, [activeTab, reloadToken]);
+
+  useEffect(() => {
+    if (activeTab !== 'court' && activeTab !== 'documents') return;
+
+    let cancelled = false;
+    setCourtInstancesLoading(true);
+    apiService.getCaseCourtInstances(caseId)
+      .then((items) => {
+        if (!cancelled) setCourtInstances(items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCourtInstances([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCourtInstancesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, caseId, reloadToken]);
+
+  useEffect(() => {
+    const selected = courtInstances.find((item) => item.instance === activeCourtInstance);
+    setCourtInstanceDraft(buildCourtInstanceDraft(selected ?? null));
+    setCourtComplaintDraft(buildCourtComplaintDraft(activeCourtInstance));
+    setEditingCourtComplaint(null);
+  }, [activeCourtInstance, courtInstances]);
 
   useEffect(() => {
     if (activeTab !== 'court' && activeTab !== 'documents') return;
@@ -1889,6 +2009,107 @@ export function CaseDetailPage({
     }
   };
 
+  const saveCourtInstance = async () => {
+    if (!caseItem) return;
+
+    setSavingCourtInstance(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const item = await apiService.updateCaseCourtInstance(caseItem.id, activeCourtInstance, {
+        courtId: courtInstanceDraft.courtId ? Number(courtInstanceDraft.courtId) : null,
+        courtName: courtInstanceDraft.courtName.trim(),
+        courtCaseNumber: courtInstanceDraft.courtCaseNumber.trim(),
+        courtUrl: courtInstanceDraft.courtUrl.trim(),
+        judgeName: courtInstanceDraft.judgeName.trim(),
+        courtroom: courtInstanceDraft.courtroom.trim(),
+        secretaryName: courtInstanceDraft.secretaryName.trim(),
+        notes: courtInstanceDraft.notes.trim(),
+      });
+      setCourtInstances((current) => {
+        const exists = current.some((entry) => entry.instance === item.instance);
+        return exists ? current.map((entry) => entry.instance === item.instance ? item : entry) : [...current, item];
+      });
+      setNotice(`Инстанция «${item.instanceLabel}» сохранена.`);
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить судебную инстанцию.');
+    } finally {
+      setSavingCourtInstance(false);
+    }
+  };
+
+  const saveCourtComplaint = async () => {
+    if (!caseItem) return;
+    if (!courtComplaintDraft.title.trim()) {
+      setError('Укажите название жалобы.');
+      return;
+    }
+
+    setSavingCourtComplaint(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const payload = {
+        complaintType: courtComplaintDraft.complaintType,
+        title: courtComplaintDraft.title.trim(),
+        targetInstance: courtComplaintDraft.targetInstance,
+        filedAt: courtComplaintDraft.filedAt || null,
+        status: courtComplaintDraft.status,
+        clientCaseDocumentId: courtComplaintDraft.clientCaseDocumentId ? Number(courtComplaintDraft.clientCaseDocumentId) : null,
+        notes: courtComplaintDraft.notes.trim(),
+      };
+      const item = editingCourtComplaint
+        ? await apiService.updateCaseCourtComplaint(caseItem.id, activeCourtInstance, editingCourtComplaint.id, payload)
+        : await apiService.createCaseCourtComplaint(caseItem.id, activeCourtInstance, payload);
+      setCourtInstances((current) => current.map((entry) => entry.instance === activeCourtInstance
+        ? {
+          ...entry,
+          complaints: editingCourtComplaint
+            ? entry.complaints.map((complaint) => complaint.id === item.id ? item : complaint)
+            : [item, ...entry.complaints],
+        }
+        : entry));
+      setCourtComplaintDraft(buildCourtComplaintDraft(activeCourtInstance));
+      setEditingCourtComplaint(null);
+      setNotice(editingCourtComplaint ? 'Жалоба обновлена.' : 'Жалоба добавлена.');
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить жалобу.');
+    } finally {
+      setSavingCourtComplaint(false);
+    }
+  };
+
+  const startEditCourtComplaint = (complaint: ClientCaseCourtComplaint) => {
+    setEditingCourtComplaint(complaint);
+    setCourtComplaintDraft(buildCourtComplaintDraft(activeCourtInstance, complaint));
+  };
+
+  const archiveCourtComplaint = async (complaint: ClientCaseCourtComplaint) => {
+    if (!caseItem) return;
+
+    setArchivingCourtComplaintId(complaint.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiService.archiveCaseCourtComplaint(caseItem.id, activeCourtInstance, complaint.id);
+      setCourtInstances((current) => current.map((entry) => entry.instance === activeCourtInstance
+        ? { ...entry, complaints: entry.complaints.filter((item) => item.id !== complaint.id) }
+        : entry));
+      if (editingCourtComplaint?.id === complaint.id) {
+        setEditingCourtComplaint(null);
+        setCourtComplaintDraft(buildCourtComplaintDraft(activeCourtInstance));
+      }
+      setNotice('Жалоба архивирована.');
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось архивировать жалобу.');
+    } finally {
+      setArchivingCourtComplaintId(null);
+    }
+  };
+
   const addCourtEvent = async () => {
     if (!caseItem) return;
     if (!courtEventScheduledAtDraft) {
@@ -1900,16 +2121,17 @@ export function CaseDetailPage({
     setError(null);
     setNotice(null);
     try {
+      const selectedCourtInstance = courtInstances.find((item) => item.instance === activeCourtInstance);
       const item = await apiService.createCaseCourtEvent(caseItem.id, {
         eventType: courtEventTypeDraft,
         title: courtEventTitleDraft.trim() || undefined,
         scheduledAt: courtEventScheduledAtDraft,
         allDay: courtEventTypeDraft !== 'hearing',
         courtId: courtEventCourtIdDraft ? Number(courtEventCourtIdDraft) : undefined,
-        courtInstance: 'first',
-        courtName: caseItem.courtName || undefined,
-        courtCaseNumber: caseItem.courtCaseNumber || undefined,
-        courtroom: caseItem.courtroom || undefined,
+        courtInstance: activeCourtInstance,
+        courtName: selectedCourtInstance?.courtName || caseItem.courtName || undefined,
+        courtCaseNumber: selectedCourtInstance?.courtCaseNumber || caseItem.courtCaseNumber || undefined,
+        courtroom: selectedCourtInstance?.courtroom || caseItem.courtroom || undefined,
         movementStatus: courtEventStatusDraft,
         resultSummary: courtEventResultDraft.trim() || undefined,
         clientCaseDocumentId: courtEventDocumentIdDraft ? Number(courtEventDocumentIdDraft) : undefined,
@@ -2765,6 +2987,12 @@ export function CaseDetailPage({
             <CourtPanel
               caseItem={caseItem}
               courtDirectory={courtDirectory}
+              courtInstances={courtInstances}
+              courtInstancesLoading={courtInstancesLoading}
+              activeCourtInstance={activeCourtInstance}
+              courtInstanceDraft={courtInstanceDraft}
+              courtComplaintDraft={courtComplaintDraft}
+              editingCourtComplaint={editingCourtComplaint}
               courtEvents={courtEvents}
               courtDirectoryLoading={courtDirectoryLoading}
               courtEventsLoading={courtEventsLoading}
@@ -2794,6 +3022,9 @@ export function CaseDetailPage({
               deadlineNotesDraft={deadlineNotesDraft}
               logs={courtSyncLogs}
               logsLoading={courtSyncLogsLoading}
+              savingCourtInstance={savingCourtInstance}
+              savingCourtComplaint={savingCourtComplaint}
+              archivingCourtComplaintId={archivingCourtComplaintId}
               savingCourtEvent={savingCourtEvent}
               savingCourtParty={savingCourtParty}
               archivingCourtPartyId={archivingCourtPartyId}
@@ -2802,6 +3033,17 @@ export function CaseDetailPage({
               closingProceduralDeadlineId={closingProceduralDeadlineId}
               onRunCourtSync={runCourtSync}
               syncingCourt={syncingCourt}
+              onActiveCourtInstanceChange={setActiveCourtInstance}
+              onCourtInstanceDraftChange={setCourtInstanceDraft}
+              onCourtComplaintDraftChange={setCourtComplaintDraft}
+              onSaveCourtInstance={() => void saveCourtInstance()}
+              onSaveCourtComplaint={() => void saveCourtComplaint()}
+              onEditCourtComplaint={startEditCourtComplaint}
+              onCancelCourtComplaintEdit={() => {
+                setEditingCourtComplaint(null);
+                setCourtComplaintDraft(buildCourtComplaintDraft(activeCourtInstance));
+              }}
+              onArchiveCourtComplaint={(complaint) => void archiveCourtComplaint(complaint)}
               onCourtEventTypeChange={setCourtEventTypeDraft}
               onCourtEventTitleChange={setCourtEventTitleDraft}
               onCourtEventScheduledAtChange={setCourtEventScheduledAtDraft}
@@ -4708,6 +4950,12 @@ function CourtTimeline({ entries }: { entries: CourtTimelineEntry[] }) {
 function CourtPanel({
   caseItem,
   courtDirectory,
+  courtInstances,
+  courtInstancesLoading,
+  activeCourtInstance,
+  courtInstanceDraft,
+  courtComplaintDraft,
+  editingCourtComplaint,
   courtEvents,
   courtDirectoryLoading,
   courtEventsLoading,
@@ -4737,6 +4985,9 @@ function CourtPanel({
   deadlineNotesDraft,
   logs,
   logsLoading,
+  savingCourtInstance,
+  savingCourtComplaint,
+  archivingCourtComplaintId,
   savingCourtEvent,
   savingCourtParty,
   archivingCourtPartyId,
@@ -4745,6 +4996,14 @@ function CourtPanel({
   closingProceduralDeadlineId,
   onRunCourtSync,
   syncingCourt,
+  onActiveCourtInstanceChange,
+  onCourtInstanceDraftChange,
+  onCourtComplaintDraftChange,
+  onSaveCourtInstance,
+  onSaveCourtComplaint,
+  onEditCourtComplaint,
+  onCancelCourtComplaintEdit,
+  onArchiveCourtComplaint,
   onCourtEventTypeChange,
   onCourtEventTitleChange,
   onCourtEventScheduledAtChange,
@@ -4773,6 +5032,12 @@ function CourtPanel({
 }: {
   caseItem: ClientCase;
   courtDirectory: ClientCaseCourt[];
+  courtInstances: ClientCaseCourtInstance[];
+  courtInstancesLoading: boolean;
+  activeCourtInstance: string;
+  courtInstanceDraft: CourtInstanceDraft;
+  courtComplaintDraft: CourtComplaintDraft;
+  editingCourtComplaint: ClientCaseCourtComplaint | null;
   courtEvents: ClientCaseCourtEvent[];
   courtDirectoryLoading: boolean;
   courtEventsLoading: boolean;
@@ -4802,6 +5067,9 @@ function CourtPanel({
   deadlineNotesDraft: string;
   logs: ClientCaseCourtSyncLog[];
   logsLoading: boolean;
+  savingCourtInstance: boolean;
+  savingCourtComplaint: boolean;
+  archivingCourtComplaintId: number | null;
   savingCourtEvent: boolean;
   savingCourtParty: boolean;
   archivingCourtPartyId: number | null;
@@ -4810,6 +5078,14 @@ function CourtPanel({
   closingProceduralDeadlineId: number | null;
   onRunCourtSync: () => void;
   syncingCourt: boolean;
+  onActiveCourtInstanceChange: (value: string) => void;
+  onCourtInstanceDraftChange: (draft: CourtInstanceDraft) => void;
+  onCourtComplaintDraftChange: (draft: CourtComplaintDraft) => void;
+  onSaveCourtInstance: () => void;
+  onSaveCourtComplaint: () => void;
+  onEditCourtComplaint: (complaint: ClientCaseCourtComplaint) => void;
+  onCancelCourtComplaintEdit: () => void;
+  onArchiveCourtComplaint: (complaint: ClientCaseCourtComplaint) => void;
   onCourtEventTypeChange: (value: string) => void;
   onCourtEventTitleChange: (value: string) => void;
   onCourtEventScheduledAtChange: (value: string) => void;
@@ -4849,6 +5125,10 @@ function CourtPanel({
   const activeProceduralDeadlines = proceduralDeadlines.filter((item) => item.status !== 'closed' && item.status !== 'cancelled');
   const closedProceduralDeadlines = proceduralDeadlines.filter((item) => item.status === 'closed' || item.status === 'cancelled');
   const courtTimeline = buildCourtTimeline(caseItem, logs);
+  const selectedCourtInstance = courtInstances.find((item) => item.instance === activeCourtInstance);
+  const selectedCourtInstanceMeta = COURT_INSTANCE_TABS.find((item) => item.value === activeCourtInstance) ?? COURT_INSTANCE_TABS[0];
+  const selectedCourtEvents = courtEvents.filter((event) => event.courtInstance === activeCourtInstance);
+  const courtDirectoryForInstance = courtDirectory.filter((court) => court.instance === activeCourtInstance || (activeCourtInstance === 'supreme' && court.instance === 'supervision'));
 
   return (
     <div className="space-y-4">
@@ -4868,31 +5148,169 @@ function CourtPanel({
         </button>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-        <InfoSection title="Карточка суда" rows={[
-          ['Суд', caseItem.courtName || '—'],
-          ['Номер дела', caseItem.courtCaseNumber || '—'],
-          ['Судья', caseItem.judgeName || '—'],
-          ['Зал / кабинет', caseItem.courtroom || '—'],
-          ['Секретарь / контакты', caseItem.courtSecretaryContacts || '—'],
-        ]} />
-        <section className="rounded-xl border border-slate-200 p-4">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Источник</h2>
-          {caseItem.courtUrl ? (
-            <a
-              href={caseItem.courtUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-4 inline-flex break-all text-sm font-semibold text-blue-700 hover:underline">
-              {caseItem.courtUrl}
-            </a>
-          ) : (
-            <div className="mt-4 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-              Ссылка на первоисточник не указана. Ручная проверка запишет это в историю дела.
+      <section className="rounded-xl border border-slate-200 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Инстанции судов</h2>
+            <div className="mt-1 text-sm text-slate-500">{selectedCourtInstanceMeta.hint}</div>
+          </div>
+          {courtInstancesLoading ? <span className="inline-flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Загрузка</span> : null}
+        </div>
+        <div className="mt-4 grid gap-2 md:grid-cols-4">
+          {COURT_INSTANCE_TABS.map((tab) => {
+            const item = courtInstances.find((entry) => entry.instance === tab.value);
+            return (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => onActiveCourtInstanceChange(tab.value)}
+                className={`rounded-lg border px-3 py-2 text-left text-sm transition ${activeCourtInstance === tab.value ? 'border-blue-500 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+                <span className="block font-semibold">{tab.label}</span>
+                <span className="mt-1 block truncate text-xs text-slate-500">{item?.courtCaseNumber || item?.courtName || 'Не заполнено'}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+            <div className="grid gap-3 lg:grid-cols-2">
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Справочник суда</span>
+                <select
+                  value={courtInstanceDraft.courtId}
+                  onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, courtId: event.target.value })}
+                  disabled={courtDirectoryLoading}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50">
+                  <option value="">{courtDirectoryLoading ? 'Загрузка...' : 'Без справочника'}</option>
+                  {courtDirectoryForInstance.map((court) => (
+                    <option key={court.id} value={court.id}>{court.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Суд</span>
+                <input value={courtInstanceDraft.courtName} onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, courtName: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Номер дела</span>
+                <input value={courtInstanceDraft.courtCaseNumber} onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, courtCaseNumber: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Судья</span>
+                <input value={courtInstanceDraft.judgeName} onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, judgeName: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Зал / кабинет</span>
+                <input value={courtInstanceDraft.courtroom} onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, courtroom: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Секретарь / контакты</span>
+                <input value={courtInstanceDraft.secretaryName} onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, secretaryName: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700 lg:col-span-2">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Ссылка на карточку дела</span>
+                <input value={courtInstanceDraft.courtUrl} onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, courtUrl: event.target.value })} placeholder="https://..." className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700 lg:col-span-2">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Заметки</span>
+                <input value={courtInstanceDraft.notes} onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, notes: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
             </div>
-          )}
-        </section>
-      </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              {courtInstanceDraft.courtUrl ? (
+                <a href={courtInstanceDraft.courtUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 break-all text-sm font-semibold text-blue-700 hover:underline">
+                  <ExternalLink className="h-4 w-4" /> Открыть источник
+                </a>
+              ) : <span className="text-sm text-slate-500">Ссылка на эту инстанцию пока не указана.</span>}
+              <button type="button" onClick={() => void onSaveCourtInstance()} disabled={savingCourtInstance} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
+                {savingCourtInstance ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Сохранить инстанцию
+              </button>
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-100 bg-white p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-slate-800">Жалобы и частные жалобы</h3>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{selectedCourtInstance?.complaints.length ?? 0}</span>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Тип</span>
+                <select value={courtComplaintDraft.complaintType} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, complaintType: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  {COURT_COMPLAINT_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                </select>
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Подается в</span>
+                <select value={courtComplaintDraft.targetInstance} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, targetInstance: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  {COURT_INSTANCE_TABS.filter((tab) => tab.value !== 'first').map((tab) => <option key={tab.value} value={tab.value}>{tab.label}</option>)}
+                </select>
+              </label>
+              <label className="text-sm font-medium text-slate-700 md:col-span-2">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Название</span>
+                <input value={courtComplaintDraft.title} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, title: event.target.value })} placeholder="Например, частная жалоба на определение суда" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Дата подачи</span>
+                <input type="date" value={courtComplaintDraft.filedAt} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, filedAt: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
+                <select value={courtComplaintDraft.status} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, status: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  {COURT_COMPLAINT_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+                </select>
+              </label>
+              <label className="text-sm font-medium text-slate-700 md:col-span-2">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Документ</span>
+                <select value={courtComplaintDraft.clientCaseDocumentId} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, clientCaseDocumentId: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  <option value="">Без документа</option>
+                  {documents.map((document) => (
+                    <option key={document.id} value={document.id}>{document.originalFileName || document.documentType || `Документ #${document.id}`}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm font-medium text-slate-700 md:col-span-2">
+                <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Заметка</span>
+                <input value={courtComplaintDraft.notes} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, notes: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={() => void onSaveCourtComplaint()} disabled={savingCourtComplaint} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                {savingCourtComplaint ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} {editingCourtComplaint ? 'Сохранить жалобу' : 'Добавить жалобу'}
+              </button>
+              {editingCourtComplaint ? (
+                <button type="button" onClick={onCancelCourtComplaintEdit} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  <X className="h-4 w-4" /> Отмена
+                </button>
+              ) : null}
+            </div>
+            <div className="mt-4 space-y-2">
+              {(selectedCourtInstance?.complaints.length ?? 0) === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-200 p-3 text-sm text-slate-500">Жалобы по этой инстанции пока не добавлены.</div>
+              ) : selectedCourtInstance?.complaints.map((complaint) => (
+                <div key={complaint.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{complaint.complaintTypeLabel} · {complaint.statusLabel}</div>
+                      <div className="mt-1 font-semibold text-slate-900">{complaint.title}</div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => onEditCourtComplaint(complaint)} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-white">
+                        <Pencil className="h-3 w-3" /> Править
+                      </button>
+                      <button type="button" onClick={() => void onArchiveCourtComplaint(complaint)} disabled={archivingCourtComplaintId === complaint.id} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-white disabled:opacity-50">
+                        {archivingCourtComplaintId === complaint.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Archive className="h-3 w-3" />} Архив
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-sm text-slate-600">В инстанцию: {complaint.targetInstanceLabel}{complaint.filedAt ? ` · ${toRuDate(complaint.filedAt)}` : ''}</div>
+                  {complaint.clientCaseDocumentId ? <div className="mt-1 text-sm text-slate-500">Документ #{complaint.clientCaseDocumentId}</div> : null}
+                  {complaint.notes ? <div className="mt-2 text-sm text-slate-500">{complaint.notes}</div> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-xl border border-slate-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -4905,7 +5323,7 @@ function CourtPanel({
       <section className="rounded-xl border border-slate-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Судебные события</h2>
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{courtEvents.length} записей</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">{selectedCourtEvents.length} записей</span>
         </div>
         <div className="mt-5 rounded-lg border border-slate-100 bg-slate-50 p-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -5019,7 +5437,7 @@ function CourtPanel({
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Суд</span>
             <select value={courtEventCourtIdDraft} onChange={(event) => onCourtEventCourtIdChange(event.target.value)} disabled={courtDirectoryLoading} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50">
               <option value="">{courtDirectoryLoading ? 'Загрузка...' : 'Из карточки'}</option>
-              {courtDirectory.map((court) => (
+              {courtDirectoryForInstance.map((court) => (
                 <option key={court.id} value={court.id}>
                   {court.name}
                 </option>
@@ -5032,13 +5450,13 @@ function CourtPanel({
         </div>
         {courtEventsLoading ? (
           <LoadingBlock label="Загрузка судебных событий..." />
-        ) : courtEvents.length === 0 ? (
+        ) : selectedCourtEvents.length === 0 ? (
           <div className="mt-3 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
             Судебные события пока не добавлены.
           </div>
         ) : (
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {courtEvents.map((event) => (
+            {selectedCourtEvents.map((event) => (
               <div key={event.id} className={`rounded-lg border p-3 ${event.isOverdue ? 'border-rose-200 bg-rose-50' : 'border-slate-100 bg-slate-50'}`}>
                 <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{event.eventTypeLabel || event.eventType} · {event.movementStatusLabel || event.movementStatus}</div>
                 <div className="mt-2 font-semibold text-slate-900">{event.title}</div>
