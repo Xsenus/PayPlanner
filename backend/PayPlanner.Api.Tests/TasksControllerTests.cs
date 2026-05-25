@@ -14,6 +14,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
@@ -1327,6 +1328,132 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task ExportPlanningReport_ReturnsHtmlGroupedByClientAndCase()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Кирпита Наталья Андреевна");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Взыскание долга");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: clientCase.Id, result: "На контроль");
+        task.Title = "Проверить движение по делу";
+        task.Description = "Сверить карточку суда и зафиксировать результат.";
+        task.DueAt = new DateTime(2026, 5, 11, 13, 0, 0, DateTimeKind.Utc);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.ExportPlanningReport(
+            format: "html",
+            search: null,
+            status: "active",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            clientCaseId: null,
+            clientId: null,
+            legalEntityId: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        var content = Encoding.UTF8.GetString(file.FileContents);
+
+        Assert.Equal("text/html; charset=utf-8", file.ContentType);
+        Assert.Contains("ПЛАНИНГ ПО КЛИЕНТАМ", content);
+        Assert.Contains("КЛИЕНТ | Кирпита Наталья Андреевна", content);
+        Assert.Contains("ДЕЛО | Взыскание долга", content);
+        Assert.Contains("Проверить движение по делу", content);
+        Assert.Contains("На контроль", content);
+    }
+
+    [Fact]
+    public async Task ExportPlanningReport_ReturnsWordFile()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        await CreateTaskAsync(db, author.Id, client.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.ExportPlanningReport(
+            format: "word",
+            search: null,
+            status: "active",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            clientCaseId: null,
+            clientId: null,
+            legalEntityId: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+
+        Assert.Equal("application/msword", file.ContentType);
+        Assert.EndsWith(".doc", file.FileDownloadName);
+        var preamble = Encoding.UTF8.GetPreamble();
+        Assert.True(file.FileContents.Take(preamble.Length).SequenceEqual(preamble));
+    }
+
+    [Fact]
+    public async Task ExportPlanningReport_ReturnsPdfThroughPdfService()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        await CreateTaskAsync(db, author.Id, client.Id);
+        var pdfService = new FakeInvoiceDocumentPdfService([1, 2, 3]);
+        var controller = CreateController(db, new RecordingNotificationService(), author, pdfService);
+
+        var result = await controller.ExportPlanningReport(
+            format: "pdf",
+            search: null,
+            status: "active",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            clientCaseId: null,
+            clientId: null,
+            legalEntityId: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.Equal([1, 2, 3], file.FileContents);
+        Assert.Contains("ПЛАНИНГ ПО КЛИЕНТАМ", pdfService.LastHtml);
+    }
+
+    [Fact]
+    public async Task ExportPlanningReport_ReturnsForbidWhenTaskExportIsDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateTaskUserAsync(
+            db,
+            "task-report-denied@example.com",
+            "Пользователь без экспорта",
+            canEdit: false,
+            canExport: false);
+        var controller = CreateController(db, new RecordingNotificationService(), user);
+
+        var result = await controller.ExportPlanningReport(
+            format: "html",
+            search: null,
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            clientCaseId: null,
+            clientId: null,
+            legalEntityId: null,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
     public async Task GetNotifications_IncludesCompletedTaskForAuthor()
     {
         await using var db = await CreateContextAsync();
@@ -2067,8 +2194,9 @@ public class TasksControllerTests
     private static TasksController CreateController(
         PaymentContext db,
         INotificationService notificationService,
-        User user)
-        => new(db, notificationService)
+        User user,
+        IInvoiceDocumentPdfService? pdfService = null)
+        => new(db, notificationService, pdfService: pdfService)
         {
             ControllerContext = new ControllerContext
             {
@@ -2284,6 +2412,24 @@ public class TasksControllerTests
         var property = value?.GetType().GetProperty(propertyName);
         Assert.NotNull(property);
         return Assert.IsType<int>(property.GetValue(value));
+    }
+
+    private sealed class FakeInvoiceDocumentPdfService : IInvoiceDocumentPdfService
+    {
+        private readonly byte[] _bytes;
+
+        public FakeInvoiceDocumentPdfService(byte[] bytes)
+        {
+            _bytes = bytes;
+        }
+
+        public string LastHtml { get; private set; } = string.Empty;
+
+        public Task<byte[]> RenderAsync(string html, CancellationToken ct = default)
+        {
+            LastHtml = html;
+            return Task.FromResult(_bytes);
+        }
     }
 
     private sealed class RecordingNotificationService : INotificationService

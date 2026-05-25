@@ -70,6 +70,7 @@ type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 type PeriodMode = 'day' | 'week' | 'month';
 type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
+type TaskPlanningReportFormat = 'html' | 'word' | 'pdf';
 type ModalState = { mode: 'create' | 'edit' | 'view'; task?: TaskJournalItem; dueAt?: string } | null;
 type TaskJournalMode = 'journal' | 'approvals';
 type TaskJournalProps = {
@@ -2106,6 +2107,68 @@ export function TaskJournal({
     }
   };
 
+  const buildPlanningReportParams = (format: TaskPlanningReportFormat) => {
+    const nowDate = new Date();
+    let from = dateRangeBounds.from?.toISOString();
+    let to = dateRangeBounds.to?.toISOString();
+    let reportStatus: TaskJournalStatus | 'active' | undefined = statusFilter === 'all' ? undefined : statusFilter;
+    let reportPriority: TaskJournalPriority | 'highPriority' | undefined = priorityFilter === 'all' ? undefined : priorityFilter;
+
+    if (!from && !to && metricFilter === 'none' && (viewMode === 'list' || viewMode === 'board')) {
+      const { periodStart, periodEnd } = getTaskPeriodBounds(nowDate, periodMode);
+      from = periodStart.toISOString();
+      to = periodEnd.toISOString();
+    }
+
+    if (metricFilter === 'active') {
+      reportStatus = 'active';
+    } else if (metricFilter === 'overdue') {
+      reportStatus = 'active';
+      to = nowDate.toISOString();
+    } else if (metricFilter === 'today') {
+      reportStatus = 'active';
+      from = startOfDay(nowDate).toISOString();
+      to = endOfDay(nowDate).toISOString();
+    } else if (metricFilter === 'highPriority') {
+      reportStatus = 'active';
+      reportPriority = 'highPriority';
+    }
+
+    const reportAssigneeUserId =
+      quickFilter === 'assignedToMe' && currentUserId
+        ? currentUserId
+        : assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)
+          ? Number(assigneeFilter)
+          : undefined;
+
+    return {
+      format,
+      search: search.trim() || undefined,
+      status: reportStatus,
+      type: typeFilter === 'all' ? undefined : typeFilter,
+      priority: reportPriority,
+      assigneeUserId: reportAssigneeUserId,
+      from,
+      to,
+    };
+  };
+
+  const handlePlanningReportExport = async (format: TaskPlanningReportFormat) => {
+    if (!canExportTasks) {
+      toast.error('У роли нет права на выгрузку отчета по задачам.', 'Отчет по задачам');
+      return;
+    }
+
+    const label = format === 'word' ? 'Word' : format.toUpperCase();
+    try {
+      const response = await apiService.downloadTaskPlanningReport(buildPlanningReportParams(format));
+      downloadBlob(response.fileName, response.blob);
+      toast.success(`Отчет по задачам выгружен в ${label}.`, 'Отчет по задачам');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось выгрузить отчет по задачам.'), 'Отчет по задачам');
+    }
+  };
+
   const pageTitle = isApprovalsMode ? 'Согласования' : 'Журнал задач';
   const pageDescription = isApprovalsMode
     ? 'Задачи, которые находятся на согласовании и требуют решения текущего согласующего. Они остаются в общем журнале задач.'
@@ -2174,6 +2237,30 @@ export function TaskJournal({
                   >
                     <Download className="h-4 w-4" />
                     CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handlePlanningReportExport('word')}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <FileText className="h-4 w-4" />
+                    Word
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handlePlanningReportExport('pdf')}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <FileText className="h-4 w-4" />
+                    PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handlePlanningReportExport('html')}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <Download className="h-4 w-4" />
+                    HTML
                   </button>
                   <button
                     type="button"

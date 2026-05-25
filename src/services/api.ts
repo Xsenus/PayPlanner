@@ -2203,6 +2203,7 @@ export class ApiService {
     search?: string;
     status?: string;
     type?: string;
+    priority?: string;
     assigneeUserId?: number;
     clientCaseId?: number;
     clientId?: number;
@@ -2216,6 +2217,7 @@ export class ApiService {
       search: params?.search,
       status: params?.status,
       type: params?.type,
+      priority: params?.priority,
       assigneeUserId: params?.assigneeUserId,
       clientCaseId: params?.clientCaseId,
       clientId: params?.clientId,
@@ -2290,6 +2292,49 @@ export class ApiService {
     return {
       blob: await response.blob(),
       fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || 'task-calendar.ics',
+    };
+  }
+
+  async downloadTaskPlanningReport(params?: {
+    format?: 'html' | 'word' | 'pdf';
+    search?: string;
+    status?: string;
+    type?: string;
+    priority?: string;
+    assigneeUserId?: number;
+    from?: string;
+    to?: string;
+    clientCaseId?: number;
+    clientId?: number;
+    legalEntityId?: number;
+  }) {
+    const format = params?.format ?? 'html';
+    const q = buildQuery({
+      search: params?.search,
+      status: params?.status,
+      type: params?.type,
+      priority: params?.priority,
+      assigneeUserId: params?.assigneeUserId,
+      from: params?.from,
+      to: params?.to,
+      clientCaseId: params?.clientCaseId,
+      clientId: params?.clientId,
+      legalEntityId: params?.legalEntityId,
+    });
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/tasks/planning-report.${format}${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || `task-planning-report.${format === 'word' ? 'doc' : format}`,
     };
   }
 

@@ -16,6 +16,7 @@ const apiMock = vi.hoisted(() => ({
   createTaskJournalCaseAutomationTask: vi.fn(),
   createTaskJournalCaseAutomationTasks: vi.fn(),
   downloadTaskJournalCalendar: vi.fn(),
+  downloadTaskPlanningReport: vi.fn(),
   getCaseCalendarEvents: vi.fn(),
   getCaseCalendarSummary: vi.fn(),
   getTaskJournalItem: vi.fn(),
@@ -348,6 +349,7 @@ describe('TaskJournal', () => {
       skippedCount: 0,
     });
     apiMock.downloadTaskJournalCalendar.mockResolvedValue({ blob: new Blob(['ics']), fileName: 'task-calendar.ics' });
+    apiMock.downloadTaskPlanningReport.mockResolvedValue({ blob: new Blob(['report']), fileName: 'task-planning-report.doc' });
     apiMock.getCaseCalendarEvents.mockResolvedValue([]);
     apiMock.getCaseCalendarSummary.mockResolvedValue({
       from: todayAt(0),
@@ -455,7 +457,22 @@ describe('TaskJournal', () => {
     await renderJournal();
 
     expect(screen.queryByRole('button', { name: 'CSV' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Word' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'PDF' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'HTML' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'ICS' })).toBeNull();
+  });
+
+  it('exports client planning report in Word format', async () => {
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Word' }));
+
+    await waitFor(() => expect(apiMock.downloadTaskPlanningReport).toHaveBeenCalledWith(expect.objectContaining({
+      format: 'word',
+      status: 'active',
+    })));
+    expect(toastMock.success).toHaveBeenCalledWith('Отчет по задачам выгружен в Word.', 'Отчет по задачам');
   });
 
   it('shows case deadlines and court events in calendar mode', async () => {

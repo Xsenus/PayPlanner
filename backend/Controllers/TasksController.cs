@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
@@ -11,6 +12,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
@@ -77,17 +79,20 @@ public class TasksController : ControllerBase
     private readonly PaymentContext _db;
     private readonly INotificationService _notificationService;
     private readonly ICaseDocumentStorage _caseDocumentStorage;
+    private readonly IInvoiceDocumentPdfService? _pdfService;
     private readonly string _taskFilesRoot;
 
     public TasksController(
         PaymentContext db,
         INotificationService notificationService,
         IWebHostEnvironment? environment = null,
-        ICaseDocumentStorage? caseDocumentStorage = null)
+        ICaseDocumentStorage? caseDocumentStorage = null,
+        IInvoiceDocumentPdfService? pdfService = null)
     {
         _db = db;
         _notificationService = notificationService;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
+        _pdfService = pdfService;
         _taskFilesRoot = Path.Combine(environment?.ContentRootPath ?? AppContext.BaseDirectory, "App_Data", "task-files");
     }
 
@@ -102,6 +107,7 @@ public class TasksController : ControllerBase
         [FromQuery] int? clientCaseId = null,
         [FromQuery] int? clientId = null,
         [FromQuery] int? legalEntityId = null,
+        [FromQuery] string? priority = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
@@ -117,83 +123,18 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        var query = BuildVisibleTasksQuery(access);
-
-        if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.Equals(status, "active", StringComparison.OrdinalIgnoreCase))
-            {
-                query = query.Where(task => task.Status != "done" && task.Status != "cancelled");
-            }
-            else
-            {
-                var normalizedStatus = NormalizeEnumValue(status, AllowedStatuses, "new");
-                query = query.Where(task => task.Status == normalizedStatus);
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "all", StringComparison.OrdinalIgnoreCase))
-        {
-            var normalizedType = NormalizeEnumValue(type, AllowedTypes, "task");
-            query = query.Where(task => task.Type == normalizedType);
-        }
-
-        if (assigneeUserId.HasValue)
-        {
-            query = query.Where(task =>
-                task.AssigneeUserId == assigneeUserId.Value ||
-                task.Participants.Any(participant =>
-                    participant.Role == "assignee" &&
-                    participant.UserId == assigneeUserId.Value));
-        }
-
-        if (clientCaseId.HasValue)
-        {
-            query = query.Where(task => task.ClientCaseId == clientCaseId.Value);
-        }
-
-        if (clientId.HasValue)
-        {
-            query = query.Where(task => task.ClientId == clientId.Value);
-        }
-
-        if (legalEntityId.HasValue)
-        {
-            query = query.Where(task => task.LegalEntityId == legalEntityId.Value);
-        }
-
-        if (from.HasValue)
-        {
-            query = query.Where(task => task.DueAt >= from.Value);
-        }
-
-        if (to.HasValue)
-        {
-            query = query.Where(task => task.DueAt <= to.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var term = search.Trim().ToLower();
-            query = query.Where(task =>
-                task.ObjectName.ToLower().Contains(term) ||
-                (task.Client != null && task.Client.Name.ToLower().Contains(term)) ||
-                (task.LegalEntity != null && (
-                    task.LegalEntity.ShortName.ToLower().Contains(term) ||
-                    (task.LegalEntity.FullName ?? "").ToLower().Contains(term) ||
-                    (task.LegalEntity.Inn ?? "").ToLower().Contains(term))) ||
-                (task.ClientCase != null && task.ClientCase.Title.ToLower().Contains(term)) ||
-                task.Title.ToLower().Contains(term) ||
-                (task.Description ?? "").ToLower().Contains(term) ||
-                task.AssigneeName.ToLower().Contains(term) ||
-                task.Participants.Any(participant =>
-                    participant.DisplayName.ToLower().Contains(term) ||
-                    participant.Email.ToLower().Contains(term) ||
-                    (participant.Resolution ?? "").ToLower().Contains(term)) ||
-                task.AuthorName.ToLower().Contains(term) ||
-                (task.Result ?? "").ToLower().Contains(term) ||
-                task.TagsJson.ToLower().Contains(term));
-        }
+        var query = ApplyTaskJournalFilters(
+            BuildVisibleTasksQuery(access),
+            search,
+            status,
+            type,
+            assigneeUserId,
+            from,
+            to,
+            clientCaseId,
+            clientId,
+            legalEntityId,
+            priority);
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
@@ -507,6 +448,87 @@ public class TasksController : ControllerBase
             Encoding.UTF8.GetBytes(calendar),
             "text/calendar; charset=utf-8",
             "task-calendar.ics");
+    }
+
+    [HttpGet("planning-report.{format}")]
+    public async Task<IActionResult> ExportPlanningReport(
+        string format,
+        [FromQuery] string? search,
+        [FromQuery] string? status,
+        [FromQuery] string? type,
+        [FromQuery] int? assigneeUserId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? clientCaseId = null,
+        [FromQuery] int? clientId = null,
+        [FromQuery] int? legalEntityId = null,
+        [FromQuery] string? priority = null,
+        CancellationToken ct = default)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanExport != true)
+        {
+            return Forbid();
+        }
+
+        var normalizedFormat = NormalizePlanningReportFormat(format);
+        if (normalizedFormat is null)
+        {
+            return BadRequest("Поддерживаются форматы html, word и pdf.");
+        }
+
+        var tasks = await ApplyTaskJournalFilters(
+                BuildVisibleTasksQuery(access).AsNoTracking(),
+                search,
+                status,
+                type,
+                assigneeUserId,
+                from,
+                to,
+                clientCaseId,
+                clientId,
+                legalEntityId,
+                priority)
+            .OrderBy(task => task.Client != null ? task.Client.Name : task.LegalEntity != null ? task.LegalEntity.ShortName : task.ObjectName)
+            .ThenBy(task => task.ClientCase != null ? task.ClientCase.Title : task.ObjectName)
+            .ThenBy(task => task.DueAt)
+            .ThenBy(task => task.Id)
+            .Take(5000)
+            .ToListAsync(ct);
+
+        var html = BuildTaskPlanningReportHtml(tasks, BuildTaskPlanningReportFilterText(status, type, priority, from, to), DateTime.UtcNow);
+        var fileStamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture);
+
+        if (normalizedFormat == "pdf")
+        {
+            if (_pdfService is null)
+            {
+                return Problem("Сервис формирования PDF недоступен.");
+            }
+
+            var pdfBytes = await _pdfService.RenderAsync(html, ct);
+            return File(pdfBytes, "application/pdf", $"task-planning-report-{fileStamp}.pdf");
+        }
+
+        var bytes = normalizedFormat == "word"
+            ? Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(html)).ToArray()
+            : Encoding.UTF8.GetBytes(html);
+        var contentType = normalizedFormat == "word"
+            ? "application/msword"
+            : "text/html; charset=utf-8";
+        var extension = normalizedFormat == "word" ? "doc" : "html";
+
+        return File(bytes, contentType, $"task-planning-report-{fileStamp}.{extension}");
     }
 
     [HttpGet("automation/case-candidates")]
@@ -2084,6 +2106,320 @@ public class TasksController : ControllerBase
 
     private static bool IntervalsOverlap(DateTime firstStart, DateTime firstEnd, DateTime secondStart, DateTime secondEnd)
         => firstStart < secondEnd && secondStart < firstEnd;
+
+    private static IQueryable<TaskJournalItem> ApplyTaskJournalFilters(
+        IQueryable<TaskJournalItem> query,
+        string? search,
+        string? status,
+        string? type,
+        int? assigneeUserId,
+        DateTime? from,
+        DateTime? to,
+        int? clientCaseId,
+        int? clientId,
+        int? legalEntityId,
+        string? priority = null)
+    {
+        if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(status, "active", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(task => task.Status != "done" && task.Status != "cancelled");
+            }
+            else
+            {
+                var normalizedStatus = NormalizeEnumValue(status, AllowedStatuses, "new");
+                query = query.Where(task => task.Status == normalizedStatus);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var normalizedType = NormalizeEnumValue(type, AllowedTypes, "task");
+            query = query.Where(task => task.Type == normalizedType);
+        }
+
+        if (!string.IsNullOrWhiteSpace(priority) && !string.Equals(priority, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(priority, "highPriority", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(task => task.Priority == "high" || task.Priority == "urgent");
+            }
+            else
+            {
+                var normalizedPriority = NormalizeEnumValue(priority, AllowedPriorities, "normal");
+                query = query.Where(task => task.Priority == normalizedPriority);
+            }
+        }
+
+        if (assigneeUserId.HasValue)
+        {
+            query = query.Where(task =>
+                task.AssigneeUserId == assigneeUserId.Value ||
+                task.Participants.Any(participant =>
+                    participant.Role == "assignee" &&
+                    participant.UserId == assigneeUserId.Value));
+        }
+
+        if (clientCaseId.HasValue)
+        {
+            query = query.Where(task => task.ClientCaseId == clientCaseId.Value);
+        }
+
+        if (clientId.HasValue)
+        {
+            query = query.Where(task => task.ClientId == clientId.Value);
+        }
+
+        if (legalEntityId.HasValue)
+        {
+            query = query.Where(task => task.LegalEntityId == legalEntityId.Value);
+        }
+
+        if (from.HasValue)
+        {
+            query = query.Where(task => task.DueAt >= from.Value);
+        }
+
+        if (to.HasValue)
+        {
+            query = query.Where(task => task.DueAt <= to.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim().ToLower();
+            query = query.Where(task =>
+                task.ObjectName.ToLower().Contains(term) ||
+                (task.Client != null && task.Client.Name.ToLower().Contains(term)) ||
+                (task.LegalEntity != null && (
+                    task.LegalEntity.ShortName.ToLower().Contains(term) ||
+                    (task.LegalEntity.FullName ?? "").ToLower().Contains(term) ||
+                    (task.LegalEntity.Inn ?? "").ToLower().Contains(term))) ||
+                (task.ClientCase != null && task.ClientCase.Title.ToLower().Contains(term)) ||
+                task.Title.ToLower().Contains(term) ||
+                (task.Description ?? "").ToLower().Contains(term) ||
+                task.AssigneeName.ToLower().Contains(term) ||
+                task.Participants.Any(participant =>
+                    participant.DisplayName.ToLower().Contains(term) ||
+                    participant.Email.ToLower().Contains(term) ||
+                    (participant.Resolution ?? "").ToLower().Contains(term)) ||
+                task.AuthorName.ToLower().Contains(term) ||
+                (task.Result ?? "").ToLower().Contains(term) ||
+                task.TagsJson.ToLower().Contains(term));
+        }
+
+        return query;
+    }
+
+    private static string? NormalizePlanningReportFormat(string? format)
+    {
+        var normalized = (format ?? string.Empty).Trim().TrimStart('.').ToLowerInvariant();
+        return normalized switch
+        {
+            "html" => "html",
+            "word" or "doc" or "docx" => "word",
+            "pdf" => "pdf",
+            _ => null,
+        };
+    }
+
+    private static string BuildTaskPlanningReportFilterText(string? status, string? type, string? priority, DateTime? from, DateTime? to)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            parts.Add(string.Equals(status, "active", StringComparison.OrdinalIgnoreCase)
+                ? "статус: активные"
+                : $"статус: {TaskStatusLabel(NormalizeEnumValue(status, AllowedStatuses, "new")).ToLowerInvariant()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            parts.Add($"тип: {TaskTypeLabel(NormalizeEnumValue(type, AllowedTypes, "task")).ToLowerInvariant()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(priority) && !string.Equals(priority, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            parts.Add(string.Equals(priority, "highPriority", StringComparison.OrdinalIgnoreCase)
+                ? "приоритет: высокий или срочный"
+                : $"приоритет: {TaskPriorityLabel(NormalizeEnumValue(priority, AllowedPriorities, "normal")).ToLowerInvariant()}");
+        }
+
+        if (from.HasValue || to.HasValue)
+        {
+            var fromText = from.HasValue ? FormatPlanningDate(from.Value) : "без начала";
+            var toText = to.HasValue ? FormatPlanningDate(to.Value) : "без окончания";
+            parts.Add($"срок: {fromText} - {toText}");
+        }
+
+        return parts.Count == 0 ? "Все доступные задачи" : string.Join("; ", parts);
+    }
+
+    private static string BuildTaskPlanningReportHtml(
+        IReadOnlyList<TaskJournalItem> tasks,
+        string filterText,
+        DateTime generatedAtUtc)
+    {
+        var html = new StringBuilder();
+        html.AppendLine("<!doctype html>");
+        html.AppendLine("<html lang=\"ru\">");
+        html.AppendLine("<head>");
+        html.AppendLine("<meta charset=\"utf-8\">");
+        html.AppendLine("<title>Планинг по клиентам</title>");
+        html.AppendLine("<style>");
+        html.AppendLine("@page { size: A4 landscape; margin: 12mm; }");
+        html.AppendLine("body { font-family: Arial, sans-serif; color: #111827; font-size: 11px; }");
+        html.AppendLine("h1 { margin: 0 0 8px; text-align: center; font-size: 20px; letter-spacing: .04em; }");
+        html.AppendLine(".meta { margin: 0 0 14px; color: #475569; text-align: center; }");
+        html.AppendLine("table { width: 100%; border-collapse: collapse; table-layout: fixed; }");
+        html.AppendLine("th, td { border: 1px solid #94a3b8; padding: 6px 7px; vertical-align: top; word-wrap: break-word; }");
+        html.AppendLine("th { background: #e2e8f0; text-transform: uppercase; font-size: 9px; letter-spacing: .08em; }");
+        html.AppendLine(".client-row td { background: #dbeafe; font-weight: 700; font-size: 12px; }");
+        html.AppendLine(".case-row td { background: #f1f5f9; font-weight: 700; }");
+        html.AppendLine(".empty-row td { text-align: center; color: #64748b; padding: 18px; }");
+        html.AppendLine(".small { color: #64748b; font-size: 10px; margin-top: 3px; }");
+        html.AppendLine(".num { width: 5%; text-align: center; }");
+        html.AppendLine(".kind { width: 10%; }");
+        html.AppendLine(".task { width: 28%; }");
+        html.AppendLine(".due { width: 12%; }");
+        html.AppendLine(".status { width: 12%; }");
+        html.AppendLine(".assignee { width: 16%; }");
+        html.AppendLine(".comment { width: 17%; }");
+        html.AppendLine("</style>");
+        html.AppendLine("</head>");
+        html.AppendLine("<body>");
+        html.AppendLine("<h1>ПЛАНИНГ ПО КЛИЕНТАМ</h1>");
+        html.AppendLine($"<p class=\"meta\">Сформировано: {Html(FormatPlanningDate(generatedAtUtc))}. Фильтр: {Html(filterText)}. Задач: {tasks.Count}.</p>");
+        html.AppendLine("<table>");
+
+        if (tasks.Count == 0)
+        {
+            html.AppendLine("<tr class=\"empty-row\"><td colspan=\"7\">По выбранным фильтрам задач нет.</td></tr>");
+        }
+        else
+        {
+            foreach (var clientGroup in tasks
+                .GroupBy(GetPlanningClientName)
+                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                html.AppendLine($"<tr class=\"client-row\"><td colspan=\"7\">КЛИЕНТ | {Html(clientGroup.Key)}</td></tr>");
+
+                foreach (var caseGroup in clientGroup
+                    .GroupBy(GetPlanningCaseTitle)
+                    .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    html.AppendLine($"<tr class=\"case-row\"><td colspan=\"7\">ДЕЛО | {Html(caseGroup.Key)}</td></tr>");
+                    AppendTaskPlanningHeader(html);
+
+                    var rowNumber = 1;
+                    foreach (var task in caseGroup.OrderBy(item => item.DueAt).ThenBy(item => item.Id))
+                    {
+                        var description = Html(task.Title);
+                        if (!string.IsNullOrWhiteSpace(task.Description) &&
+                            !string.Equals(task.Description.Trim(), task.Title.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            description += $"<div class=\"small\">{Html(task.Description)}</div>";
+                        }
+
+                        html.AppendLine("<tr>");
+                        html.AppendLine($"<td class=\"num\">{rowNumber}</td>");
+                        html.AppendLine($"<td class=\"kind\">{Html(TaskTypeLabel(task.Type))}</td>");
+                        html.AppendLine($"<td class=\"task\">{description}</td>");
+                        html.AppendLine($"<td class=\"due\">{Html(FormatPlanningDate(task.DueAt))}</td>");
+                        html.AppendLine($"<td class=\"status\">{Html(TaskStatusLabel(ResolveTaskStatus(task)))}</td>");
+                        html.AppendLine($"<td class=\"assignee\">{Html(GetPlanningAssigneeName(task))}</td>");
+                        html.AppendLine($"<td class=\"comment\">{Html(task.Result)}</td>");
+                        html.AppendLine("</tr>");
+                        rowNumber++;
+                    }
+                }
+            }
+        }
+
+        html.AppendLine("</table>");
+        html.AppendLine("</body>");
+        html.AppendLine("</html>");
+        return html.ToString();
+    }
+
+    private static void AppendTaskPlanningHeader(StringBuilder html)
+    {
+        html.AppendLine("<tr>");
+        html.AppendLine("<th class=\"num\">№ П/П</th>");
+        html.AppendLine("<th class=\"kind\">ЗАДАЧА</th>");
+        html.AppendLine("<th class=\"task\">ОПИСАНИЕ ЗАДАЧИ</th>");
+        html.AppendLine("<th class=\"due\">СРОК</th>");
+        html.AppendLine("<th class=\"status\">СТАТУС</th>");
+        html.AppendLine("<th class=\"assignee\">ИСПОЛНИТЕЛЬ</th>");
+        html.AppendLine("<th class=\"comment\">КОММЕНТАРИЙ</th>");
+        html.AppendLine("</tr>");
+    }
+
+    private static string GetPlanningClientName(TaskJournalItem task)
+    {
+        if (task.Client is not null && !string.IsNullOrWhiteSpace(task.Client.Name))
+        {
+            return task.Client.Name.Trim();
+        }
+
+        if (task.LegalEntity is not null)
+        {
+            var legalEntityName = GetLegalEntityName(task.LegalEntity);
+            if (!string.IsNullOrWhiteSpace(legalEntityName))
+            {
+                return legalEntityName;
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(task.ObjectName)
+            ? task.ObjectName.Trim()
+            : "Без клиента";
+    }
+
+    private static string GetPlanningCaseTitle(TaskJournalItem task)
+    {
+        if (task.ClientCase is not null && !string.IsNullOrWhiteSpace(task.ClientCase.Title))
+        {
+            return task.ClientCase.Title.Trim();
+        }
+
+        return !string.IsNullOrWhiteSpace(task.ObjectName)
+            ? task.ObjectName.Trim()
+            : "Без дела";
+    }
+
+    private static string GetPlanningAssigneeName(TaskJournalItem task)
+    {
+        var names = new List<string>();
+        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
+        {
+            names.Add(task.AssigneeName.Trim());
+        }
+
+        names.AddRange(task.Participants
+            .Where(participant => string.Equals(participant.Role, "assignee", StringComparison.OrdinalIgnoreCase))
+            .Select(participant => participant.DisplayName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim()));
+
+        var distinct = names
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return distinct.Count == 0 ? "—" : string.Join(", ", distinct);
+    }
+
+    private static string FormatPlanningDate(DateTime value)
+    {
+        var utcValue = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        return utcValue.TimeOfDay == TimeSpan.Zero
+            ? utcValue.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"))
+            : utcValue.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+    }
+
+    private static string Html(string? value)
+        => WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(value) ? "—" : value.Trim());
 
     private IQueryable<TaskJournalItem> BuildVisibleTasksQuery(TaskAccess access)
     {
