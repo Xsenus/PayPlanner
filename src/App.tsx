@@ -579,6 +579,25 @@ function AppContent() {
     [activeTab, handleOpenClient, permissions.cases.canView],
   );
 
+  const openCaseDetailSection = useCallback(
+    (caseId: number, section: 'tasks' | 'documents' | 'court' | 'workOrder') => {
+      if (!permissions.cases.canView || !(caseId > 0)) {
+        return;
+      }
+
+      try {
+        window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: section }));
+      } catch {
+        /** */
+      }
+
+      setSelectedCaseId(caseId);
+      setCaseReturnTab(activeTab === 'caseDetail' ? 'cases' : activeTab);
+      setActiveTab('caseDetail');
+    },
+    [activeTab, permissions.cases.canView],
+  );
+
   const openTaskDetail = useCallback(
     (taskId: number, options?: { returnTo?: Tab | null }) => {
       if (!permissions.tasks.canView || !(taskId > 0)) {
@@ -1059,6 +1078,8 @@ function AppContent() {
                   setCaseReturnTab('reports');
                   setActiveTab('caseDetail');
                 }}
+                onOpenCaseSection={openCaseDetailSection}
+                onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: 'reports' })}
               />
             )
           : renderNoAccess('Просмотр отчетов недоступен для вашей роли.');

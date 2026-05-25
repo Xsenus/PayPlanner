@@ -90,6 +90,25 @@ vi.mock('./components/Notifications/NotificationCenter', () => ({
   ),
 }));
 
+vi.mock('./components/Reports/Reports', () => ({
+  Reports: ({
+    onOpenCaseSection,
+    onOpenTask,
+  }: {
+    onOpenCaseSection?: (caseId: number, section: 'tasks' | 'documents' | 'court' | 'workOrder') => void;
+    onOpenTask?: (taskId: number) => void;
+  }) => (
+    <section data-testid="reports-view">
+      <button type="button" onClick={() => onOpenCaseSection?.(77, 'documents')}>
+        open report document
+      </button>
+      <button type="button" onClick={() => onOpenTask?.(202)}>
+        open report task
+      </button>
+    </section>
+  ),
+}));
+
 vi.mock('./components/Tasks/TaskJournal', () => ({
   TaskJournal: ({
     routeTaskId,
@@ -103,6 +122,15 @@ vi.mock('./components/Tasks/TaskJournal', () => ({
       <button type="button" onClick={() => onRouteTaskChange?.(null)}>
         save task
       </button>
+    </section>
+  ),
+}));
+
+vi.mock('./components/Cases/CaseDetailPage', () => ({
+  CaseDetailPage: ({ caseId }: { caseId: number }) => (
+    <section data-testid="case-detail">
+      <span>case {caseId}</span>
+      <span>{window.sessionStorage.getItem(`pp.case-detail.${caseId}.view.v1`)}</span>
     </section>
   ),
 }));
@@ -161,6 +189,34 @@ describe('App calendar client navigation', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('task-journal')).toBeNull();
       expect(screen.getByTestId('notification-center')).toBeTruthy();
+    });
+  });
+
+  it('opens report drill-down targets and returns from report task', async () => {
+    window.history.replaceState({}, '', '/?ppTab=reports');
+
+    const firstRender = render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'open report document' }));
+
+    expect(await screen.findByTestId('case-detail')).toBeTruthy();
+    expect(screen.getByText('case 77')).toBeTruthy();
+    expect(screen.getByText('{"activeTab":"documents"}')).toBeTruthy();
+
+    firstRender.unmount();
+    window.history.replaceState({}, '', '/?ppTab=reports');
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'open report task' }));
+
+    expect(await screen.findByTestId('task-journal')).toBeTruthy();
+    expect(screen.getByText('task 202')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'save task' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-journal')).toBeNull();
+      expect(screen.getByTestId('reports-view')).toBeTruthy();
     });
   });
 });

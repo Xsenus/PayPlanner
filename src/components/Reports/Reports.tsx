@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -1320,6 +1320,7 @@ function formatDeadlineOffset(days: number) {
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
 type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity';
+type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
   from?: string;
@@ -1400,6 +1401,33 @@ function ManagementReportExportButtons({
   );
 }
 
+function ReportDrilldownButton({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || !onClick}
+      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-45"
+    >
+      {children}
+      <ArrowUpRight className="h-3 w-3" />
+    </button>
+  );
+}
+
+function isCourtSource(sourceType?: string | null) {
+  const normalized = (sourceType ?? '').toLowerCase();
+  return normalized === 'court-event' || normalized === 'courtevent' || normalized === 'court';
+}
+
 function LegalWorkReportSection({
   report,
   loading,
@@ -1407,6 +1435,7 @@ function LegalWorkReportSection({
   filters,
   onReload,
   onOpenCase,
+  onOpenCaseSection,
 }: {
   report: LegalWorkReport | null;
   loading: boolean;
@@ -1414,6 +1443,7 @@ function LegalWorkReportSection({
   filters?: LegalWorkReportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
+  onOpenCaseSection?: (caseId: number, section: ReportCaseSection) => void;
 }) {
   const [exporting, setExporting] = useState<LegalWorkExportFormat | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -1593,6 +1623,16 @@ function LegalWorkReportSection({
                             <ArrowUpRight className="h-3.5 w-3.5" />
                           </button>
                           <div className="mt-1 text-sm text-slate-500">{row.clientName} · {row.caseTitle || row.caseNumber}</div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <ReportDrilldownButton onClick={() => onOpenCaseSection?.(row.caseId, 'tasks')}>
+                              Задачи
+                            </ReportDrilldownButton>
+                            {row.deadlineType === 'hearing' ? (
+                              <ReportDrilldownButton onClick={() => onOpenCaseSection?.(row.caseId, 'court')}>
+                                Суд
+                              </ReportDrilldownButton>
+                            ) : null}
+                          </div>
                         </div>
                         <span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">
                           {formatDeadlineOffset(row.daysOffset)}
@@ -1623,6 +1663,16 @@ function LegalWorkReportSection({
                             <ArrowUpRight className="h-3.5 w-3.5" />
                           </button>
                           <div className="mt-1 text-sm text-slate-500">{formatDate(row.dueAt)} · {row.responsibleName}</div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <ReportDrilldownButton onClick={() => onOpenCaseSection?.(row.caseId, 'tasks')}>
+                              Задачи
+                            </ReportDrilldownButton>
+                            {row.deadlineType === 'hearing' ? (
+                              <ReportDrilldownButton onClick={() => onOpenCaseSection?.(row.caseId, 'court')}>
+                                Суд
+                              </ReportDrilldownButton>
+                            ) : null}
+                          </div>
                         </div>
                         <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
                           {formatDeadlineOffset(row.daysOffset)}
@@ -2197,6 +2247,7 @@ function CurrentCasesReportSection({
   filters,
   onReload,
   onOpenCase,
+  onOpenCaseSection,
 }: {
   report: CurrentCasesReport | null;
   loading: boolean;
@@ -2204,6 +2255,7 @@ function CurrentCasesReportSection({
   filters?: ManagementReportExportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
+  onOpenCaseSection?: (caseId: number, section: ReportCaseSection) => void;
 }) {
   const rows = report?.items ?? [];
   const statusRows = report?.byStatus ?? [];
@@ -2371,6 +2423,18 @@ function CurrentCasesReportSection({
                         {row.overdueTaskCount > 0 ? <div className="text-xs text-rose-600">{row.overdueTaskCount} проср. задач</div> : null}
                         <div className="mt-1 text-xs text-slate-500">{row.activeDeadlineCount} сроков</div>
                         {row.overdueDeadlineCount > 0 ? <div className="text-xs text-rose-600">{row.overdueDeadlineCount} проср. сроков</div> : null}
+                        <div className="mt-3 flex justify-end gap-2">
+                          {row.openTaskCount > 0 || row.overdueTaskCount > 0 ? (
+                            <ReportDrilldownButton onClick={() => onOpenCaseSection?.(row.caseId, 'tasks')}>
+                              Задачи
+                            </ReportDrilldownButton>
+                          ) : null}
+                          {row.activeDeadlineCount > 0 || row.overdueDeadlineCount > 0 ? (
+                            <ReportDrilldownButton onClick={() => onOpenCaseSection?.(row.caseId, 'court')}>
+                              Сроки
+                            </ReportDrilldownButton>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   )) : (
@@ -2595,6 +2659,8 @@ function OverdueProceduralDeadlinesReportSection({
   filters,
   onReload,
   onOpenCase,
+  onOpenCaseSection,
+  onOpenTask,
 }: {
   report: OverdueProceduralDeadlinesReport | null;
   loading: boolean;
@@ -2602,6 +2668,8 @@ function OverdueProceduralDeadlinesReportSection({
   filters?: ManagementReportExportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
+  onOpenCaseSection?: (caseId: number, section: ReportCaseSection) => void;
+  onOpenTask?: (taskId: number) => void;
 }) {
   const rows = report?.items ?? [];
   const typeRows = report?.byType ?? [];
@@ -2746,6 +2814,23 @@ function OverdueProceduralDeadlinesReportSection({
                           {row.taskTitle ? ` · ${row.taskTitle}` : ''}
                           {row.documentName ? ` · ${row.documentName}` : ''}
                         </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {row.taskJournalItemId ? (
+                            <ReportDrilldownButton onClick={() => onOpenTask?.(row.taskJournalItemId!)}>
+                              Задача
+                            </ReportDrilldownButton>
+                          ) : null}
+                          {row.clientCaseDocumentId ? (
+                            <ReportDrilldownButton onClick={() => onOpenCaseSection?.(row.caseId, 'documents')}>
+                              Документ
+                            </ReportDrilldownButton>
+                          ) : null}
+                          {isCourtSource(row.sourceType) ? (
+                            <ReportDrilldownButton onClick={() => onOpenCaseSection?.(row.caseId, 'court')}>
+                              Суд
+                            </ReportDrilldownButton>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-900">{row.clientName}</div>
@@ -2789,6 +2874,7 @@ function CaseActivityReportSection({
   filters,
   onReload,
   onOpenCase,
+  onOpenCaseSection,
 }: {
   report: CaseActivityReport | null;
   loading: boolean;
@@ -2796,6 +2882,7 @@ function CaseActivityReportSection({
   filters?: ManagementReportExportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
+  onOpenCaseSection?: (caseId: number, section: ReportCaseSection) => void;
 }) {
   const rows = report?.items ?? [];
 
@@ -2919,6 +3006,13 @@ function CaseActivityReportSection({
                     <td className="px-4 py-3 text-slate-600">
                       <div>{row.activeTaskCount} активных</div>
                       <div className="mt-1 text-xs text-slate-500">{row.completedTaskCount} завершенных</div>
+                      {row.activeTaskCount > 0 ? (
+                        <div className="mt-3">
+                          <ReportDrilldownButton onClick={() => onOpenCaseSection?.(row.caseId, 'tasks')}>
+                            Задачи
+                          </ReportDrilldownButton>
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-slate-600">{row.reason}</td>
                   </tr>
@@ -5350,9 +5444,11 @@ function SpreadsheetImportReportSection({
 
 interface ReportsProps {
   onOpenCase?: (caseId: number) => void;
+  onOpenCaseSection?: (caseId: number, section: ReportCaseSection) => void;
+  onOpenTask?: (taskId: number) => void;
 }
 
-export function Reports({ onOpenCase }: ReportsProps = {}) {
+export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsProps = {}) {
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
   const [range, setRange] = useState<MonthRange>({ from: ymNow, to: ymNow });
@@ -5958,6 +6054,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               filters={cashFlowDates}
               onReload={reloadLegalWorkReport}
               onOpenCase={onOpenCase}
+              onOpenCaseSection={onOpenCaseSection}
             />
 
             <CaseFinanceReportSection
@@ -5985,6 +6082,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               filters={currentCasesReportFilters}
               onReload={reloadCurrentCasesReport}
               onOpenCase={onOpenCase}
+              onOpenCaseSection={onOpenCaseSection}
             />
 
             <LawyerWorkloadReportSection
@@ -6002,6 +6100,8 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               filters={overdueDeadlinesReportFilters}
               onReload={reloadOverdueDeadlinesReport}
               onOpenCase={onOpenCase}
+              onOpenCaseSection={onOpenCaseSection}
+              onOpenTask={onOpenTask}
             />
 
             <CaseActivityReportSection
@@ -6011,6 +6111,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               filters={caseActivityReportFilters}
               onReload={reloadCaseActivityReport}
               onOpenCase={onOpenCase}
+              onOpenCaseSection={onOpenCaseSection}
             />
 
             <DirectionReportSection
