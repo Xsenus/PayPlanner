@@ -9,6 +9,7 @@ import {
   Compass,
   CreditCard as CreditCardIcon,
   FileSpreadsheet,
+  FileText,
   FileUp,
   Flag,
   FolderKanban,
@@ -50,7 +51,9 @@ import { useCashOrderReport } from '../../hooks/useCashOrderReport';
 import { useBankStatementImportReport } from '../../hooks/useBankStatementImportReport';
 import { useSpreadsheetImportReport } from '../../hooks/useSpreadsheetImportReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
+import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
@@ -142,6 +145,10 @@ function csvCell(value: unknown) {
 function downloadCsv(filename: string, rows: unknown[][]) {
   const csv = rows.map((row) => row.map(csvCell).join(';')).join('\n');
   const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+  downloadBlob(filename, blob);
+}
+
+function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -150,7 +157,7 @@ function downloadCsv(filename: string, rows: unknown[][]) {
   URL.revokeObjectURL(url);
 }
 
-function exportLegalWorkReport(report: LegalWorkReport) {
+export function exportLegalWorkReport(report: LegalWorkReport) {
   const rows: unknown[][] = [
     ['Раздел', 'Наименование', 'Ответственный', 'Дата/период', 'Дела', 'Задачи', 'Сроки', 'Сумма', 'Примечание'],
     ['Сводка', 'Всего дел', '', `${report.from} - ${report.to}`, report.totalCases, '', '', report.feeTotal, `Оплачено: ${report.paidTotal}; остаток: ${report.outstandingTotal}`],
@@ -1186,25 +1193,53 @@ function formatDeadlineOffset(days: number) {
   return `через ${days} дн.`;
 }
 
+type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
+
+type LegalWorkReportFilters = {
+  from?: string;
+  to?: string;
+  status?: string;
+  responsibleUserId?: number;
+  caseType?: string;
+};
+
 function LegalWorkReportSection({
   report,
   loading,
   error,
+  filters,
   onReload,
   onOpenCase,
 }: {
   report: LegalWorkReport | null;
   loading: boolean;
   error: string | null;
+  filters?: LegalWorkReportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
 }) {
+  const [exporting, setExporting] = useState<LegalWorkExportFormat | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const responsibleRows = (report?.responsibles ?? []).slice(0, 8);
   const overdueRows = report?.overdueDeadlines ?? [];
   const upcomingRows = report?.upcomingDeadlines ?? [];
   const caseRows = report?.cases ?? [];
   const financeRows = report?.financeByStatus ?? [];
   const deadlineSummaryRows = report?.deadlinesByType ?? [];
+
+  async function handleExport(format: LegalWorkExportFormat) {
+    setExporting(format);
+    setExportError(null);
+
+    try {
+      const result = await apiService.downloadLegalWorkReport({ ...(filters ?? {}), format });
+      downloadBlob(result.fileName, result.blob);
+    } catch (err) {
+      setExportError(extractDisplayErrorMessage(err, 'Не удалось выгрузить отчет по юридической работе.'));
+    } finally {
+      setExporting(null);
+    }
+  }
 
   return (
     <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
@@ -1222,12 +1257,30 @@ function LegalWorkReportSection({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => report && exportLegalWorkReport(report)}
-            disabled={!report}
+            onClick={() => void handleExport('csv')}
+            disabled={!report || exporting !== null}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
-            CSV
+            {exporting === 'csv' ? 'CSV...' : 'CSV'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExport('excel')}
+            disabled={!report || exporting !== null}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            {exporting === 'excel' ? 'Excel...' : 'Excel'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExport('pdf')}
+            disabled={!report || exporting !== null}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileText className="h-4 w-4" />
+            {exporting === 'pdf' ? 'PDF...' : 'PDF'}
           </button>
           <button
             type="button"
@@ -1239,6 +1292,11 @@ function LegalWorkReportSection({
           </button>
         </div>
       </div>
+      {exportError ? (
+        <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {exportError}
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
@@ -4623,6 +4681,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               report={legalWorkReport}
               loading={legalWorkReportLoading}
               error={legalWorkReportError}
+              filters={cashFlowDates}
               onReload={reloadLegalWorkReport}
               onOpenCase={onOpenCase}
             />

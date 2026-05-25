@@ -8,6 +8,7 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.Invoices;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -110,7 +111,8 @@ public class ReportsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, CreateAdminPrincipal());
+        var pdfService = new FakeInvoiceDocumentPdfService([0x25, 0x50, 0x44, 0x46]);
+        var controller = CreateController(db, CreateAdminPrincipal(), pdfService);
 
         var action = await controller.LegalWork(today.AddDays(-30), today.AddDays(30), null, null, null, CancellationToken.None);
 
@@ -182,9 +184,72 @@ public class ReportsControllerTests
             CancellationToken.None);
         var csv = Assert.IsType<FileContentResult>(csvAction);
         Assert.Equal("text/csv; charset=utf-8", csv.ContentType);
+
+        var excelAction = await controller.ExportLegalWorkExcel(
+            today.AddDays(-30),
+            today.AddDays(30),
+            nameof(ClientCaseStatus.Open),
+            responsible.Id,
+            "Р‘Р°РЅРє",
+            CancellationToken.None);
+        var excel = Assert.IsType<FileContentResult>(excelAction);
+        Assert.Equal("application/vnd.ms-excel; charset=utf-8", excel.ContentType);
+        Assert.EndsWith(".xls", excel.FileDownloadName, StringComparison.Ordinal);
+        var excelText = System.Text.Encoding.UTF8.GetString(excel.FileContents);
+        Assert.Contains("Excel.Sheet", excelText, StringComparison.Ordinal);
+        Assert.Contains("<Worksheet ss:Name=\"Legal work\">", excelText, StringComparison.Ordinal);
+
+        var pdfAction = await controller.ExportLegalWorkPdf(
+            today.AddDays(-30),
+            today.AddDays(30),
+            nameof(ClientCaseStatus.Open),
+            responsible.Id,
+            "Р‘Р°РЅРє",
+            CancellationToken.None);
+        var pdf = Assert.IsType<FileContentResult>(pdfAction);
+        Assert.Equal("application/pdf", pdf.ContentType);
+        Assert.Equal([0x25, 0x50, 0x44, 0x46], pdf.FileContents);
+        Assert.Contains("Отчет по юридической работе", pdfService.LastHtml, StringComparison.Ordinal);
+
         var csvText = System.Text.Encoding.UTF8.GetString(csv.FileContents);
         Assert.Contains("Банкротство", csvText, StringComparison.Ordinal);
         Assert.Contains("Финансы по статусам", csvText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LegalWorkExports_RequireExportPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "reports-viewer", Description = "Reports viewer" };
+        var user = new User
+        {
+            Email = "reports-viewer@example.test",
+            FullName = "Reports Viewer",
+            IsActive = true,
+            Role = role,
+        };
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Reports,
+            CanView = true,
+            CanExport = false,
+            ViewScope = DataVisibilityScope.All,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(
+            db,
+            CreateUserPrincipal(user.Id),
+            new FakeInvoiceDocumentPdfService([0x25, 0x50, 0x44, 0x46]));
+
+        Assert.IsType<ForbidResult>(await controller.ExportLegalWorkCsv(null, null, null, null, null, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportLegalWorkExcel(null, null, null, null, null, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportLegalWorkPdf(null, null, null, null, null, CancellationToken.None));
     }
 
     [Fact]
@@ -2353,15 +2418,36 @@ public class ReportsControllerTests
             CreatedAt = DateTime.UtcNow,
         };
 
-    private static ReportsController CreateController(PaymentContext db, ClaimsPrincipal? user = null)
+    private static ReportsController CreateController(
+        PaymentContext db,
+        ClaimsPrincipal? user = null,
+        IInvoiceDocumentPdfService? pdfService = null)
     {
-        var controller = new ReportsController(db, NullLogger<ReportsController>.Instance);
+        var controller = new ReportsController(db, NullLogger<ReportsController>.Instance, pdfService);
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext { User = user ?? CreateAdminPrincipal() },
         };
 
         return controller;
+    }
+
+    private sealed class FakeInvoiceDocumentPdfService : IInvoiceDocumentPdfService
+    {
+        private readonly byte[] _bytes;
+
+        public FakeInvoiceDocumentPdfService(byte[] bytes)
+        {
+            _bytes = bytes;
+        }
+
+        public string LastHtml { get; private set; } = string.Empty;
+
+        public Task<byte[]> RenderAsync(string html, CancellationToken ct = default)
+        {
+            LastHtml = html;
+            return Task.FromResult(_bytes);
+        }
     }
 
     private static ClaimsPrincipal CreateAdminPrincipal()

@@ -4014,6 +4014,38 @@ export class ApiService {
     return this.request<LegalWorkReport>(`/reports/legal-work${q}`);
   }
 
+  async downloadLegalWorkReport(params?: {
+    format?: 'csv' | 'excel' | 'pdf';
+    from?: string;
+    to?: string;
+    status?: string;
+    responsibleUserId?: number;
+    caseType?: string;
+  }) {
+    const { format = 'csv', ...filters } = params ?? {};
+    const extension = format === 'excel' ? 'xls' : format;
+    const q = buildQuery(filters);
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/reports/legal-work.${extension}${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} at ${API_BASE_URL}/reports/legal-work.${extension} ${text ? `- ${text}` : ''}`,
+      );
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName:
+        parseContentDispositionFileName(response.headers.get('content-disposition')) ??
+        `legal-work-report.${extension}`,
+    };
+  }
+
   async getCaseActivityReport(params?: {
     inactiveDays?: number;
     escalationDays?: number;

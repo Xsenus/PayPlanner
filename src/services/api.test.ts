@@ -472,6 +472,35 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('source=Bank');
   });
 
+  it('downloads legal work report exports with filters', async () => {
+    const fetchMock = vi.fn(async () => new Response('excel-data', {
+      headers: {
+        'content-disposition': 'attachment; filename="legal-work-report.xls"',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.downloadLegalWorkReport({
+      format: 'excel',
+      from: '2026-05-01',
+      to: '2026-05-31',
+      status: 'Open',
+      responsibleUserId: 7,
+      caseType: 'bankruptcy',
+    });
+
+    expect(result.fileName).toBe('legal-work-report.xls');
+    expect(await result.blob.text()).toBe('excel-data');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/legal-work.xls?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('status=Open');
+    expect(String(url)).toContain('responsibleUserId=7');
+    expect(String(url)).toContain('caseType=bankruptcy');
+  });
+
   it('loads direction report with filters', async () => {
     const payload = {
       from: '2026-05-01T00:00:00',

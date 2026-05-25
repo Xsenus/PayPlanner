@@ -7,6 +7,9 @@ using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Invoices;
+using System.Globalization;
+using System.Net;
 using System.Text;
 
 namespace PayPlanner.Api.Controllers;
@@ -21,11 +24,13 @@ public class ReportsController : ControllerBase
 
     private readonly PaymentContext _db;
     private readonly ILogger<ReportsController> _logger;
+    private readonly IInvoiceDocumentPdfService? _pdfService;
 
-    public ReportsController(PaymentContext db, ILogger<ReportsController> logger)
+    public ReportsController(PaymentContext db, ILogger<ReportsController> logger, IInvoiceDocumentPdfService? pdfService = null)
     {
         _db = db;
         _logger = logger;
+        _pdfService = pdfService;
     }
 
     private async Task<ActionResult<TReport>> ExecuteVisibleReportAsync<TReport>(
@@ -74,6 +79,28 @@ public class ReportsController : ControllerBase
         return permission?.CanView == true;
     }
 
+    private async Task<bool> CanExportReportsAsync(CancellationToken ct)
+    {
+        if (User.IsInRole("admin"))
+        {
+            return true;
+        }
+
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return false;
+        }
+
+        if (await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Reports, ct);
+        return permission?.CanExport == true;
+    }
+
     [HttpGet("legal-work")]
     public async Task<ActionResult<LegalWorkReportDto>> LegalWork(
         [FromQuery] DateTime? from,
@@ -83,13 +110,7 @@ public class ReportsController : ControllerBase
         [FromQuery] string? caseType,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = ResolveLegalWorkPeriod(from, to);
 
         if (!await CanViewReportsAsync(ct))
         {
@@ -122,17 +143,72 @@ public class ReportsController : ControllerBase
         [FromQuery] string? caseType,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
+        var (report, error) = await BuildLegalWorkExportReportAsync(from, to, status, responsibleUserId, caseType, ct);
+        if (error is not null)
         {
-            (start, end) = (end, start);
+            return error;
         }
 
-        if (!await CanViewReportsAsync(ct))
+        return File(BuildLegalWorkCsv(report!), "text/csv; charset=utf-8", "legal-work-report.csv");
+    }
+
+    [HttpGet("legal-work.xls")]
+    public async Task<IActionResult> ExportLegalWorkExcel(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        CancellationToken ct)
+    {
+        var (report, error) = await BuildLegalWorkExportReportAsync(from, to, status, responsibleUserId, caseType, ct);
+        if (error is not null)
         {
-            return Forbid();
+            return error;
+        }
+
+        var fileName = $"legal-work-report-{DateTime.UtcNow:yyyyMMdd-HHmm}.xls";
+        return File(
+            Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(BuildLegalWorkExcelXml(report!))).ToArray(),
+            "application/vnd.ms-excel; charset=utf-8",
+            fileName);
+    }
+
+    [HttpGet("legal-work.pdf")]
+    public async Task<IActionResult> ExportLegalWorkPdf(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        CancellationToken ct)
+    {
+        if (_pdfService is null)
+        {
+            return Problem("Сервис формирования PDF недоступен.");
+        }
+
+        var (report, error) = await BuildLegalWorkExportReportAsync(from, to, status, responsibleUserId, caseType, ct);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        var pdf = await _pdfService.RenderAsync(BuildLegalWorkPrintHtml(report!, DateTime.UtcNow), ct);
+        return File(pdf, "application/pdf", $"legal-work-report-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf");
+    }
+
+    private async Task<(LegalWorkReportDto? Report, IActionResult? Error)> BuildLegalWorkExportReportAsync(
+        DateTime? from,
+        DateTime? to,
+        string? status,
+        int? responsibleUserId,
+        string? caseType,
+        CancellationToken ct)
+    {
+        if (!await CanExportReportsAsync(ct))
+        {
+            return (null, Forbid());
         }
 
         var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -140,16 +216,25 @@ public class ReportsController : ControllerBase
         var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (casesVisibility is null || tasksVisibility is null || accountsVisibility is null)
         {
-            return Unauthorized();
+            return (null, Unauthorized());
         }
 
+        var (start, end) = ResolveLegalWorkPeriod(from, to);
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var report = await SqliteRetryHelper.ExecuteAsync(
             cancellationToken => BuildLegalWorkReportAsync(start, end, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
             _logger,
             ct);
 
-        return File(BuildLegalWorkCsv(report), "text/csv; charset=utf-8", "legal-work-report.csv");
+        return (report, null);
+    }
+
+    private static (DateTime Start, DateTime End) ResolveLegalWorkPeriod(DateTime? from, DateTime? to)
+    {
+        var today = DateTime.Today;
+        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
+        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
+        return end < start ? (end, start) : (start, end);
     }
 
     [HttpGet("case-activity")]
@@ -1039,10 +1124,266 @@ public class ReportsController : ControllerBase
         return Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(builder.ToString())).ToArray();
     }
 
+    private static string BuildLegalWorkExcelXml(LegalWorkReportDto report)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
+        builder.AppendLine("""<?mso-application progid="Excel.Sheet"?>""");
+        builder.AppendLine("""
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+          xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <Worksheet ss:Name="Legal work">
+    <Table>
+""");
+
+        AppendLegalWorkExcelRow(builder, ["Отчет по юридической работе"], header: true);
+        AppendLegalWorkExcelRow(builder, ["Период", $"{report.From:dd.MM.yyyy} - {report.To:dd.MM.yyyy}"]);
+        AppendLegalWorkExcelRow(builder, ["Всего дел", report.TotalCases.ToString(CultureInfo.InvariantCulture)]);
+        AppendLegalWorkExcelRow(builder, ["Дел в работе", report.ActiveCases.ToString(CultureInfo.InvariantCulture)]);
+        AppendLegalWorkExcelRow(builder, ["Закрыто", report.ClosedCases.ToString(CultureInfo.InvariantCulture)]);
+        AppendLegalWorkExcelRow(builder, ["Проиграно", report.LostCases.ToString(CultureInfo.InvariantCulture)]);
+        AppendLegalWorkExcelRow(builder, ["Открытые задачи", report.OpenTaskCount.ToString(CultureInfo.InvariantCulture)]);
+        AppendLegalWorkExcelRow(builder, ["Просроченные задачи", report.OverdueTaskCount.ToString(CultureInfo.InvariantCulture)]);
+        AppendLegalWorkExcelRow(builder, ["Просроченные сроки", report.OverdueDeadlineCount.ToString(CultureInfo.InvariantCulture)]);
+        AppendLegalWorkExcelRow(builder, ["Ближайшие сроки", report.UpcomingDeadlineCount.ToString(CultureInfo.InvariantCulture)]);
+        AppendLegalWorkExcelRow(builder, ["Гонорар", MoneyCell(report.FeeTotal)]);
+        AppendLegalWorkExcelRow(builder, ["Оплачено", MoneyCell(report.PaidTotal)]);
+        AppendLegalWorkExcelRow(builder, ["Остаток", MoneyCell(report.OutstandingTotal)]);
+        AppendLegalWorkExcelRow(builder, []);
+
+        AppendLegalWorkExcelRow(builder, [
+            "Дело",
+            "Клиент",
+            "Ответственный",
+            "Статус",
+            "Тип дела",
+            "Создано",
+            "Гонорар",
+            "Оплачено",
+            "Остаток",
+            "Открытые задачи",
+            "Просроченные задачи",
+            "На согласовании",
+            "Просроченные сроки",
+            "Ближайшие сроки",
+        ], header: true);
+
+        foreach (var item in report.Cases)
+        {
+            AppendLegalWorkExcelRow(builder, [
+                BuildCaseCsvTitle(item),
+                item.ClientName,
+                item.ResponsibleName,
+                item.StatusLabel,
+                item.CaseType,
+                item.CreatedAt.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU")),
+                MoneyCell(item.FeeAmount),
+                MoneyCell(item.PaidTotal),
+                MoneyCell(item.OutstandingTotal),
+                item.OpenTasks.ToString(CultureInfo.InvariantCulture),
+                item.OverdueTasks.ToString(CultureInfo.InvariantCulture),
+                item.OnApprovalTasks.ToString(CultureInfo.InvariantCulture),
+                item.OverdueDeadlines.ToString(CultureInfo.InvariantCulture),
+                item.UpcomingDeadlines.ToString(CultureInfo.InvariantCulture),
+            ]);
+        }
+
+        AppendLegalWorkExcelRow(builder, []);
+        AppendLegalWorkExcelRow(builder, ["Ответственный", "Дел в работе", "Закрыто", "Проиграно", "Открытые задачи", "Просроченные задачи", "На согласовании", "Просроченные сроки", "Гонорар", "Оплачено", "Остаток"], header: true);
+        foreach (var item in report.Responsibles)
+        {
+            AppendLegalWorkExcelRow(builder, [
+                item.ResponsibleName,
+                item.ActiveCases.ToString(CultureInfo.InvariantCulture),
+                item.ClosedCases.ToString(CultureInfo.InvariantCulture),
+                item.LostCases.ToString(CultureInfo.InvariantCulture),
+                item.OpenTasks.ToString(CultureInfo.InvariantCulture),
+                item.OverdueTasks.ToString(CultureInfo.InvariantCulture),
+                item.OnApprovalTasks.ToString(CultureInfo.InvariantCulture),
+                item.OverdueDeadlines.ToString(CultureInfo.InvariantCulture),
+                MoneyCell(item.FeeTotal),
+                MoneyCell(item.PaidTotal),
+                MoneyCell(item.OutstandingTotal),
+            ]);
+        }
+
+        AppendLegalWorkExcelRow(builder, []);
+        AppendLegalWorkExcelRow(builder, ["Финансы по статусам", "Дел", "Гонорар", "Оплачено", "Остаток"], header: true);
+        foreach (var item in report.FinanceByStatus)
+        {
+            AppendLegalWorkExcelRow(builder, [
+                item.StatusLabel,
+                item.CaseCount.ToString(CultureInfo.InvariantCulture),
+                MoneyCell(item.FeeTotal),
+                MoneyCell(item.PaidTotal),
+                MoneyCell(item.OutstandingTotal),
+            ]);
+        }
+
+        AppendLegalWorkExcelRow(builder, []);
+        AppendLegalWorkExcelRow(builder, ["Срок", "Всего", "Просрочено", "Ближайшие"], header: true);
+        foreach (var item in report.DeadlinesByType)
+        {
+            AppendLegalWorkExcelRow(builder, [
+                item.DeadlineLabel,
+                item.TotalCount.ToString(CultureInfo.InvariantCulture),
+                item.OverdueCount.ToString(CultureInfo.InvariantCulture),
+                item.UpcomingCount.ToString(CultureInfo.InvariantCulture),
+            ]);
+        }
+
+        AppendLegalWorkExcelRow(builder, []);
+        AppendLegalWorkExcelRow(builder, ["Контрольные сроки", "Дело", "Клиент", "Ответственный", "Дата", "Отклонение"], header: true);
+        foreach (var item in report.OverdueDeadlines.Concat(report.UpcomingDeadlines))
+        {
+            AppendLegalWorkExcelRow(builder, [
+                item.DeadlineLabel,
+                string.IsNullOrWhiteSpace(item.CaseNumber) ? item.CaseTitle : $"{item.CaseNumber} {item.CaseTitle}",
+                item.ClientName,
+                item.ResponsibleName,
+                item.DueAt.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU")),
+                FormatLegalWorkDeadlineOffset(item.DaysOffset),
+            ]);
+        }
+
+        builder.AppendLine("""
+    </Table>
+  </Worksheet>
+</Workbook>
+""");
+        return builder.ToString();
+    }
+
+    private static string BuildLegalWorkPrintHtml(LegalWorkReportDto report, DateTime generatedAtUtc)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page { size: A4 landscape; margin: 14mm; }
+    body { font-family: Arial, sans-serif; color: #111827; font-size: 12px; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    h2 { margin: 22px 0 8px; font-size: 15px; }
+    .muted { color: #6b7280; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0; }
+    .metric { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+    .metric strong { display: block; font-size: 17px; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #e5e7eb; padding: 5px 6px; vertical-align: top; }
+    th { background: #f3f4f6; text-align: left; }
+    .num { text-align: right; white-space: nowrap; }
+  </style>
+</head>
+<body>
+""");
+        builder.Append("<h1>Отчет по юридической работе</h1>");
+        builder.Append("<div class=\"muted\">Период: ")
+            .Append(Html($"{report.From:dd.MM.yyyy} - {report.To:dd.MM.yyyy}"))
+            .Append(" · Сформировано: ")
+            .Append(Html(generatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"))))
+            .AppendLine("</div>");
+
+        builder.AppendLine("<div class=\"summary\">");
+        AppendLegalWorkMetric(builder, "Всего дел", report.TotalCases.ToString(CultureInfo.InvariantCulture));
+        AppendLegalWorkMetric(builder, "Дел в работе", report.ActiveCases.ToString(CultureInfo.InvariantCulture));
+        AppendLegalWorkMetric(builder, "Просроченные сроки", report.OverdueDeadlineCount.ToString(CultureInfo.InvariantCulture));
+        AppendLegalWorkMetric(builder, "Остаток по гонорарам", MoneyCell(report.OutstandingTotal));
+        AppendLegalWorkMetric(builder, "Открытые задачи", report.OpenTaskCount.ToString(CultureInfo.InvariantCulture));
+        AppendLegalWorkMetric(builder, "На согласовании", report.OnApprovalTaskCount.ToString(CultureInfo.InvariantCulture));
+        AppendLegalWorkMetric(builder, "Оплачено", MoneyCell(report.PaidTotal));
+        AppendLegalWorkMetric(builder, "Гонорар", MoneyCell(report.FeeTotal));
+        builder.AppendLine("</div>");
+
+        builder.AppendLine("<h2>Дела</h2><table><thead><tr><th>Дело</th><th>Клиент</th><th>Ответственный</th><th>Статус</th><th>Тип</th><th class=\"num\">Гонорар</th><th class=\"num\">Оплачено</th><th class=\"num\">Остаток</th><th class=\"num\">Задачи</th><th class=\"num\">Сроки</th></tr></thead><tbody>");
+        foreach (var item in report.Cases)
+        {
+            builder.Append("<tr><td>").Append(Html(BuildCaseCsvTitle(item)))
+                .Append("</td><td>").Append(Html(item.ClientName))
+                .Append("</td><td>").Append(Html(item.ResponsibleName))
+                .Append("</td><td>").Append(Html(item.StatusLabel))
+                .Append("</td><td>").Append(Html(item.CaseType))
+                .Append("</td><td class=\"num\">").Append(Html(MoneyCell(item.FeeAmount)))
+                .Append("</td><td class=\"num\">").Append(Html(MoneyCell(item.PaidTotal)))
+                .Append("</td><td class=\"num\">").Append(Html(MoneyCell(item.OutstandingTotal)))
+                .Append("</td><td class=\"num\">").Append(Html($"{item.OpenTasks}/{item.OverdueTasks}"))
+                .Append("</td><td class=\"num\">").Append(Html($"{item.OverdueDeadlines}/{item.UpcomingDeadlines}"))
+                .AppendLine("</td></tr>");
+        }
+        builder.AppendLine("</tbody></table>");
+
+        builder.AppendLine("<h2>Ответственные</h2><table><thead><tr><th>Ответственный</th><th class=\"num\">В работе</th><th class=\"num\">Закрыто</th><th class=\"num\">Открытые задачи</th><th class=\"num\">Просрочено задач</th><th class=\"num\">Остаток</th></tr></thead><tbody>");
+        foreach (var item in report.Responsibles)
+        {
+            builder.Append("<tr><td>").Append(Html(item.ResponsibleName))
+                .Append("</td><td class=\"num\">").Append(item.ActiveCases)
+                .Append("</td><td class=\"num\">").Append(item.ClosedCases)
+                .Append("</td><td class=\"num\">").Append(item.OpenTasks)
+                .Append("</td><td class=\"num\">").Append(item.OverdueTasks)
+                .Append("</td><td class=\"num\">").Append(Html(MoneyCell(item.OutstandingTotal)))
+                .AppendLine("</td></tr>");
+        }
+        builder.AppendLine("</tbody></table>");
+
+        builder.AppendLine("<h2>Контрольные сроки</h2><table><thead><tr><th>Срок</th><th>Дело</th><th>Клиент</th><th>Ответственный</th><th>Дата</th><th>Отклонение</th></tr></thead><tbody>");
+        foreach (var item in report.OverdueDeadlines.Concat(report.UpcomingDeadlines))
+        {
+            builder.Append("<tr><td>").Append(Html(item.DeadlineLabel))
+                .Append("</td><td>").Append(Html(string.IsNullOrWhiteSpace(item.CaseNumber) ? item.CaseTitle : $"{item.CaseNumber} {item.CaseTitle}"))
+                .Append("</td><td>").Append(Html(item.ClientName))
+                .Append("</td><td>").Append(Html(item.ResponsibleName))
+                .Append("</td><td>").Append(Html($"{item.DueAt:dd.MM.yyyy}"))
+                .Append("</td><td>").Append(Html(FormatLegalWorkDeadlineOffset(item.DaysOffset)))
+                .AppendLine("</td></tr>");
+        }
+        builder.AppendLine("</tbody></table></body></html>");
+        return builder.ToString();
+    }
+
     private static string BuildCaseCsvTitle(LegalWorkCaseItemDto item)
         => string.IsNullOrWhiteSpace(item.CaseNumber)
             ? item.CaseTitle
             : $"{item.CaseNumber} {item.CaseTitle}";
+
+    private static string MoneyCell(decimal value)
+        => value.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private static string FormatLegalWorkDeadlineOffset(int days)
+        => days < 0
+            ? $"{Math.Abs(days)} дн. просрочено"
+            : days == 0
+                ? "сегодня"
+                : $"через {days} дн.";
+
+    private static void AppendLegalWorkMetric(StringBuilder builder, string label, string value)
+    {
+        builder.Append("<div class=\"metric\"><span>")
+            .Append(Html(label))
+            .Append("</span><strong>")
+            .Append(Html(value))
+            .AppendLine("</strong></div>");
+    }
+
+    private static void AppendLegalWorkExcelRow(StringBuilder builder, IReadOnlyList<string> values, bool header = false)
+    {
+        builder.AppendLine("      <Row>");
+        foreach (var value in values)
+        {
+            var type = !header && decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out _)
+                ? "Number"
+                : "String";
+            builder.Append("        <Cell><Data ss:Type=\"").Append(type).Append("\">");
+            builder.Append(WebUtility.HtmlEncode(value));
+            builder.AppendLine("</Data></Cell>");
+        }
+
+        builder.AppendLine("      </Row>");
+    }
+
+    private static string Html(string? value)
+        => WebUtility.HtmlEncode(value ?? string.Empty);
 
     private static void AppendCsvRow(StringBuilder builder, IReadOnlyList<string> values)
     {
