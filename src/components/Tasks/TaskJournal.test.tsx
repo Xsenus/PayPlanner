@@ -1656,6 +1656,54 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-calendar-task-101').getAttribute('title')).toContain('Конфликт: задача пересекается');
   });
 
+  it('saves the selected calendar conflict policy', async () => {
+    await renderJournal([createTask()], { initialView: 'calendar' });
+
+    fireEvent.click(screen.getByTestId('task-conflict-policy-block'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-conflict-policy-block').getAttribute('aria-pressed')).toBe('true');
+      expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
+        calendarConflictPolicy: 'block',
+      });
+    });
+  });
+
+  it('blocks calendar drag-and-drop when the selected conflict policy forbids overlaps', async () => {
+    const targetDate = getSameWeekDateOutsideTodayForTest(new Date());
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'calendar',
+      periodMode: 'week',
+      calendarConflictPolicy: 'block',
+    }));
+
+    await renderJournal([
+      createTask({ dueAt: todayAt(11), plannedDurationMinutes: 60, assigneeUserId: 7, assigneeName: 'Администратор' }),
+      createTask({
+        id: 102,
+        title: 'Занятый слот',
+        dueAt: dateAt(targetDate, 11),
+        plannedDurationMinutes: 60,
+        assigneeUserId: 7,
+        assigneeName: 'Администратор',
+      }),
+    ], { waitForTitle: null });
+
+    const targetDay = await screen.findByTestId(`task-calendar-day-${dateKey(targetDate)}`);
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.dragStart(screen.getByTestId('task-calendar-task-101'), { dataTransfer });
+    fireEvent.dragOver(targetDay, { dataTransfer });
+    fireEvent.drop(targetDay, { dataTransfer });
+
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(
+      'Перенос заблокирован: задача пересекается с "Занятый слот".',
+      'Календарь задач',
+    ));
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+  });
+
   it('renders a weekly workload timeline with color legend', async () => {
     await renderJournal([
       createTask({ assigneeUserId: 7, assigneeName: 'Администратор' }),

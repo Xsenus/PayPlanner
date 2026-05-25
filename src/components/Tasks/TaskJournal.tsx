@@ -24,6 +24,7 @@ import {
   Plus,
   Search,
   Send,
+  ShieldAlert,
   TimerReset,
   Trash2,
   WalletCards,
@@ -72,6 +73,7 @@ type PeriodMode = 'day' | 'week' | 'month';
 type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
 type TaskCalendarColorMode = 'smart' | 'priority' | 'status';
+type TaskCalendarConflictPolicy = 'warn' | 'block';
 type TaskPlanningReportFormat = 'html' | 'word' | 'pdf';
 type ModalState = { mode: 'create' | 'edit' | 'view'; task?: TaskJournalItem; dueAt?: string } | null;
 type TaskJournalMode = 'journal' | 'approvals';
@@ -89,6 +91,7 @@ type TaskForm = TaskJournalUpsertPayload & { dueAt: string; approvalDueAt: strin
 type TaskJournalFilterPreferences = {
   viewMode: ViewMode;
   calendarColorMode: TaskCalendarColorMode;
+  calendarConflictPolicy: TaskCalendarConflictPolicy;
   quickFilter: QuickFilter;
   metricFilter: MetricFilter;
   search: string;
@@ -146,6 +149,11 @@ const TASK_CALENDAR_COLOR_MODE_OPTIONS: Array<{ value: TaskCalendarColorMode; la
   { value: 'status', label: 'Статус' },
 ];
 
+const TASK_CALENDAR_CONFLICT_POLICY_OPTIONS: Array<{ value: TaskCalendarConflictPolicy; label: string }> = [
+  { value: 'warn', label: 'Предупреждать' },
+  { value: 'block', label: 'Запрещать' },
+];
+
 const BULK_STATUS_OPTIONS = STATUS_OPTIONS.filter((option) => option.value !== 'approved' && option.value !== 'done');
 
 const REMINDER_OPTIONS: Array<{ value: TaskJournalReminder; label: string }> = TASK_REMINDER_DEFAULT_OPTIONS;
@@ -197,6 +205,7 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
   return {
     viewMode,
     calendarColorMode: 'smart',
+    calendarConflictPolicy: 'warn',
     quickFilter: getDefaultQuickFilter(userId, mode),
     metricFilter: 'none',
     search: '',
@@ -220,6 +229,10 @@ function isViewMode(value: unknown): value is ViewMode {
 
 function isTaskCalendarColorMode(value: unknown): value is TaskCalendarColorMode {
   return value === 'smart' || value === 'priority' || value === 'status';
+}
+
+function isTaskCalendarConflictPolicy(value: unknown): value is TaskCalendarConflictPolicy {
+  return value === 'warn' || value === 'block';
 }
 
 function isMetricFilter(value: unknown): value is MetricFilter {
@@ -290,6 +303,7 @@ function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJourn
     return {
       viewMode: isViewMode(parsed.viewMode) ? parsed.viewMode : defaults.viewMode,
       calendarColorMode: isTaskCalendarColorMode(parsed.calendarColorMode) ? parsed.calendarColorMode : defaults.calendarColorMode,
+      calendarConflictPolicy: isTaskCalendarConflictPolicy(parsed.calendarConflictPolicy) ? parsed.calendarConflictPolicy : defaults.calendarConflictPolicy,
       quickFilter: isQuickFilter(parsed.quickFilter) ? parsed.quickFilter : defaults.quickFilter,
       metricFilter: isMetricFilter(parsed.metricFilter) ? parsed.metricFilter : defaults.metricFilter,
       search: typeof parsed.search === 'string' ? parsed.search : defaults.search,
@@ -991,6 +1005,40 @@ function buildTaskConflictTaskIds(tasks: TaskJournalItem[]) {
   return conflictIds;
 }
 
+function findTaskScheduleConflict(task: TaskJournalItem, nextDueAt: Date, tasks: TaskJournalItem[]) {
+  if (!isTaskJournalActive(task.status) || Number.isNaN(nextDueAt.getTime())) {
+    return null;
+  }
+
+  const taskKeys = new Set(getTaskAssigneeConflictKeys(task));
+  if (taskKeys.size === 0) {
+    return null;
+  }
+
+  const nextStart = nextDueAt.getTime();
+  const nextEnd = nextStart + normalizeTaskDuration(task.plannedDurationMinutes) * 60 * 1000;
+
+  return tasks.find((candidate) => {
+    if (candidate.id === task.id || !isTaskJournalActive(candidate.status)) {
+      return false;
+    }
+
+    const candidateDueAt = new Date(candidate.dueAt);
+    if (!isSameDay(candidateDueAt, nextDueAt)) {
+      return false;
+    }
+
+    const hasSharedAssignee = getTaskAssigneeConflictKeys(candidate).some((key) => taskKeys.has(key));
+    if (!hasSharedAssignee) {
+      return false;
+    }
+
+    const candidateStart = candidateDueAt.getTime();
+    const candidateEnd = candidateStart + normalizeTaskDuration(candidate.plannedDurationMinutes) * 60 * 1000;
+    return intervalsOverlap(nextStart, nextEnd, candidateStart, candidateEnd);
+  }) ?? null;
+}
+
 function getTimelineTaskTone(
   task: TaskJournalItem,
   currentUserId: number | null,
@@ -1291,6 +1339,7 @@ export function TaskJournal({
   const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
   const [calendarColorMode, setCalendarColorMode] = useState<TaskCalendarColorMode>(initialPreferences.calendarColorMode);
+  const [calendarConflictPolicy, setCalendarConflictPolicy] = useState<TaskCalendarConflictPolicy>(initialPreferences.calendarConflictPolicy);
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
   const [statusFilter, setStatusFilter] = useState<TaskJournalStatus | 'active' | 'all'>(initialPreferences.statusFilter);
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
@@ -1334,6 +1383,7 @@ export function TaskJournal({
     setFilterOwnerKey(nextOwnerKey);
     setViewMode(nextPreferences.viewMode);
     setCalendarColorMode(nextPreferences.calendarColorMode);
+    setCalendarConflictPolicy(nextPreferences.calendarConflictPolicy);
     setQuickFilter(nextPreferences.quickFilter);
     setMetricFilter(nextPreferences.metricFilter);
     setSearch(nextPreferences.search);
@@ -1355,6 +1405,7 @@ export function TaskJournal({
     writeTaskJournalFilterPreferences(currentUserId, {
       viewMode,
       calendarColorMode,
+      calendarConflictPolicy,
       quickFilter,
       metricFilter,
       search,
@@ -1366,7 +1417,7 @@ export function TaskJournal({
       priorityFilter,
       periodMode,
     }, mode);
-  }, [assigneeFilter, calendarColorMode, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
+  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
@@ -2139,11 +2190,22 @@ export function TaskJournal({
     }
 
     const nextDueAt = moveDueAtToDate(task.dueAt, targetDate);
+    const scheduleConflict = findTaskScheduleConflict(task, new Date(nextDueAt), tasks);
+    if (calendarConflictPolicy === 'block' && scheduleConflict) {
+      toast.error(`Перенос заблокирован: задача пересекается с "${scheduleConflict.title}".`, 'Календарь задач');
+      return;
+    }
+
     setCalendarMovingTaskId(task.id);
     try {
       await apiService.updateTaskJournalItem(task.id, taskToPayload(task, { dueAt: nextDueAt }));
       setCalendarSelectedDate(targetDate);
-      toast.success('Задача перенесена в календаре.', 'Календарь задач');
+      toast.success(
+        scheduleConflict
+          ? `Задача перенесена, но пересекается с "${scheduleConflict.title}".`
+          : 'Задача перенесена в календаре.',
+        'Календарь задач',
+      );
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
@@ -2171,11 +2233,22 @@ export function TaskJournal({
       return;
     }
 
+    const scheduleConflict = findTaskScheduleConflict(task, targetDueAt, tasks);
+    if (calendarConflictPolicy === 'block' && scheduleConflict) {
+      toast.error(`Перенос заблокирован: задача пересекается с "${scheduleConflict.title}".`, 'Календарь нагрузки');
+      return;
+    }
+
     setCalendarMovingTaskId(task.id);
     try {
       await apiService.updateTaskJournalItem(task.id, taskToPayload(task, { dueAt: targetDueAt.toISOString() }));
       setCalendarSelectedDate(targetDueAt);
-      toast.success('Задача перенесена на шкале нагрузки.', 'Календарь нагрузки');
+      toast.success(
+        scheduleConflict
+          ? `Задача перенесена, но пересекается с "${scheduleConflict.title}".`
+          : 'Задача перенесена на шкале нагрузки.',
+        'Календарь нагрузки',
+      );
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
@@ -2645,6 +2718,25 @@ export function TaskJournal({
                   aria-pressed={calendarColorMode === option.value}
                   data-testid={`task-color-mode-${option.value}`}
                   className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${calendarColorMode === option.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex rounded-xl bg-slate-100 p-1" aria-label="Стратегия конфликтов календаря задач">
+              <span className="inline-flex items-center gap-1 px-2 text-sm font-semibold text-slate-500">
+                <ShieldAlert className="h-4 w-4" />
+                Конфликты
+              </span>
+              {TASK_CALENDAR_CONFLICT_POLICY_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setCalendarConflictPolicy(option.value)}
+                  aria-pressed={calendarConflictPolicy === option.value}
+                  data-testid={`task-conflict-policy-${option.value}`}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${calendarConflictPolicy === option.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   {option.label}
                 </button>
