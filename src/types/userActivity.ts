@@ -55,3 +55,29 @@ export interface UserActivityLogResponse {
   page: number;
   pageSize: number;
 }
+
+export interface UserOnlineStatus {
+  userId: number;
+  fullName: string;
+  email: string;
+  roleName: string | null;
+  department: string | null;
+  isActive: boolean;
+  isApproved: boolean;
+  isOnline: boolean;
+  lastActivityAt: string | null;
+  lastLoginAt: string | null;
+  lastLogoutAt: string | null;
+  lastAction: string | null;
+  lastSection: string | null;
+  lastIpAddress: string | null;
+  lastUserAgent: string | null;
+}
+
+export interface UserOnlineResponse {
+  generatedAt: string;
+  onlineThresholdMinutes: number;
+  totalUsers: number;
+  onlineUsers: number;
+  users: UserOnlineStatus[];
+}

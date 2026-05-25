@@ -894,6 +894,33 @@ function AppContent() {
     });
   }, [activeTab, logActivity, tabNames, user]);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const sendHeartbeat = () => {
+      void apiService.sendUserActivityHeartbeat().catch(() => {
+        // Heartbeat is auxiliary and should not interrupt the user's work.
+      });
+    };
+
+    sendHeartbeat();
+    const intervalId = window.setInterval(sendHeartbeat, 120000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        sendHeartbeat();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [user]);
+
   const hardSignOut = () => {
     try {
       localStorage.removeItem('pp_token');

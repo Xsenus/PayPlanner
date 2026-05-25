@@ -4707,6 +4707,16 @@ export class ApiService {
     return this.request<UserActivityFiltersResponse>('/user-activity/filters');
   }
 
+  async getUsersOnline() {
+    return this.request<UserOnlineResponse>('/user-activity/online');
+  }
+
+  async sendUserActivityHeartbeat() {
+    return this.request<void>('/user-activity/heartbeat', {
+      method: 'POST',
+    });
+  }
+
   async getUserActivityMaintenance() {
     return this.request<UserActivityMaintenanceDto>('/user-activity/admin/maintenance');
   }
@@ -4889,7 +4899,7 @@ import type {
 } from '../types';
 import { BaseDictItem } from '../types/dictionaries';
 import type { RolePermissions } from '../types/permissions';
-import type { CreateUserActivityInput, UserActivityFiltersResponse, UserActivityLogItem, UserActivityLogResponse, UserActivityStatus } from '../types/userActivity';
+import type { CreateUserActivityInput, UserActivityFiltersResponse, UserActivityLogItem, UserActivityLogResponse, UserActivityStatus, UserOnlineResponse } from '../types/userActivity';
 import type {
   TaskJournalAssignee,
   TaskJournalAutomationCreateResult,

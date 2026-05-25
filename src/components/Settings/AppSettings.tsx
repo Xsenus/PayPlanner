@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bell, ClipboardList, Database, History, Save, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { Bell, ClipboardList, Database, History, Save, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -20,6 +20,7 @@ import { MoneyAccountSettings } from './MoneyAccountSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { SpreadsheetImportSettings } from './SpreadsheetImportSettings';
 import { TaskJournalSettings } from './TaskJournalSettings';
+import { UserOnlineSettings } from './UserOnlineSettings';
 import { UserMergeSettings } from './UserMergeSettings';
 import type {
   ContractNumberingSettingsDto,
@@ -39,6 +40,7 @@ type SettingsSection =
   | 'general'
   | 'integrations'
   | 'notifications'
+  | 'users-online'
   | 'app-releases'
   | 'auth-providers'
   | 'db-maintenance'
@@ -59,6 +61,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'general',
   'integrations',
   'notifications',
+  'users-online',
   'app-releases',
   'auth-providers',
   'db-maintenance',
@@ -172,6 +175,7 @@ export function AppSettings() {
     if (activeSection === 'general') return 'Финансовые правила';
     if (activeSection === 'integrations') return 'Ключи и внешние сервисы';
     if (activeSection === 'notifications') return 'Уведомления';
+    if (activeSection === 'users-online') return 'Пользователи онлайн';
     if (activeSection === 'app-releases') return 'Версия приложения и обновления';
     if (activeSection === 'auth-providers') return 'Внешняя авторизация';
     if (activeSection === 'db-maintenance') return 'Обслуживание базы данных';
@@ -833,6 +837,22 @@ export function AppSettings() {
                   >
                     Авторизация и вход
                   </button>
+                  {!restrictedSettingsMode && (
+                    <button
+                      type="button"
+                      onClick={() => selectSection('users-online')}
+                      className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                        activeSection === 'users-online'
+                          ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
+                          : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+                        Пользователи онлайн
+                      </span>
+                    </button>
+                  )}
                 </div>
               </div>
               )}
@@ -1227,6 +1247,8 @@ export function AppSettings() {
             {activeSection === 'notifications' && canViewNotificationSettings && (
               <NotificationSettings canEdit={canEditNotificationSettings} />
             )}
+
+            {activeSection === 'users-online' && !restrictedSettingsMode && <UserOnlineSettings />}
 
             {activeSection === 'app-releases' && <AppVersionSettings />}
 

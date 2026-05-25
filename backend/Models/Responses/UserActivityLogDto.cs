@@ -42,3 +42,31 @@ public class UserActivityActorDto
     public string? FullName { get; init; }
     public string? Email { get; init; }
 }
+
+public class UserOnlineStatusDto
+{
+    public int UserId { get; init; }
+    public string FullName { get; init; } = string.Empty;
+    public string Email { get; init; } = string.Empty;
+    public string? RoleName { get; init; }
+    public string? Department { get; init; }
+    public bool IsActive { get; init; }
+    public bool IsApproved { get; init; }
+    public bool IsOnline { get; set; }
+    public DateTime? LastActivityAt { get; init; }
+    public DateTime? LastLoginAt { get; init; }
+    public DateTime? LastLogoutAt { get; init; }
+    public string? LastAction { get; init; }
+    public string? LastSection { get; init; }
+    public string? LastIpAddress { get; init; }
+    public string? LastUserAgent { get; init; }
+}
+
+public class UserOnlineSummaryDto
+{
+    public DateTime GeneratedAt { get; init; }
+    public int OnlineThresholdMinutes { get; init; }
+    public int TotalUsers { get; init; }
+    public int OnlineUsers { get; init; }
+    public IReadOnlyList<UserOnlineStatusDto> Users { get; init; } = Array.Empty<UserOnlineStatusDto>();
+}

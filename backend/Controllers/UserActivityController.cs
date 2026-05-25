@@ -17,6 +17,7 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class UserActivityController : ControllerBase
 {
+    private const int OnlineThresholdMinutes = 5;
     private readonly PaymentContext _context;
     private readonly IUserActivityService _activityService;
     private readonly ISqliteMaintenanceService _sqliteMaintenanceService;
@@ -125,6 +126,94 @@ public class UserActivityController : ControllerBase
         });
     }
 
+    [HttpGet("online")]
+    [Authorize(Policy = "Admin")]
+    public async Task<ActionResult<UserOnlineSummaryDto>> GetOnlineAsync(CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var onlineAfter = now.AddMinutes(-OnlineThresholdMinutes);
+
+        var users = await _context.Users
+            .AsNoTracking()
+            .Include(x => x.Role)
+            .OrderBy(x => x.FullName)
+            .ThenBy(x => x.Email)
+            .Select(user => new UserOnlineStatusDto
+            {
+                UserId = user.Id,
+                FullName = user.FullName,
+                Email = user.Email,
+                RoleName = user.Role != null ? user.Role.Name : null,
+                Department = user.DepartmentDictionary != null ? user.DepartmentDictionary.Name : user.Department,
+                IsActive = user.IsActive,
+                IsApproved = user.IsApproved,
+                LastActivityAt = _context.UserActivityLogs
+                    .Where(log => log.UserId == user.Id)
+                    .Max(log => (DateTime?)log.CreatedAt),
+                LastLoginAt = _context.UserActivityLogs
+                    .Where(log => log.UserId == user.Id
+                        && (log.Category == "auth" || log.Category == "Auth")
+                        && (log.Action == "login" || log.Action == "Login"))
+                    .Max(log => (DateTime?)log.CreatedAt),
+                LastLogoutAt = _context.UserActivityLogs
+                    .Where(log => log.UserId == user.Id
+                        && (log.Category == "auth" || log.Category == "Auth")
+                        && (log.Action == "logout" || log.Action == "Logout"))
+                    .Max(log => (DateTime?)log.CreatedAt),
+                LastAction = _context.UserActivityLogs
+                    .Where(log => log.UserId == user.Id)
+                    .OrderByDescending(log => log.CreatedAt)
+                    .ThenByDescending(log => log.Id)
+                    .Select(log => log.Action)
+                    .FirstOrDefault(),
+                LastSection = _context.UserActivityLogs
+                    .Where(log => log.UserId == user.Id)
+                    .OrderByDescending(log => log.CreatedAt)
+                    .ThenByDescending(log => log.Id)
+                    .Select(log => log.Section)
+                    .FirstOrDefault(),
+                LastIpAddress = _context.UserActivityLogs
+                    .Where(log => log.UserId == user.Id)
+                    .OrderByDescending(log => log.CreatedAt)
+                    .ThenByDescending(log => log.Id)
+                    .Select(log => log.IpAddress)
+                    .FirstOrDefault(),
+                LastUserAgent = _context.UserActivityLogs
+                    .Where(log => log.UserId == user.Id)
+                    .OrderByDescending(log => log.CreatedAt)
+                    .ThenByDescending(log => log.Id)
+                    .Select(log => log.UserAgent)
+                    .FirstOrDefault()
+            })
+            .ToListAsync(cancellationToken);
+
+        foreach (var user in users)
+        {
+            var latestAction = user.LastAction?.Trim();
+            var latestActionIsLogout = string.Equals(latestAction, "logout", StringComparison.OrdinalIgnoreCase);
+            user.IsOnline = user.IsActive
+                && user.IsApproved
+                && user.LastActivityAt.HasValue
+                && user.LastActivityAt.Value >= onlineAfter
+                && !latestActionIsLogout;
+        }
+
+        var orderedUsers = users
+            .OrderByDescending(user => user.IsOnline)
+            .ThenByDescending(user => user.LastActivityAt ?? DateTime.MinValue)
+            .ThenBy(user => user.FullName)
+            .ToList();
+
+        return Ok(new UserOnlineSummaryDto
+        {
+            GeneratedAt = now,
+            OnlineThresholdMinutes = OnlineThresholdMinutes,
+            TotalUsers = orderedUsers.Count,
+            OnlineUsers = orderedUsers.Count(user => user.IsOnline),
+            Users = orderedUsers
+        });
+    }
+
     [HttpGet("filters")]
     [Authorize(Policy = "Admin")]
     public async Task<IActionResult> GetFiltersAsync(CancellationToken cancellationToken)
@@ -213,6 +302,26 @@ public class UserActivityController : ControllerBase
 
         var dto = MapToDto(log);
         return Created($"/api/user-activity/{dto.Id}", dto);
+    }
+
+    [HttpPost("heartbeat")]
+    public async Task<IActionResult> HeartbeatAsync(CancellationToken cancellationToken)
+    {
+        if (!(await _activityService.GetSettingsAsync(cancellationToken)).IsEnabled)
+        {
+            return NoContent();
+        }
+
+        await _activityService.TryWriteAsync(new ActivityLogEntry
+        {
+            Category = "session",
+            Action = "heartbeat",
+            Section = "session",
+            Description = "Пользователь активен в приложении.",
+            Status = UserActivityStatus.Info
+        }, cancellationToken);
+
+        return NoContent();
     }
 
     [HttpGet("admin/maintenance")]
