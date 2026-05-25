@@ -106,6 +106,7 @@ public class CasesV2Controller : ControllerBase
     private readonly ICaseDocumentStorage _caseDocumentStorage;
     private readonly IInvoiceDocumentPdfService? _pdfService;
     private readonly ISudrfCourtSyncService? _sudrfCourtSyncService;
+    private readonly ICourtSyncProviderRegistry? _courtSyncProviderRegistry;
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions>? _featureFlags;
 
@@ -115,6 +116,7 @@ public class CasesV2Controller : ControllerBase
         ICaseDocumentStorage? caseDocumentStorage = null,
         ISudrfCourtSyncService? sudrfCourtSyncService = null,
         IInvoiceDocumentPdfService? pdfService = null,
+        ICourtSyncProviderRegistry? courtSyncProviderRegistry = null,
         IConfiguration? configuration = null,
         IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null)
     {
@@ -122,6 +124,7 @@ public class CasesV2Controller : ControllerBase
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
         _pdfService = pdfService;
         _sudrfCourtSyncService = sudrfCourtSyncService;
+        _courtSyncProviderRegistry = courtSyncProviderRegistry;
         _configuration = configuration ?? new ConfigurationBuilder().Build();
         _featureFlags = featureFlags;
     }
@@ -5504,6 +5507,35 @@ public class CasesV2Controller : ControllerBase
         return Ok(await ResolveCourtSyncSettingsAsync(ct));
     }
 
+    [HttpGet("court-sync/providers")]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseCourtSyncProviderDto>>> GetCourtSyncProviders(CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var externalCourtSyncEnabled = _featureFlags?.CurrentValue.Legal.ExternalCourtSync ?? false;
+        var providers = _courtSyncProviderRegistry?.GetProviders()
+            ?? CourtSyncProviderRegistry.GetDefaultDescriptors(externalCourtSyncEnabled);
+
+        return Ok(providers
+            .Select(static provider => new ClientCaseCourtSyncProviderDto
+            {
+                Key = provider.Key,
+                Label = provider.Label,
+                SourceType = provider.SourceType,
+                Status = provider.Status,
+                IsAvailable = provider.IsAvailable,
+                FeatureFlagEnabled = provider.FeatureFlagEnabled,
+                SupportsManualRun = provider.SupportsManualRun,
+                SupportsBackgroundSync = provider.SupportsBackgroundSync,
+                SupportedHosts = provider.SupportedHosts,
+                Message = provider.Message,
+            })
+            .ToList());
+    }
+
     [HttpPut("court-sync/settings")]
     public async Task<ActionResult<ClientCaseCourtSyncSettingsDto>> UpdateCourtSyncSettings(
         UpdateClientCaseCourtSyncSettingsRequest request,
@@ -5576,20 +5608,19 @@ public class CasesV2Controller : ControllerBase
             });
         }
 
-        if (_sudrfCourtSyncService is not null
-            && !string.IsNullOrWhiteSpace(clientCase.CourtUrl)
-            && _sudrfCourtSyncService.CanHandle(clientCase.CourtUrl))
+        var courtSyncProvider = ResolveCourtSyncProvider(clientCase.CourtUrl);
+        if (courtSyncProvider is not null && !string.IsNullOrWhiteSpace(clientCase.CourtUrl))
         {
             try
             {
-                var courtData = await _sudrfCourtSyncService.FetchCaseAsync(clientCase.CourtUrl, ct, clientCase.CourtCaseNumber);
+                var courtData = await courtSyncProvider.FetchCaseAsync(clientCase.CourtUrl, ct, clientCase.CourtCaseNumber);
                 var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, actorName, checkedAt, ct);
                 var syncMessage = syncResult.ChangedFields.Count == 0 && syncResult.CreatedCourtEvents == 0 && syncResult.UpdatedCourtEvents == 0
                     ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
                     : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult)}";
 
                 AppendCaseEvent(clientCase, $"{syncMessage} Инициатор: {actorName}.");
-                _db.SetAuditReason($"Обновление дела #{clientCase.Id} из ГАС «Правосудие».");
+                _db.SetAuditReason($"Обновление дела #{clientCase.Id} из судебного источника {courtSyncProvider.Label}.");
                 await _db.SaveChangesAsync(ct);
 
                 return Ok(new ClientCaseCourtSyncRunDto
@@ -6868,6 +6899,19 @@ public class CasesV2Controller : ControllerBase
             MinBatchSize = ClientCaseCourtSyncSchedulerService.MinBatchSize,
             MaxBatchSize = ClientCaseCourtSyncSchedulerService.MaxBatchSize,
         };
+    }
+
+    private ICourtSyncProvider? ResolveCourtSyncProvider(string? sourceUrl)
+    {
+        var provider = _courtSyncProviderRegistry?.Resolve(sourceUrl);
+        if (provider is not null)
+        {
+            return provider;
+        }
+
+        return _sudrfCourtSyncService is not null && _sudrfCourtSyncService.CanHandle(sourceUrl)
+            ? new LegacySudrfCourtSyncProvider(_sudrfCourtSyncService)
+            : null;
     }
 
     private async Task UpsertSystemSettingAsync(string key, string value, DateTime nowUtc, CancellationToken ct)
@@ -10265,6 +10309,20 @@ public class CasesV2Controller : ControllerBase
         public int? BatchSize { get; set; }
     }
 
+    public sealed class ClientCaseCourtSyncProviderDto
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string SourceType { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public bool IsAvailable { get; set; }
+        public bool FeatureFlagEnabled { get; set; }
+        public bool SupportsManualRun { get; set; }
+        public bool SupportsBackgroundSync { get; set; }
+        public IReadOnlyList<string> SupportedHosts { get; set; } = [];
+        public string Message { get; set; } = string.Empty;
+    }
+
     public sealed class UpdateCaseDocumentRequest
     {
         public string? DocumentType { get; set; }
@@ -10346,6 +10404,27 @@ public class CasesV2Controller : ControllerBase
         public int Version { get; set; } = 1;
         public bool IsActive { get; set; } = true;
         public DateTime? UpdatedAt { get; set; }
+    }
+
+    private sealed class LegacySudrfCourtSyncProvider : ICourtSyncProvider
+    {
+        private readonly ISudrfCourtSyncService _service;
+
+        public LegacySudrfCourtSyncProvider(ISudrfCourtSyncService service)
+        {
+            _service = service;
+        }
+
+        public string Key => "sudrf";
+        public string Label => "ГАС Правосудие / sudrf.ru";
+        public string SourceType => "sudrf";
+        public IReadOnlyList<string> SupportedHosts { get; } = ["sudrf.ru"];
+
+        public bool CanHandle(string? sourceUrl)
+            => _service.CanHandle(sourceUrl);
+
+        public Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
+            => _service.FetchCaseAsync(sourceUrl, ct, courtCaseNumber);
     }
 
     private readonly record struct CaseDocumentTemplate(

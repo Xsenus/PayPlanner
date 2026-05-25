@@ -5,6 +5,7 @@ import { CourtSyncSchedulerSettings } from './CourtSyncSchedulerSettings';
 
 const apiMock = vi.hoisted(() => ({
   getCourtSyncSettings: vi.fn(),
+  getCourtSyncProviders: vi.fn(),
   updateCourtSyncSettings: vi.fn(),
 }));
 
@@ -25,6 +26,32 @@ describe('CourtSyncSchedulerSettings', () => {
       minBatchSize: 1,
       maxBatchSize: 100,
     });
+    apiMock.getCourtSyncProviders.mockResolvedValue([
+      {
+        key: 'sudrf',
+        label: 'ГАС Правосудие / sudrf.ru',
+        sourceType: 'sudrf',
+        status: 'active',
+        isAvailable: true,
+        featureFlagEnabled: true,
+        supportsManualRun: true,
+        supportsBackgroundSync: true,
+        supportedHosts: ['sudrf.ru'],
+        message: 'Поддерживается ручное обновление карточки дела и фоновая синхронизация открытых дел.',
+      },
+      {
+        key: 'kadArbitr',
+        label: 'КАД Арбитр',
+        sourceType: 'kadArbitr',
+        status: 'planned',
+        isAvailable: false,
+        featureFlagEnabled: true,
+        supportsManualRun: false,
+        supportsBackgroundSync: false,
+        supportedHosts: ['kad.arbitr.ru'],
+        message: 'Источник добавлен в дорожную карту.',
+      },
+    ]);
     apiMock.updateCourtSyncSettings.mockImplementation(async (payload) => ({
       ...payload,
       featureFlagEnabled: true,
@@ -35,13 +62,16 @@ describe('CourtSyncSchedulerSettings', () => {
     }));
   });
 
-  it('loads current court sync scheduler settings', async () => {
+  it('loads current court sync scheduler settings and providers', async () => {
     render(<CourtSyncSchedulerSettings />);
 
     expect(await screen.findByText('Автосинхронизация судов')).toBeTruthy();
     expect((screen.getByRole('checkbox', { name: /Включить фоновую проверку/i }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText('Интервал, минут') as HTMLInputElement).value).toBe('120');
     expect((screen.getByLabelText('Дел за запуск') as HTMLInputElement).value).toBe('15');
+    expect(screen.getByText('ГАС Правосудие / sudrf.ru')).toBeTruthy();
+    expect(screen.getByText('КАД Арбитр')).toBeTruthy();
+    expect(screen.getByText('Запланирован')).toBeTruthy();
   });
 
   it('saves normalized scheduler settings', async () => {

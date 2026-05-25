@@ -101,14 +101,21 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
             return 0;
         }
 
-        var caseIds = await db.ClientCases
+        var registry = scope.ServiceProvider.GetService<ICourtSyncProviderRegistry>();
+        var candidateLimit = Math.Max(NormalizeBatchSize(batchSize) * 5, NormalizeBatchSize(batchSize));
+        var candidates = await db.ClientCases
             .AsNoTracking()
             .Where(item => item.Status == ClientCaseStatus.Open)
-            .Where(item => item.CourtUrl.Contains(".sudrf.ru"))
+            .Where(item => item.CourtUrl != string.Empty)
             .OrderBy(item => item.Id)
+            .Select(item => new { item.Id, item.CourtUrl })
+            .Take(candidateLimit)
+            .ToListAsync(cancellationToken);
+        var caseIds = candidates
+            .Where(item => registry?.Resolve(item.CourtUrl) is not null || item.CourtUrl.Contains(".sudrf.ru", StringComparison.OrdinalIgnoreCase))
             .Select(item => item.Id)
             .Take(NormalizeBatchSize(batchSize))
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         if (caseIds.Count == 0)
         {
@@ -118,7 +125,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         var environment = scope.ServiceProvider.GetService<IWebHostEnvironment>();
         var storage = scope.ServiceProvider.GetRequiredService<ICaseDocumentStorage>();
         var sudrf = scope.ServiceProvider.GetRequiredService<ISudrfCourtSyncService>();
-        var controller = new CasesV2Controller(db, environment, storage, sudrf)
+        var controller = new CasesV2Controller(db, environment, storage, sudrf, courtSyncProviderRegistry: registry)
         {
             ControllerContext = new ControllerContext
             {

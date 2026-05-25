@@ -1120,6 +1120,19 @@ export interface ClientCaseCourtSyncSettings {
   maxBatchSize: number;
 }
 
+export interface ClientCaseCourtSyncProvider {
+  key: string;
+  label: string;
+  sourceType: string;
+  status: 'active' | 'manual-only' | 'planned' | string;
+  isAvailable: boolean;
+  featureFlagEnabled: boolean;
+  supportsManualRun: boolean;
+  supportsBackgroundSync: boolean;
+  supportedHosts: string[];
+  message: string;
+}
+
 export type ClientCaseRelatedPartySourceType = 'client' | 'externalContact' | 'legalEntity';
 
 export interface ClientCaseRelatedParty {

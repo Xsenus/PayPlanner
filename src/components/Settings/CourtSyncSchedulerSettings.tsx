@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, RefreshCw, Save } from 'lucide-react';
 import { apiService } from '../../services/api';
-import type { ClientCaseCourtSyncSettings } from '../../types';
+import type { ClientCaseCourtSyncProvider, ClientCaseCourtSyncSettings } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 const DEFAULT_LIMITS = {
@@ -18,6 +18,7 @@ function clampNumber(value: number, min: number, max: number) {
 
 export function CourtSyncSchedulerSettings() {
   const [settings, setSettings] = useState<ClientCaseCourtSyncSettings | null>(null);
+  const [providers, setProviders] = useState<ClientCaseCourtSyncProvider[]>([]);
   const [isEnabled, setIsEnabled] = useState(false);
   const [intervalMinutes, setIntervalMinutes] = useState('360');
   const [batchSize, setBatchSize] = useState('25');
@@ -40,7 +41,12 @@ export function CourtSyncSchedulerSettings() {
     setError(null);
     setSavedMessage(null);
     try {
-      applySettings(await apiService.getCourtSyncSettings());
+      const [nextSettings, nextProviders] = await Promise.all([
+        apiService.getCourtSyncSettings(),
+        apiService.getCourtSyncProviders(),
+      ]);
+      applySettings(nextSettings);
+      setProviders(nextProviders ?? []);
     } catch (loadError) {
       setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить настройки судебной синхронизации.'));
     } finally {
@@ -150,6 +156,34 @@ export function CourtSyncSchedulerSettings() {
         <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{savedMessage}</div>
       ) : null}
 
+      <div className="mt-5 border-t border-gray-100 pt-5">
+        <div className="text-sm font-semibold text-gray-900">Судебные источники</div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          {providers.length === 0 ? (
+            <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+              Источники судебной синхронизации не загружены.
+            </div>
+          ) : providers.map((provider) => (
+            <div key={provider.key} className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-gray-900">{provider.label}</span>
+                <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${getProviderStatusClass(provider.status)}`}>
+                  {getProviderStatusLabel(provider.status)}
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-gray-600">{provider.message}</div>
+              {provider.supportedHosts.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {provider.supportedHosts.map((host) => (
+                    <span key={host} className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-600">{host}</span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="mt-5 flex justify-end">
         <button
           type="button"
@@ -163,4 +197,18 @@ export function CourtSyncSchedulerSettings() {
       </div>
     </div>
   );
+}
+
+function getProviderStatusLabel(status: string) {
+  if (status === 'active') return 'Активен';
+  if (status === 'manual-only') return 'Ручной режим';
+  if (status === 'planned') return 'Запланирован';
+  return status;
+}
+
+function getProviderStatusClass(status: string) {
+  if (status === 'active') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (status === 'manual-only') return 'border-sky-200 bg-sky-50 text-sky-700';
+  if (status === 'planned') return 'border-amber-200 bg-amber-50 text-amber-700';
+  return 'border-slate-200 bg-white text-slate-700';
 }

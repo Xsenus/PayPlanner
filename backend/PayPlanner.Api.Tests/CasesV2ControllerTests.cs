@@ -3863,6 +3863,25 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtSyncProviders_ReturnsSupportedAndPlannedSources()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var controller = CreateController(db, manager);
+
+        var result = await controller.GetCourtSyncProviders(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var providers = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtSyncProviderDto>>(ok.Value);
+
+        var sudrf = Assert.Single(providers, item => item.Key == "sudrf");
+        Assert.True(sudrf.IsAvailable);
+        Assert.True(sudrf.SupportsManualRun);
+        Assert.Contains("sudrf.ru", sudrf.SupportedHosts);
+        Assert.Contains(providers, item => item.Key == "kadArbitr" && item.Status == "planned");
+    }
+
+    [Fact]
     public async Task RunCourtSync_ExplainsMissingCourtBinding()
     {
         await using var db = await CreateContextAsync();
@@ -4854,12 +4873,13 @@ public class CasesV2ControllerTests
         string? contentRootPath = null,
         ISudrfCourtSyncService? sudrfCourtSyncService = null,
         IInvoiceDocumentPdfService? pdfService = null,
+        ICourtSyncProviderRegistry? courtSyncProviderRegistry = null,
         IConfiguration? configuration = null,
         IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null)
         => new(db, new TestWebHostEnvironment
         {
             ContentRootPath = contentRootPath ?? Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N")),
-        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, configuration: configuration, featureFlags: featureFlags)
+        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags)
         {
             ControllerContext = new ControllerContext
             {

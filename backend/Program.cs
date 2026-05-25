@@ -114,6 +114,8 @@ builder.Services.Configure<AppFeatureFlagsOptions>(
 builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));
 builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 builder.Services.AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService>();
+builder.Services.AddScoped<ICourtSyncProvider, SudrfCourtSyncProvider>();
+builder.Services.AddScoped<ICourtSyncProviderRegistry, CourtSyncProviderRegistry>();
 
 if (databaseProvider.IsSqlite)
 {

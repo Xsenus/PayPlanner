@@ -3424,6 +3424,10 @@ export class ApiService {
     return this.request<ClientCaseCourtSyncSettings>('/v2/cases/court-sync/settings');
   }
 
+  async getCourtSyncProviders() {
+    return this.request<ClientCaseCourtSyncProvider[]>('/v2/cases/court-sync/providers');
+  }
+
   async updateCourtSyncSettings(payload: Pick<ClientCaseCourtSyncSettings, 'isEnabled' | 'intervalMinutes' | 'batchSize'>) {
     return this.request<ClientCaseCourtSyncSettings>('/v2/cases/court-sync/settings', {
       method: 'PUT',
@@ -4921,6 +4925,7 @@ import type {
   ClientCaseConversationEntry,
   ClientCaseCourtSyncJournalEntry,
   ClientCaseCourtSyncLog,
+  ClientCaseCourtSyncProvider,
   ClientCaseCourtSyncRun,
   ClientCaseCourtSyncSettings,
   ClientCaseDocument,
