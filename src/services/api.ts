@@ -3420,6 +3420,17 @@ export class ApiService {
     return this.request<ClientCaseCourtSyncJournalEntry[]>(`/v2/cases/court-sync/logs${suffix}`);
   }
 
+  async getCourtSyncSettings() {
+    return this.request<ClientCaseCourtSyncSettings>('/v2/cases/court-sync/settings');
+  }
+
+  async updateCourtSyncSettings(payload: Pick<ClientCaseCourtSyncSettings, 'isEnabled' | 'intervalMinutes' | 'batchSize'>) {
+    return this.request<ClientCaseCourtSyncSettings>('/v2/cases/court-sync/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getCaseCourtDirectory(includeInactive = false) {
     const query = includeInactive ? '?includeInactive=true' : '';
     return this.request<ClientCaseCourt[]>(`/v2/cases/court-directory${query}`);
@@ -4911,6 +4922,7 @@ import type {
   ClientCaseCourtSyncJournalEntry,
   ClientCaseCourtSyncLog,
   ClientCaseCourtSyncRun,
+  ClientCaseCourtSyncSettings,
   ClientCaseDocument,
   ClientCaseDocumentTemplate,
   ClientCaseDocumentTemplateToken,

@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using System.Security.Cryptography;
 using System.Globalization;
 using System.Net;
@@ -104,18 +106,24 @@ public class CasesV2Controller : ControllerBase
     private readonly ICaseDocumentStorage _caseDocumentStorage;
     private readonly IInvoiceDocumentPdfService? _pdfService;
     private readonly ISudrfCourtSyncService? _sudrfCourtSyncService;
+    private readonly IConfiguration _configuration;
+    private readonly IOptionsMonitor<AppFeatureFlagsOptions>? _featureFlags;
 
     public CasesV2Controller(
         PaymentContext db,
         IWebHostEnvironment? environment = null,
         ICaseDocumentStorage? caseDocumentStorage = null,
         ISudrfCourtSyncService? sudrfCourtSyncService = null,
-        IInvoiceDocumentPdfService? pdfService = null)
+        IInvoiceDocumentPdfService? pdfService = null,
+        IConfiguration? configuration = null,
+        IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null)
     {
         _db = db;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
         _pdfService = pdfService;
         _sudrfCourtSyncService = sudrfCourtSyncService;
+        _configuration = configuration ?? new ConfigurationBuilder().Build();
+        _featureFlags = featureFlags;
     }
 
     private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
@@ -5485,6 +5493,41 @@ public class CasesV2Controller : ControllerBase
         return Ok(entries);
     }
 
+    [HttpGet("court-sync/settings")]
+    public async Task<ActionResult<ClientCaseCourtSyncSettingsDto>> GetCourtSyncSettings(CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        return Ok(await ResolveCourtSyncSettingsAsync(ct));
+    }
+
+    [HttpPut("court-sync/settings")]
+    public async Task<ActionResult<ClientCaseCourtSyncSettingsDto>> UpdateCourtSyncSettings(
+        UpdateClientCaseCourtSyncSettingsRequest request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var intervalMinutes = ClientCaseCourtSyncSchedulerService.NormalizeIntervalMinutes(
+            request.IntervalMinutes ?? ClientCaseCourtSyncSchedulerService.DefaultIntervalMinutes);
+        var batchSize = ClientCaseCourtSyncSchedulerService.NormalizeBatchSize(
+            request.BatchSize ?? ClientCaseCourtSyncSchedulerService.DefaultBatchSize);
+        var now = DateTime.UtcNow;
+
+        await UpsertSystemSettingAsync(ClientCaseCourtSyncSchedulerService.EnabledSettingKey, request.IsEnabled ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(ClientCaseCourtSyncSchedulerService.IntervalMinutesSettingKey, intervalMinutes.ToString(CultureInfo.InvariantCulture), now, ct);
+        await UpsertSystemSettingAsync(ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey, batchSize.ToString(CultureInfo.InvariantCulture), now, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(await ResolveCourtSyncSettingsAsync(ct));
+    }
+
     [HttpPost("{id:int}/court-sync/run")]
     public async Task<ActionResult<ClientCaseCourtSyncRunDto>> RunCourtSync(int id, CancellationToken ct)
     {
@@ -6795,6 +6838,62 @@ public class CasesV2Controller : ControllerBase
 
         await _db.SaveChangesAsync(ct);
     }
+
+    private async Task<ClientCaseCourtSyncSettingsDto> ResolveCourtSyncSettingsAsync(CancellationToken ct)
+    {
+        var settings = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.Key == ClientCaseCourtSyncSchedulerService.EnabledSettingKey ||
+                item.Key == ClientCaseCourtSyncSchedulerService.IntervalMinutesSettingKey ||
+                item.Key == ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey)
+            .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
+
+        var configEnabled = _configuration.GetValue("LegalIntegrations:CourtSyncScheduler:Enabled", false);
+        var configInterval = _configuration.GetValue<int?>("LegalIntegrations:CourtSyncScheduler:IntervalMinutes")
+            ?? ClientCaseCourtSyncSchedulerService.DefaultIntervalMinutes;
+        var configBatchSize = _configuration.GetValue<int?>("LegalIntegrations:CourtSyncScheduler:BatchSize")
+            ?? ClientCaseCourtSyncSchedulerService.DefaultBatchSize;
+
+        return new ClientCaseCourtSyncSettingsDto
+        {
+            IsEnabled = ParseBoolSetting(settings.GetValueOrDefault(ClientCaseCourtSyncSchedulerService.EnabledSettingKey), configEnabled),
+            FeatureFlagEnabled = _featureFlags?.CurrentValue.Legal.ExternalCourtSync ?? false,
+            IntervalMinutes = ClientCaseCourtSyncSchedulerService.NormalizeIntervalMinutes(
+                ParseIntSetting(settings.GetValueOrDefault(ClientCaseCourtSyncSchedulerService.IntervalMinutesSettingKey), configInterval)),
+            BatchSize = ClientCaseCourtSyncSchedulerService.NormalizeBatchSize(
+                ParseIntSetting(settings.GetValueOrDefault(ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey), configBatchSize)),
+            MinIntervalMinutes = ClientCaseCourtSyncSchedulerService.MinIntervalMinutes,
+            MaxIntervalMinutes = ClientCaseCourtSyncSchedulerService.MaxIntervalMinutes,
+            MinBatchSize = ClientCaseCourtSyncSchedulerService.MinBatchSize,
+            MaxBatchSize = ClientCaseCourtSyncSchedulerService.MaxBatchSize,
+        };
+    }
+
+    private async Task UpsertSystemSettingAsync(string key, string value, DateTime nowUtc, CancellationToken ct)
+    {
+        var setting = await _db.SystemSettings.FirstOrDefaultAsync(item => item.Key == key, ct);
+        if (setting is null)
+        {
+            _db.SystemSettings.Add(new SystemSetting
+            {
+                Key = key,
+                Value = value,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+            });
+            return;
+        }
+
+        setting.Value = value;
+        setting.UpdatedAt = nowUtc;
+    }
+
+    private static bool ParseBoolSetting(string? value, bool fallback)
+        => bool.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static int ParseIntSetting(string? value, int fallback)
+        => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
 
     private static CaseDocumentTemplateLibraryStorage? DeserializeCaseDocumentTemplateLibrary(string? rawJson)
     {
@@ -10145,6 +10244,25 @@ public class CasesV2Controller : ControllerBase
         public string Message { get; set; } = string.Empty;
         public DateTime? OccurredAt { get; set; }
         public string? ActorName { get; set; }
+    }
+
+    public sealed class ClientCaseCourtSyncSettingsDto
+    {
+        public bool IsEnabled { get; set; }
+        public bool FeatureFlagEnabled { get; set; }
+        public int IntervalMinutes { get; set; }
+        public int BatchSize { get; set; }
+        public int MinIntervalMinutes { get; set; }
+        public int MaxIntervalMinutes { get; set; }
+        public int MinBatchSize { get; set; }
+        public int MaxBatchSize { get; set; }
+    }
+
+    public sealed class UpdateClientCaseCourtSyncSettingsRequest
+    {
+        public bool IsEnabled { get; set; }
+        public int? IntervalMinutes { get; set; }
+        public int? BatchSize { get; set; }
     }
 
     public sealed class UpdateCaseDocumentRequest

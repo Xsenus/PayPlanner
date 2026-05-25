@@ -1109,6 +1109,17 @@ export interface ClientCaseCourtSyncJournalEntry {
   actorName?: string | null;
 }
 
+export interface ClientCaseCourtSyncSettings {
+  isEnabled: boolean;
+  featureFlagEnabled: boolean;
+  intervalMinutes: number;
+  batchSize: number;
+  minIntervalMinutes: number;
+  maxIntervalMinutes: number;
+  minBatchSize: number;
+  maxBatchSize: number;
+}
+
 export type ClientCaseRelatedPartySourceType = 'client' | 'externalContact' | 'legalEntity';
 
 export interface ClientCaseRelatedParty {

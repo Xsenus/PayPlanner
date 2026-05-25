@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -6,7 +7,9 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
 using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -3819,6 +3822,47 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtSyncSettings_ReturnsDefaultsAndPersistsOverrides()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["LegalIntegrations:CourtSyncScheduler:Enabled"] = "true",
+                ["LegalIntegrations:CourtSyncScheduler:IntervalMinutes"] = "90",
+                ["LegalIntegrations:CourtSyncScheduler:BatchSize"] = "12",
+            })
+            .Build();
+        var controller = CreateController(db, manager, configuration: configuration);
+
+        var initialResult = await controller.GetCourtSyncSettings(CancellationToken.None);
+        var initialOk = Assert.IsType<OkObjectResult>(initialResult.Result);
+        var initial = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncSettingsDto>(initialOk.Value);
+        Assert.True(initial.IsEnabled);
+        Assert.Equal(90, initial.IntervalMinutes);
+        Assert.Equal(12, initial.BatchSize);
+
+        var updateResult = await controller.UpdateCourtSyncSettings(new CasesV2Controller.UpdateClientCaseCourtSyncSettingsRequest
+        {
+            IsEnabled = false,
+            IntervalMinutes = 5,
+            BatchSize = 250,
+        }, CancellationToken.None);
+
+        var updateOk = Assert.IsType<OkObjectResult>(updateResult.Result);
+        var updated = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncSettingsDto>(updateOk.Value);
+        Assert.False(updated.IsEnabled);
+        Assert.Equal(ClientCaseCourtSyncSchedulerService.MinIntervalMinutes, updated.IntervalMinutes);
+        Assert.Equal(ClientCaseCourtSyncSchedulerService.MaxBatchSize, updated.BatchSize);
+
+        var saved = await db.SystemSettings.AsNoTracking().ToDictionaryAsync(item => item.Key, item => item.Value);
+        Assert.Equal("false", saved[ClientCaseCourtSyncSchedulerService.EnabledSettingKey]);
+        Assert.Equal(ClientCaseCourtSyncSchedulerService.MinIntervalMinutes.ToString(CultureInfo.InvariantCulture), saved[ClientCaseCourtSyncSchedulerService.IntervalMinutesSettingKey]);
+        Assert.Equal(ClientCaseCourtSyncSchedulerService.MaxBatchSize.ToString(CultureInfo.InvariantCulture), saved[ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey]);
+    }
+
+    [Fact]
     public async Task RunCourtSync_ExplainsMissingCourtBinding()
     {
         await using var db = await CreateContextAsync();
@@ -4809,11 +4853,13 @@ public class CasesV2ControllerTests
         User user,
         string? contentRootPath = null,
         ISudrfCourtSyncService? sudrfCourtSyncService = null,
-        IInvoiceDocumentPdfService? pdfService = null)
+        IInvoiceDocumentPdfService? pdfService = null,
+        IConfiguration? configuration = null,
+        IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null)
         => new(db, new TestWebHostEnvironment
         {
             ContentRootPath = contentRootPath ?? Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N")),
-        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService)
+        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, configuration: configuration, featureFlags: featureFlags)
         {
             ControllerContext = new ControllerContext
             {

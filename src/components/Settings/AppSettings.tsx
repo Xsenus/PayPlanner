@@ -13,6 +13,7 @@ import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
 import { ContractDocumentTemplateSettings } from './ContractDocumentTemplateSettings';
 import { CourtSyncJournalSettings } from './CourtSyncJournalSettings';
+import { CourtSyncSchedulerSettings } from './CourtSyncSchedulerSettings';
 import { FeatureFlagSettings } from './FeatureFlagSettings';
 import { AppVersionSettings } from './AppVersionSettings';
 import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
@@ -1520,6 +1521,8 @@ export function AppSettings() {
                 </div>
 
                 <FeatureFlagSettings />
+
+                <CourtSyncSchedulerSettings />
 
                 <CourtSyncJournalSettings />
 

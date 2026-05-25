@@ -13,8 +13,17 @@ namespace PayPlanner.Api.Services.LegalIntegrations;
 public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
 {
     private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(3);
-    private static readonly TimeSpan DefaultInterval = TimeSpan.FromHours(6);
-    private const int DefaultBatchSize = 25;
+    public const string EnabledSettingKey = "legalIntegrations.courtSyncScheduler.enabled";
+    public const string IntervalMinutesSettingKey = "legalIntegrations.courtSyncScheduler.intervalMinutes";
+    public const string BatchSizeSettingKey = "legalIntegrations.courtSyncScheduler.batchSize";
+    public const int DefaultIntervalMinutes = 360;
+    public const int MinIntervalMinutes = 15;
+    public const int MaxIntervalMinutes = 1440;
+    public const int DefaultBatchSize = 25;
+    public const int MinBatchSize = 1;
+    public const int MaxBatchSize = 100;
+
+    private static readonly TimeSpan DefaultInterval = TimeSpan.FromMinutes(DefaultIntervalMinutes);
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions> _featureFlags;
@@ -46,11 +55,14 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var nextDelay = DefaultInterval;
             try
             {
-                if (IsEnabled())
+                var settings = await ResolveSettingsAsync(stoppingToken);
+                nextDelay = TimeSpan.FromMinutes(settings.IntervalMinutes);
+                if (settings.CanRun)
                 {
-                    var processed = await RunOnceAsync(stoppingToken);
+                    var processed = await RunOnceAsync(settings.BatchSize, stoppingToken);
                     _logger.LogInformation("Automatic court source sync finished. Processed cases: {Count}.", processed);
                 }
             }
@@ -61,7 +73,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
 
             try
             {
-                await Task.Delay(ResolveInterval(), stoppingToken);
+                await Task.Delay(nextDelay, stoppingToken);
             }
             catch (TaskCanceledException)
             {
@@ -70,6 +82,12 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
     }
 
     public async Task<int> RunOnceAsync(CancellationToken cancellationToken)
+    {
+        var settings = await ResolveSettingsAsync(cancellationToken);
+        return await RunOnceAsync(settings.BatchSize, cancellationToken);
+    }
+
+    private async Task<int> RunOnceAsync(int batchSize, CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
@@ -83,14 +101,13 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
             return 0;
         }
 
-        var batchSize = Math.Clamp(_configuration.GetValue<int?>("LegalIntegrations:CourtSyncScheduler:BatchSize") ?? DefaultBatchSize, 1, 100);
         var caseIds = await db.ClientCases
             .AsNoTracking()
             .Where(item => item.Status == ClientCaseStatus.Open)
             .Where(item => item.CourtUrl.Contains(".sudrf.ru"))
             .OrderBy(item => item.Id)
             .Select(item => item.Id)
-            .Take(batchSize)
+            .Take(NormalizeBatchSize(batchSize))
             .ToListAsync(cancellationToken);
 
         if (caseIds.Count == 0)
@@ -129,13 +146,51 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         return processed;
     }
 
-    private bool IsEnabled()
-        => _featureFlags.CurrentValue.Legal.ExternalCourtSync
-           && _configuration.GetValue("LegalIntegrations:CourtSyncScheduler:Enabled", false);
+    public static int NormalizeIntervalMinutes(int value)
+        => Math.Clamp(value, MinIntervalMinutes, MaxIntervalMinutes);
 
-    private TimeSpan ResolveInterval()
+    public static int NormalizeBatchSize(int value)
+        => Math.Clamp(value, MinBatchSize, MaxBatchSize);
+
+    private async Task<CourtSyncSchedulerSettings> ResolveSettingsAsync(CancellationToken cancellationToken)
     {
-        var minutes = _configuration.GetValue<int?>("LegalIntegrations:CourtSyncScheduler:IntervalMinutes");
-        return minutes is > 0 ? TimeSpan.FromMinutes(minutes.Value) : DefaultInterval;
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+        var settings = await db.SystemSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.Key == EnabledSettingKey ||
+                item.Key == IntervalMinutesSettingKey ||
+                item.Key == BatchSizeSettingKey)
+            .ToDictionaryAsync(item => item.Key, item => item.Value, cancellationToken);
+
+        var configEnabled = _configuration.GetValue("LegalIntegrations:CourtSyncScheduler:Enabled", false);
+        var configInterval = _configuration.GetValue<int?>("LegalIntegrations:CourtSyncScheduler:IntervalMinutes") ?? (int)DefaultInterval.TotalMinutes;
+        var configBatchSize = _configuration.GetValue<int?>("LegalIntegrations:CourtSyncScheduler:BatchSize") ?? DefaultBatchSize;
+
+        var isEnabled = ParseBoolSetting(settings.GetValueOrDefault(EnabledSettingKey), configEnabled);
+        var intervalMinutes = NormalizeIntervalMinutes(ParseIntSetting(settings.GetValueOrDefault(IntervalMinutesSettingKey), configInterval));
+        var batchSize = NormalizeBatchSize(ParseIntSetting(settings.GetValueOrDefault(BatchSizeSettingKey), configBatchSize));
+
+        return new CourtSyncSchedulerSettings(
+            isEnabled,
+            _featureFlags.CurrentValue.Legal.ExternalCourtSync,
+            intervalMinutes,
+            batchSize);
+    }
+
+    private static bool ParseBoolSetting(string? value, bool fallback)
+        => bool.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static int ParseIntSetting(string? value, int fallback)
+        => int.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private readonly record struct CourtSyncSchedulerSettings(
+        bool IsEnabled,
+        bool FeatureFlagEnabled,
+        int IntervalMinutes,
+        int BatchSize)
+    {
+        public bool CanRun => IsEnabled && FeatureFlagEnabled;
     }
 }
