@@ -4117,6 +4117,47 @@ export class ApiService {
     };
   }
 
+  async downloadManagementReport(params: {
+    report: 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity';
+    format: 'excel' | 'pdf';
+    from?: string;
+    to?: string;
+    asOf?: string;
+    status?: string;
+    responsibleUserId?: number;
+    caseType?: string;
+    lawyerUserId?: number;
+    horizonDays?: number;
+    deadlineType?: string;
+    activity?: 'all' | 'inactive' | 'active' | 'escalated' | 'disabled';
+    inactiveDays?: number;
+    escalationDays?: number;
+    limit?: number;
+  }) {
+    const { format, ...filters } = params;
+    const extension = format === 'excel' ? 'xls' : 'pdf';
+    const q = buildQuery(filters);
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/reports/management.${extension}${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} at ${API_BASE_URL}/reports/management.${extension} ${text ? `- ${text}` : ''}`,
+      );
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName:
+        parseContentDispositionFileName(response.headers.get('content-disposition')) ??
+        `${filters.report}-report.${extension}`,
+    };
+  }
+
   async getCaseActivityReport(params?: {
     inactiveDays?: number;
     escalationDays?: number;

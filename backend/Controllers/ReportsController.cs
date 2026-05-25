@@ -198,6 +198,99 @@ public class ReportsController : ControllerBase
         return File(pdf, "application/pdf", $"legal-work-report-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf");
     }
 
+    [HttpGet("management.xls")]
+    public async Task<IActionResult> ExportManagementReportExcel(
+        [FromQuery] string report,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] DateTime? asOf,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] int? lawyerUserId,
+        [FromQuery] int? horizonDays,
+        [FromQuery] string? deadlineType,
+        [FromQuery] string? activity,
+        [FromQuery] int? inactiveDays,
+        [FromQuery] int? escalationDays,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        var (document, error) = await BuildManagementReportExportDocumentAsync(
+            report,
+            from,
+            to,
+            asOf,
+            status,
+            responsibleUserId,
+            caseType,
+            lawyerUserId,
+            horizonDays,
+            deadlineType,
+            activity,
+            inactiveDays,
+            escalationDays,
+            limit,
+            ct);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        return File(
+            Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(BuildReportExportExcelXml(document!))).ToArray(),
+            "application/vnd.ms-excel; charset=utf-8",
+            $"{document!.Slug}-{DateTime.UtcNow:yyyyMMdd-HHmm}.xls");
+    }
+
+    [HttpGet("management.pdf")]
+    public async Task<IActionResult> ExportManagementReportPdf(
+        [FromQuery] string report,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] DateTime? asOf,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] int? lawyerUserId,
+        [FromQuery] int? horizonDays,
+        [FromQuery] string? deadlineType,
+        [FromQuery] string? activity,
+        [FromQuery] int? inactiveDays,
+        [FromQuery] int? escalationDays,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        if (_pdfService is null)
+        {
+            return Problem("Сервис формирования PDF недоступен.");
+        }
+
+        var (document, error) = await BuildManagementReportExportDocumentAsync(
+            report,
+            from,
+            to,
+            asOf,
+            status,
+            responsibleUserId,
+            caseType,
+            lawyerUserId,
+            horizonDays,
+            deadlineType,
+            activity,
+            inactiveDays,
+            escalationDays,
+            limit,
+            ct);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        var pdf = await _pdfService.RenderAsync(BuildReportExportPrintHtml(document!, DateTime.UtcNow), ct);
+        return File(pdf, "application/pdf", $"{document!.Slug}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf");
+    }
+
     [HttpGet("case-finance")]
     public async Task<ActionResult<CaseFinanceReportDto>> CaseFinance(
         [FromQuery] DateTime? from,
@@ -294,6 +387,143 @@ public class ReportsController : ControllerBase
             ct);
 
         return (report, null);
+    }
+
+    private async Task<(ReportExportDocument? Document, IActionResult? Error)> BuildManagementReportExportDocumentAsync(
+        string? report,
+        DateTime? from,
+        DateTime? to,
+        DateTime? asOf,
+        string? status,
+        int? responsibleUserId,
+        string? caseType,
+        int? lawyerUserId,
+        int? horizonDays,
+        string? deadlineType,
+        string? activity,
+        int? inactiveDays,
+        int? escalationDays,
+        int? limit,
+        CancellationToken ct)
+    {
+        if (!await CanExportReportsAsync(ct))
+        {
+            return (null, Forbid());
+        }
+
+        var normalizedReport = (NormalizeOptional(report) ?? string.Empty).ToLowerInvariant();
+        var effectiveAsOf = asOf?.Date ?? DateTime.UtcNow.Date;
+        var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
+
+        switch (normalizedReport)
+        {
+            case "case-finance":
+            {
+                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+                if (casesVisibility is null || accountsVisibility is null)
+                {
+                    return (null, Unauthorized());
+                }
+
+                var (start, end) = ResolveLegalWorkPeriod(from, to);
+                var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
+                var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                    cancellationToken => BuildCaseFinanceReportAsync(start, end, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
+                    _logger,
+                    ct);
+                return (BuildCaseFinanceExportDocument(reportDto), null);
+            }
+
+            case "case-success":
+            {
+                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                if (casesVisibility is null)
+                {
+                    return (null, Unauthorized());
+                }
+
+                var (start, end) = ResolveLegalWorkPeriod(from, to);
+                var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
+                var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                    cancellationToken => BuildCaseSuccessReportAsync(start, end, filters, effectiveLimit, casesVisibility, cancellationToken),
+                    _logger,
+                    ct);
+                return (BuildCaseSuccessExportDocument(reportDto), null);
+            }
+
+            case "current-cases":
+            {
+                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+                if (casesVisibility is null || tasksVisibility is null)
+                {
+                    return (null, Unauthorized());
+                }
+
+                var filters = new CurrentCasesReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
+                var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                    cancellationToken => BuildCurrentCasesReportAsync(effectiveAsOf, filters, effectiveLimit, casesVisibility, tasksVisibility, cancellationToken),
+                    _logger,
+                    ct);
+                return (BuildCurrentCasesExportDocument(reportDto), null);
+            }
+
+            case "lawyer-workload":
+            {
+                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+                if (casesVisibility is null || tasksVisibility is null)
+                {
+                    return (null, Unauthorized());
+                }
+
+                var effectiveHorizonDays = Math.Clamp(horizonDays ?? 7, 1, 60);
+                var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                    cancellationToken => BuildLawyerWorkloadReportAsync(effectiveAsOf, effectiveHorizonDays, lawyerUserId, effectiveLimit, casesVisibility, tasksVisibility, cancellationToken),
+                    _logger,
+                    ct);
+                return (BuildLawyerWorkloadExportDocument(reportDto), null);
+            }
+
+            case "overdue-deadlines":
+            {
+                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                if (casesVisibility is null)
+                {
+                    return (null, Unauthorized());
+                }
+
+                var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                    cancellationToken => BuildOverdueProceduralDeadlinesReportAsync(effectiveAsOf, NormalizeOptional(deadlineType), responsibleUserId, effectiveLimit, casesVisibility, cancellationToken),
+                    _logger,
+                    ct);
+                return (BuildOverdueDeadlinesExportDocument(reportDto), null);
+            }
+
+            case "case-activity":
+            {
+                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                if (casesVisibility is null)
+                {
+                    return (null, Unauthorized());
+                }
+
+                var settings = await GetCaseActivityReportSettingsAsync(ct);
+                var effectiveInactiveDays = Math.Clamp(inactiveDays ?? settings.InactivityDays, 1, 365);
+                var effectiveEscalationDays = Math.Clamp(escalationDays ?? settings.EscalationDays, effectiveInactiveDays, 365);
+                var effectiveActivityLimit = Math.Clamp(limit ?? 50, 1, 200);
+                var normalizedActivity = NormalizeCaseActivityFilter(activity);
+                var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                    cancellationToken => BuildCaseActivityReportAsync(effectiveInactiveDays, effectiveEscalationDays, normalizedActivity, effectiveActivityLimit, casesVisibility, cancellationToken),
+                    _logger,
+                    ct);
+                return (BuildCaseActivityExportDocument(reportDto), null);
+            }
+
+            default:
+                return (null, BadRequest("Неизвестный управленческий отчет для выгрузки."));
+        }
     }
 
     private static (DateTime Start, DateTime End) ResolveLegalWorkPeriod(DateTime? from, DateTime? to)
@@ -1547,6 +1777,342 @@ public class ReportsController : ControllerBase
             })
             .ToList();
 
+    private static ReportExportDocument BuildCaseFinanceExportDocument(CaseFinanceReportDto report)
+        => new(
+            "case-finance-report",
+            "Финансовый отчет по делам",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}",
+            [
+                new("Всего дел", report.TotalCases.ToString(CultureInfo.InvariantCulture)),
+                new("В работе", report.ActiveCases.ToString(CultureInfo.InvariantCulture)),
+                new("Закрыто", report.ClosedCases.ToString(CultureInfo.InvariantCulture)),
+                new("Гонорар", MoneyCell(report.FeeTotal)),
+                new("Оплачено", MoneyCell(report.PaidTotal)),
+                new("Остаток", MoneyCell(report.OutstandingTotal)),
+                new("Сбор оплат", PercentCell(report.CollectionRate)),
+                new("Полностью оплачено", report.FullyPaidCaseCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Дела", ["Дело", "Клиент", "Ответственный", "Тип", "Статус", "Гонорар", "Оплачено", "Остаток", "Оплата", "Финансовое состояние"], report.Items.Select(item => new ReportExportRow([
+                    BuildCaseTitle(item.CaseNumber, item.CaseTitle),
+                    item.ClientName,
+                    item.ResponsibleName,
+                    item.CaseType,
+                    item.StatusLabel,
+                    MoneyCell(item.FeeAmount),
+                    MoneyCell(item.PaidTotal),
+                    MoneyCell(item.OutstandingTotal),
+                    PercentCell(item.PaymentRate),
+                    item.FinanceStateLabel,
+                ])).ToList()),
+                new("По ответственным", ["Ответственный", "Дел", "Гонорар", "Оплачено", "Остаток", "Сбор оплат"], report.ByResponsible.Select(item => new ReportExportRow([
+                    item.ResponsibleName,
+                    item.CaseCount.ToString(CultureInfo.InvariantCulture),
+                    MoneyCell(item.FeeTotal),
+                    MoneyCell(item.PaidTotal),
+                    MoneyCell(item.OutstandingTotal),
+                    PercentCell(item.CollectionRate),
+                ])).ToList()),
+                new("По статусам", ["Статус", "Дел", "Гонорар", "Оплачено", "Остаток", "Сбор оплат"], report.ByStatus.Select(item => new ReportExportRow([
+                    item.StatusLabel,
+                    item.CaseCount.ToString(CultureInfo.InvariantCulture),
+                    MoneyCell(item.FeeTotal),
+                    MoneyCell(item.PaidTotal),
+                    MoneyCell(item.OutstandingTotal),
+                    PercentCell(item.CollectionRate),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildCaseSuccessExportDocument(CaseSuccessReportDto report)
+        => new(
+            "case-success-report",
+            "Статистика успешности дел",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}. {report.FormulaNote}",
+            [
+                new("Всего дел", report.TotalCases.ToString(CultureInfo.InvariantCulture)),
+                new("Завершено", report.CompletedCases.ToString(CultureInfo.InvariantCulture)),
+                new("Успешно", report.SuccessfulCases.ToString(CultureInfo.InvariantCulture)),
+                new("Отрицательный исход", report.LostCases.ToString(CultureInfo.InvariantCulture)),
+                new("В работе", report.InProgressCases.ToString(CultureInfo.InvariantCulture)),
+                new("На паузе", report.OnHoldCases.ToString(CultureInfo.InvariantCulture)),
+                new("Успешность", PercentCell(report.SuccessRate)),
+                new("Доля завершенных", PercentCell(report.CompletionRate)),
+            ],
+            [
+                new("Дела", ["Дело", "Клиент", "Ответственный", "Тип", "Статус", "Исход", "Дней в работе", "Дата начала", "Срок дела"], report.Items.Select(item => new ReportExportRow([
+                    BuildCaseTitle(item.CaseNumber, item.CaseTitle),
+                    item.ClientName,
+                    item.ResponsibleName,
+                    item.CaseType,
+                    item.StatusLabel,
+                    item.OutcomeLabel,
+                    item.DaysInWork.ToString(CultureInfo.InvariantCulture),
+                    DateCell(item.StartDate),
+                    DateCell(item.DueDate),
+                ])).ToList()),
+                new("По ответственным", ["Ответственный", "Всего", "Завершено", "Успешно", "Отрицательный исход", "В работе", "Успешность"], report.ByResponsible.Select(item => new ReportExportRow([
+                    item.ResponsibleName,
+                    item.TotalCases.ToString(CultureInfo.InvariantCulture),
+                    item.CompletedCases.ToString(CultureInfo.InvariantCulture),
+                    item.SuccessfulCases.ToString(CultureInfo.InvariantCulture),
+                    item.LostCases.ToString(CultureInfo.InvariantCulture),
+                    item.InProgressCases.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.SuccessRate),
+                ])).ToList()),
+                new("По типам дел", ["Тип", "Всего", "Завершено", "Успешно", "Отрицательный исход", "Успешность"], report.ByType.Select(item => new ReportExportRow([
+                    item.CaseType,
+                    item.TotalCases.ToString(CultureInfo.InvariantCulture),
+                    item.CompletedCases.ToString(CultureInfo.InvariantCulture),
+                    item.SuccessfulCases.ToString(CultureInfo.InvariantCulture),
+                    item.LostCases.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.SuccessRate),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildCurrentCasesExportDocument(CurrentCasesReportDto report)
+        => new(
+            "current-cases-report",
+            "Отчет по текущим делам",
+            $"Дата среза: {DateCell(report.AsOf)}",
+            [
+                new("Текущие дела", report.TotalCurrentCases.ToString(CultureInfo.InvariantCulture)),
+                new("Открыто", report.OpenCases.ToString(CultureInfo.InvariantCulture)),
+                new("На паузе", report.OnHoldCases.ToString(CultureInfo.InvariantCulture)),
+                new("Просрочено", report.OverdueCases.ToString(CultureInfo.InvariantCulture)),
+                new("Без ответственного", report.WithoutResponsibleCount.ToString(CultureInfo.InvariantCulture)),
+                new("С открытыми задачами", report.WithOpenTasksCount.ToString(CultureInfo.InvariantCulture)),
+                new("С просроченными задачами", report.WithOverdueTasksCount.ToString(CultureInfo.InvariantCulture)),
+                new("С просроченными сроками", report.WithOverdueDeadlinesCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Дела", ["Дело", "Клиент", "Ответственный", "Тип", "Статус", "Дней в работе", "Срок дела", "Просрочено", "Открытые задачи", "Просроченные задачи", "Активные сроки", "Ближайший срок"], report.Items.Select(item => new ReportExportRow([
+                    BuildCaseTitle(item.CaseNumber, item.CaseTitle),
+                    item.ClientName,
+                    item.ResponsibleName,
+                    item.CaseType,
+                    item.StatusLabel,
+                    item.DaysInWork.ToString(CultureInfo.InvariantCulture),
+                    DateCell(item.DueDate),
+                    item.IsOverdue ? "Да" : "Нет",
+                    item.OpenTaskCount.ToString(CultureInfo.InvariantCulture),
+                    item.OverdueTaskCount.ToString(CultureInfo.InvariantCulture),
+                    item.ActiveDeadlineCount.ToString(CultureInfo.InvariantCulture),
+                    item.NextDeadlineLabel,
+                ])).ToList()),
+                new("По ответственным", ["Ответственный", "Дел", "Просрочено дел", "Открытые задачи", "Просроченные задачи", "Просроченные сроки"], report.ByResponsible.Select(item => new ReportExportRow([
+                    item.ResponsibleName,
+                    item.CaseCount.ToString(CultureInfo.InvariantCulture),
+                    item.OverdueCases.ToString(CultureInfo.InvariantCulture),
+                    item.OpenTasks.ToString(CultureInfo.InvariantCulture),
+                    item.OverdueTasks.ToString(CultureInfo.InvariantCulture),
+                    item.OverdueDeadlines.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildLawyerWorkloadExportDocument(LawyerWorkloadReportDto report)
+        => new(
+            "lawyer-workload-report",
+            "Отчет по загрузке юристов",
+            $"Дата среза: {DateCell(report.AsOf)}. Горизонт: {report.HorizonDays} дн.",
+            [
+                new("Юристов", report.LawyerCount.ToString(CultureInfo.InvariantCulture)),
+                new("Активные дела", report.TotalActiveCases.ToString(CultureInfo.InvariantCulture)),
+                new("Открытые задачи", report.TotalOpenTasks.ToString(CultureInfo.InvariantCulture)),
+                new("Просроченные задачи", report.TotalOverdueTasks.ToString(CultureInfo.InvariantCulture)),
+                new("Просроченные сроки", report.TotalOverdueDeadlines.ToString(CultureInfo.InvariantCulture)),
+                new("Перегружено", report.OverloadedLawyerCount.ToString(CultureInfo.InvariantCulture)),
+                new("Плановые часы", report.TotalPlannedHours.ToString("0.##", CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Юристы", ["Юрист", "Активные дела", "Открытые задачи", "Просроченные задачи", "На согласовании", "Сегодня", "Ближайшие дни", "Просроченные сроки", "Активные сроки", "Плановые часы", "Индекс нагрузки", "Риск", "Ближайшая задача", "Ближайший срок"], report.Items.Select(item => new ReportExportRow([
+                    item.LawyerName,
+                    item.ActiveCaseCount.ToString(CultureInfo.InvariantCulture),
+                    item.OpenTaskCount.ToString(CultureInfo.InvariantCulture),
+                    item.OverdueTaskCount.ToString(CultureInfo.InvariantCulture),
+                    item.OnApprovalTaskCount.ToString(CultureInfo.InvariantCulture),
+                    item.DueTodayTaskCount.ToString(CultureInfo.InvariantCulture),
+                    item.DueSoonTaskCount.ToString(CultureInfo.InvariantCulture),
+                    item.OverdueDeadlineCount.ToString(CultureInfo.InvariantCulture),
+                    item.ActiveDeadlineCount.ToString(CultureInfo.InvariantCulture),
+                    item.PlannedHours.ToString("0.##", CultureInfo.InvariantCulture),
+                    item.WorkloadScore.ToString(CultureInfo.InvariantCulture),
+                    item.RiskLabel,
+                    DateTimeCell(item.NearestTaskDueAt),
+                    DateCell(item.NearestDeadlineAt),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildOverdueDeadlinesExportDocument(OverdueProceduralDeadlinesReportDto report)
+        => new(
+            "overdue-deadlines-report",
+            "Отчет по просроченным процессуальным срокам",
+            $"Дата среза: {DateCell(report.AsOf)}",
+            [
+                new("Просрочено сроков", report.TotalOverdueCount.ToString(CultureInfo.InvariantCulture)),
+                new("Критичные", report.CriticalOverdueCount.ToString(CultureInfo.InvariantCulture)),
+                new("Без ответственного", report.WithoutResponsibleCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Сроки", ["Дело", "Клиент", "Ответственный", "Тип срока", "Срок", "Дата", "Дней просрочки", "Статус", "Задача", "Документ"], report.Items.Select(item => new ReportExportRow([
+                    BuildCaseTitle(item.CaseNumber, item.CaseTitle),
+                    item.ClientName,
+                    item.ResponsibleName,
+                    item.DeadlineTypeLabel,
+                    item.Title,
+                    DateCell(item.DueAt),
+                    item.DaysOverdue.ToString(CultureInfo.InvariantCulture),
+                    item.StatusLabel,
+                    item.TaskTitle,
+                    item.DocumentName,
+                ])).ToList()),
+                new("По типам сроков", ["Тип", "Всего", "Критичные"], report.ByType.Select(item => new ReportExportRow([
+                    item.DeadlineTypeLabel,
+                    item.Count.ToString(CultureInfo.InvariantCulture),
+                    item.CriticalCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+                new("По ответственным", ["Ответственный", "Всего", "Критичные"], report.ByResponsible.Select(item => new ReportExportRow([
+                    item.ResponsibleName,
+                    item.Count.ToString(CultureInfo.InvariantCulture),
+                    item.CriticalCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildCaseActivityExportDocument(CaseActivityReportDto report)
+        => new(
+            "case-activity-report",
+            "Отчет по активности дел",
+            $"Порог неактивности: {report.InactivityDays} дн. Эскалация: {report.EscalationDays} дн.",
+            [
+                new("Видимые дела", report.TotalVisibleCases.ToString(CultureInfo.InvariantCulture)),
+                new("Активные", report.ActiveCaseCount.ToString(CultureInfo.InvariantCulture)),
+                new("Завершенные", report.FinishedCaseCount.ToString(CultureInfo.InvariantCulture)),
+                new("Неактивные", report.InactiveCaseCount.ToString(CultureInfo.InvariantCulture)),
+                new("Эскалации", report.EscalatedCaseCount.ToString(CultureInfo.InvariantCulture)),
+                new("Контроль отключен", report.DisabledCaseCount.ToString(CultureInfo.InvariantCulture)),
+                new("С активными задачами", report.WithActiveTasksCount.ToString(CultureInfo.InvariantCulture)),
+                new("Без ответственного", report.WithoutResponsibleCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Дела", ["Дело", "Клиент", "Ответственный", "Тип", "Статус", "Последняя активность", "Дней без активности", "Активные задачи", "Завершенные задачи", "Неактивно", "Эскалация", "Причина"], report.Items.Select(item => new ReportExportRow([
+                    BuildCaseTitle(item.CaseNumber, item.CaseTitle),
+                    item.OwnerName,
+                    item.ResponsibleName,
+                    item.CaseType,
+                    item.StatusLabel,
+                    DateTimeCell(item.LastActivityAt),
+                    item.DaysWithoutActivity.ToString(CultureInfo.InvariantCulture),
+                    item.ActiveTaskCount.ToString(CultureInfo.InvariantCulture),
+                    item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
+                    item.IsInactive ? "Да" : "Нет",
+                    item.IsEscalated ? "Да" : "Нет",
+                    item.Reason,
+                ])).ToList()),
+            ]);
+
+    private static string BuildReportExportExcelXml(ReportExportDocument document)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
+        builder.AppendLine("""<?mso-application progid="Excel.Sheet"?>""");
+        builder.AppendLine("""
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+          xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <Worksheet ss:Name="Report">
+    <Table>
+""");
+
+        AppendLegalWorkExcelRow(builder, [document.Title], header: true);
+        AppendLegalWorkExcelRow(builder, [document.Subtitle]);
+        AppendLegalWorkExcelRow(builder, []);
+        foreach (var metric in document.Metrics)
+        {
+            AppendLegalWorkExcelRow(builder, [metric.Label, metric.Value]);
+        }
+
+        foreach (var table in document.Tables)
+        {
+            AppendLegalWorkExcelRow(builder, []);
+            AppendLegalWorkExcelRow(builder, [table.Title], header: true);
+            AppendLegalWorkExcelRow(builder, table.Headers, header: true);
+            foreach (var row in table.Rows)
+            {
+                AppendLegalWorkExcelRow(builder, row.Cells);
+            }
+        }
+
+        builder.AppendLine("""
+    </Table>
+  </Worksheet>
+</Workbook>
+""");
+        return builder.ToString();
+    }
+
+    private static string BuildReportExportPrintHtml(ReportExportDocument document, DateTime generatedAtUtc)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page { size: A4 landscape; margin: 14mm; }
+    body { font-family: Arial, sans-serif; color: #111827; font-size: 12px; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    h2 { margin: 20px 0 8px; font-size: 15px; }
+    .muted { color: #6b7280; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0; }
+    .metric { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+    .metric strong { display: block; font-size: 16px; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #e5e7eb; padding: 5px 6px; vertical-align: top; }
+    th { background: #f3f4f6; text-align: left; }
+  </style>
+</head>
+<body>
+""");
+        builder.Append("<h1>").Append(Html(document.Title)).AppendLine("</h1>");
+        builder.Append("<div class=\"muted\">")
+            .Append(Html(document.Subtitle))
+            .Append(" · Сформировано: ")
+            .Append(Html(generatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"))))
+            .AppendLine("</div>");
+
+        builder.AppendLine("<div class=\"summary\">");
+        foreach (var metric in document.Metrics)
+        {
+            AppendLegalWorkMetric(builder, metric.Label, metric.Value);
+        }
+
+        builder.AppendLine("</div>");
+        foreach (var table in document.Tables)
+        {
+            builder.Append("<h2>").Append(Html(table.Title)).AppendLine("</h2><table><thead><tr>");
+            foreach (var header in table.Headers)
+            {
+                builder.Append("<th>").Append(Html(header)).Append("</th>");
+            }
+
+            builder.AppendLine("</tr></thead><tbody>");
+            foreach (var row in table.Rows)
+            {
+                builder.Append("<tr>");
+                foreach (var cell in row.Cells)
+                {
+                    builder.Append("<td>").Append(Html(cell)).Append("</td>");
+                }
+
+                builder.AppendLine("</tr>");
+            }
+
+            builder.AppendLine("</tbody></table>");
+        }
+
+        builder.AppendLine("</body></html>");
+        return builder.ToString();
+    }
+
     private static byte[] BuildLegalWorkCsv(LegalWorkReportDto report)
     {
         var builder = new StringBuilder();
@@ -1870,8 +2436,26 @@ public class ReportsController : ControllerBase
             ? item.CaseTitle
             : $"{item.CaseNumber} {item.CaseTitle}";
 
+    private static string BuildCaseTitle(string? caseNumber, string? caseTitle)
+        => string.IsNullOrWhiteSpace(caseNumber)
+            ? NormalizeReportText(caseTitle, "Без номера")
+            : $"{caseNumber} {NormalizeReportText(caseTitle, "Без названия")}";
+
     private static string MoneyCell(decimal value)
         => value.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private static string PercentCell(decimal value)
+        => $"{value.ToString("0.##", CultureInfo.InvariantCulture)}%";
+
+    private static string DateCell(DateTime? value)
+        => value.HasValue
+            ? value.Value.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"))
+            : string.Empty;
+
+    private static string DateTimeCell(DateTime? value)
+        => value.HasValue
+            ? value.Value.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"))
+            : string.Empty;
 
     private static string FormatLegalWorkDeadlineOffset(int days)
         => days < 0
@@ -5152,6 +5736,25 @@ public class ReportsController : ControllerBase
     private sealed record CaseActivityReportSettings(
         int InactivityDays,
         int EscalationDays);
+
+    private sealed record ReportExportDocument(
+        string Slug,
+        string Title,
+        string Subtitle,
+        IReadOnlyList<ReportExportMetric> Metrics,
+        IReadOnlyList<ReportExportTable> Tables);
+
+    private sealed record ReportExportMetric(
+        string Label,
+        string Value);
+
+    private sealed record ReportExportTable(
+        string Title,
+        IReadOnlyList<string> Headers,
+        IReadOnlyList<ReportExportRow> Rows);
+
+    private sealed record ReportExportRow(
+        IReadOnlyList<string> Cells);
 
     private sealed record CaseActivityTaskRow(
         int ClientCaseId,

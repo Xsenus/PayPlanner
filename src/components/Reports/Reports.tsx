@@ -1318,6 +1318,8 @@ function formatDeadlineOffset(days: number) {
 }
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
+type ManagementReportExportFormat = 'excel' | 'pdf';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity';
 
 type LegalWorkReportFilters = {
   from?: string;
@@ -1326,6 +1328,77 @@ type LegalWorkReportFilters = {
   responsibleUserId?: number;
   caseType?: string;
 };
+
+type ManagementReportExportFilters = {
+  from?: string;
+  to?: string;
+  asOf?: string;
+  status?: string;
+  responsibleUserId?: number;
+  caseType?: string;
+  lawyerUserId?: number;
+  horizonDays?: number;
+  deadlineType?: string;
+  activity?: 'all' | 'inactive' | 'active' | 'escalated' | 'disabled';
+  inactiveDays?: number;
+  escalationDays?: number;
+  limit?: number;
+};
+
+function ManagementReportExportButtons({
+  reportKind,
+  filters,
+  disabled,
+}: {
+  reportKind: ManagementReportKind;
+  filters?: ManagementReportExportFilters;
+  disabled?: boolean;
+}) {
+  const [exporting, setExporting] = useState<ManagementReportExportFormat | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleExport(format: ManagementReportExportFormat) {
+    setExporting(format);
+    setError(null);
+
+    try {
+      const result = await apiService.downloadManagementReport({
+        report: reportKind,
+        format,
+        ...(filters ?? {}),
+      });
+      downloadBlob(result.fileName, result.blob);
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось выгрузить отчет.'));
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void handleExport('excel')}
+        disabled={disabled || exporting !== null}
+        className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <FileSpreadsheet className="h-4 w-4" />
+        {exporting === 'excel' ? 'Excel...' : 'Excel'}
+      </button>
+      <button
+        type="button"
+        onClick={() => void handleExport('pdf')}
+        disabled={disabled || exporting !== null}
+        className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <FileText className="h-4 w-4" />
+        {exporting === 'pdf' ? 'PDF...' : 'PDF'}
+      </button>
+      {error ? <span className="w-full text-xs text-rose-600">{error}</span> : null}
+    </>
+  );
+}
 
 function LegalWorkReportSection({
   report,
@@ -1698,12 +1771,14 @@ function CaseFinanceReportSection({
   report,
   loading,
   error,
+  filters,
   onReload,
   onOpenCase,
 }: {
   report: CaseFinanceReport | null;
   loading: boolean;
   error: string | null;
+  filters?: ManagementReportExportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
 }) {
@@ -1734,6 +1809,7 @@ function CaseFinanceReportSection({
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
+          <ManagementReportExportButtons reportKind="case-finance" filters={filters} disabled={!report} />
           <button
             type="button"
             onClick={onReload}
@@ -1897,12 +1973,14 @@ function CaseSuccessReportSection({
   report,
   loading,
   error,
+  filters,
   onReload,
   onOpenCase,
 }: {
   report: CaseSuccessReport | null;
   loading: boolean;
   error: string | null;
+  filters?: ManagementReportExportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
 }) {
@@ -1934,6 +2012,7 @@ function CaseSuccessReportSection({
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
+          <ManagementReportExportButtons reportKind="case-success" filters={filters} disabled={!report} />
           <button
             type="button"
             onClick={onReload}
@@ -2115,12 +2194,14 @@ function CurrentCasesReportSection({
   report,
   loading,
   error,
+  filters,
   onReload,
   onOpenCase,
 }: {
   report: CurrentCasesReport | null;
   loading: boolean;
   error: string | null;
+  filters?: ManagementReportExportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
 }) {
@@ -2151,6 +2232,7 @@ function CurrentCasesReportSection({
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
+          <ManagementReportExportButtons reportKind="current-cases" filters={filters} disabled={!report} />
           <button
             type="button"
             onClick={onReload}
@@ -2312,11 +2394,13 @@ function LawyerWorkloadReportSection({
   report,
   loading,
   error,
+  filters,
   onReload,
 }: {
   report: LawyerWorkloadReport | null;
   loading: boolean;
   error: string | null;
+  filters?: ManagementReportExportFilters;
   onReload: () => void;
 }) {
   const rows = report?.items ?? [];
@@ -2345,6 +2429,7 @@ function LawyerWorkloadReportSection({
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
+          <ManagementReportExportButtons reportKind="lawyer-workload" filters={filters} disabled={!report} />
           <button
             type="button"
             onClick={onReload}
@@ -2507,12 +2592,14 @@ function OverdueProceduralDeadlinesReportSection({
   report,
   loading,
   error,
+  filters,
   onReload,
   onOpenCase,
 }: {
   report: OverdueProceduralDeadlinesReport | null;
   loading: boolean;
   error: string | null;
+  filters?: ManagementReportExportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
 }) {
@@ -2543,6 +2630,7 @@ function OverdueProceduralDeadlinesReportSection({
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
+          <ManagementReportExportButtons reportKind="overdue-deadlines" filters={filters} disabled={!report} />
           <button
             type="button"
             onClick={onReload}
@@ -2698,12 +2786,14 @@ function CaseActivityReportSection({
   report,
   loading,
   error,
+  filters,
   onReload,
   onOpenCase,
 }: {
   report: CaseActivityReport | null;
   loading: boolean;
   error: string | null;
+  filters?: ManagementReportExportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
 }) {
@@ -2732,6 +2822,7 @@ function CaseActivityReportSection({
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
+          <ManagementReportExportButtons reportKind="case-activity" filters={filters} disabled={!report} />
           <button
             type="button"
             onClick={onReload}
@@ -5276,6 +5367,26 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     () => monthRangeToDates(normalizedRange.fromYM, normalizedRange.toYM),
     [normalizedRange.fromYM, normalizedRange.toYM],
   );
+  const casePeriodReportFilters = useMemo(
+    () => ({ ...cashFlowDates, limit: 100 }),
+    [cashFlowDates],
+  );
+  const caseActivityReportFilters = useMemo(
+    () => ({ activity: 'all' as const, limit: 50 }),
+    [],
+  );
+  const currentCasesReportFilters = useMemo(
+    () => ({ limit: 100 }),
+    [],
+  );
+  const lawyerWorkloadReportFilters = useMemo(
+    () => ({ horizonDays: 7, limit: 100 }),
+    [],
+  );
+  const overdueDeadlinesReportFilters = useMemo(
+    () => ({ limit: 100 }),
+    [],
+  );
   const {
     report: cashFlowReport,
     loading: cashFlowLoading,
@@ -5328,8 +5439,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     error: caseFinanceReportError,
     reload: reloadCaseFinanceReport,
   } = useCaseFinanceReport({
-    ...cashFlowDates,
-    limit: 100,
+    ...casePeriodReportFilters,
   });
   const {
     report: caseSuccessReport,
@@ -5337,8 +5447,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     error: caseSuccessReportError,
     reload: reloadCaseSuccessReport,
   } = useCaseSuccessReport({
-    ...cashFlowDates,
-    limit: 100,
+    ...casePeriodReportFilters,
   });
   const {
     report: caseActivityReport,
@@ -5346,8 +5455,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     error: caseActivityReportError,
     reload: reloadCaseActivityReport,
   } = useCaseActivityReport({
-    activity: 'all',
-    limit: 50,
+    ...caseActivityReportFilters,
   });
   const {
     report: currentCasesReport,
@@ -5355,7 +5463,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     error: currentCasesReportError,
     reload: reloadCurrentCasesReport,
   } = useCurrentCasesReport({
-    limit: 100,
+    ...currentCasesReportFilters,
   });
   const {
     report: lawyerWorkloadReport,
@@ -5363,8 +5471,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     error: lawyerWorkloadReportError,
     reload: reloadLawyerWorkloadReport,
   } = useLawyerWorkloadReport({
-    horizonDays: 7,
-    limit: 100,
+    ...lawyerWorkloadReportFilters,
   });
   const {
     report: overdueDeadlinesReport,
@@ -5372,7 +5479,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     error: overdueDeadlinesReportError,
     reload: reloadOverdueDeadlinesReport,
   } = useOverdueProceduralDeadlinesReport({
-    limit: 100,
+    ...overdueDeadlinesReportFilters,
   });
   const {
     report: directionReport,
@@ -5857,6 +5964,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               report={caseFinanceReport}
               loading={caseFinanceReportLoading}
               error={caseFinanceReportError}
+              filters={casePeriodReportFilters}
               onReload={reloadCaseFinanceReport}
               onOpenCase={onOpenCase}
             />
@@ -5865,6 +5973,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               report={caseSuccessReport}
               loading={caseSuccessReportLoading}
               error={caseSuccessReportError}
+              filters={casePeriodReportFilters}
               onReload={reloadCaseSuccessReport}
               onOpenCase={onOpenCase}
             />
@@ -5873,6 +5982,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               report={currentCasesReport}
               loading={currentCasesReportLoading}
               error={currentCasesReportError}
+              filters={currentCasesReportFilters}
               onReload={reloadCurrentCasesReport}
               onOpenCase={onOpenCase}
             />
@@ -5881,6 +5991,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               report={lawyerWorkloadReport}
               loading={lawyerWorkloadReportLoading}
               error={lawyerWorkloadReportError}
+              filters={lawyerWorkloadReportFilters}
               onReload={reloadLawyerWorkloadReport}
             />
 
@@ -5888,6 +5999,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               report={overdueDeadlinesReport}
               loading={overdueDeadlinesReportLoading}
               error={overdueDeadlinesReportError}
+              filters={overdueDeadlinesReportFilters}
               onReload={reloadOverdueDeadlinesReport}
               onOpenCase={onOpenCase}
             />
@@ -5896,6 +6008,7 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               report={caseActivityReport}
               loading={caseActivityReportLoading}
               error={caseActivityReportError}
+              filters={caseActivityReportFilters}
               onReload={reloadCaseActivityReport}
               onOpenCase={onOpenCase}
             />

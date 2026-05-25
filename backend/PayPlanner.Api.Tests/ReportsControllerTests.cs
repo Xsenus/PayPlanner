@@ -217,6 +217,103 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task ManagementReportExports_ReturnExcelAndPdfFiles()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "manager", Description = "Manager" };
+        var responsible = new User
+        {
+            Email = "manager@example.test",
+            FullName = "Manager User",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client
+        {
+            Name = "Export Client",
+            ResponsibleUser = responsible,
+        };
+        db.Roles.Add(role);
+        db.Users.Add(responsible);
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var today = DateTime.UtcNow.Date;
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "EXP-1",
+            Title = "Export case",
+            CaseType = "Bankruptcy",
+            Status = ClientCaseStatus.Closed,
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = today.AddDays(-10),
+            StartDate = today.AddDays(-10),
+            DueDate = today.AddDays(-1),
+            FeeAmount = 10_000m,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var pdfService = new FakeInvoiceDocumentPdfService([0x25, 0x50, 0x44, 0x46]);
+        var controller = CreateController(db, CreateAdminPrincipal(), pdfService);
+        var reportKinds = new[]
+        {
+            "case-finance",
+            "case-success",
+            "current-cases",
+            "lawyer-workload",
+            "overdue-deadlines",
+            "case-activity",
+        };
+
+        foreach (var reportKind in reportKinds)
+        {
+            var excelAction = await controller.ExportManagementReportExcel(
+                reportKind,
+                today.AddDays(-30),
+                today.AddDays(30),
+                today,
+                null,
+                null,
+                null,
+                null,
+                7,
+                null,
+                "all",
+                null,
+                null,
+                50,
+                CancellationToken.None);
+            var excel = Assert.IsType<FileContentResult>(excelAction);
+            Assert.Equal("application/vnd.ms-excel; charset=utf-8", excel.ContentType);
+            Assert.EndsWith(".xls", excel.FileDownloadName, StringComparison.Ordinal);
+            Assert.Contains("Excel.Sheet", System.Text.Encoding.UTF8.GetString(excel.FileContents), StringComparison.Ordinal);
+        }
+
+        var pdfAction = await controller.ExportManagementReportPdf(
+            "case-success",
+            today.AddDays(-30),
+            today.AddDays(30),
+            today,
+            null,
+            null,
+            null,
+            null,
+            7,
+            null,
+            "all",
+            null,
+            null,
+            50,
+            CancellationToken.None);
+        var pdf = Assert.IsType<FileContentResult>(pdfAction);
+        Assert.Equal("application/pdf", pdf.ContentType);
+        Assert.Equal([0x25, 0x50, 0x44, 0x46], pdf.FileContents);
+        Assert.Contains("Статистика успешности дел", pdfService.LastHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task LegalWorkExports_RequireExportPermission()
     {
         await using var db = await CreateContextAsync();
@@ -250,6 +347,8 @@ public class ReportsControllerTests
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkCsv(null, null, null, null, null, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkExcel(null, null, null, null, null, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkPdf(null, null, null, null, null, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportManagementReportExcel("case-finance", null, null, null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportManagementReportPdf("case-finance", null, null, null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
     }
 
     [Fact]
