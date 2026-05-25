@@ -17,6 +17,7 @@ import { useToast } from './hooks/useToast';
 import { DialogProvider } from './contexts/DialogContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { AppVersionGate } from './components/AppVersion/AppVersionGate';
+import { RealtimeNotificationToasts } from './components/Notifications/RealtimeNotificationToasts';
 import type { User as AppUser } from './services/authService';
 import { apiService, type ContactScope } from './services/api';
 import { extractDisplayErrorMessage } from './utils/errorUtils';
@@ -1743,6 +1744,10 @@ function AppContent() {
   return (
     <TabProvider value={{ activeTab, setActiveTab: handleTabChange }}>
       <div className="min-h-screen bg-gray-50">
+        <RealtimeNotificationToasts
+          userId={user.id}
+          onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: activeTab })}
+        />
         <DoubleHorizontalScrollbars />
         <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
         <div className="flex min-h-screen flex-col">

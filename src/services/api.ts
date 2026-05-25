@@ -3,7 +3,11 @@ export const AUTH_SESSION_EXPIRED_EVENT = 'payplanner:auth-session-expired';
 const AUTH_SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Войдите снова.';
 const AUTH_TOKEN_STORAGE_KEYS = ['pp_token', 'auth_token', 'pp.jwt'];
 
-function getAuthToken(): string | null {
+export function getApiBaseUrl(): string {
+  return API_BASE_URL;
+}
+
+export function getAuthToken(): string | null {
   return (
     AUTH_TOKEN_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean) ||
     sessionStorage.getItem('auth_token') ||

@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Filters;
+using PayPlanner.Api.Hubs;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
@@ -31,6 +32,7 @@ builder.Services.AddControllers(options =>
     options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
     options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
+builder.Services.AddSignalR();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -92,6 +94,7 @@ builder.Services.Configure<PasswordHasherOptions>(opt =>
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
 builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>();
+builder.Services.AddScoped<IRealtimeNotificationPublisher, SignalRRealtimeNotificationPublisher>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ExternalAuthService>();
@@ -176,6 +179,20 @@ builder.Services
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(2)
         };
+        o.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrWhiteSpace(accessToken) && path.StartsWithSegments(NotificationsHub.Path))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.AddAuthorization(opts =>
@@ -236,5 +253,6 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.MapControllers();
+app.MapHub<NotificationsHub>(NotificationsHub.Path);
 
 app.Run();

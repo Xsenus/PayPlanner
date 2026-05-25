@@ -6,6 +6,8 @@ import { ToastContext, type ToastContextValue, type ToastOptions, type ToastVari
 type ToastRecord = Required<Pick<ToastOptions, 'description' | 'durationMs' | 'variant'>> & {
   id: string;
   title: string;
+  actionLabel?: string;
+  onAction?: () => void;
 };
 
 function toToastOptions(options: ToastOptions | string): ToastOptions {
@@ -79,6 +81,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       description: normalized.description,
       variant,
       durationMs: normalized.durationMs ?? (variant === 'error' ? 5200 : 3400),
+      actionLabel: normalized.actionLabel,
+      onAction: normalized.onAction,
     };
 
     setToasts((prev) => [...prev.slice(-3), toast]);
@@ -142,6 +146,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-slate-900">{toast.title}</div>
                         <div className="mt-1 break-words text-sm text-slate-700">{toast.description}</div>
+                        {toast.actionLabel && toast.onAction ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              toast.onAction?.();
+                              dismissToast(toast.id);
+                            }}
+                            className="mt-3 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
+                          >
+                            {toast.actionLabel}
+                          </button>
+                        ) : null}
                       </div>
                       <button
                         type="button"

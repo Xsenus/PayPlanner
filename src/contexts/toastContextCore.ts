@@ -7,6 +7,8 @@ export interface ToastOptions {
   description: string;
   variant?: ToastVariant;
   durationMs?: number;
+  actionLabel?: string;
+  onAction?: () => void;
 }
 
 export interface ToastContextValue {

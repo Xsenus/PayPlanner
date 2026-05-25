@@ -273,6 +273,105 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskAssignedAsync_PublishesRealtimeNotificationForAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "task-author-realtime@example.com");
+        var assignee = new User
+        {
+            Email = "new-assignee-realtime@example.com",
+            FullName = "Realtime Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Prepare response",
+            Description = "Check documents",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(4),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService(), realtime);
+
+        await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        var published = Assert.Single(realtime.Notifications);
+        Assert.Equal(assignee.Id, published.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, published.Type);
+        Assert.Equal(task.Id, published.TaskJournalItemId);
+        Assert.True(published.Id > 0);
+    }
+
+    [Fact]
+    public async Task NotifyTaskAssignedAsync_DoesNotPublishRealtimeWhenInAppTypeDisabled()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "task-author-realtime-disabled@example.com");
+        var assignee = new User
+        {
+            Email = "new-assignee-realtime-disabled@example.com",
+            FullName = "Realtime Disabled Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = assignee.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = JsonSerializer.Serialize(new { disabledTypes = new[] { UserNotificationTypes.TaskAssigned } }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Prepare disabled response",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService(), realtime);
+
+        await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        Assert.Empty(realtime.Notifications);
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
     public async Task NotifyCaseInactivityControlTaskCreatedAsync_CreatesDedicatedInAppNotification()
     {
         await using var db = await CreateContextAsync();
@@ -927,7 +1026,8 @@ public class NotificationServiceTests
     private static NotificationService CreateService(
         PaymentContext db,
         IEmailService emailService,
-        ITelegramNotificationService telegramService)
+        ITelegramNotificationService telegramService,
+        IRealtimeNotificationPublisher? realtimePublisher = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
@@ -938,7 +1038,8 @@ public class NotificationServiceTests
             configuration,
             emailService,
             telegramService,
-            NullLogger<NotificationService>.Instance);
+            NullLogger<NotificationService>.Instance,
+            realtimePublisher);
     }
 
     private static ExternalAuthService CreateExternalAuthService(
@@ -1140,6 +1241,19 @@ public class NotificationServiceTests
         {
             Messages.Add((chatId, text));
             return Task.FromResult(new TelegramSendResult(true, NotificationDeliveryStatus.Sent));
+        }
+    }
+
+    private sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher
+    {
+        public List<UserNotification> Notifications { get; } = [];
+
+        public Task PublishUserNotificationAsync(
+            UserNotification notification,
+            CancellationToken cancellationToken = default)
+        {
+            Notifications.Add(notification);
+            return Task.CompletedTask;
         }
     }
 

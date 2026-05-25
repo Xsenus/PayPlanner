@@ -42,6 +42,7 @@ public sealed class NotificationService : INotificationService
     private readonly IConfiguration _configuration;
     private readonly IEmailService _emailService;
     private readonly ITelegramNotificationService _telegramService;
+    private readonly IRealtimeNotificationPublisher _realtimePublisher;
     private readonly ILogger<NotificationService> _logger;
 
     private sealed record NotificationSenderTarget(
@@ -83,12 +84,14 @@ public sealed class NotificationService : INotificationService
         IConfiguration configuration,
         IEmailService emailService,
         ITelegramNotificationService telegramService,
-        ILogger<NotificationService> logger)
+        ILogger<NotificationService> logger,
+        IRealtimeNotificationPublisher? realtimePublisher = null)
     {
         _context = context;
         _configuration = configuration;
         _emailService = emailService;
         _telegramService = telegramService;
+        _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
         _logger = logger;
     }
 
@@ -1224,7 +1227,7 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
-        _context.UserNotifications.Add(new UserNotification
+        var notification = new UserNotification
         {
             RecipientUserId = recipientUserId,
             Type = type,
@@ -1237,8 +1240,10 @@ public sealed class NotificationService : INotificationService
             TaskJournalItemId = task.Id,
             MetadataJson = metadata is null ? "{}" : JsonSerializer.Serialize(metadata, JsonOptions),
             CreatedAt = DateTime.UtcNow
-        });
+        };
+        _context.UserNotifications.Add(notification);
         await _context.SaveChangesAsync(cancellationToken);
+        await _realtimePublisher.PublishUserNotificationAsync(notification, cancellationToken);
     }
 
     private async Task<bool> IsUserNotificationTypeEnabledAsync(
