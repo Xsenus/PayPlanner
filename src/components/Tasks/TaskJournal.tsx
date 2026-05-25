@@ -1155,6 +1155,7 @@ export function TaskJournal({
   const isAdminUser = isAdmin();
   const permissions = useRolePermissions(user?.role?.id);
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
+  const canExportCases = isAdminUser || permissions.cases.canExport;
   const isApprovalsMode = mode === 'approvals';
   const initialPreferencesRef = useRef<TaskJournalFilterPreferences | null>(null);
   if (initialPreferencesRef.current === null) {
@@ -1166,6 +1167,7 @@ export function TaskJournal({
   const [caseCalendarEvents, setCaseCalendarEvents] = useState<CaseCalendarEvent[]>([]);
   const [caseCalendarSummary, setCaseCalendarSummary] = useState<CaseCalendarSummary | null>(null);
   const [caseCalendarLoading, setCaseCalendarLoading] = useState(false);
+  const [caseCalendarExporting, setCaseCalendarExporting] = useState(false);
   const [taskSettings, setTaskSettings] = useState<TaskJournalSettingsDto>(DEFAULT_TASK_JOURNAL_SETTINGS);
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
@@ -1359,6 +1361,20 @@ export function TaskJournal({
       setCaseCalendarLoading(false);
     }
   }, [assigneeFilter, calendarAnchorDate, periodMode, toast, viewMode]);
+
+  const buildCaseCalendarParams = useCallback(() => {
+    const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
+    const responsibleUserId = assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)
+      ? Number(assigneeFilter)
+      : undefined;
+
+    return {
+      from: range.from.toISOString(),
+      to: range.to.toISOString(),
+      responsibleUserId,
+      includeTasks: false,
+    };
+  }, [assigneeFilter, calendarAnchorDate, periodMode, viewMode]);
 
   useEffect(() => {
     void refreshCaseCalendarEvents();
@@ -2121,6 +2137,24 @@ export function TaskJournal({
     }
   };
 
+  const handleCaseCalendarExport = async () => {
+    if (!canExportCases) {
+      toast.error('У роли нет права на выгрузку календаря дел.', 'Календарь дел');
+      return;
+    }
+
+    setCaseCalendarExporting(true);
+    try {
+      const response = await apiService.downloadCaseCalendarIcs(buildCaseCalendarParams());
+      downloadBlob(response.fileName, response.blob);
+      toast.success('Календарь дел выгружен в ICS.', 'Календарь дел');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось выгрузить календарь дел.'), 'Календарь дел');
+    } finally {
+      setCaseCalendarExporting(false);
+    }
+  };
+
   const buildPlanningReportParams = (format: TaskPlanningReportFormat) => {
     const nowDate = new Date();
     let from = dateRangeBounds.from?.toISOString();
@@ -2594,7 +2628,14 @@ export function TaskJournal({
           />
         ) : viewMode === 'calendar' ? (
           <>
-            <CaseCalendarEventsPanel events={caseCalendarEvents} summary={caseCalendarSummary} loading={caseCalendarLoading} />
+            <CaseCalendarEventsPanel
+              events={caseCalendarEvents}
+              summary={caseCalendarSummary}
+              loading={caseCalendarLoading}
+              canExport={canExportCases}
+              exporting={caseCalendarExporting}
+              onExport={() => void handleCaseCalendarExport()}
+            />
             <TaskCalendar
               tasks={filteredTasks}
               mode={periodMode}
@@ -2621,7 +2662,14 @@ export function TaskJournal({
           </>
         ) : (
           <>
-            <CaseCalendarEventsPanel events={caseCalendarEvents} summary={caseCalendarSummary} loading={caseCalendarLoading} />
+            <CaseCalendarEventsPanel
+              events={caseCalendarEvents}
+              summary={caseCalendarSummary}
+              loading={caseCalendarLoading}
+              canExport={canExportCases}
+              exporting={caseCalendarExporting}
+              onExport={() => void handleCaseCalendarExport()}
+            />
             <TaskTimelineCalendar
               tasks={filteredTasks}
               anchorDate={calendarAnchorDate}
@@ -3237,10 +3285,16 @@ function CaseCalendarEventsPanel({
   events,
   summary,
   loading,
+  canExport,
+  exporting,
+  onExport,
 }: {
   events: CaseCalendarEvent[];
   summary: CaseCalendarSummary | null;
   loading: boolean;
+  canExport: boolean;
+  exporting: boolean;
+  onExport: () => void;
 }) {
   const visibleEvents = events.slice(0, 12);
   const totalEventCount = summary?.totalEventCount ?? events.length;
@@ -3259,7 +3313,18 @@ function CaseCalendarEventsPanel({
           </div>
           <h2 className="mt-1 text-lg font-semibold text-slate-900">Календарь дел</h2>
         </div>
-        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+          {canExport ? (
+            <button
+              type="button"
+              onClick={onExport}
+              disabled={exporting || loading}
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
+              {exporting ? 'ICS...' : 'ICS'}
+            </button>
+          ) : null}
           <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">{totalEventCount} событий</span>
           {proceduralDeadlineCount > 0 ? <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-sky-700">Сроков: {proceduralDeadlineCount}</span> : null}
           {courtEventCount > 0 ? <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-indigo-700">Судов: {courtEventCount}</span> : null}

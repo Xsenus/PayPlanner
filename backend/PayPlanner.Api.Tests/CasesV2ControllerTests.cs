@@ -1376,6 +1376,45 @@ public class CasesV2ControllerTests
         Assert.Equal(1, summary.ProceduralDeadlineCount);
         Assert.Equal(1, summary.TaskCount);
         Assert.NotNull(summary.NearestEvent);
+
+        var exportResult = await controller.ExportCaseCalendarIcs(
+            new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc),
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: true,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(exportResult);
+        Assert.Equal("text/calendar; charset=utf-8", file.ContentType);
+        Assert.EndsWith(".ics", file.FileDownloadName, StringComparison.Ordinal);
+        var ics = Encoding.UTF8.GetString(file.FileContents);
+        Assert.Contains("BEGIN:VCALENDAR", ics, StringComparison.Ordinal);
+        Assert.Contains("X-WR-CALNAME:Календарь дел", ics, StringComparison.Ordinal);
+        Assert.Contains("SUMMARY:Судебное заседание", ics, StringComparison.Ordinal);
+        Assert.Contains("SUMMARY:Срок апелляции", ics, StringComparison.Ordinal);
+        Assert.Contains("SUMMARY:Подготовить позицию", ics, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExportCaseCalendarIcs_ReturnsForbidWhenExportDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "case-calendar-export-denied@example.com", "Владелец");
+        var permission = await db.RolePermissions.FirstAsync(item => item.RoleId == owner.RoleId && item.Section == RolePermissionCatalog.Cases);
+        permission.CanExport = false;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.ExportCaseCalendarIcs(
+            from: null,
+            to: null,
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: true,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
     }
 
     [Fact]

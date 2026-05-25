@@ -16,6 +16,7 @@ const apiMock = vi.hoisted(() => ({
   createTaskJournalCaseAutomationTask: vi.fn(),
   createTaskJournalCaseAutomationTasks: vi.fn(),
   downloadTaskJournalCalendar: vi.fn(),
+  downloadCaseCalendarIcs: vi.fn(),
   downloadTaskPlanningReport: vi.fn(),
   getCaseCalendarEvents: vi.fn(),
   getCaseCalendarSummary: vi.fn(),
@@ -61,6 +62,7 @@ const authState = vi.hoisted((): { user: { id: number; fullName: string; email: 
 const permissionsState = vi.hoisted(() => ({
   taskCanEdit: true,
   taskCanExport: true,
+  caseCanExport: true,
   taskViewScope: 'all' as 'own' | 'department' | 'all',
 }));
 
@@ -129,7 +131,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       calculator: { ...section },
       legalEntities: { ...section },
       clients: { ...section },
-      cases: { ...section },
+      cases: { ...section, canExport: permissionsState.caseCanExport },
       accounts: { ...section },
       acts: { ...section },
       payments: { ...section },
@@ -324,6 +326,7 @@ describe('TaskJournal', () => {
     authState.isAdmin = true;
     permissionsState.taskCanEdit = true;
     permissionsState.taskCanExport = true;
+    permissionsState.caseCanExport = true;
     permissionsState.taskViewScope = 'all';
     clientsState.clients = [
       { id: 10, name: 'Иванов Иван Иванович', phone: '+7 900 000-00-00', email: 'client@example.com' } as Client,
@@ -349,6 +352,7 @@ describe('TaskJournal', () => {
       skippedCount: 0,
     });
     apiMock.downloadTaskJournalCalendar.mockResolvedValue({ blob: new Blob(['ics']), fileName: 'task-calendar.ics' });
+    apiMock.downloadCaseCalendarIcs.mockResolvedValue({ blob: new Blob(['case-ics']), fileName: 'case-calendar.ics' });
     apiMock.downloadTaskPlanningReport.mockResolvedValue({ blob: new Blob(['report']), fileName: 'task-planning-report.doc' });
     apiMock.getCaseCalendarEvents.mockResolvedValue([]);
     apiMock.getCaseCalendarSummary.mockResolvedValue({
@@ -524,6 +528,19 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Судов: 1')).toBeTruthy();
     expect(apiMock.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({ includeTasks: false }));
     expect(apiMock.getCaseCalendarSummary).toHaveBeenCalledWith(expect.objectContaining({ includeTasks: false }));
+  });
+
+  it('exports case calendar events to ICS with current calendar filters', async () => {
+    await renderJournal([createTask()], { initialView: 'calendar' });
+
+    const panel = screen.getByText('Календарь дел').closest('section');
+    expect(panel).not.toBeNull();
+    fireEvent.click(within(panel as HTMLElement).getByRole('button', { name: 'ICS' }));
+
+    await waitFor(() => expect(apiMock.downloadCaseCalendarIcs).toHaveBeenCalledWith(expect.objectContaining({
+      includeTasks: false,
+    })));
+    expect(toastMock.success).toHaveBeenCalledWith('Календарь дел выгружен в ICS.', 'Календарь дел');
   });
 
   it('filters case calendar events by selected assignee', async () => {

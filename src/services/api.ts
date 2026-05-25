@@ -3600,6 +3600,37 @@ export class ApiService {
     return this.request<CaseCalendarSummary>(`/case-calendar/summary${q}`);
   }
 
+  async downloadCaseCalendarIcs(params?: {
+    from?: string;
+    to?: string;
+    clientCaseId?: number;
+    responsibleUserId?: number;
+    includeTasks?: boolean;
+  }) {
+    const q = buildQuery({
+      from: params?.from,
+      to: params?.to,
+      clientCaseId: params?.clientCaseId,
+      responsibleUserId: params?.responsibleUserId,
+      includeTasks: params?.includeTasks,
+    });
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/case-calendar/events.ics${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || 'case-calendar.ics',
+    };
+  }
+
   async getCaseProceduralDeadlines(caseId: number) {
     return this.request<ClientCaseProceduralDeadline[]>(`/v2/cases/${caseId}/procedural-deadlines`);
   }

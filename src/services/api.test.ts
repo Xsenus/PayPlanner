@@ -291,6 +291,33 @@ describe('apiService auth handling', () => {
   });
 });
 
+describe('apiService case calendar', () => {
+  it('downloads case calendar ICS with filters', async () => {
+    const fetchMock = vi.fn(async () => new Response('case-calendar', {
+      headers: {
+        'content-disposition': 'attachment; filename="case-calendar.ics"',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.downloadCaseCalendarIcs({
+      from: '2026-06-01',
+      to: '2026-06-30',
+      responsibleUserId: 7,
+      includeTasks: false,
+    });
+
+    expect(result.fileName).toBe('case-calendar.ics');
+    expect(await result.blob.text()).toBe('case-calendar');
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/case-calendar/events.ics?');
+    expect(String(url)).toContain('from=2026-06-01');
+    expect(String(url)).toContain('to=2026-06-30');
+    expect(String(url)).toContain('responsibleUserId=7');
+    expect(String(url)).toContain('includeTasks=false');
+  });
+});
+
 describe('apiService reports', () => {
   it('loads cash flow report with filters', async () => {
     const payload = {

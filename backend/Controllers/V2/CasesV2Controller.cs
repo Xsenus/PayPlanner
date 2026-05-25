@@ -1317,6 +1317,45 @@ public class CasesV2Controller : ControllerBase
         return Ok(BuildCaseCalendarSummary(events, fromDate, toDate));
     }
 
+    [HttpGet("/api/case-calendar/events.ics")]
+    public async Task<IActionResult> ExportCaseCalendarIcs(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? clientCaseId,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] bool includeTasks = true,
+        CancellationToken ct = default)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } viewForbidden)
+        {
+            return viewForbidden;
+        }
+
+        if (await RequireCasesPermissionAsync(static permission => permission.CanExport, ct) is { } exportForbidden)
+        {
+            return exportForbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var fromDate = (from ?? DateTime.UtcNow.Date.AddDays(-30)).Date;
+        var toDate = (to ?? fromDate.AddDays(90)).Date;
+        if (toDate < fromDate)
+        {
+            return BadRequest(new { message = "Дата окончания периода не может быть раньше даты начала." });
+        }
+
+        var events = await QueryCaseCalendarEventsAsync(visibility, fromDate, toDate, clientCaseId, responsibleUserId, includeTasks, ct);
+        return File(
+            Encoding.UTF8.GetBytes(BuildCaseCalendarIcs(events)),
+            "text/calendar; charset=utf-8",
+            $"case-calendar-{fromDate:yyyyMMdd}-{toDate:yyyyMMdd}.ics");
+    }
+
     [HttpPost("procedural-deadlines/calculate")]
     public ActionResult<ProceduralDeadlineCalculationDto> CalculateProceduralDeadlinePreview(
         [FromBody] ProceduralDeadlineCalculationRequest? request)
@@ -3699,6 +3738,83 @@ public class CasesV2Controller : ControllerBase
                 ?? events.OrderByDescending(static item => item.StartAt).FirstOrDefault(),
         };
     }
+
+    private static string BuildCaseCalendarIcs(IEnumerable<CaseCalendarEventDto> events)
+    {
+        var now = DateTime.UtcNow;
+        var builder = new StringBuilder();
+        builder.AppendLine("BEGIN:VCALENDAR");
+        builder.AppendLine("VERSION:2.0");
+        builder.AppendLine("PRODID:-//PayPlanner//Case Calendar//RU");
+        builder.AppendLine("CALSCALE:GREGORIAN");
+        builder.AppendLine("METHOD:PUBLISH");
+        builder.AppendLine("X-WR-CALNAME:Календарь дел");
+
+        foreach (var item in events)
+        {
+            builder.AppendLine("BEGIN:VEVENT");
+            builder.AppendLine($"UID:payplanner-case-calendar-{EscapeIcsText(item.Id)}@crm.elitpravo.com");
+            builder.AppendLine($"DTSTAMP:{FormatIcsDateTime(now)}");
+
+            if (item.AllDay)
+            {
+                var start = DateTime.SpecifyKind(item.StartAt.Date, DateTimeKind.Utc);
+                var end = DateTime.SpecifyKind(item.EndAt.Date, DateTimeKind.Utc);
+                if (end <= start)
+                {
+                    end = start.AddDays(1);
+                }
+
+                builder.AppendLine($"DTSTART;VALUE=DATE:{start:yyyyMMdd}");
+                builder.AppendLine($"DTEND;VALUE=DATE:{end:yyyyMMdd}");
+            }
+            else
+            {
+                var start = DateTime.SpecifyKind(item.StartAt, DateTimeKind.Utc);
+                var end = DateTime.SpecifyKind(item.EndAt, DateTimeKind.Utc);
+                if (end <= start)
+                {
+                    end = start.AddHours(1);
+                }
+
+                builder.AppendLine($"DTSTART:{FormatIcsDateTime(start)}");
+                builder.AppendLine($"DTEND:{FormatIcsDateTime(end)}");
+            }
+
+            builder.AppendLine($"SUMMARY:{EscapeIcsText(item.Title)}");
+            builder.AppendLine($"DESCRIPTION:{EscapeIcsText(BuildCaseCalendarIcsDescription(item))}");
+            builder.AppendLine("STATUS:CONFIRMED");
+            builder.AppendLine("END:VEVENT");
+        }
+
+        builder.AppendLine("END:VCALENDAR");
+        return builder.ToString().ReplaceLineEndings("\r\n");
+    }
+
+    private static string BuildCaseCalendarIcsDescription(CaseCalendarEventDto item)
+        => string.Join("\\n", new[]
+        {
+            item.CaseTitle,
+            item.ClientName,
+            item.LegalEntityName,
+            item.ResponsibleName,
+            item.CourtName,
+            item.CourtCaseNumber,
+            item.Kind,
+            item.DeadlineType,
+        }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+    private static string FormatIcsDateTime(DateTime value)
+        => DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
+
+    private static string EscapeIcsText(string? value)
+        => (value ?? string.Empty)
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace(";", "\\;", StringComparison.Ordinal)
+            .Replace(",", "\\,", StringComparison.Ordinal)
+            .Replace("\r\n", "\\n", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal)
+            .Replace("\r", "\\n", StringComparison.Ordinal);
 
     private static void AddCaseCalendarDateEvents(
         ICollection<CaseCalendarEventDto> events,
