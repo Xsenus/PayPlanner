@@ -1028,10 +1028,14 @@ describe('Accounts integration', () => {
 
     render(<Accounts onOpenActPage={onOpenActPage} />);
 
-    expect(screen.getByRole('button', { name: /Акт №ACT-901/i })).toBeTruthy();
+    const primaryActButton = screen.getByRole('button', { name: /Акт №ACT-901/i });
+    expect(primaryActButton).toBeTruthy();
+    expect(within(primaryActButton).getByText('Не подписан')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Акт №ACT-902/i })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /Показать все акты счета 24/i }));
+
+    expect(screen.getByText('Подписан')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /Акт №ACT-902/i }));
 

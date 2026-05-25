@@ -802,6 +802,18 @@ export function Accounts({
     Signed: t('actStatusSigned') ?? 'Подписано',
     Terminated: t('actStatusTerminated') ?? 'Расторгнуто',
   };
+  const actSigningStatusLabels: Record<ActStatus, string> = {
+    Created: 'Не подписан',
+    Transferred: 'На подписании',
+    Signed: 'Подписан',
+    Terminated: 'Аннулирован',
+  };
+  const actSigningStatusClasses: Record<ActStatus, string> = {
+    Created: 'border border-slate-200 bg-slate-100 text-slate-700',
+    Transferred: 'border border-violet-200 bg-violet-100 text-violet-700',
+    Signed: 'border border-emerald-200 bg-emerald-100 text-emerald-700',
+    Terminated: 'border border-rose-200 bg-rose-100 text-rose-700',
+  };
 
   const statusClasses: Partial<Record<AccountStatus, string>> = {
     created: 'bg-amber-100 text-amber-700 border border-amber-200',
@@ -1595,7 +1607,7 @@ export function Accounts({
       { key: 'signingStatus', label: 'Статус документа', sortable: false },
       { key: 'dueDate', label: t('invoiceDueDate') ?? 'Оплатить до', sortable: true },
       { key: 'paidDate', label: t('paidDate') ?? 'Дата оплаты', sortable: false },
-      { key: 'act', label: t('invoiceAct') ?? 'Акт', sortable: false },
+      { key: 'act', label: 'Акт / статус', sortable: false },
       { key: 'responsible', label: t('invoiceResponsible') ?? 'Ответственный', sortable: true },
       { key: 'type', label: t('invoiceType') ?? 'Тип', sortable: false },
       { key: 'description', label: t('description') ?? 'Описание', sortable: false },
@@ -1858,7 +1870,7 @@ export function Accounts({
       { key: 'status', label: t('invoiceStatus') ?? t('status') ?? 'Статус', sortable: false },
       { key: 'dueDate', label: t('invoiceDueDate') ?? 'Оплатить до', sortable: true },
       { key: 'paidDate', label: t('paidDate') ?? 'Дата оплаты', sortable: false },
-      { key: 'act', label: t('invoiceAct') ?? 'Акт', sortable: false },
+      { key: 'act', label: 'Акт / статус', sortable: false },
       { key: 'responsible', label: t('invoiceResponsible') ?? 'Ответственный', sortable: true },
       { key: 'type', label: t('invoiceType') ?? 'Тип', sortable: false },
       { key: 'description', label: t('description') ?? 'Описание', sortable: false },
@@ -3166,14 +3178,17 @@ export function Accounts({
                                           <button
                                             type="button"
                                             onClick={(event) => { event.stopPropagation(); openActEditModal(primaryAct, row); }}
-                                            className="inline-flex w-[7.5rem] min-w-0 flex-col items-start rounded-md border border-slate-200 bg-white px-2 py-1 text-left text-xs shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
-                                            title={`${primaryAct.number ? `Акт №${primaryAct.number}` : t('act') ?? 'Акт'} · ${formatDate(primaryAct.date)} · ${actStatusLabels[primaryAct.status]}`}
+                                            className="inline-flex w-[8.5rem] min-w-0 flex-col items-start gap-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-left text-xs shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                                            title={`${primaryAct.number ? `Акт №${primaryAct.number}` : t('act') ?? 'Акт'} · ${formatDate(primaryAct.date)} · ${actSigningStatusLabels[primaryAct.status] ?? actStatusLabels[primaryAct.status]}`}
                                           >
                                             <span className="block w-full truncate font-semibold text-blue-700">
                                               {primaryAct.number ? `Акт №${primaryAct.number}` : t('act') ?? 'Акт'}
                                             </span>
                                             <span className="block w-full truncate text-[11px] font-medium text-slate-500">
-                                              {formatDate(primaryAct.date)} · {actStatusLabels[primaryAct.status]}
+                                              {formatDate(primaryAct.date)}
+                                            </span>
+                                            <span className={`inline-flex max-w-full items-center justify-center rounded-full px-2 py-0.5 text-center text-[11px] font-medium leading-tight ${actSigningStatusClasses[primaryAct.status]}`}>
+                                              {actSigningStatusLabels[primaryAct.status] ?? actStatusLabels[primaryAct.status]}
                                             </span>
                                           </button>
                                           {extraActs.length > 0 && (
@@ -3216,8 +3231,8 @@ export function Accounts({
                                                       </span>
                                                       <span className="block text-[11px] font-medium text-slate-500">{formatDate(act.date)}</span>
                                                     </span>
-                                                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                                                      {actStatusLabels[act.status]}
+                                                    <span className={`inline-flex shrink-0 items-center justify-center rounded-full px-2 py-0.5 text-center text-[11px] font-medium leading-tight ${actSigningStatusClasses[act.status]}`}>
+                                                      {actSigningStatusLabels[act.status] ?? actStatusLabels[act.status]}
                                                     </span>
                                                   </button>
                                                 ))}
