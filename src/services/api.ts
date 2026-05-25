@@ -3401,9 +3401,10 @@ export class ApiService {
     });
   }
 
-  async runCaseCourtSync(caseId: number) {
+  async runCaseCourtSync(caseId: number, payload?: ClientCaseCourtSyncRunRequest) {
     return this.request<ClientCaseCourtSyncRun>(`/v2/cases/${caseId}/court-sync/run`, {
       method: 'POST',
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
     });
   }
 
@@ -4927,6 +4928,7 @@ import type {
   ClientCaseCourtSyncLog,
   ClientCaseCourtSyncProvider,
   ClientCaseCourtSyncRun,
+  ClientCaseCourtSyncRunRequest,
   ClientCaseCourtSyncSettings,
   ClientCaseDocument,
   ClientCaseDocumentTemplate,

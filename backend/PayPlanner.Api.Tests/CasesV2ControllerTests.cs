@@ -3416,7 +3416,7 @@ public class CasesV2ControllerTests
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
 
-        var result = await controller.RunCourtSync(clientCase.Id, CancellationToken.None);
+        var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
@@ -3430,6 +3430,70 @@ public class CasesV2ControllerTests
         await db.Entry(clientCase).ReloadAsync();
         Assert.Contains("Ручная проверка судебного источника зафиксирована", clientCase.EventHistory, StringComparison.Ordinal);
         Assert.Contains("Инициатор: Владелец", clientCase.EventHistory, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunCourtSync_ManualOnlyRecordsCommentWithoutExternalUpdate()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Земцов Виктор Александрович",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Земцов - ручная проверка",
+            CourtName = "Текущий суд",
+            CourtCaseNumber = "2-100/2026",
+            CourtUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=100",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = clientCase.CourtUrl,
+            CourtName = "Новый суд из источника",
+            CaseNumber = "2-100/2026",
+            MovementEvents =
+            [
+                new()
+                {
+                    Title = "Судебное заседание",
+                    ScheduledAt = new DateTime(2026, 6, 3, 10, 0, 0),
+                    SourceSummary = "Судебное заседание; 03.06.2026 10:00",
+                },
+            ],
+        };
+        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
+
+        var result = await controller.RunCourtSync(
+            clientCase.Id,
+            new CasesV2Controller.ClientCaseCourtSyncRunRequest
+            {
+                ManualOnly = true,
+                Comment = "Проверено по телефону суда, изменений нет.",
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
+
+        Assert.Equal("manual-check-recorded", dto.Status);
+        Assert.False(dto.SyncedFromExternalSource);
+        Assert.Contains("без автоматического обновления", dto.Message, StringComparison.Ordinal);
+        Assert.Contains("Комментарий: Проверено по телефону суда, изменений нет.", dto.Message, StringComparison.Ordinal);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal("Текущий суд", clientCase.CourtName);
+        Assert.Contains("Проверено по телефону суда, изменений нет.", clientCase.EventHistory, StringComparison.Ordinal);
+        Assert.Equal(0, await db.ClientCaseCourtEvents.CountAsync(item => item.ClientCaseId == clientCase.Id));
     }
 
     [Fact]
@@ -3620,7 +3684,7 @@ public class CasesV2ControllerTests
         };
         var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
 
-        var result = await controller.RunCourtSync(clientCase.Id, CancellationToken.None);
+        var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
@@ -3737,7 +3801,7 @@ public class CasesV2ControllerTests
         };
         var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
 
-        var result = await controller.RunCourtSync(clientCase.Id, CancellationToken.None);
+        var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
@@ -3982,7 +4046,7 @@ public class CasesV2ControllerTests
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
 
-        var result = await controller.RunCourtSync(clientCase.Id, CancellationToken.None);
+        var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);

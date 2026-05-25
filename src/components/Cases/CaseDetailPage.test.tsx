@@ -1727,6 +1727,38 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('records a manual court check with a comment from the court tab', async () => {
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('Проверено по телефону суда');
+    vi.mocked(apiService.runCaseCourtSync).mockResolvedValueOnce({
+      clientCaseId: 15,
+      status: 'manual-check-recorded',
+      hasCourtBinding: true,
+      message: 'Ручная проверка судебного источника зафиксирована без автоматического обновления. Комментарий: Проверено по телефону суда.',
+      checkedAt: '2026-05-18T10:00:00Z',
+      checkedByUserId: 7,
+      checkedByUserName: 'Кожеваткин Андрей Владимирович',
+      courtName: 'Арбитражный суд Самарской области',
+      courtCaseNumber: 'А55-12345/2026',
+      courtUrl: 'https://kad.arbitr.ru/card',
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Зафиксировать вручную/u }));
+
+    await waitFor(() => {
+      expect(apiService.runCaseCourtSync).toHaveBeenCalledWith(15, {
+        manualOnly: true,
+        comment: 'Проверено по телефону суда',
+      });
+    });
+    expect(screen.getByText(/Комментарий: Проверено по телефону суда/u)).toBeTruthy();
+
+    prompt.mockRestore();
+  });
+
   it('copies a direct case link', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });

@@ -1084,6 +1084,11 @@ export interface ClientCaseCourtSyncRun {
   nextHearingAt?: string | null;
 }
 
+export interface ClientCaseCourtSyncRunRequest {
+  manualOnly?: boolean;
+  comment?: string;
+}
+
 export interface ClientCaseCourtSyncLog {
   id: number;
   clientCaseId: number;

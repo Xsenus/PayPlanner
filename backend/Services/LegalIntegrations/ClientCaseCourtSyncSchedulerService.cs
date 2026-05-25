@@ -146,7 +146,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         foreach (var caseId in caseIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await controller.RunCourtSync(caseId, cancellationToken);
+            await controller.RunCourtSync(caseId, null, cancellationToken);
             processed++;
         }
 

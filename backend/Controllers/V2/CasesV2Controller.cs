@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -5561,7 +5562,10 @@ public class CasesV2Controller : ControllerBase
     }
 
     [HttpPost("{id:int}/court-sync/run")]
-    public async Task<ActionResult<ClientCaseCourtSyncRunDto>> RunCourtSync(int id, CancellationToken ct)
+    public async Task<ActionResult<ClientCaseCourtSyncRunDto>> RunCourtSync(
+        int id,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ClientCaseCourtSyncRunRequest? request,
+        CancellationToken ct)
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
         {
@@ -5587,7 +5591,14 @@ public class CasesV2Controller : ControllerBase
         var hasCourtBinding =
             !string.IsNullOrWhiteSpace(clientCase.CourtCaseNumber)
             || !string.IsNullOrWhiteSpace(clientCase.CourtUrl);
-        if (!hasCourtBinding)
+        var manualOnly = request?.ManualOnly == true;
+        var manualComment = NormalizeOptional(request?.Comment);
+        manualComment = manualComment is null ? string.Empty : Truncate(NormalizeHistoryText(manualComment), 1000);
+        manualComment = manualComment.TrimEnd('.', ';', ' ');
+        var manualCommentSuffix = string.IsNullOrWhiteSpace(manualComment)
+            ? string.Empty
+            : $" Комментарий: {manualComment}.";
+        if (!hasCourtBinding && !manualOnly)
         {
             const string missingBindingMessage = "Ручная проверка судебного источника не выполнена: в деле не указан номер дела в суде или ссылка на первоисточник.";
             AppendCaseEvent(clientCase, $"{missingBindingMessage} Инициатор: {actorName}.");
@@ -5608,7 +5619,7 @@ public class CasesV2Controller : ControllerBase
             });
         }
 
-        var courtSyncProvider = ResolveCourtSyncProvider(clientCase.CourtUrl);
+        var courtSyncProvider = manualOnly ? null : ResolveCourtSyncProvider(clientCase.CourtUrl);
         if (courtSyncProvider is not null && !string.IsNullOrWhiteSpace(clientCase.CourtUrl))
         {
             try
@@ -5668,9 +5679,11 @@ public class CasesV2Controller : ControllerBase
         }
 
         var status = "manual-check-recorded";
-        var message = string.IsNullOrWhiteSpace(clientCase.CourtUrl)
-            ? $"Ручная проверка судебного источника зафиксирована: для автоматического обновления добавьте ссылку на карточку дела суда. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
-            : $"Ручная проверка судебного источника зафиксирована: автоматическое обновление сейчас поддерживает ссылки на сайты sudrf.ru. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.";
+        var message = manualOnly
+            ? $"Ручная проверка судебного источника зафиксирована без автоматического обновления. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.{manualCommentSuffix}"
+            : string.IsNullOrWhiteSpace(clientCase.CourtUrl)
+                ? $"Ручная проверка судебного источника зафиксирована: для автоматического обновления добавьте ссылку на карточку дела суда. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.{manualCommentSuffix}"
+                : $"Ручная проверка судебного источника зафиксирована: автоматическое обновление сейчас поддерживает ссылки на сайты sudrf.ru. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}.{manualCommentSuffix}";
 
         AppendCaseEvent(clientCase, $"{message} Инициатор: {actorName}.");
         await _db.SaveChangesAsync(ct);
@@ -10316,6 +10329,12 @@ public class CasesV2Controller : ControllerBase
         public DateTime Date { get; set; }
         public decimal? Amount { get; set; }
         public string Status { get; set; } = string.Empty;
+    }
+
+    public sealed class ClientCaseCourtSyncRunRequest
+    {
+        public bool ManualOnly { get; set; }
+        public string? Comment { get; set; }
     }
 
     public sealed class ClientCaseCourtSyncRunDto

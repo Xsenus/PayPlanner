@@ -42,6 +42,7 @@ import type {
   ClientCaseCourtInstance,
   ClientCaseCourtParty,
   ClientCaseCourtSyncLog,
+  ClientCaseCourtSyncRunRequest,
   ClientCaseDocument,
   ClientCaseDocumentTemplate,
   ClientCaseFinanceDetail,
@@ -2015,14 +2016,16 @@ export function CaseDetailPage({
     }
   };
 
-  const runCourtSync = async () => {
+  const runCourtSync = async (payload?: ClientCaseCourtSyncRunRequest) => {
     if (!caseItem) return;
 
     setSyncingCourt(true);
     setError(null);
     setNotice(null);
     try {
-      const result = await apiService.runCaseCourtSync(caseItem.id);
+      const result = payload
+        ? await apiService.runCaseCourtSync(caseItem.id, payload)
+        : await apiService.runCaseCourtSync(caseItem.id);
       setNotice(result.message);
       setActiveTab('history');
       setReloadToken((value) => value + 1);
@@ -2031,6 +2034,13 @@ export function CaseDetailPage({
     } finally {
       setSyncingCourt(false);
     }
+  };
+
+  const recordManualCourtCheck = async () => {
+    const comment = window.prompt('Комментарий к ручной проверке суда', '');
+    if (comment === null) return;
+
+    await runCourtSync({ manualOnly: true, comment: comment.trim() });
   };
 
   const saveCourtInstance = async () => {
@@ -3058,6 +3068,7 @@ export function CaseDetailPage({
               calculatingProceduralDeadline={calculatingProceduralDeadline}
               closingProceduralDeadlineId={closingProceduralDeadlineId}
               onRunCourtSync={runCourtSync}
+              onRecordManualCourtCheck={recordManualCourtCheck}
               syncingCourt={syncingCourt}
               onActiveCourtInstanceChange={setActiveCourtInstance}
               onCourtInstanceDraftChange={setCourtInstanceDraft}
@@ -5040,6 +5051,7 @@ function CourtPanel({
   calculatingProceduralDeadline,
   closingProceduralDeadlineId,
   onRunCourtSync,
+  onRecordManualCourtCheck,
   syncingCourt,
   onActiveCourtInstanceChange,
   onCourtInstanceDraftChange,
@@ -5122,6 +5134,7 @@ function CourtPanel({
   calculatingProceduralDeadline: boolean;
   closingProceduralDeadlineId: number | null;
   onRunCourtSync: () => void;
+  onRecordManualCourtCheck: () => void;
   syncingCourt: boolean;
   onActiveCourtInstanceChange: (value: string) => void;
   onCourtInstanceDraftChange: (draft: CourtInstanceDraft) => void;
@@ -5184,13 +5197,22 @@ function CourtPanel({
             {hasCourtBinding ? 'Суд, номер дела, источник и процессуальные сроки по карточке.' : 'Судебная привязка пока не настроена.'}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => void onRunCourtSync()}
-          disabled={syncingCourt}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-200 px-4 py-2 text-sm font-medium text-cyan-700 hover:bg-cyan-50 disabled:opacity-50">
-          {syncingCourt ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Проверить источник
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void onRunCourtSync()}
+            disabled={syncingCourt}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-200 px-4 py-2 text-sm font-medium text-cyan-700 hover:bg-cyan-50 disabled:opacity-50">
+            {syncingCourt ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Проверить источник
+          </button>
+          <button
+            type="button"
+            onClick={() => void onRecordManualCourtCheck()}
+            disabled={syncingCourt}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
+            {syncingCourt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Зафиксировать вручную
+          </button>
+        </div>
       </div>
 
       <section className="rounded-xl border border-slate-200 p-4">
