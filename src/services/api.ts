@@ -4150,6 +4150,18 @@ export class ApiService {
     return this.request<CaseFinanceReport>(`/reports/case-finance${q}`);
   }
 
+  async getCaseSuccessReport(params?: {
+    from?: string;
+    to?: string;
+    status?: string;
+    responsibleUserId?: number;
+    caseType?: string;
+    limit?: number;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<CaseSuccessReport>(`/reports/case-success${q}`);
+  }
+
   async getLawyerWorkloadReport(params?: {
     asOf?: string;
     horizonDays?: number;
@@ -5013,6 +5025,7 @@ import type {
   ProjectReport,
   LegalWorkReport,
   CaseFinanceReport,
+  CaseSuccessReport,
   CaseActivityReport,
   CurrentCasesReport,
   LawyerWorkloadReport,

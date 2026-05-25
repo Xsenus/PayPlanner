@@ -232,6 +232,39 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("case-success")]
+    public async Task<ActionResult<CaseSuccessReportDto>> CaseSuccess(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        if (casesVisibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var (start, end) = ResolveLegalWorkPeriod(from, to);
+        var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
+        var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildCaseSuccessReportAsync(start, end, filters, effectiveLimit, casesVisibility, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<(LegalWorkReportDto? Report, IActionResult? Error)> BuildLegalWorkExportReportAsync(
         DateTime? from,
         DateTime? to,
@@ -1255,6 +1288,171 @@ public class ReportsController : ControllerBase
             Items = rows.Take(limit).ToList(),
         };
     }
+
+    private async Task<CaseSuccessReportDto> BuildCaseSuccessReportAsync(
+        DateTime start,
+        DateTime end,
+        LegalWorkReportFilters filters,
+        int limit,
+        DataVisibilityAccess casesVisibility,
+        CancellationToken ct)
+    {
+        var asOf = DateTime.UtcNow.Date;
+        var endInclusive = end.Date.AddDays(1).AddTicks(-1);
+        var caseQuery = _db.ClientCases
+            .AsNoTracking()
+            .WithCaseIncludes()
+            .ApplyClientCaseVisibility(casesVisibility)
+            .Where(item => item.CreatedAt <= endInclusive
+                && (item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost
+                    || (item.StartDate.HasValue && item.StartDate.Value >= start.Date)
+                    || (item.DueDate.HasValue && item.DueDate.Value >= start.Date)));
+
+        if (TryParseClientCaseStatus(filters.Status, out var statusFilter))
+        {
+            caseQuery = caseQuery.Where(item => item.Status == statusFilter);
+        }
+
+        if (filters.ResponsibleUserId.HasValue)
+        {
+            caseQuery = caseQuery.Where(item => item.ResponsibleUserId == filters.ResponsibleUserId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filters.CaseType))
+        {
+            caseQuery = caseQuery.Where(item => item.CaseType != null && item.CaseType.Contains(filters.CaseType));
+        }
+
+        var rows = (await caseQuery.ToListAsync(ct))
+            .Select(item => BuildCaseSuccessItem(item, asOf))
+            .OrderByDescending(item => item.IsFinished)
+            .ThenBy(item => item.Status)
+            .ThenBy(item => item.CaseTitle)
+            .ToList();
+
+        var successfulCases = rows.Count(item => item.OutcomeCategory == "successful");
+        var lostCases = rows.Count(item => item.OutcomeCategory == "lost");
+        var completedCases = successfulCases + lostCases;
+        var inProgressCases = rows.Count(item => item.OutcomeCategory == "inProgress");
+        var onHoldCases = rows.Count(item => item.OutcomeCategory == "onHold");
+
+        return new CaseSuccessReportDto
+        {
+            GeneratedAt = DateTime.UtcNow,
+            From = start,
+            To = end,
+            StatusFilter = filters.Status ?? string.Empty,
+            ResponsibleUserIdFilter = filters.ResponsibleUserId,
+            CaseTypeFilter = filters.CaseType ?? string.Empty,
+            Limit = limit,
+            TotalCases = rows.Count,
+            CompletedCases = completedCases,
+            SuccessfulCases = successfulCases,
+            LostCases = lostCases,
+            InProgressCases = inProgressCases,
+            OnHoldCases = onHoldCases,
+            SuccessRate = CalculatePercent(successfulCases, completedCases),
+            LossRate = CalculatePercent(lostCases, completedCases),
+            CompletionRate = CalculatePercent(completedCases, rows.Count),
+            FormulaNote = "Первая версия считает успешность по текущим статусам: Closed = закрыто без отрицательного результата, Lost = отрицательный исход. Открытые и приостановленные дела не входят в процент успешности.",
+            ByStatus = rows
+                .GroupBy(item => new { item.Status, item.StatusLabel })
+                .OrderBy(group => group.Key.Status)
+                .Select(group => new CaseSuccessStatusItemDto
+                {
+                    Status = group.Key.Status,
+                    StatusLabel = group.Key.StatusLabel,
+                    CaseCount = group.Count(),
+                    Share = CalculatePercent(group.Count(), rows.Count),
+                })
+                .ToList(),
+            ByResponsible = rows
+                .GroupBy(item => new { item.ResponsibleUserId, item.ResponsibleName })
+                .OrderByDescending(group => group.Count(item => item.OutcomeCategory == "lost"))
+                .ThenByDescending(group => group.Count())
+                .ThenBy(group => group.Key.ResponsibleName)
+                .Select(group =>
+                {
+                    var groupSuccessful = group.Count(item => item.OutcomeCategory == "successful");
+                    var groupLost = group.Count(item => item.OutcomeCategory == "lost");
+                    var groupCompleted = groupSuccessful + groupLost;
+                    return new CaseSuccessResponsibleItemDto
+                    {
+                        ResponsibleUserId = group.Key.ResponsibleUserId,
+                        ResponsibleName = group.Key.ResponsibleName,
+                        TotalCases = group.Count(),
+                        CompletedCases = groupCompleted,
+                        SuccessfulCases = groupSuccessful,
+                        LostCases = groupLost,
+                        InProgressCases = group.Count(item => !item.IsFinished),
+                        SuccessRate = CalculatePercent(groupSuccessful, groupCompleted),
+                    };
+                })
+                .Take(25)
+                .ToList(),
+            ByType = rows
+                .GroupBy(item => item.CaseType)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key)
+                .Select(group =>
+                {
+                    var groupSuccessful = group.Count(item => item.OutcomeCategory == "successful");
+                    var groupLost = group.Count(item => item.OutcomeCategory == "lost");
+                    var groupCompleted = groupSuccessful + groupLost;
+                    return new CaseSuccessTypeItemDto
+                    {
+                        CaseType = group.Key,
+                        TotalCases = group.Count(),
+                        CompletedCases = groupCompleted,
+                        SuccessfulCases = groupSuccessful,
+                        LostCases = groupLost,
+                        SuccessRate = CalculatePercent(groupSuccessful, groupCompleted),
+                    };
+                })
+                .Take(25)
+                .ToList(),
+            Items = rows.Take(limit).ToList(),
+        };
+    }
+
+    private static CaseSuccessItemDto BuildCaseSuccessItem(ClientCase clientCase, DateTime asOf)
+    {
+        var (outcomeCategory, outcomeLabel) = ResolveCaseSuccessOutcome(clientCase.Status);
+        var start = clientCase.StartDate ?? clientCase.CreatedAt;
+        var finishAnchor = clientCase.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost
+            ? clientCase.DueDate ?? asOf
+            : asOf;
+        var daysInWork = Math.Max(0, (finishAnchor.Date - start.Date).Days);
+
+        return new CaseSuccessItemDto
+        {
+            CaseId = clientCase.Id,
+            CaseNumber = clientCase.CaseNumber,
+            CaseTitle = clientCase.Title,
+            ClientName = ResolveCaseOwnerName(clientCase),
+            CaseType = NormalizeReportText(clientCase.CaseType, "Не указан"),
+            Status = clientCase.Status.ToString(),
+            StatusLabel = FormatCaseStatus(clientCase.Status),
+            OutcomeCategory = outcomeCategory,
+            OutcomeLabel = outcomeLabel,
+            ResponsibleUserId = clientCase.ResponsibleUserId,
+            ResponsibleName = ResolveCaseResponsibleName(clientCase),
+            CreatedAt = clientCase.CreatedAt,
+            StartDate = clientCase.StartDate,
+            DueDate = clientCase.DueDate,
+            DaysInWork = daysInWork,
+            IsFinished = clientCase.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost,
+        };
+    }
+
+    private static (string Category, string Label) ResolveCaseSuccessOutcome(ClientCaseStatus status)
+        => status switch
+        {
+            ClientCaseStatus.Closed => ("successful", "Закрыто без отрицательного результата"),
+            ClientCaseStatus.Lost => ("lost", "Отрицательный исход"),
+            ClientCaseStatus.OnHold => ("onHold", "Приостановлено"),
+            _ => ("inProgress", "В работе"),
+        };
 
     private static CaseFinanceItemDto BuildCaseFinanceItem(ClientCase clientCase, decimal paid)
     {

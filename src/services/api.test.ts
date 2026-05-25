@@ -658,6 +658,56 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('limit=25');
   });
 
+  it('loads case success report with filters', async () => {
+    const payload = {
+      generatedAt: '2026-05-26T10:00:00Z',
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      statusFilter: 'Closed',
+      responsibleUserIdFilter: 7,
+      caseTypeFilter: 'bankruptcy',
+      limit: 25,
+      totalCases: 2,
+      completedCases: 2,
+      successfulCases: 1,
+      lostCases: 1,
+      inProgressCases: 0,
+      onHoldCases: 0,
+      successRate: 50,
+      lossRate: 50,
+      completionRate: 100,
+      formulaNote: 'Closed = закрыто',
+      byStatus: [],
+      byResponsible: [],
+      byType: [],
+      items: [],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getCaseSuccessReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+      status: 'Closed',
+      responsibleUserId: 7,
+      caseType: 'bankruptcy',
+      limit: 25,
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/case-success?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('status=Closed');
+    expect(String(url)).toContain('responsibleUserId=7');
+    expect(String(url)).toContain('caseType=bankruptcy');
+    expect(String(url)).toContain('limit=25');
+  });
+
   it('loads lawyer workload report with filters', async () => {
     const payload = {
       generatedAt: '2026-05-26T10:00:00Z',

@@ -1238,6 +1238,153 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CaseSuccess_UsesVisibleCasesAndStatusFormula()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "case-success-lawyer", Description = "Lawyer" };
+        var visibleUser = new User
+        {
+            Email = "visible-case-success@example.test",
+            FullName = "Visible Case Success User",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = "hidden-case-success@example.test",
+            FullName = "Hidden Case Success User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var today = DateTime.UtcNow.Date;
+        var visibleClient = new Client { Name = "Visible Success Client", ResponsibleUserId = visibleUser.Id };
+        var hiddenClient = new Client { Name = "Hidden Success Client", ResponsibleUserId = hiddenUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var closedCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "SUCCESS-CLOSED",
+            Title = "Closed success case",
+            CaseType = "Банкротство",
+            Status = ClientCaseStatus.Closed,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = today.AddDays(-20),
+            StartDate = today.AddDays(-20),
+            DueDate = today.AddDays(-2),
+        };
+        var lostCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "SUCCESS-LOST",
+            Title = "Lost success case",
+            CaseType = "Банкротство",
+            Status = ClientCaseStatus.Lost,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = today.AddDays(-18),
+            StartDate = today.AddDays(-18),
+            DueDate = today.AddDays(-1),
+        };
+        var openCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "SUCCESS-OPEN",
+            Title = "Open success case",
+            CaseType = "Семейное",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = today.AddDays(-10),
+            StartDate = today.AddDays(-10),
+        };
+        var hiddenCase = new ClientCase
+        {
+            ClientId = hiddenClient.Id,
+            CaseNumber = "SUCCESS-HIDDEN",
+            Title = "Hidden success case",
+            CaseType = "Банкротство",
+            Status = ClientCaseStatus.Closed,
+            ResponsibleUserId = hiddenUser.Id,
+            CreatedAt = today.AddDays(-10),
+            StartDate = today.AddDays(-10),
+            DueDate = today.AddDays(-1),
+        };
+        db.ClientCases.AddRange(closedCase, lostCase, openCase, hiddenCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var action = await controller.CaseSuccess(today.AddDays(-30), today.AddDays(30), null, null, null, 20, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CaseSuccessReportDto>(ok.Value);
+        Assert.Equal(3, report.TotalCases);
+        Assert.Equal(2, report.CompletedCases);
+        Assert.Equal(1, report.SuccessfulCases);
+        Assert.Equal(1, report.LostCases);
+        Assert.Equal(1, report.InProgressCases);
+        Assert.Equal(0, report.OnHoldCases);
+        Assert.Equal(50m, report.SuccessRate);
+        Assert.Equal(50m, report.LossRate);
+        Assert.Equal(66.7m, report.CompletionRate);
+        Assert.Contains("Closed", report.FormulaNote, StringComparison.Ordinal);
+        Assert.DoesNotContain(report.Items, item => item.CaseId == hiddenCase.Id);
+
+        Assert.Contains(report.ByStatus, item => item.Status == nameof(ClientCaseStatus.Closed) && item.CaseCount == 1);
+        Assert.Contains(report.ByType, item =>
+            item.CaseType == "Банкротство"
+            && item.TotalCases == 2
+            && item.CompletedCases == 2
+            && item.SuccessRate == 50m);
+
+        var responsible = Assert.Single(report.ByResponsible);
+        Assert.Equal(visibleUser.Id, responsible.ResponsibleUserId);
+        Assert.Equal(3, responsible.TotalCases);
+        Assert.Equal(2, responsible.CompletedCases);
+        Assert.Equal(1, responsible.SuccessfulCases);
+        Assert.Equal(1, responsible.LostCases);
+        Assert.Equal(1, responsible.InProgressCases);
+        Assert.Equal(50m, responsible.SuccessRate);
+
+        var filteredAction = await controller.CaseSuccess(
+            today.AddDays(-30),
+            today.AddDays(30),
+            nameof(ClientCaseStatus.Closed),
+            visibleUser.Id,
+            "Банк",
+            10,
+            CancellationToken.None);
+        var filteredReport = Assert.IsType<CaseSuccessReportDto>(Assert.IsType<OkObjectResult>(filteredAction.Result).Value);
+        Assert.Equal(1, filteredReport.TotalCases);
+        Assert.Equal(1, filteredReport.SuccessfulCases);
+        Assert.Equal(nameof(ClientCaseStatus.Closed), filteredReport.StatusFilter);
+        Assert.Equal(visibleUser.Id, filteredReport.ResponsibleUserIdFilter);
+        Assert.Equal("Банк", filteredReport.CaseTypeFilter);
+        Assert.Equal(closedCase.Id, Assert.Single(filteredReport.Items).CaseId);
+    }
+
+    [Fact]
     public async Task CashFlow_UsesPaymentVisibilityForLinkedOperations()
     {
         await using var db = await CreateContextAsync();

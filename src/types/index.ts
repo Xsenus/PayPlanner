@@ -1785,6 +1785,76 @@ export interface CaseFinanceReport {
   items: CaseFinanceItem[];
 }
 
+export interface CaseSuccessStatusItem {
+  status: string;
+  statusLabel: string;
+  caseCount: number;
+  share: number;
+}
+
+export interface CaseSuccessResponsibleItem {
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  totalCases: number;
+  completedCases: number;
+  successfulCases: number;
+  lostCases: number;
+  inProgressCases: number;
+  successRate: number;
+}
+
+export interface CaseSuccessTypeItem {
+  caseType: string;
+  totalCases: number;
+  completedCases: number;
+  successfulCases: number;
+  lostCases: number;
+  successRate: number;
+}
+
+export interface CaseSuccessItem {
+  caseId: number;
+  caseNumber: string;
+  caseTitle: string;
+  clientName: string;
+  caseType: string;
+  status: string;
+  statusLabel: string;
+  outcomeCategory: string;
+  outcomeLabel: string;
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  createdAt: string;
+  startDate?: string | null;
+  dueDate?: string | null;
+  daysInWork: number;
+  isFinished: boolean;
+}
+
+export interface CaseSuccessReport {
+  generatedAt: string;
+  from: string;
+  to: string;
+  statusFilter: string;
+  responsibleUserIdFilter?: number | null;
+  caseTypeFilter: string;
+  limit: number;
+  totalCases: number;
+  completedCases: number;
+  successfulCases: number;
+  lostCases: number;
+  inProgressCases: number;
+  onHoldCases: number;
+  successRate: number;
+  lossRate: number;
+  completionRate: number;
+  formulaNote: string;
+  byStatus: CaseSuccessStatusItem[];
+  byResponsible: CaseSuccessResponsibleItem[];
+  byType: CaseSuccessTypeItem[];
+  items: CaseSuccessItem[];
+}
+
 export interface CaseActivityReportItem {
   caseId: number;
   caseNumber: string;

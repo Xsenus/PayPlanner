@@ -31,6 +31,7 @@ import { useCounterpartyReport } from '../../hooks/useCounterpartyReport';
 import { useProjectReport } from '../../hooks/useProjectReport';
 import { useLegalWorkReport } from '../../hooks/useLegalWorkReport';
 import { useCaseFinanceReport } from '../../hooks/useCaseFinanceReport';
+import { useCaseSuccessReport } from '../../hooks/useCaseSuccessReport';
 import { useCaseActivityReport } from '../../hooks/useCaseActivityReport';
 import { useCurrentCasesReport } from '../../hooks/useCurrentCasesReport';
 import { useLawyerWorkloadReport } from '../../hooks/useLawyerWorkloadReport';
@@ -58,7 +59,7 @@ import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicke
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -229,6 +230,28 @@ function exportCaseFinanceReport(report: CaseFinanceReport) {
   });
 
   downloadCsv('case-finance-report.csv', rows);
+}
+
+function exportCaseSuccessReport(report: CaseSuccessReport) {
+  const rows: unknown[][] = [
+    ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус дела', 'Исход', 'Дней в работе', 'Дата начала', 'Срок дела'],
+  ];
+
+  report.items.forEach((item) => {
+    rows.push([
+      item.caseNumber ? `${item.caseNumber} · ${item.caseTitle}` : item.caseTitle,
+      item.clientName,
+      item.responsibleName,
+      item.caseType,
+      item.statusLabel,
+      item.outcomeLabel,
+      item.daysInWork,
+      item.startDate ? formatDate(item.startDate) : formatDate(item.createdAt),
+      item.dueDate ? formatDate(item.dueDate) : '',
+    ]);
+  });
+
+  downloadCsv('case-success-report.csv', rows);
 }
 
 function exportCaseActivityReport(report: CaseActivityReport) {
@@ -1857,6 +1880,224 @@ function CaseFinanceReportSection({
                     <tr>
                       <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
                         Финансовые строки по выбранным условиям не найдены.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function CaseSuccessReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+  onOpenCase,
+}: {
+  report: CaseSuccessReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+  onOpenCase?: (caseId: number) => void;
+}) {
+  const rows = report?.items ?? [];
+  const responsibleRows = report?.byResponsible ?? [];
+  const typeRows = report?.byType ?? [];
+  const statusRows = report?.byStatus ?? [];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Исходы дел
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Статистика успешности дел</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Первая версия считает исходы по текущим статусам дел: закрытые без отрицательного результата, проигранные и незавершенные.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportCaseSuccessReport(report)}
+            disabled={!report}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка статистики успешности дел...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить статистику успешности дел</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для отчета.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Успешность"
+              value={`${report.successRate}%`}
+              icon={CheckCircle2}
+              tone="profit"
+              subtitle={`${report.successfulCases} из ${report.completedCases} завершенных`}
+            />
+            <MetricCard
+              title="Отрицательные исходы"
+              value={String(report.lostCases)}
+              icon={AlertTriangle}
+              tone="expense"
+              subtitle={`Доля среди завершенных: ${report.lossRate}%`}
+            />
+            <MetricCard
+              title="Завершенность"
+              value={`${report.completionRate}%`}
+              icon={Percent}
+              tone="rate"
+              subtitle={`Завершено: ${report.completedCases} из ${report.totalCases}`}
+            />
+            <MetricCard
+              title="В работе"
+              value={String(report.inProgressCases + report.onHoldCases)}
+              icon={FolderKanban}
+              tone="income"
+              subtitle={`Активно: ${report.inProgressCases}, на паузе: ${report.onHoldCases}`}
+            />
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-blue-100 bg-blue-50/70 p-5 text-sm leading-6 text-blue-800">
+            {report.formulaNote}
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">По ответственным</h3>
+                <div className="mt-4 space-y-3">
+                  {responsibleRows.length > 0 ? responsibleRows.slice(0, 8).map((item) => (
+                    <div key={`${item.responsibleUserId ?? 'none'}-${item.responsibleName}`} className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium text-slate-900">{item.responsibleName}</div>
+                          <div className="mt-1 text-xs text-slate-500">{item.completedCases} завершено · {item.inProgressCases} в работе</div>
+                        </div>
+                        <div className="text-right text-sm">
+                          <div className="font-semibold text-slate-900">{item.successRate}%</div>
+                          <div className="text-slate-500">{item.successfulCases}/{item.lostCases}</div>
+                        </div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-5 text-center text-sm text-slate-500">
+                      Ответственные не найдены.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">По типам дел</h3>
+                <div className="mt-4 space-y-3">
+                  {typeRows.length > 0 ? typeRows.slice(0, 8).map((item) => (
+                    <div key={item.caseType} className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm">
+                      <div>
+                        <div className="font-medium text-slate-900">{item.caseType}</div>
+                        <div className="mt-1 text-xs text-slate-500">{item.totalCases} дел · завершено {item.completedCases}</div>
+                      </div>
+                      <div className="text-right text-sm">
+                        <div className="font-semibold text-slate-900">{item.successRate}%</div>
+                        <div className="text-slate-500">{item.successfulCases}/{item.lostCases}</div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-5 text-center text-sm text-slate-500">
+                      Типы дел не найдены.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">По статусам</h3>
+                <div className="mt-4 space-y-3">
+                  {statusRows.length > 0 ? statusRows.map((item) => (
+                    <div key={item.status} className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm">
+                      <div className="font-medium text-slate-900">{item.statusLabel}</div>
+                      <div className="text-right text-sm text-slate-500">
+                        <div>{item.caseCount} дел</div>
+                        <div>{item.share}%</div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-5 text-center text-sm text-slate-500">
+                      Статусы не найдены.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-3xl border border-slate-100 bg-slate-50/70">
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Дело</th>
+                    <th className="px-4 py-3 font-semibold">Ответственный</th>
+                    <th className="px-4 py-3 font-semibold">Исход</th>
+                    <th className="px-4 py-3 text-right font-semibold">Дней</th>
+                    <th className="px-4 py-3 font-semibold">Срок</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white/80">
+                  {rows.length > 0 ? rows.map((row) => (
+                    <tr key={row.caseId} className="align-top">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-900">{row.clientName}</div>
+                        <button
+                          type="button"
+                          onClick={() => onOpenCase?.(row.caseId)}
+                          className="mt-1 inline-flex items-center gap-1 text-left font-semibold text-blue-700 transition hover:text-blue-900 hover:underline"
+                        >
+                          {row.caseNumber ? `${row.caseNumber} · ` : ''}{row.caseTitle}
+                          <ArrowUpRight className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="mt-1 text-xs text-slate-500">{row.caseType} · {row.statusLabel}</div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{row.responsibleName}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${row.outcomeCategory === 'successful' ? 'bg-emerald-50 text-emerald-700' : row.outcomeCategory === 'lost' ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-700'}`}>
+                          {row.outcomeLabel}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-600">{row.daysInWork}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.dueDate ? formatDate(row.dueDate) : 'Не указан'}</td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                        Дела по выбранным условиям не найдены.
                       </td>
                     </tr>
                   )}
@@ -5091,6 +5332,15 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     limit: 100,
   });
   const {
+    report: caseSuccessReport,
+    loading: caseSuccessReportLoading,
+    error: caseSuccessReportError,
+    reload: reloadCaseSuccessReport,
+  } = useCaseSuccessReport({
+    ...cashFlowDates,
+    limit: 100,
+  });
+  const {
     report: caseActivityReport,
     loading: caseActivityReportLoading,
     error: caseActivityReportError,
@@ -5608,6 +5858,14 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               loading={caseFinanceReportLoading}
               error={caseFinanceReportError}
               onReload={reloadCaseFinanceReport}
+              onOpenCase={onOpenCase}
+            />
+
+            <CaseSuccessReportSection
+              report={caseSuccessReport}
+              loading={caseSuccessReportLoading}
+              error={caseSuccessReportError}
+              onReload={reloadCaseSuccessReport}
               onOpenCase={onOpenCase}
             />
 
