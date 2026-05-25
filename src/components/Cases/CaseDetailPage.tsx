@@ -698,6 +698,10 @@ function getOwnerEmail(caseItem: ClientCase) {
   return caseItem.client?.email || caseItem.legalEntity?.email || '';
 }
 
+function getOwnerInn(caseItem: ClientCase) {
+  return caseItem.client?.legalEntity?.inn || caseItem.legalEntity?.inn || '';
+}
+
 function getOwnerOrganization(caseItem: ClientCase) {
   return caseItem.client?.legalEntity?.shortName
     || caseItem.client?.legalEntity?.fullName
@@ -707,11 +711,31 @@ function getOwnerOrganization(caseItem: ClientCase) {
     || '—';
 }
 
+function getOwnerAddress(caseItem: ClientCase) {
+  return getPreferredAddress(caseItem.client?.addresses)
+    || caseItem.client?.address
+    || getPreferredAddress(caseItem.client?.legalEntity?.addresses)
+    || caseItem.client?.legalEntity?.address
+    || getPreferredAddress(caseItem.legalEntity?.addresses)
+    || caseItem.legalEntity?.address
+    || '';
+}
+
+function getPreferredAddress(addresses?: Client['addresses']) {
+  return (addresses ?? [])
+    .slice()
+    .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+    .map((address) => address.unrestrictedValue || address.value)
+    .find((value) => value?.trim())?.trim() ?? '';
+}
+
 function maskSensitiveValue(value: string, visibleTail = 4) {
   const normalized = value.trim();
   if (!normalized) return '—';
-  if (normalized.length <= visibleTail) return '••••';
-  return `${'•'.repeat(Math.min(8, normalized.length - visibleTail))}${normalized.slice(-visibleTail)}`;
+  const tailLength = Math.max(0, visibleTail);
+  if (tailLength === 0) return '••••••••';
+  if (normalized.length <= tailLength) return '••••';
+  return `${'•'.repeat(Math.min(8, normalized.length - tailLength))}${normalized.slice(-tailLength)}`;
 }
 
 function getRiskLabel(caseItem: ClientCase) {
@@ -2822,6 +2846,7 @@ export function CaseDetailPage({
           <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
             <CaseClientSidebar
               caseItem={caseItem}
+              canRevealSensitive={canEdit}
               onOpenClient={onOpenClient}
               onOpenLegalEntity={onOpenLegalEntity}
               onOpenFinance={onOpenFinance}
@@ -2954,6 +2979,7 @@ export function CaseDetailPage({
               ) : (
                 <RelatedParties
                   parties={relatedParties}
+                  canRevealContacts={canEdit}
                   showArchived={showArchivedParties}
                   onToggleArchived={() => setShowArchivedParties((value) => !value)}
                   onOpenClient={(clientId) => onOpenClient?.(clientId, caseItem.id)}
@@ -3678,6 +3704,7 @@ function ConversationTimeline({ entries }: { entries: ClientCaseConversationEntr
 
 function CaseClientSidebar({
   caseItem,
+  canRevealSensitive,
   onOpenClient,
   onOpenLegalEntity,
   onOpenFinance,
@@ -3685,6 +3712,7 @@ function CaseClientSidebar({
   onCreatePayment,
 }: {
   caseItem: ClientCase;
+  canRevealSensitive: boolean;
   onOpenClient?: (clientId: number, caseId?: number) => void;
   onOpenLegalEntity?: (legalEntityId: number, caseId?: number) => void;
   onOpenFinance?: (caseItem: ClientCase) => void;
@@ -3694,6 +3722,10 @@ function CaseClientSidebar({
   const [showSensitive, setShowSensitive] = useState(false);
   const phone = getOwnerPhone(caseItem);
   const email = getOwnerEmail(caseItem);
+  const inn = getOwnerInn(caseItem);
+  const address = getOwnerAddress(caseItem);
+  const hasSensitive = Boolean(phone || email || inn || address);
+  const sensitiveVisible = canRevealSensitive && showSensitive;
   const legalEntityId = caseItem.legalEntityId ?? caseItem.client?.legalEntityId ?? caseItem.client?.legalEntity?.id ?? null;
 
   return (
@@ -3704,28 +3736,36 @@ function CaseClientSidebar({
           <h2 className="mt-2 break-words text-lg font-semibold text-slate-900">{getOwnerName(caseItem)}</h2>
           <div className="mt-2 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">{getOwnerStatus(caseItem)}</div>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowSensitive((value) => !value)}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">
-          {showSensitive ? 'Скрыть' : 'Показать'}
-        </button>
+        {canRevealSensitive && hasSensitive ? (
+          <button
+            type="button"
+            onClick={() => setShowSensitive((value) => !value)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">
+            {showSensitive ? 'Скрыть' : 'Показать'}
+          </button>
+        ) : (
+          <div className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500">
+            <LockKeyhole className="h-3.5 w-3.5" /> Скрыто по роли
+          </div>
+        )}
       </div>
 
       <dl className="mt-4 space-y-3 text-sm">
-        <ClientSidebarRow label="Телефон" value={showSensitive ? (phone || '—') : maskSensitiveValue(phone)} />
-        <ClientSidebarRow label="Email" value={showSensitive ? (email || '—') : maskSensitiveValue(email, 6)} />
+        <ClientSidebarRow label="Телефон" value={sensitiveVisible ? (phone || '—') : maskSensitiveValue(phone)} />
+        <ClientSidebarRow label="Email" value={sensitiveVisible ? (email || '—') : maskSensitiveValue(email, 6)} />
+        <ClientSidebarRow label="ИНН" value={sensitiveVisible ? (inn || '—') : maskSensitiveValue(inn)} />
+        <ClientSidebarRow label="Адрес" value={sensitiveVisible ? (address || '—') : maskSensitiveValue(address, 0)} />
         <ClientSidebarRow label="Организация" value={getOwnerOrganization(caseItem)} />
         <ClientSidebarRow label="Ответственный" value={getResponsibleName(caseItem)} />
       </dl>
 
       <div className="mt-4 grid gap-2">
-        {phone ? (
+        {phone && sensitiveVisible ? (
           <a href={`tel:${phone}`} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
             <Phone className="h-4 w-4" /> Позвонить
           </a>
         ) : null}
-        {email ? (
+        {email && sensitiveVisible ? (
           <a href={`mailto:${email}`} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
             <Mail className="h-4 w-4" /> Написать email
           </a>
@@ -4582,6 +4622,7 @@ function getRelatedPartyContactLine(party: ClientCaseRelatedParty, showContacts:
 
 function RelatedParties({
   parties,
+  canRevealContacts,
   showArchived,
   onToggleArchived,
   onOpenClient,
@@ -4592,6 +4633,7 @@ function RelatedParties({
   restoringPartyId,
 }: {
   parties: ClientCaseRelatedParty[];
+  canRevealContacts: boolean;
   showArchived: boolean;
   onToggleArchived: () => void;
   onOpenClient?: (clientId: number) => void;
@@ -4604,6 +4646,7 @@ function RelatedParties({
   const [showContacts, setShowContacts] = useState(false);
   const [auditPartyId, setAuditPartyId] = useState<number | null>(null);
   const auditParty = parties.find((party) => party.id === auditPartyId) ?? null;
+  const contactsVisible = canRevealContacts && showContacts;
 
   return (
     <section className="rounded-xl border border-slate-200 p-4">
@@ -4618,9 +4661,11 @@ function RelatedParties({
         {parties.some((party) => party.phone || party.email) ? (
           <button
             type="button"
-            onClick={() => setShowContacts((value) => !value)}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-            {showContacts ? 'Скрыть контакты' : 'Показать контакты'}
+            onClick={() => canRevealContacts && setShowContacts((value) => !value)}
+            disabled={!canRevealContacts}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
+            {!canRevealContacts ? <LockKeyhole className="h-3.5 w-3.5" /> : null}
+            {!canRevealContacts ? 'Контакты скрыты по роли' : contactsVisible ? 'Скрыть контакты' : 'Показать контакты'}
           </button>
         ) : null}
       </div>
@@ -4644,7 +4689,7 @@ function RelatedParties({
               </div>
             ) : null}
             {party.phone || party.email ? (
-              <div className="mt-2 text-xs text-slate-500">{getRelatedPartyContactLine(party, showContacts)}</div>
+              <div className="mt-2 text-xs text-slate-500">{getRelatedPartyContactLine(party, contactsVisible)}</div>
             ) : null}
             {party.notes ? <div className="mt-2 text-xs text-slate-500">{party.notes}</div> : null}
             <button

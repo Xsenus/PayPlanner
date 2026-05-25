@@ -1090,6 +1090,16 @@ describe('CaseDetailPage', () => {
         phone: '89332428978',
         email: 'zemcov@example.com',
         company: 'ООО "Земцов"',
+        address: '443001, Самара, ул. Полевая, д. 10, кв. 7',
+        legalEntity: {
+          id: 25,
+          shortName: 'ООО "Земцов"',
+          fullName: 'Общество с ограниченной ответственностью "Земцов"',
+          inn: '6310000000',
+          address: '443001, Самара, ул. Полевая, д. 10',
+          clientsCount: 1,
+          createdAt: '2026-05-01T00:00:00Z',
+        },
       },
     }));
     const onOpenClient = vi.fn();
@@ -1108,10 +1118,14 @@ describe('CaseDetailPage', () => {
 
     expect(await screen.findByText('Клиент по делу')).toBeTruthy();
     expect(screen.queryByText('89332428978')).toBeNull();
+    expect(screen.queryByText('6310000000')).toBeNull();
+    expect(screen.queryByText('443001, Самара, ул. Полевая, д. 10, кв. 7')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Показать' }));
     expect(screen.getByText('89332428978')).toBeTruthy();
     expect(screen.getByText('zemcov@example.com')).toBeTruthy();
+    expect(screen.getByText('6310000000')).toBeTruthy();
+    expect(screen.getByText('443001, Самара, ул. Полевая, д. 10, кв. 7')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Карточка клиента' }));
     fireEvent.click(screen.getByRole('button', { name: 'Счет' }));
@@ -1120,6 +1134,44 @@ describe('CaseDetailPage', () => {
     expect(onOpenClient).toHaveBeenCalledWith(12, 15);
     expect(onCreateInvoice).toHaveBeenCalledWith(expect.objectContaining({ id: 15 }));
     expect(onCreatePayment).toHaveBeenCalledWith(expect.objectContaining({ id: 15 }));
+  });
+
+  it('keeps sensitive owner and participant contacts locked for read-only case access', async () => {
+    const baseCase = createCase();
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      client: {
+        ...baseCase.client!,
+        phone: '89332428978',
+        email: 'zemcov@example.com',
+        address: '443001, Самара, ул. Полевая, д. 10, кв. 7',
+        legalEntity: {
+          id: 25,
+          shortName: 'ООО "Земцов"',
+          fullName: 'Общество с ограниченной ответственностью "Земцов"',
+          inn: '6310000000',
+          address: '443001, Самара, ул. Полевая, д. 10',
+          clientsCount: 1,
+          createdAt: '2026-05-01T00:00:00Z',
+        },
+      },
+    }));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
+
+    expect(await screen.findByText('Клиент по делу')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Показать' })).toBeNull();
+    expect(screen.getByText('Скрыто по роли')).toBeTruthy();
+    expect(screen.queryByText('89332428978')).toBeNull();
+    expect(screen.queryByText('zemcov@example.com')).toBeNull();
+    expect(screen.queryByText('6310000000')).toBeNull();
+    expect(screen.queryByText('443001, Самара, ул. Полевая, д. 10, кв. 7')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Позвонить' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Написать email' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Участники' }));
+    expect((await screen.findByRole('button', { name: 'Контакты скрыты по роли' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText('+79991234567')).toBeNull();
+    expect(screen.queryByText('zemtsov@example.test')).toBeNull();
   });
 
   it('creates a regular task from the case card', async () => {
