@@ -303,6 +303,9 @@ namespace PayPlanner.Api.Models
         [MaxLength(1000)]
         public string AccessRequestReason { get; set; } = string.Empty;
 
+        [NotMapped]
+        public bool CanRevealSensitiveData { get; set; } = true;
+
         /// <summary>
         /// Описание или примечания по делу.
         /// </summary>

@@ -555,6 +555,7 @@ export interface ClientCase {
   accessRequestedByUserId?: number | null;
   accessRequestedByUserName?: string | null;
   accessRequestReason?: string | null;
+  canRevealSensitiveData?: boolean;
   title: string;
   description?: string;
   status: string;

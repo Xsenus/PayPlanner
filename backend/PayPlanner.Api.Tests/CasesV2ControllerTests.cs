@@ -180,6 +180,58 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetById_AndRelatedParties_HideSensitiveContacts_WhenRoleCannotEditCases()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "readonly@example.com", "Наблюдатель");
+        viewer.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanEdit = false;
+
+        var client = new Client
+        {
+            Name = "Клиент с персональными данными",
+            IsActive = true,
+            ResponsibleUserId = viewer.Id,
+            Phone = "+79991234567",
+            Email = "client@example.test",
+            Address = "Самара, Полевая, 10",
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с ограниченным раскрытием",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = viewer.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseRelatedParties.Add(new ClientCaseRelatedParty
+        {
+            ClientCase = clientCase,
+            SourceType = "client",
+            DisplayName = "Связанный участник",
+            Phone = "+79995554433",
+            Email = "party@example.test",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, viewer);
+
+        var caseResult = await controller.GetById(clientCase.Id, CancellationToken.None);
+
+        var caseOk = Assert.IsType<OkObjectResult>(caseResult);
+        var dto = Assert.IsType<ClientCase>(caseOk.Value);
+        Assert.False(dto.CanRevealSensitiveData);
+        Assert.Equal(string.Empty, dto.Client!.Phone);
+        Assert.Equal(string.Empty, dto.Client.Email);
+        Assert.Equal(string.Empty, dto.Client.Address);
+
+        var partiesResult = await controller.GetRelatedParties(clientCase.Id, includeArchived: false, CancellationToken.None);
+
+        var partiesOk = Assert.IsType<OkObjectResult>(partiesResult.Result);
+        var party = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<ClientCaseRelatedPartyDto>>(partiesOk.Value));
+        Assert.Equal(string.Empty, party.Phone);
+        Assert.Equal(string.Empty, party.Email);
+    }
+
+    [Fact]
     public async Task RequestAccess_RecordsRequestForHiddenCase()
     {
         await using var db = await CreateContextAsync();

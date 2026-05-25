@@ -171,6 +171,55 @@ public class CasesV2Controller : ControllerBase
         return permission is not null && permission.CanEdit ? null : Forbid();
     }
 
+    private async Task<bool> CanRevealCaseSensitiveDataAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return false;
+        }
+
+        if (User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Cases, ct);
+        return permission?.CanEdit == true;
+    }
+
+    private static void HideCaseSensitiveData(ClientCase clientCase)
+    {
+        if (clientCase.Client is not null)
+        {
+            clientCase.Client.Phone = string.Empty;
+            clientCase.Client.Email = string.Empty;
+            clientCase.Client.Address = string.Empty;
+            clientCase.Client.Notes = string.Empty;
+
+            if (clientCase.Client.LegalEntity is not null)
+            {
+                HideLegalEntitySensitiveData(clientCase.Client.LegalEntity);
+            }
+        }
+
+        if (clientCase.LegalEntity is not null)
+        {
+            HideLegalEntitySensitiveData(clientCase.LegalEntity);
+        }
+    }
+
+    private static void HideLegalEntitySensitiveData(LegalEntity legalEntity)
+    {
+        legalEntity.Inn = null;
+        legalEntity.Kpp = null;
+        legalEntity.Ogrn = null;
+        legalEntity.Address = null;
+        legalEntity.Phone = null;
+        legalEntity.Email = null;
+        legalEntity.Director = null;
+    }
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] int? clientId,
@@ -1768,6 +1817,12 @@ public class CasesV2Controller : ControllerBase
         {
             await ApplyFinanceSummaryAsync([entity], ct);
             await ApplyTaskSummaryAsync([entity], ct);
+            var canRevealSensitiveData = await CanRevealCaseSensitiveDataAsync(ct);
+            entity.CanRevealSensitiveData = canRevealSensitiveData;
+            if (!canRevealSensitiveData)
+            {
+                HideCaseSensitiveData(entity);
+            }
         }
 
         if (entity is null)
@@ -4484,7 +4539,9 @@ public class CasesV2Controller : ControllerBase
             .ThenBy(item => item.Id)
             .ToListAsync(ct);
 
-        return Ok(items.Select(MapRelatedParty).ToList());
+        var canRevealSensitiveData = await CanRevealCaseSensitiveDataAsync(ct);
+
+        return Ok(items.Select(item => MapRelatedParty(item, canRevealSensitiveData)).ToList());
     }
 
     [HttpPost("{id:int}/related-parties")]
@@ -9272,7 +9329,7 @@ public class CasesV2Controller : ControllerBase
         party.ArchiveReason = string.Empty;
     }
 
-    private static ClientCaseRelatedPartyDto MapRelatedParty(ClientCaseRelatedParty party)
+    private static ClientCaseRelatedPartyDto MapRelatedParty(ClientCaseRelatedParty party, bool canRevealSensitiveData = true)
         => new()
         {
             Id = party.Id,
@@ -9285,8 +9342,8 @@ public class CasesV2Controller : ControllerBase
             DisplayName = party.DisplayName,
             Role = party.Role,
             OrganizationName = party.OrganizationName,
-            Phone = party.Phone,
-            Email = party.Email,
+            Phone = canRevealSensitiveData ? party.Phone : string.Empty,
+            Email = canRevealSensitiveData ? party.Email : string.Empty,
             Notes = party.Notes,
             CreatedAt = party.CreatedAt,
             CreatedByUserId = party.CreatedByUserId,

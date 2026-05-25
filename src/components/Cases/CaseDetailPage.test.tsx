@@ -1174,6 +1174,42 @@ describe('CaseDetailPage', () => {
     expect(screen.queryByText('zemtsov@example.test')).toBeNull();
   });
 
+  it('keeps sensitive data locked when backend denies reveal permission', async () => {
+    const baseCase = createCase();
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      canRevealSensitiveData: false,
+      client: {
+        ...baseCase.client!,
+        phone: '89332428978',
+        email: 'zemcov@example.com',
+        address: '443001, Самара, ул. Полевая, д. 10, кв. 7',
+        legalEntity: {
+          id: 25,
+          shortName: 'ООО "Земцов"',
+          fullName: 'Общество с ограниченной ответственностью "Земцов"',
+          inn: '6310000000',
+          address: '443001, Самара, ул. Полевая, д. 10',
+          clientsCount: 1,
+          createdAt: '2026-05-01T00:00:00Z',
+        },
+      },
+    }));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+
+    expect(await screen.findByText('Клиент по делу')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Показать' })).toBeNull();
+    expect(screen.getByText('Скрыто по роли')).toBeTruthy();
+    expect(screen.queryByText('89332428978')).toBeNull();
+    expect(screen.queryByText('zemcov@example.com')).toBeNull();
+    expect(screen.queryByText('6310000000')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Участники' }));
+    expect((await screen.findByRole('button', { name: 'Контакты скрыты по роли' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText('+79991234567')).toBeNull();
+    expect(screen.queryByText('zemtsov@example.test')).toBeNull();
+  });
+
   it('creates a regular task from the case card', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 

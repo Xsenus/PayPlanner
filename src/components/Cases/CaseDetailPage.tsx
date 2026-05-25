@@ -2679,6 +2679,7 @@ export function CaseDetailPage({
   const overdueTasks = caseItem.overdueTaskCount ?? 0;
   const inactivitySummary = getInactivitySummary(caseItem);
   const courtSyncSummary = getCourtSyncSummary(caseItem);
+  const canRevealCaseSensitiveData = canEdit && (caseItem.canRevealSensitiveData ?? true);
 
   if (editPageOpen && caseEditDraft) {
     return (
@@ -2856,7 +2857,7 @@ export function CaseDetailPage({
           <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
             <CaseClientSidebar
               caseItem={caseItem}
-              canRevealSensitive={canEdit}
+              canRevealSensitive={canRevealCaseSensitiveData}
               onOpenClient={onOpenClient}
               onOpenLegalEntity={onOpenLegalEntity}
               onOpenFinance={onOpenFinance}
@@ -2989,7 +2990,7 @@ export function CaseDetailPage({
               ) : (
                 <RelatedParties
                   parties={relatedParties}
-                  canRevealContacts={canEdit}
+                  canRevealContacts={canRevealCaseSensitiveData}
                   showArchived={showArchivedParties}
                   onToggleArchived={() => setShowArchivedParties((value) => !value)}
                   onOpenClient={(clientId) => onOpenClient?.(clientId, caseItem.id)}
