@@ -4138,6 +4138,16 @@ export class ApiService {
     return this.request<CurrentCasesReport>(`/reports/current-cases${q}`);
   }
 
+  async getLawyerWorkloadReport(params?: {
+    asOf?: string;
+    horizonDays?: number;
+    lawyerUserId?: number;
+    limit?: number;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<LawyerWorkloadReport>(`/reports/lawyer-workload${q}`);
+  }
+
   async getOverdueProceduralDeadlinesReport(params?: {
     asOf?: string;
     deadlineType?: string;
@@ -4992,6 +5002,7 @@ import type {
   LegalWorkReport,
   CaseActivityReport,
   CurrentCasesReport,
+  LawyerWorkloadReport,
   OverdueProceduralDeadlinesReport,
   DirectionReport,
   SalesPointReport,

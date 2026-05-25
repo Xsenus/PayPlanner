@@ -32,6 +32,7 @@ import { useProjectReport } from '../../hooks/useProjectReport';
 import { useLegalWorkReport } from '../../hooks/useLegalWorkReport';
 import { useCaseActivityReport } from '../../hooks/useCaseActivityReport';
 import { useCurrentCasesReport } from '../../hooks/useCurrentCasesReport';
+import { useLawyerWorkloadReport } from '../../hooks/useLawyerWorkloadReport';
 import { useOverdueProceduralDeadlinesReport } from '../../hooks/useOverdueProceduralDeadlinesReport';
 import { useDirectionReport } from '../../hooks/useDirectionReport';
 import { useSalesPointReport } from '../../hooks/useSalesPointReport';
@@ -56,7 +57,7 @@ import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicke
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -250,6 +251,33 @@ function exportCurrentCasesReport(report: CurrentCasesReport) {
   });
 
   downloadCsv('current-cases-report.csv', rows);
+}
+
+function exportLawyerWorkloadReport(report: LawyerWorkloadReport) {
+  const rows: unknown[][] = [
+    ['Юрист', 'Активные дела', 'Открытые задачи', 'Просроченные задачи', 'На согласовании', 'Сегодня', 'Ближайшие дни', 'Просроченные сроки', 'Активные сроки', 'Плановые часы', 'Индекс нагрузки', 'Риск', 'Ближайшая задача', 'Ближайший срок'],
+  ];
+
+  report.items.forEach((item) => {
+    rows.push([
+      item.lawyerName,
+      item.activeCaseCount,
+      item.openTaskCount,
+      item.overdueTaskCount,
+      item.onApprovalTaskCount,
+      item.dueTodayTaskCount,
+      item.dueSoonTaskCount,
+      item.overdueDeadlineCount,
+      item.activeDeadlineCount,
+      item.plannedHours,
+      item.workloadScore,
+      item.riskLabel,
+      item.nearestTaskDueAt ? formatDate(item.nearestTaskDueAt) : '',
+      item.nearestDeadlineAt ? formatDate(item.nearestDeadlineAt) : '',
+    ]);
+  });
+
+  downloadCsv('lawyer-workload-report.csv', rows);
 }
 
 function exportOverdueProceduralDeadlinesReport(report: OverdueProceduralDeadlinesReport) {
@@ -1802,6 +1830,201 @@ function CurrentCasesReportSection({
                     <tr>
                       <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
                         Текущих дел по выбранным условиям нет.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function LawyerWorkloadReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: LawyerWorkloadReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const rows = report?.items ?? [];
+  const overloadedRows = rows.filter((row) => row.isOverloaded);
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+            <Target className="h-3.5 w-3.5" />
+            Загрузка юристов
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по загрузке юристов</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Сводка по активным делам, открытым задачам, плановым часам и просроченным срокам помогает увидеть перегрузку команды.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportLawyerWorkloadReport(report)}
+            disabled={!report}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по загрузке юристов...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по загрузке юристов</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для отчета.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Юристов в отчете"
+              value={String(report.lawyerCount)}
+              icon={Target}
+              tone="income"
+              subtitle={`Строк в таблице: ${rows.length}`}
+            />
+            <MetricCard
+              title="Активные дела"
+              value={String(report.totalActiveCases)}
+              icon={FolderKanban}
+              tone="profit"
+              subtitle={`Горизонт задач: ${report.horizonDays} дн.`}
+            />
+            <MetricCard
+              title="Открытые задачи"
+              value={String(report.totalOpenTasks)}
+              icon={Clock3}
+              tone="rate"
+              subtitle={`Просрочено: ${report.totalOverdueTasks}`}
+            />
+            <MetricCard
+              title="Перегрузка"
+              value={String(report.overloadedLawyerCount)}
+              icon={AlertTriangle}
+              tone="expense"
+              subtitle={`Просроченных сроков: ${report.totalOverdueDeadlines}`}
+            />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[0.75fr_1.25fr]">
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">С повышенной нагрузкой</h3>
+                <div className="mt-4 space-y-3">
+                  {overloadedRows.length > 0 ? overloadedRows.slice(0, 8).map((item) => (
+                    <div key={`${item.lawyerUserId ?? 'none'}-${item.lawyerName}`} className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium text-slate-900">{item.lawyerName}</div>
+                          <div className="mt-1 text-xs text-rose-600">{item.riskLabel}</div>
+                        </div>
+                        <div className="text-right text-sm text-slate-500">
+                          <div>{item.workloadScore} баллов</div>
+                          <div>{item.plannedHours.toLocaleString('ru-RU')} ч</div>
+                        </div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-5 text-center text-sm text-slate-500">
+                      Перегрузка по выбранным условиям не найдена.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">Плановые часы</h3>
+                <div className="mt-3 text-3xl font-semibold text-slate-950">
+                  {report.totalPlannedHours.toLocaleString('ru-RU')} ч
+                </div>
+                <div className="mt-2 text-sm leading-6 text-slate-500">
+                  Сумма плановой длительности открытых задач по юристам, которые доступны пользователю в отчете.
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-3xl border border-slate-100 bg-slate-50/70">
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Юрист</th>
+                    <th className="px-4 py-3 text-right font-semibold">Дела</th>
+                    <th className="px-4 py-3 text-right font-semibold">Задачи</th>
+                    <th className="px-4 py-3 text-right font-semibold">Сроки</th>
+                    <th className="px-4 py-3 text-right font-semibold">План</th>
+                    <th className="px-4 py-3 font-semibold">Риск</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white/80">
+                  {rows.length > 0 ? rows.map((row) => (
+                    <tr key={`${row.lawyerUserId ?? 'none'}-${row.lawyerName}`} className="align-top">
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-slate-900">{row.lawyerName}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          Индекс нагрузки: {row.workloadScore}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-600">
+                        <div>{row.activeCaseCount}</div>
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-600">
+                        <div>{row.openTaskCount} открыто</div>
+                        {row.overdueTaskCount > 0 ? <div className="text-xs text-rose-600">{row.overdueTaskCount} проср.</div> : null}
+                        {row.dueTodayTaskCount > 0 ? <div className="text-xs text-amber-600">{row.dueTodayTaskCount} сегодня</div> : null}
+                        {row.dueSoonTaskCount > 0 ? <div className="text-xs text-slate-500">{row.dueSoonTaskCount} скоро</div> : null}
+                        {row.onApprovalTaskCount > 0 ? <div className="text-xs text-blue-600">{row.onApprovalTaskCount} на соглас.</div> : null}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-600">
+                        <div>{row.activeDeadlineCount} активных</div>
+                        {row.overdueDeadlineCount > 0 ? <div className="text-xs text-rose-600">{row.overdueDeadlineCount} проср.</div> : null}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-600">
+                        <div className="font-semibold text-slate-900">{row.plannedHours.toLocaleString('ru-RU')} ч</div>
+                        <div className="text-xs text-slate-500">{row.plannedMinutes} мин.</div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${row.isOverloaded ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                          {row.riskLabel}
+                        </span>
+                        <div className="mt-2 text-xs text-slate-500">
+                          {row.nearestTaskDueAt ? `Задача: ${formatDate(row.nearestTaskDueAt)}` : 'Ближайшая задача не указана'}
+                        </div>
+                        {row.nearestDeadlineAt ? (
+                          <div className="mt-1 text-xs text-slate-500">Срок: {formatDate(row.nearestDeadlineAt)}</div>
+                        ) : null}
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        Данных по загрузке юристов по выбранным условиям нет.
                       </td>
                     </tr>
                   )}
@@ -4652,6 +4875,15 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     limit: 100,
   });
   const {
+    report: lawyerWorkloadReport,
+    loading: lawyerWorkloadReportLoading,
+    error: lawyerWorkloadReportError,
+    reload: reloadLawyerWorkloadReport,
+  } = useLawyerWorkloadReport({
+    horizonDays: 7,
+    limit: 100,
+  });
+  const {
     report: overdueDeadlinesReport,
     loading: overdueDeadlinesReportLoading,
     error: overdueDeadlinesReportError,
@@ -5144,6 +5376,13 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               error={currentCasesReportError}
               onReload={reloadCurrentCasesReport}
               onOpenCase={onOpenCase}
+            />
+
+            <LawyerWorkloadReportSection
+              report={lawyerWorkloadReport}
+              loading={lawyerWorkloadReportLoading}
+              error={lawyerWorkloadReportError}
+              onReload={reloadLawyerWorkloadReport}
             />
 
             <OverdueProceduralDeadlinesReportSection

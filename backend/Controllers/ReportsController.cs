@@ -318,6 +318,45 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("lawyer-workload")]
+    public async Task<ActionResult<LawyerWorkloadReportDto>> LawyerWorkload(
+        [FromQuery] DateTime? asOf,
+        [FromQuery] int? horizonDays,
+        [FromQuery] int? lawyerUserId,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        if (casesVisibility is null || tasksVisibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var effectiveAsOf = asOf?.Date ?? DateTime.UtcNow.Date;
+        var effectiveHorizonDays = Math.Clamp(horizonDays ?? 7, 1, 60);
+        var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildLawyerWorkloadReportAsync(
+                effectiveAsOf,
+                effectiveHorizonDays,
+                lawyerUserId,
+                effectiveLimit,
+                casesVisibility,
+                tasksVisibility,
+                cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     [HttpGet("overdue-deadlines")]
     public async Task<ActionResult<OverdueProceduralDeadlinesReportDto>> OverdueDeadlines(
         [FromQuery] DateTime? asOf,
@@ -1961,6 +2000,229 @@ public class ReportsController : ControllerBase
                 : NormalizeReportText(nextDeadline.Title, ResolveProceduralDeadlineTypeLabel(nextDeadline.DeadlineType)),
             LastActivityAt = lastActivityAt,
         };
+    }
+
+    private async Task<LawyerWorkloadReportDto> BuildLawyerWorkloadReportAsync(
+        DateTime asOf,
+        int horizonDays,
+        int? lawyerUserId,
+        int limit,
+        DataVisibilityAccess casesVisibility,
+        DataVisibilityAccess tasksVisibility,
+        CancellationToken ct)
+    {
+        var horizonEnd = asOf.Date.AddDays(horizonDays);
+        var activeCases = await _db.ClientCases
+            .AsNoTracking()
+            .WithCaseIncludes()
+            .ApplyClientCaseVisibility(casesVisibility)
+            .Where(item => item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost)
+            .ToListAsync(ct);
+
+        var caseIds = activeCases.Select(item => item.Id).Distinct().ToArray();
+        var tasks = caseIds.Length == 0
+            ? new List<LegalWorkTaskRow>()
+            : await _db.TaskJournalItems
+                .AsNoTracking()
+                .ApplyTaskVisibility(tasksVisibility)
+                .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))
+                .Select(item => new LegalWorkTaskRow(
+                    item.Id,
+                    item.ClientCaseId,
+                    item.AssigneeUserId,
+                    item.AssigneeName,
+                    item.Status,
+                    item.Priority,
+                    item.DueAt,
+                    item.PlannedDurationMinutes))
+                .ToListAsync(ct);
+
+        var deadlines = caseIds.Length == 0
+            ? new List<CurrentCaseDeadlineRow>()
+            : await _db.ClientCaseProceduralDeadlines
+                .AsNoTracking()
+                .Where(item =>
+                    caseIds.Contains(item.ClientCaseId)
+                    && (item.Status == "active" || item.Status == "moved"))
+                .Select(item => new CurrentCaseDeadlineRow(
+                    item.ClientCaseId,
+                    item.DeadlineType,
+                    item.Title,
+                    item.DueAt))
+                .ToListAsync(ct);
+
+        static int workloadKey(int? userId) => userId ?? int.MinValue;
+        static int? workloadUserId(int key) => key == int.MinValue ? null : key;
+
+        var caseResponsibleNames = activeCases
+            .GroupBy(item => workloadKey(item.ResponsibleUserId))
+            .ToDictionary(
+                group => group.Key,
+                group => ResolveCaseResponsibleName(group.First()));
+        var taskAssigneeNames = tasks
+            .GroupBy(item => workloadKey(item.AssigneeUserId))
+            .ToDictionary(
+                group => group.Key,
+                group => NormalizeReportText(group.First().AssigneeName, "Не назначен"));
+        var casesByResponsible = activeCases
+            .GroupBy(item => workloadKey(item.ResponsibleUserId))
+            .ToDictionary(group => group.Key, group => group.ToList());
+        var tasksByAssignee = tasks
+            .Where(item => IsOpenTaskStatus(item.Status))
+            .GroupBy(item => workloadKey(item.AssigneeUserId))
+            .ToDictionary(group => group.Key, group => group.ToList());
+        var deadlinesByResponsible = deadlines
+            .Join(
+                activeCases,
+                deadline => deadline.ClientCaseId,
+                clientCase => clientCase.Id,
+                (deadline, clientCase) => new { deadline, clientCase.ResponsibleUserId })
+            .GroupBy(item => workloadKey(item.ResponsibleUserId))
+            .ToDictionary(group => group.Key, group => group.Select(item => item.deadline).ToList());
+
+        var lawyerIds = casesByResponsible.Keys
+            .Concat(tasksByAssignee.Keys)
+            .Concat(deadlinesByResponsible.Keys)
+            .Distinct()
+            .ToList();
+
+        var rows = lawyerIds
+            .Select(key => BuildLawyerWorkloadItem(
+                workloadUserId(key),
+                ResolveLawyerWorkloadName(key, caseResponsibleNames, taskAssigneeNames),
+                casesByResponsible.GetValueOrDefault(key) ?? [],
+                tasksByAssignee.GetValueOrDefault(key) ?? [],
+                deadlinesByResponsible.GetValueOrDefault(key) ?? [],
+                asOf,
+                horizonEnd))
+            .Where(item => !lawyerUserId.HasValue || item.LawyerUserId == lawyerUserId.Value)
+            .OrderByDescending(item => item.IsOverloaded)
+            .ThenByDescending(item => item.WorkloadScore)
+            .ThenByDescending(item => item.OpenTaskCount + item.ActiveCaseCount)
+            .ThenBy(item => item.LawyerName)
+            .ToList();
+
+        return new LawyerWorkloadReportDto
+        {
+            GeneratedAt = DateTime.UtcNow,
+            AsOf = asOf,
+            HorizonDays = horizonDays,
+            LawyerUserIdFilter = lawyerUserId,
+            Limit = limit,
+            LawyerCount = rows.Count,
+            TotalActiveCases = rows.Sum(item => item.ActiveCaseCount),
+            TotalOpenTasks = rows.Sum(item => item.OpenTaskCount),
+            TotalOverdueTasks = rows.Sum(item => item.OverdueTaskCount),
+            TotalOverdueDeadlines = rows.Sum(item => item.OverdueDeadlineCount),
+            OverloadedLawyerCount = rows.Count(item => item.IsOverloaded),
+            TotalPlannedHours = rows.Sum(item => item.PlannedHours),
+            Items = rows.Take(limit).ToList(),
+        };
+    }
+
+    private static LawyerWorkloadItemDto BuildLawyerWorkloadItem(
+        int? lawyerUserId,
+        string lawyerName,
+        IReadOnlyCollection<ClientCase> cases,
+        IReadOnlyCollection<LegalWorkTaskRow> tasks,
+        IReadOnlyCollection<CurrentCaseDeadlineRow> deadlines,
+        DateTime asOf,
+        DateTime horizonEnd)
+    {
+        var overdueTasks = tasks.Where(item => item.DueAt.Date < asOf.Date).ToList();
+        var onApprovalTasks = tasks
+            .Where(item => string.Equals(item.Status, "onApproval", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.Status, "overdueApproval", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var dueTodayTasks = tasks.Where(item => item.DueAt.Date == asOf.Date).ToList();
+        var dueSoonTasks = tasks
+            .Where(item => item.DueAt.Date > asOf.Date && item.DueAt.Date <= horizonEnd.Date)
+            .ToList();
+        var overdueDeadlines = deadlines.Where(item => item.DueAt.Date < asOf.Date).ToList();
+        var plannedMinutes = tasks.Sum(item => Math.Max(0, item.PlannedDurationMinutes));
+        var plannedHours = Math.Round(plannedMinutes / 60m, 1, MidpointRounding.AwayFromZero);
+        var workloadScore =
+            cases.Count * 2
+            + tasks.Count * 3
+            + overdueTasks.Count * 4
+            + overdueDeadlines.Count * 5
+            + onApprovalTasks.Count * 2
+            + (int)Math.Ceiling(plannedHours);
+        var isOverloaded =
+            workloadScore >= 40
+            || tasks.Count >= 10
+            || plannedHours >= 32m
+            || overdueDeadlines.Count > 0
+            || overdueTasks.Count >= 3;
+
+        return new LawyerWorkloadItemDto
+        {
+            LawyerUserId = lawyerUserId,
+            LawyerName = lawyerName,
+            ActiveCaseCount = cases.Count,
+            OpenTaskCount = tasks.Count,
+            OverdueTaskCount = overdueTasks.Count,
+            OnApprovalTaskCount = onApprovalTasks.Count,
+            DueTodayTaskCount = dueTodayTasks.Count,
+            DueSoonTaskCount = dueSoonTasks.Count,
+            OverdueDeadlineCount = overdueDeadlines.Count,
+            ActiveDeadlineCount = deadlines.Count,
+            PlannedMinutes = plannedMinutes,
+            PlannedHours = plannedHours,
+            WorkloadScore = workloadScore,
+            IsOverloaded = isOverloaded,
+            RiskLabel = ResolveLawyerWorkloadRiskLabel(isOverloaded, overdueTasks.Count, overdueDeadlines.Count, plannedHours, tasks.Count),
+            NearestTaskDueAt = tasks.Count == 0 ? null : tasks.Min(item => item.DueAt),
+            NearestDeadlineAt = deadlines.Count == 0 ? null : deadlines.Min(item => item.DueAt),
+        };
+    }
+
+    private static string ResolveLawyerWorkloadName(
+        int lawyerUserKey,
+        IReadOnlyDictionary<int, string> caseResponsibleNames,
+        IReadOnlyDictionary<int, string> taskAssigneeNames)
+    {
+        if (caseResponsibleNames.TryGetValue(lawyerUserKey, out var caseName))
+        {
+            return NormalizeReportText(caseName, "Не назначен");
+        }
+
+        if (taskAssigneeNames.TryGetValue(lawyerUserKey, out var taskName))
+        {
+            return NormalizeReportText(taskName, "Не назначен");
+        }
+
+        return "Не назначен";
+    }
+
+    private static string ResolveLawyerWorkloadRiskLabel(
+        bool isOverloaded,
+        int overdueTaskCount,
+        int overdueDeadlineCount,
+        decimal plannedHours,
+        int openTaskCount)
+    {
+        if (!isOverloaded)
+        {
+            return "Норма";
+        }
+
+        if (overdueDeadlineCount > 0)
+        {
+            return "Есть просроченные сроки";
+        }
+
+        if (overdueTaskCount > 0)
+        {
+            return "Есть просроченные задачи";
+        }
+
+        if (plannedHours >= 32m)
+        {
+            return "Высокая плановая нагрузка";
+        }
+
+        return openTaskCount >= 10 ? "Много открытых задач" : "Повышенная нагрузка";
     }
 
     private static IReadOnlyList<LegalWorkResponsibleItemDto> BuildLegalWorkResponsibleItems(

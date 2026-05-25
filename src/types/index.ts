@@ -1827,6 +1827,42 @@ export interface CurrentCasesReport {
   items: CurrentCaseReportItem[];
 }
 
+export interface LawyerWorkloadItem {
+  lawyerUserId?: number | null;
+  lawyerName: string;
+  activeCaseCount: number;
+  openTaskCount: number;
+  overdueTaskCount: number;
+  onApprovalTaskCount: number;
+  dueTodayTaskCount: number;
+  dueSoonTaskCount: number;
+  overdueDeadlineCount: number;
+  activeDeadlineCount: number;
+  plannedMinutes: number;
+  plannedHours: number;
+  workloadScore: number;
+  isOverloaded: boolean;
+  riskLabel: string;
+  nearestTaskDueAt?: string | null;
+  nearestDeadlineAt?: string | null;
+}
+
+export interface LawyerWorkloadReport {
+  generatedAt: string;
+  asOf: string;
+  horizonDays: number;
+  lawyerUserIdFilter?: number | null;
+  limit: number;
+  lawyerCount: number;
+  totalActiveCases: number;
+  totalOpenTasks: number;
+  totalOverdueTasks: number;
+  totalOverdueDeadlines: number;
+  overloadedLawyerCount: number;
+  totalPlannedHours: number;
+  items: LawyerWorkloadItem[];
+}
+
 export interface OverdueProceduralDeadlineTypeItem {
   deadlineType: string;
   deadlineTypeLabel: string;

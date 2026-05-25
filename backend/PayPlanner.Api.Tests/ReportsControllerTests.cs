@@ -618,6 +618,178 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task LawyerWorkload_UsesVisibleCasesTasksAndDeadlines()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "lawyer-workload-role", Description = "Lawyer" };
+        var visibleUser = new User
+        {
+            Email = "visible-workload@example.test",
+            FullName = "Visible Workload User",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = "hidden-workload@example.test",
+            FullName = "Hidden Workload User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var visibleClient = new Client { Name = "Visible Workload Client", ResponsibleUserId = visibleUser.Id };
+        var hiddenClient = new Client { Name = "Hidden Workload Client", ResponsibleUserId = hiddenUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var asOf = new DateTime(2026, 5, 26);
+        var visibleCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "WORKLOAD-VISIBLE",
+            Title = "Visible workload case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = asOf.AddDays(-20),
+        };
+        var hiddenCase = new ClientCase
+        {
+            ClientId = hiddenClient.Id,
+            CaseNumber = "WORKLOAD-HIDDEN",
+            Title = "Hidden workload case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = hiddenUser.Id,
+            CreatedAt = asOf.AddDays(-20),
+        };
+        db.ClientCases.AddRange(visibleCase, hiddenCase);
+        await db.SaveChangesAsync();
+
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                ClientCaseId = visibleCase.Id,
+                ObjectName = visibleCase.Title,
+                Title = "Visible overdue task",
+                AssigneeUserId = visibleUser.Id,
+                AssigneeName = visibleUser.FullName,
+                DueAt = asOf.AddDays(-1).AddHours(9),
+                Status = "new",
+                Priority = "high",
+                Type = "task",
+                PlannedDurationMinutes = 180,
+                CreatedAt = asOf.AddDays(-3),
+            },
+            new TaskJournalItem
+            {
+                ClientCaseId = visibleCase.Id,
+                ObjectName = visibleCase.Title,
+                Title = "Visible due soon task",
+                AssigneeUserId = visibleUser.Id,
+                AssigneeName = visibleUser.FullName,
+                DueAt = asOf.AddDays(2).AddHours(10),
+                Status = "onApproval",
+                Priority = "normal",
+                Type = "task",
+                PlannedDurationMinutes = 120,
+                CreatedAt = asOf.AddDays(-1),
+            },
+            new TaskJournalItem
+            {
+                ClientCaseId = hiddenCase.Id,
+                ObjectName = hiddenCase.Title,
+                Title = "Hidden task",
+                AssigneeUserId = hiddenUser.Id,
+                AssigneeName = hiddenUser.FullName,
+                DueAt = asOf.AddDays(-1).AddHours(9),
+                Status = "new",
+                Priority = "high",
+                Type = "task",
+                PlannedDurationMinutes = 600,
+                CreatedAt = asOf.AddDays(-3),
+            });
+        db.ClientCaseProceduralDeadlines.AddRange(
+            new ClientCaseProceduralDeadline
+            {
+                ClientCaseId = visibleCase.Id,
+                DeadlineType = "appeal",
+                Title = "Просроченная апелляция",
+                DueAt = asOf.AddDays(-3),
+                Status = "active",
+                CreatedAt = asOf.AddDays(-10),
+            },
+            new ClientCaseProceduralDeadline
+            {
+                ClientCaseId = hiddenCase.Id,
+                DeadlineType = "motion",
+                Title = "Скрытый срок",
+                DueAt = asOf.AddDays(-5),
+                Status = "active",
+                CreatedAt = asOf.AddDays(-10),
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var action = await controller.LawyerWorkload(asOf, 7, null, 50, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<LawyerWorkloadReportDto>(ok.Value);
+        Assert.Equal(asOf, report.AsOf);
+        Assert.Equal(7, report.HorizonDays);
+        Assert.Equal(1, report.LawyerCount);
+        Assert.Equal(1, report.TotalActiveCases);
+        Assert.Equal(2, report.TotalOpenTasks);
+        Assert.Equal(1, report.TotalOverdueTasks);
+        Assert.Equal(1, report.TotalOverdueDeadlines);
+        Assert.Equal(5m, report.TotalPlannedHours);
+
+        var row = Assert.Single(report.Items);
+        Assert.Equal(visibleUser.Id, row.LawyerUserId);
+        Assert.Equal("Visible Workload User", row.LawyerName);
+        Assert.Equal(1, row.ActiveCaseCount);
+        Assert.Equal(2, row.OpenTaskCount);
+        Assert.Equal(1, row.OverdueTaskCount);
+        Assert.Equal(1, row.OnApprovalTaskCount);
+        Assert.Equal(1, row.DueSoonTaskCount);
+        Assert.Equal(1, row.OverdueDeadlineCount);
+        Assert.Equal(300, row.PlannedMinutes);
+        Assert.Equal(5m, row.PlannedHours);
+        Assert.Contains("срок", row.RiskLabel, StringComparison.OrdinalIgnoreCase);
+
+        var filteredAction = await controller.LawyerWorkload(asOf, 7, visibleUser.Id, 10, CancellationToken.None);
+        var filteredReport = Assert.IsType<LawyerWorkloadReportDto>(Assert.IsType<OkObjectResult>(filteredAction.Result).Value);
+        Assert.Equal(visibleUser.Id, filteredReport.LawyerUserIdFilter);
+        Assert.Equal(visibleUser.Id, Assert.Single(filteredReport.Items).LawyerUserId);
+    }
+
+    [Fact]
     public async Task OverdueDeadlines_UsesVisibleProceduralDeadlines()
     {
         await using var db = await CreateContextAsync();
