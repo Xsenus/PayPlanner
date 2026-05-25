@@ -2016,6 +2016,11 @@ public class CasesV2ControllerTests
             Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal("workingDays", dto.Rule);
         Assert.Equal(new DateTime(2026, 5, 5, 0, 0, 0, DateTimeKind.Utc), dto.DeadlineAt);
+        Assert.Equal(new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc), dto.StartAt);
+        Assert.Equal(new DateTime(2026, 5, 5, 0, 0, 0, DateTimeKind.Utc), dto.RawDeadlineAt);
+        Assert.Equal(3, dto.SkippedNonWorkingDays);
+        Assert.Equal(0, dto.RollForwardDays);
+        Assert.Contains("пропущено нерабочих дней: 3", dto.Explanation, StringComparison.Ordinal);
     }
 
     [Fact]

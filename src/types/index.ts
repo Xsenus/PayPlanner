@@ -669,6 +669,11 @@ export interface ProceduralDeadlineCalculationResult {
   monthsToAdd: number;
   daysToAdd: number;
   rollForwardToWorkingDay: boolean;
+  startAt?: string | null;
+  rawDeadlineAt?: string | null;
+  skippedNonWorkingDays?: number;
+  rollForwardDays?: number;
+  explanation?: string;
 }
 
 export interface ClientCaseCourtEvent {

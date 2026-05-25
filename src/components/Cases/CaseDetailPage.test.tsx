@@ -449,6 +449,11 @@ describe('CaseDetailPage', () => {
       monthsToAdd: 0,
       daysToAdd: 5,
       rollForwardToWorkingDay: true,
+      startAt: '2026-05-20T00:00:00Z',
+      rawDeadlineAt: '2026-06-09T00:00:00Z',
+      skippedNonWorkingDays: 2,
+      rollForwardDays: 1,
+      explanation: 'Старт: 20.05.2026. Правило: 5 рабочих дней. Базовая дата: 09.06.2026. Дата перенесена на ближайший рабочий день: 10.06.2026.',
     });
     vi.mocked(apiService.closeCaseProceduralDeadline).mockReset();
     vi.mocked(apiService.closeCaseProceduralDeadline).mockResolvedValue({
@@ -1786,6 +1791,30 @@ describe('CaseDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Проверить источник/u }));
     await waitFor(() => {
       expect(apiService.runCaseCourtSync).toHaveBeenCalledWith(15);
+    });
+  });
+
+  it('calculates a procedural deadline and shows calculation details', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Рассчитать/u }));
+
+    await waitFor(() => {
+      expect(apiService.calculateCaseProceduralDeadline).toHaveBeenCalledWith({
+        startAt: '2026-05-20T09:30:00Z',
+        rule: 'workingDays',
+        monthsToAdd: 0,
+        daysToAdd: 5,
+        rollForwardToWorkingDay: true,
+      });
+      expect(screen.getByDisplayValue('2026-06-10')).toBeTruthy();
+      expect(screen.getByText('Дата процессуального срока рассчитана.')).toBeTruthy();
+      expect(screen.getByText('Расчет срока: 20.05.2026 → 10.06.2026')).toBeTruthy();
+      expect(screen.getAllByText(/Базовая дата: 09.06.2026/u).length).toBeGreaterThan(0);
+      expect(screen.getByText('Пропущено нерабочих дней: 2')).toBeTruthy();
+      expect(screen.getByText('Перенос: 1 дн.')).toBeTruthy();
     });
   });
 

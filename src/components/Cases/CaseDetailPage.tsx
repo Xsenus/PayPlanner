@@ -53,6 +53,7 @@ import type {
   ClientCaseWorkOrderItem,
   DocumentStatusEntity,
   LegalEntitySummary,
+  ProceduralDeadlineCalculationResult,
 } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -1112,6 +1113,7 @@ export function CaseDetailPage({
   const [deadlineDocumentIdDraft, setDeadlineDocumentIdDraft] = useState('');
   const [deadlineCourtEventIdDraft, setDeadlineCourtEventIdDraft] = useState('');
   const [deadlineNotesDraft, setDeadlineNotesDraft] = useState('');
+  const [deadlineCalculationPreview, setDeadlineCalculationPreview] = useState<ProceduralDeadlineCalculationResult | null>(null);
   const [courtEventTypeDraft, setCourtEventTypeDraft] = useState('hearing');
   const [courtEventTitleDraft, setCourtEventTitleDraft] = useState('');
   const [courtEventScheduledAtDraft, setCourtEventScheduledAtDraft] = useState('');
@@ -2270,6 +2272,7 @@ export function CaseDetailPage({
       setDeadlineDocumentIdDraft('');
       setDeadlineCourtEventIdDraft('');
       setDeadlineNotesDraft('');
+      setDeadlineCalculationPreview(null);
       setNotice('Процессуальный срок добавлен.');
       setReloadToken((value) => value + 1);
     } catch (err) {
@@ -2300,6 +2303,7 @@ export function CaseDetailPage({
       });
       if (result.deadlineAt) {
         setDeadlineDueAtDraft(result.deadlineAt.slice(0, 10));
+        setDeadlineCalculationPreview(result);
         setNotice('Дата процессуального срока рассчитана.');
       }
     } catch (err) {
@@ -3066,6 +3070,7 @@ export function CaseDetailPage({
               deadlineDocumentIdDraft={deadlineDocumentIdDraft}
               deadlineCourtEventIdDraft={deadlineCourtEventIdDraft}
               deadlineNotesDraft={deadlineNotesDraft}
+              deadlineCalculationPreview={deadlineCalculationPreview}
               logs={courtSyncLogs}
               logsLoading={courtSyncLogsLoading}
               savingCourtInstance={savingCourtInstance}
@@ -5059,6 +5064,7 @@ function CourtPanel({
   deadlineDocumentIdDraft,
   deadlineCourtEventIdDraft,
   deadlineNotesDraft,
+  deadlineCalculationPreview,
   logs,
   logsLoading,
   savingCourtInstance,
@@ -5142,6 +5148,7 @@ function CourtPanel({
   deadlineDocumentIdDraft: string;
   deadlineCourtEventIdDraft: string;
   deadlineNotesDraft: string;
+  deadlineCalculationPreview: ProceduralDeadlineCalculationResult | null;
   logs: ClientCaseCourtSyncLog[];
   logsLoading: boolean;
   savingCourtInstance: boolean;
@@ -5619,6 +5626,23 @@ function CourtPanel({
             {calculatingProceduralDeadline ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Рассчитать
           </button>
         </div>
+        {deadlineCalculationPreview ? (
+          <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+            <div className="font-semibold">
+              Расчет срока: {toRuDate(deadlineCalculationPreview.startAt) || '—'} → {toRuDate(deadlineCalculationPreview.deadlineAt) || '—'}
+            </div>
+            <div className="mt-1 text-sky-800">
+              {deadlineCalculationPreview.explanation || 'Дата рассчитана по выбранному типу процессуального срока.'}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-sky-700">
+              {deadlineCalculationPreview.rawDeadlineAt ? (
+                <span className="rounded-full bg-white px-2 py-1">Базовая дата: {toRuDate(deadlineCalculationPreview.rawDeadlineAt)}</span>
+              ) : null}
+              <span className="rounded-full bg-white px-2 py-1">Пропущено нерабочих дней: {deadlineCalculationPreview.skippedNonWorkingDays ?? 0}</span>
+              <span className="rounded-full bg-white px-2 py-1">Перенос: {deadlineCalculationPreview.rollForwardDays ?? 0} дн.</span>
+            </div>
+          </div>
+        ) : null}
         {proceduralDeadlinesLoading ? (
           <LoadingBlock label="Загрузка процессуальных сроков..." />
         ) : activeProceduralDeadlines.length === 0 ? (

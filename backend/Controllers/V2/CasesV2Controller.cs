@@ -1681,6 +1681,11 @@ public class CasesV2Controller : ControllerBase
             MonthsToAdd = result.MonthsToAdd,
             DaysToAdd = result.DaysToAdd,
             RollForwardToWorkingDay = result.RollForwardToWorkingDay,
+            StartAt = result.StartAt,
+            RawDeadlineAt = result.RawDeadlineAt,
+            SkippedNonWorkingDays = result.SkippedNonWorkingDays,
+            RollForwardDays = result.RollForwardDays,
+            Explanation = result.Explanation,
         });
     }
 
@@ -10206,6 +10211,11 @@ public class CasesV2Controller : ControllerBase
         public int MonthsToAdd { get; set; }
         public int DaysToAdd { get; set; }
         public bool RollForwardToWorkingDay { get; set; }
+        public DateTime? StartAt { get; set; }
+        public DateTime? RawDeadlineAt { get; set; }
+        public int SkippedNonWorkingDays { get; set; }
+        public int RollForwardDays { get; set; }
+        public string Explanation { get; set; } = string.Empty;
     }
 
     public sealed class CaseCalendarEventDto
