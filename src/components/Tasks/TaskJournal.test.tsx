@@ -422,6 +422,49 @@ describe('TaskJournal', () => {
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
   });
 
+  it('shows court hearing and meeting types in filters and the task form', async () => {
+    await renderJournal([
+      createTask({ title: 'Заседание по делу', type: 'courtHearing' }),
+      createTask({ id: 102, title: 'Встреча с клиентом', type: 'meeting' }),
+    ], { waitForTitle: 'Заседание по делу' });
+
+    expect(screen.getAllByText('Суд. заседание').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Встреча').length).toBeGreaterThan(0);
+
+    const typeFilterSelect = screen.getByRole('combobox', { name: 'Тип задачи' }) as HTMLSelectElement;
+    expect(Array.from(typeFilterSelect.options).map((option) => option.textContent)).toEqual(expect.arrayContaining([
+      'Суд. заседание',
+      'Встреча',
+    ]));
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+
+    const formTypeSelect = screen.getAllByRole('combobox')
+      .map((element) => element as HTMLSelectElement)
+      .find((select) => (
+        Array.from(select.options).some((option) => option.value === 'courtHearing') &&
+        !Array.from(select.options).some((option) => option.value === 'all')
+      ));
+
+    expect(formTypeSelect).toBeTruthy();
+    expect(Array.from(formTypeSelect!.options).map((option) => option.textContent)).toEqual(expect.arrayContaining([
+      'Суд. заседание',
+      'Встреча',
+    ]));
+
+    fireEvent.click(screen.getByTestId('task-internal-checkbox'));
+    fireEvent.change(screen.getByTestId('task-title-input'), { target: { value: 'Подготовиться к заседанию' } });
+    fireEvent.change(formTypeSelect!, { target: { value: 'courtHearing' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Подготовиться к заседанию',
+      type: 'courtHearing',
+    }));
+  });
+
   it('shows who assigned the task in the journal and task card', async () => {
     await renderJournal([
       createTask({

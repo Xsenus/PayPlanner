@@ -9,7 +9,15 @@ export type TaskJournalStatus =
   | 'done'
   | 'cancelled';
 export type TaskJournalPriority = 'low' | 'normal' | 'high' | 'urgent';
-export type TaskJournalType = 'task' | 'budget' | 'contact' | 'document' | 'reminder' | 'control';
+export type TaskJournalType =
+  | 'task'
+  | 'budget'
+  | 'contact'
+  | 'document'
+  | 'reminder'
+  | 'control'
+  | 'courtHearing'
+  | 'meeting';
 export type TaskJournalReminder = 'atDue' | 'before15m' | 'before1h' | 'before1d' | 'before3d' | 'before7d' | 'dailyOverdue';
 export type TaskJournalChannel = 'inApp' | 'email' | 'telegram';
 export type TaskJournalParticipantRole = 'assignee' | 'observer' | 'approver';

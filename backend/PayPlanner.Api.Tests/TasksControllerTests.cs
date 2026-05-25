@@ -1000,6 +1000,33 @@ public class TasksControllerTests
         Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == clientCase.Id));
     }
 
+    [Theory]
+    [InlineData("courtHearing")]
+    [InlineData("meeting")]
+    public async Task CreateTask_AllowsAdditionalTaskTypes(string taskType)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-types@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            AssigneeUserId = author.Id,
+            Title = "Новая задача с типом",
+            DueAt = DateTime.UtcNow.AddHours(2),
+            Type = taskType,
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        var task = await db.TaskJournalItems.SingleAsync(item => item.Id == dto.Id);
+
+        Assert.Equal(taskType, dto.Type);
+        Assert.Equal(taskType, task.Type);
+    }
+
     [Fact]
     public async Task CreateAutomationTasksForCandidates_CreatesTasksForCasesWithoutActiveTasks()
     {

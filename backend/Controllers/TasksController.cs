@@ -35,7 +35,7 @@ public class TasksController : ControllerBase
     };
     private static readonly HashSet<string> AllowedTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "task", "budget", "contact", "document", "reminder", "control"
+        "task", "budget", "contact", "document", "reminder", "control", "courtHearing", "meeting"
     };
     private static readonly HashSet<string> AllowedReminders = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -4139,6 +4139,8 @@ public class TasksController : ControllerBase
             "document" => "Документ",
             "reminder" => "Не забыть",
             "control" => "Контроль",
+            "courtHearing" => "Суд. заседание",
+            "meeting" => "Встреча",
             _ => type ?? "—",
         };
 

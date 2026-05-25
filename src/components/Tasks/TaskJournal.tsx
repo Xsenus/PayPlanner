@@ -25,8 +25,10 @@ import {
   Search,
   Send,
   ShieldAlert,
+  Scale,
   TimerReset,
   Trash2,
+  UsersRound,
   WalletCards,
   X,
 } from 'lucide-react';
@@ -136,6 +138,8 @@ const TYPE_OPTIONS: Array<{ value: TaskJournalType; label: string; icon: typeof 
   { value: 'document', label: 'Документ', icon: FileText },
   { value: 'reminder', label: 'Не забыть', icon: Bell },
   { value: 'control', label: 'Контроль', icon: AlarmClock },
+  { value: 'courtHearing', label: 'Суд. заседание', icon: Scale },
+  { value: 'meeting', label: 'Встреча', icon: UsersRound },
 ];
 
 const PRIORITY_OPTIONS: Array<{ value: TaskJournalPriority; label: string }> = [
