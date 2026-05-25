@@ -934,6 +934,34 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-view-timeline').getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('saves and applies the selected task calendar color mode', async () => {
+    await renderJournal([createTask({ priority: 'high' })], { initialView: 'calendar' });
+
+    await waitFor(() => expect(screen.getByTestId('task-calendar-task-101')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('task-color-mode-priority'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-calendar-task-101').className).toContain('border-amber-200');
+      expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
+        calendarColorMode: 'priority',
+      });
+    });
+  });
+
+  it('restores the saved task calendar color mode', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'calendar',
+      periodMode: 'week',
+      calendarColorMode: 'status',
+    }));
+
+    await renderJournal([createTask({ status: 'inProgress' })], { waitForTitle: null });
+
+    await waitFor(() => expect(screen.getByTestId('task-calendar-task-101').className).toContain('border-blue-200'));
+    expect(screen.getByTestId('task-color-mode-status').getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('filters tasks authored by the current user from the quick controls', async () => {
     await renderJournal([
       createTask(),

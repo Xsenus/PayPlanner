@@ -19,6 +19,7 @@ import {
   Mail,
   MessageSquare,
   MoreHorizontal,
+  Palette,
   Phone,
   Plus,
   Search,
@@ -70,6 +71,7 @@ type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 type PeriodMode = 'day' | 'week' | 'month';
 type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
+type TaskCalendarColorMode = 'smart' | 'priority' | 'status';
 type TaskPlanningReportFormat = 'html' | 'word' | 'pdf';
 type ModalState = { mode: 'create' | 'edit' | 'view'; task?: TaskJournalItem; dueAt?: string } | null;
 type TaskJournalMode = 'journal' | 'approvals';
@@ -86,6 +88,7 @@ type TaskForm = TaskJournalUpsertPayload & { dueAt: string; approvalDueAt: strin
 
 type TaskJournalFilterPreferences = {
   viewMode: ViewMode;
+  calendarColorMode: TaskCalendarColorMode;
   quickFilter: QuickFilter;
   metricFilter: MetricFilter;
   search: string;
@@ -135,6 +138,12 @@ const PRIORITY_OPTIONS: Array<{ value: TaskJournalPriority; label: string }> = [
   { value: 'normal', label: 'Обычный' },
   { value: 'high', label: 'Высокий' },
   { value: 'urgent', label: 'Срочно' },
+];
+
+const TASK_CALENDAR_COLOR_MODE_OPTIONS: Array<{ value: TaskCalendarColorMode; label: string }> = [
+  { value: 'smart', label: 'Риски' },
+  { value: 'priority', label: 'Приоритет' },
+  { value: 'status', label: 'Статус' },
 ];
 
 const BULK_STATUS_OPTIONS = STATUS_OPTIONS.filter((option) => option.value !== 'approved' && option.value !== 'done');
@@ -187,6 +196,7 @@ function getDefaultQuickFilter(userId: number | null, mode: TaskJournalMode = 'j
 function createDefaultFilterPreferences(userId: number | null, mode: TaskJournalMode = 'journal', viewMode: ViewMode = 'list'): TaskJournalFilterPreferences {
   return {
     viewMode,
+    calendarColorMode: 'smart',
     quickFilter: getDefaultQuickFilter(userId, mode),
     metricFilter: 'none',
     search: '',
@@ -206,6 +216,10 @@ function isQuickFilter(value: unknown): value is QuickFilter {
 
 function isViewMode(value: unknown): value is ViewMode {
   return value === 'list' || value === 'board' || value === 'calendar' || value === 'timeline';
+}
+
+function isTaskCalendarColorMode(value: unknown): value is TaskCalendarColorMode {
+  return value === 'smart' || value === 'priority' || value === 'status';
 }
 
 function isMetricFilter(value: unknown): value is MetricFilter {
@@ -275,6 +289,7 @@ function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJourn
     const parsed = JSON.parse(raw) as Partial<TaskJournalFilterPreferences>;
     return {
       viewMode: isViewMode(parsed.viewMode) ? parsed.viewMode : defaults.viewMode,
+      calendarColorMode: isTaskCalendarColorMode(parsed.calendarColorMode) ? parsed.calendarColorMode : defaults.calendarColorMode,
       quickFilter: isQuickFilter(parsed.quickFilter) ? parsed.quickFilter : defaults.quickFilter,
       metricFilter: isMetricFilter(parsed.metricFilter) ? parsed.metricFilter : defaults.metricFilter,
       search: typeof parsed.search === 'string' ? parsed.search : defaults.search,
@@ -834,6 +849,53 @@ function statusClass(status: TaskJournalStatus) {
   }
 }
 
+function taskCalendarPriorityTone(priority: TaskJournalPriority) {
+  switch (priority) {
+    case 'urgent':
+      return 'border-rose-200 bg-rose-50 text-rose-900';
+    case 'high':
+      return 'border-amber-200 bg-amber-50 text-amber-900';
+    case 'low':
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+    default:
+      return 'border-sky-200 bg-sky-50 text-sky-900';
+  }
+}
+
+function taskCalendarStatusTone(status: TaskJournalStatus) {
+  switch (status) {
+    case 'done':
+    case 'approved':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-900';
+    case 'cancelled':
+      return 'border-slate-200 bg-slate-100 text-slate-600';
+    case 'waiting':
+      return 'border-amber-200 bg-amber-50 text-amber-900';
+    case 'onApproval':
+      return 'border-violet-200 bg-violet-50 text-violet-900';
+    case 'revision':
+      return 'border-orange-200 bg-orange-50 text-orange-900';
+    case 'overdueApproval':
+      return 'border-rose-200 bg-rose-50 text-rose-900';
+    case 'inProgress':
+      return 'border-blue-200 bg-blue-50 text-blue-900';
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-900';
+  }
+}
+
+function getTaskCalendarCardTone(task: TaskJournalItem, colorMode: TaskCalendarColorMode) {
+  if (colorMode === 'priority') {
+    return taskCalendarPriorityTone(task.priority);
+  }
+
+  if (colorMode === 'status') {
+    return taskCalendarStatusTone(task.status);
+  }
+
+  return 'border-slate-100 bg-slate-50 text-slate-900';
+}
+
 function formatTimeOnly(value: Date | string) {
   const date = typeof value === 'string' ? new Date(value) : value;
   return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -929,13 +991,52 @@ function buildTaskConflictTaskIds(tasks: TaskJournalItem[]) {
   return conflictIds;
 }
 
-function getTimelineTaskTone(task: TaskJournalItem, currentUserId: number | null, assigneeFilter: string) {
+function getTimelineTaskTone(
+  task: TaskJournalItem,
+  currentUserId: number | null,
+  assigneeFilter: string,
+  colorMode: TaskCalendarColorMode,
+) {
   const dueTime = new Date(task.dueAt).getTime();
   const isOverdue = isTaskJournalActive(task.status) && Number.isFinite(dueTime) && dueTime < Date.now();
   const isSelectedAssignee =
     assigneeFilter !== 'all' &&
     (String(task.assigneeUserId ?? '') === assigneeFilter || hasAssigneeParticipant(task, assigneeFilter));
   const isOwnTask = isSelectedAssignee || isTaskExecutorForUser(task, currentUserId);
+
+  if (colorMode === 'priority') {
+    switch (task.priority) {
+      case 'urgent':
+        return { label: 'Срочный приоритет', className: 'border-rose-600 bg-rose-600 text-white', dotClassName: 'bg-rose-600' };
+      case 'high':
+        return { label: 'Высокий приоритет', className: 'border-orange-600 bg-orange-500 text-white', dotClassName: 'bg-orange-500' };
+      case 'low':
+        return { label: 'Низкий приоритет', className: 'border-slate-500 bg-slate-500 text-white', dotClassName: 'bg-slate-500' };
+      default:
+        return { label: 'Обычный приоритет', className: 'border-sky-600 bg-sky-600 text-white', dotClassName: 'bg-sky-600' };
+    }
+  }
+
+  if (colorMode === 'status') {
+    switch (task.status) {
+      case 'done':
+      case 'approved':
+        return { label: 'Готово/согласовано', className: 'border-emerald-700 bg-emerald-600 text-white', dotClassName: 'bg-emerald-600' };
+      case 'cancelled':
+        return { label: 'Отменено', className: 'border-slate-500 bg-slate-500 text-white', dotClassName: 'bg-slate-500' };
+      case 'waiting':
+        return { label: 'Ожидание', className: 'border-amber-600 bg-amber-500 text-white', dotClassName: 'bg-amber-500' };
+      case 'onApproval':
+      case 'revision':
+        return { label: 'Согласование/доработка', className: 'border-violet-600 bg-violet-600 text-white', dotClassName: 'bg-violet-600' };
+      case 'overdueApproval':
+        return { label: 'Просрочено на согласовании', className: 'border-rose-600 bg-rose-600 text-white', dotClassName: 'bg-rose-600' };
+      case 'inProgress':
+        return { label: 'В работе', className: 'border-blue-700 bg-blue-600 text-white', dotClassName: 'bg-blue-600' };
+      default:
+        return { label: 'Новые', className: 'border-sky-600 bg-sky-600 text-white', dotClassName: 'bg-sky-600' };
+    }
+  }
 
   if (task.status === 'done' || task.status === 'cancelled') {
     return {
@@ -1189,6 +1290,7 @@ export function TaskJournal({
   const [dateFromFilter, setDateFromFilter] = useState(initialPreferences.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
+  const [calendarColorMode, setCalendarColorMode] = useState<TaskCalendarColorMode>(initialPreferences.calendarColorMode);
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
   const [statusFilter, setStatusFilter] = useState<TaskJournalStatus | 'active' | 'all'>(initialPreferences.statusFilter);
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
@@ -1231,6 +1333,7 @@ export function TaskJournal({
     skipNextFilterSaveRef.current = true;
     setFilterOwnerKey(nextOwnerKey);
     setViewMode(nextPreferences.viewMode);
+    setCalendarColorMode(nextPreferences.calendarColorMode);
     setQuickFilter(nextPreferences.quickFilter);
     setMetricFilter(nextPreferences.metricFilter);
     setSearch(nextPreferences.search);
@@ -1251,6 +1354,7 @@ export function TaskJournal({
 
     writeTaskJournalFilterPreferences(currentUserId, {
       viewMode,
+      calendarColorMode,
       quickFilter,
       metricFilter,
       search,
@@ -1262,7 +1366,7 @@ export function TaskJournal({
       priorityFilter,
       periodMode,
     }, mode);
-  }, [assigneeFilter, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
+  }, [assigneeFilter, calendarColorMode, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
@@ -2528,6 +2632,25 @@ export function TaskJournal({
               </div>
             ) : null}
 
+            <div className="flex rounded-xl bg-slate-100 p-1" aria-label="Цветовая схема календаря задач">
+              <span className="inline-flex items-center gap-1 px-2 text-sm font-semibold text-slate-500">
+                <Palette className="h-4 w-4" />
+                Цвет
+              </span>
+              {TASK_CALENDAR_COLOR_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setCalendarColorMode(option.value)}
+                  aria-pressed={calendarColorMode === option.value}
+                  data-testid={`task-color-mode-${option.value}`}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${calendarColorMode === option.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
             <div className="flex rounded-xl bg-slate-100 p-1">
               <button
                 type="button"
@@ -2654,6 +2777,7 @@ export function TaskJournal({
             <TaskCalendar
               tasks={filteredTasks}
               mode={periodMode}
+              colorMode={calendarColorMode}
               anchorDate={calendarAnchorDate}
               selectedDate={calendarSelectedDate}
               highlightedTaskId={highlightedTaskId}
@@ -2687,6 +2811,7 @@ export function TaskJournal({
             />
             <TaskTimelineCalendar
               tasks={filteredTasks}
+              colorMode={calendarColorMode}
               anchorDate={calendarAnchorDate}
               highlightedTaskId={highlightedTaskId}
               loading={loading}
@@ -3426,6 +3551,7 @@ function formatCaseCalendarEventDate(event: CaseCalendarEvent) {
 
 function TaskTimelineCalendar({
   tasks,
+  colorMode,
   anchorDate,
   highlightedTaskId,
   loading,
@@ -3444,6 +3570,7 @@ function TaskTimelineCalendar({
   movingTaskId,
 }: {
   tasks: TaskJournalItem[];
+  colorMode: TaskCalendarColorMode;
   anchorDate: Date;
   highlightedTaskId: number | null;
   loading: boolean;
@@ -3544,14 +3671,30 @@ function TaskTimelineCalendar({
     [timelineDayLayouts, visibleDays],
   );
 
-  const legend = [
-    { label: 'Выполненные/отмененные', dotClassName: 'bg-slate-500' },
-    { label: 'Мои / выбранный исполнитель', dotClassName: 'bg-emerald-600' },
-    { label: 'Высокий приоритет', dotClassName: 'bg-orange-500' },
-    { label: 'Согласование/доработка', dotClassName: 'bg-violet-600' },
-    { label: 'Просроченные', dotClassName: 'bg-rose-600' },
-    { label: 'Остальные задачи', dotClassName: 'bg-sky-600' },
-  ];
+  const legend = colorMode === 'priority'
+    ? [
+      { label: 'Срочный приоритет', dotClassName: 'bg-rose-600' },
+      { label: 'Высокий приоритет', dotClassName: 'bg-orange-500' },
+      { label: 'Обычный приоритет', dotClassName: 'bg-sky-600' },
+      { label: 'Низкий приоритет', dotClassName: 'bg-slate-500' },
+    ]
+    : colorMode === 'status'
+      ? [
+        { label: 'Новые', dotClassName: 'bg-sky-600' },
+        { label: 'В работе', dotClassName: 'bg-blue-600' },
+        { label: 'Ожидание', dotClassName: 'bg-amber-500' },
+        { label: 'Согласование/доработка', dotClassName: 'bg-violet-600' },
+        { label: 'Готово/согласовано', dotClassName: 'bg-emerald-600' },
+        { label: 'Отменено', dotClassName: 'bg-slate-500' },
+      ]
+      : [
+        { label: 'Выполненные/отмененные', dotClassName: 'bg-slate-500' },
+        { label: 'Мои / выбранный исполнитель', dotClassName: 'bg-emerald-600' },
+        { label: 'Высокий приоритет', dotClassName: 'bg-orange-500' },
+        { label: 'Согласование/доработка', dotClassName: 'bg-violet-600' },
+        { label: 'Просроченные', dotClassName: 'bg-rose-600' },
+        { label: 'Остальные задачи', dotClassName: 'bg-sky-600' },
+      ];
 
   const now = new Date();
   const currentTimeTop =
@@ -3718,7 +3861,7 @@ function TaskTimelineCalendar({
                       ) : null}
 
                       {placements.map(({ task, top, height, lane, laneCount }) => {
-                        const tone = getTimelineTaskTone(task, currentUserId, assigneeFilter);
+                        const tone = getTimelineTaskTone(task, currentUserId, assigneeFilter, colorMode);
                         const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const start = new Date(task.dueAt);
                         const end = new Date(start.getTime() + normalizeTaskDuration(task.plannedDurationMinutes) * 60 * 1000);
@@ -3802,6 +3945,7 @@ function CalendarTaskTooltip({ task }: { task: TaskJournalItem }) {
 function TaskCalendar({
   tasks,
   mode,
+  colorMode,
   anchorDate,
   selectedDate,
   highlightedTaskId,
@@ -3824,6 +3968,7 @@ function TaskCalendar({
 }: {
   tasks: TaskJournalItem[];
   mode: PeriodMode;
+  colorMode: TaskCalendarColorMode;
   anchorDate: Date;
   selectedDate: Date;
   highlightedTaskId: number | null;
@@ -4130,6 +4275,7 @@ function TaskCalendar({
                       {dayTasks.slice(0, mode === 'day' ? 8 : 3).map((task) => {
                         const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const hasTimeConflict = conflictTaskIds.has(task.id);
+                        const calendarCardTone = getTaskCalendarCardTone(task, colorMode);
                         const tooltipTitle = [
                           ...buildTaskTooltipLines(task),
                           ...(hasTimeConflict ? ['Конфликт: задача пересекается по времени с другой задачей исполнителя.'] : []),
@@ -4159,7 +4305,7 @@ function TaskCalendar({
                                   ? 'border-blue-300 bg-blue-50'
                                   : hasTimeConflict
                                     ? 'border-rose-200 bg-rose-50'
-                                    : 'border-slate-100 bg-slate-50'
+                                    : calendarCardTone
                             }`}
                           >
                             <span className="block truncate font-semibold text-slate-900">{task.title}</span>
