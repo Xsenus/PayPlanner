@@ -1308,6 +1308,10 @@ public class TasksControllerTests
         Assert.Contains("SUMMARY:Проверить документы", content);
         Assert.Contains("DTSTART:20260510T090000Z", content);
         Assert.Contains("DTEND:20260510T103000Z", content);
+        Assert.Contains("BEGIN:VALARM", content);
+        Assert.Contains("DESCRIPTION:Напоминание: Проверить документы", content);
+        Assert.Contains("TRIGGER:-PT1H", content);
+        Assert.Contains("TRIGGER:-PT15M", content);
     }
 
     [Fact]

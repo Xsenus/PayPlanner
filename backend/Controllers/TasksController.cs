@@ -3302,11 +3302,22 @@ public class TasksController : ControllerBase
             builder.AppendLine($"SUMMARY:{EscapeIcsText(task.Title)}");
             builder.AppendLine($"DESCRIPTION:{EscapeIcsText(description)}");
             builder.AppendLine($"STATUS:{(task.Status == "done" ? "COMPLETED" : "CONFIRMED")}");
+            AppendIcsAlarm(builder, task, "PT1H");
+            AppendIcsAlarm(builder, task, "PT15M");
             builder.AppendLine("END:VEVENT");
         }
 
         builder.AppendLine("END:VCALENDAR");
         return builder.ToString().ReplaceLineEndings("\r\n");
+    }
+
+    private static void AppendIcsAlarm(StringBuilder builder, TaskJournalItem task, string triggerBeforeStart)
+    {
+        builder.AppendLine("BEGIN:VALARM");
+        builder.AppendLine("ACTION:DISPLAY");
+        builder.AppendLine($"DESCRIPTION:{EscapeIcsText($"Напоминание: {task.Title}")}");
+        builder.AppendLine($"TRIGGER:-{triggerBeforeStart}");
+        builder.AppendLine("END:VALARM");
     }
 
     private static string FormatIcsDate(DateTime value)
