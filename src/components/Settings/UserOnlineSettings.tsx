@@ -60,6 +60,7 @@ export function UserOnlineSettings() {
     setError(null);
 
     try {
+      await apiService.sendUserActivityHeartbeat();
       const response = await apiService.getUsersOnline();
       setData(response);
     } catch (err) {

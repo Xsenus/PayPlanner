@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -121,6 +123,57 @@ public class UserActivityControllerOnlineTests
 
         var inactive = Assert.Single(summary.Users, user => user.UserId == inactiveUser.Id);
         Assert.False(inactive.IsOnline);
+    }
+
+    [Fact]
+    public async Task HeartbeatAsync_UpdatesUserPresenceWithoutActivityLog()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "admin", Description = "Administrator" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        var user = new User
+        {
+            Email = "current@example.com",
+            FullName = "Current User",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())],
+                    "test"))
+            }
+        };
+        controller.ControllerContext.HttpContext.Request.Headers.UserAgent = "test-browser";
+        controller.ControllerContext.HttpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("127.0.0.1");
+
+        var heartbeatResult = await controller.HeartbeatAsync(CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(heartbeatResult);
+
+        var updatedUser = await db.Users.AsNoTracking().SingleAsync(item => item.Id == user.Id);
+        Assert.NotNull(updatedUser.LastActivityAt);
+        Assert.Equal("heartbeat", updatedUser.LastActivityAction);
+        Assert.Equal("session", updatedUser.LastActivitySection);
+        Assert.Equal("127.0.0.1", updatedUser.LastActivityIpAddress);
+        Assert.Equal("test-browser", updatedUser.LastActivityUserAgent);
+        Assert.Empty(await db.UserActivityLogs.AsNoTracking().ToListAsync());
+
+        var summary = AssertOk<UserOnlineSummaryDto>(await controller.GetOnlineAsync(CancellationToken.None));
+        var current = Assert.Single(summary.Users, item => item.UserId == user.Id);
+        Assert.True(current.IsOnline);
+        Assert.Equal("heartbeat", current.LastAction);
     }
 
     private static UserActivityController CreateController(PaymentContext db)

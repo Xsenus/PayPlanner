@@ -35,6 +35,13 @@ public class User
     public bool IsApproved { get; set; } = false;
     public DateTime? ApprovedAt { get; set; }
     public int? ApprovedByUserId { get; set; }
+    public DateTime? LastActivityAt { get; set; }
+    public DateTime? LastLoginAt { get; set; }
+    public DateTime? LastLogoutAt { get; set; }
+    public string? LastActivityAction { get; set; }
+    public string? LastActivitySection { get; set; }
+    public string? LastActivityIpAddress { get; set; }
+    public string? LastActivityUserAgent { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

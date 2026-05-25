@@ -6567,6 +6567,31 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
+                    b.Property<string>("LastActivityAction")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTime?>("LastActivityAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastActivityIpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("LastActivitySection")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("LastActivityUserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("LastLoginAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("LastLogoutAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("LastName")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -6652,6 +6677,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("IsExternalContractor")
                         .HasDatabaseName("idx_users_isexternalcontractor");
+
+                    b.HasIndex("LastActivityAt")
+                        .HasDatabaseName("idx_users_last_activity");
+
+                    b.HasIndex("LastLoginAt")
+                        .HasDatabaseName("idx_users_last_login");
 
                     b.HasIndex("RoleId")
                         .HasDatabaseName("idx_users_role");

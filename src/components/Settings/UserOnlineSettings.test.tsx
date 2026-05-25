@@ -7,12 +7,15 @@ import { UserOnlineSettings } from './UserOnlineSettings';
 vi.mock('../../services/api', () => ({
   apiService: {
     getUsersOnline: vi.fn(),
+    sendUserActivityHeartbeat: vi.fn(),
   },
 }));
 
 describe('UserOnlineSettings', () => {
   beforeEach(() => {
     vi.mocked(apiService.getUsersOnline).mockReset();
+    vi.mocked(apiService.sendUserActivityHeartbeat).mockReset();
+    vi.mocked(apiService.sendUserActivityHeartbeat).mockResolvedValue(undefined);
   });
 
   it('shows online users and last login data', async () => {
@@ -70,6 +73,7 @@ describe('UserOnlineSettings', () => {
 
     await waitFor(() => {
       expect(apiService.getUsersOnline).toHaveBeenCalledTimes(1);
+      expect(apiService.sendUserActivityHeartbeat).toHaveBeenCalledTimes(1);
     });
   });
 

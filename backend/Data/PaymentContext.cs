@@ -1807,6 +1807,10 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Messenger).HasMaxLength(100);
             entity.Property(e => e.Viber).HasMaxLength(100);
             entity.Property(e => e.Department).HasMaxLength(120);
+            entity.Property(e => e.LastActivityAction).HasMaxLength(160);
+            entity.Property(e => e.LastActivitySection).HasMaxLength(160);
+            entity.Property(e => e.LastActivityIpAddress).HasMaxLength(64);
+            entity.Property(e => e.LastActivityUserAgent).HasMaxLength(512);
 
             // --- Даты как date ---
             entity.Property(e => e.DateOfBirth).HasColumnType("date");
@@ -1847,6 +1851,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_users_created");
             entity.HasIndex(e => e.UpdatedAt).HasDatabaseName("idx_users_updated");
             entity.HasIndex(e => e.ApprovedAt).HasDatabaseName("idx_users_approvedAt");
+            entity.HasIndex(e => e.LastActivityAt).HasDatabaseName("idx_users_last_activity");
+            entity.HasIndex(e => e.LastLoginAt).HasDatabaseName("idx_users_last_login");
             entity.HasIndex(e => e.IsEmployee).HasDatabaseName("idx_users_isemployee");
             entity.HasIndex(e => e.IsExternalContractor).HasDatabaseName("idx_users_isexternalcontractor");
             entity.HasIndex(e => e.DepartmentId).HasDatabaseName("idx_users_department_id");

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -147,38 +148,38 @@ public class UserActivityController : ControllerBase
                 Department = user.DepartmentDictionary != null ? user.DepartmentDictionary.Name : user.Department,
                 IsActive = user.IsActive,
                 IsApproved = user.IsApproved,
-                LastActivityAt = _context.UserActivityLogs
+                LastActivityAt = user.LastActivityAt ?? _context.UserActivityLogs
                     .Where(log => log.UserId == user.Id)
                     .Max(log => (DateTime?)log.CreatedAt),
-                LastLoginAt = _context.UserActivityLogs
+                LastLoginAt = user.LastLoginAt ?? _context.UserActivityLogs
                     .Where(log => log.UserId == user.Id
                         && (log.Category == "auth" || log.Category == "Auth")
                         && (log.Action == "login" || log.Action == "Login"))
                     .Max(log => (DateTime?)log.CreatedAt),
-                LastLogoutAt = _context.UserActivityLogs
+                LastLogoutAt = user.LastLogoutAt ?? _context.UserActivityLogs
                     .Where(log => log.UserId == user.Id
                         && (log.Category == "auth" || log.Category == "Auth")
                         && (log.Action == "logout" || log.Action == "Logout"))
                     .Max(log => (DateTime?)log.CreatedAt),
-                LastAction = _context.UserActivityLogs
+                LastAction = user.LastActivityAction ?? _context.UserActivityLogs
                     .Where(log => log.UserId == user.Id)
                     .OrderByDescending(log => log.CreatedAt)
                     .ThenByDescending(log => log.Id)
                     .Select(log => log.Action)
                     .FirstOrDefault(),
-                LastSection = _context.UserActivityLogs
+                LastSection = user.LastActivitySection ?? _context.UserActivityLogs
                     .Where(log => log.UserId == user.Id)
                     .OrderByDescending(log => log.CreatedAt)
                     .ThenByDescending(log => log.Id)
                     .Select(log => log.Section)
                     .FirstOrDefault(),
-                LastIpAddress = _context.UserActivityLogs
+                LastIpAddress = user.LastActivityIpAddress ?? _context.UserActivityLogs
                     .Where(log => log.UserId == user.Id)
                     .OrderByDescending(log => log.CreatedAt)
                     .ThenByDescending(log => log.Id)
                     .Select(log => log.IpAddress)
                     .FirstOrDefault(),
-                LastUserAgent = _context.UserActivityLogs
+                LastUserAgent = user.LastActivityUserAgent ?? _context.UserActivityLogs
                     .Where(log => log.UserId == user.Id)
                     .OrderByDescending(log => log.CreatedAt)
                     .ThenByDescending(log => log.Id)
@@ -276,6 +277,8 @@ public class UserActivityController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateAsync([FromBody] CreateUserActivityLogRequest request, CancellationToken cancellationToken)
     {
+        await UpdateCurrentUserPresenceAsync(request.Action, request.Section ?? request.Category, cancellationToken);
+
         if (!(await _activityService.GetSettingsAsync(cancellationToken)).IsEnabled)
         {
             return NoContent();
@@ -307,21 +310,57 @@ public class UserActivityController : ControllerBase
     [HttpPost("heartbeat")]
     public async Task<IActionResult> HeartbeatAsync(CancellationToken cancellationToken)
     {
-        if (!(await _activityService.GetSettingsAsync(cancellationToken)).IsEnabled)
+        await UpdateCurrentUserPresenceAsync("heartbeat", "session", cancellationToken);
+        return NoContent();
+    }
+
+    private async Task UpdateCurrentUserPresenceAsync(string? action, string? section, CancellationToken cancellationToken)
+    {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
         {
-            return NoContent();
+            return;
         }
 
-        await _activityService.TryWriteAsync(new ActivityLogEntry
-        {
-            Category = "session",
-            Action = "heartbeat",
-            Section = "session",
-            Description = "Пользователь активен в приложении.",
-            Status = UserActivityStatus.Info
-        }, cancellationToken);
+        var normalizedAction = Truncate(string.IsNullOrWhiteSpace(action) ? "activity" : action.Trim(), 160);
+        var normalizedSection = Truncate(string.IsNullOrWhiteSpace(section) ? null : section.Trim(), 160);
+        var now = DateTime.UtcNow;
+        var ip = Truncate(ResolveIpAddress(), 64);
+        var userAgent = Truncate(Request.Headers.UserAgent.FirstOrDefault(), 512);
+        var isLogin = string.Equals(normalizedAction, "login", StringComparison.OrdinalIgnoreCase);
+        var isLogout = string.Equals(normalizedAction, "logout", StringComparison.OrdinalIgnoreCase);
 
-        return NoContent();
+        await _context.Users
+            .Where(user => user.Id == userId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(user => user.LastActivityAt, now)
+                .SetProperty(user => user.LastActivityAction, normalizedAction)
+                .SetProperty(user => user.LastActivitySection, normalizedSection)
+                .SetProperty(user => user.LastActivityIpAddress, ip)
+                .SetProperty(user => user.LastActivityUserAgent, userAgent)
+                .SetProperty(user => user.LastLoginAt, user => isLogin ? now : user.LastLoginAt)
+                .SetProperty(user => user.LastLogoutAt, user => isLogout ? now : user.LastLogoutAt),
+                cancellationToken);
+    }
+
+    private string? ResolveIpAddress()
+    {
+        var forwardedFor = Request.Headers["X-Forwarded-For"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(forwardedFor))
+        {
+            return forwardedFor.Split(',').FirstOrDefault()?.Trim();
+        }
+
+        return HttpContext.Connection.RemoteIpAddress?.ToString();
+    }
+
+    private static string? Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return value[..maxLength];
     }
 
     [HttpGet("admin/maintenance")]

@@ -34,6 +34,9 @@ namespace PayPlanner.Api.Models.Responses
         public bool IsApproved { get; set; }
         public bool IsProtectedUser { get; set; }
         public DateTime? ApprovedAt { get; set; }
+        public DateTime? LastActivityAt { get; set; }
+        public DateTime? LastLoginAt { get; set; }
+        public DateTime? LastLogoutAt { get; set; }
         public DateTime CreatedAt { get; set; }
         public int? CreatedByUserId { get; set; }
         public string? CreatedByUserName { get; set; }

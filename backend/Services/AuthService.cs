@@ -183,6 +183,9 @@ public partial class AuthService
             IsApproved = user.IsApproved,
             IsProtectedUser = IsProtectedSystemUser(user),
             ApprovedAt = user.ApprovedAt,
+            LastActivityAt = user.LastActivityAt,
+            LastLoginAt = user.LastLoginAt,
+            LastLogoutAt = user.LastLogoutAt,
             CreatedAt = user.CreatedAt,
             CreatedByUserId = userAudit.CreatedByUserId,
             CreatedByUserName = userAudit.CreatedByUserName,
@@ -230,6 +233,8 @@ public partial class AuthService
 
     public async Task<LoginResponse> BuildLoginResponseAsync(User user, CancellationToken cancellationToken = default)
     {
+        await MarkUserLoginAsync(user, cancellationToken);
+
         if (user.Role is null)
         {
             await _context.Entry(user).Reference(x => x.Role).LoadAsync(cancellationToken);
@@ -247,6 +252,25 @@ public partial class AuthService
             Token = GenerateJwtToken(user),
             User = MapToDto(user)
         };
+    }
+
+    private async Task MarkUserLoginAsync(User user, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+
+        await _context.Users
+            .Where(x => x.Id == user.Id)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(x => x.LastLoginAt, now)
+                .SetProperty(x => x.LastActivityAt, now)
+                .SetProperty(x => x.LastActivityAction, (string?)"login")
+                .SetProperty(x => x.LastActivitySection, (string?)"auth"),
+                cancellationToken);
+
+        user.LastLoginAt = now;
+        user.LastActivityAt = now;
+        user.LastActivityAction = "login";
+        user.LastActivitySection = "auth";
     }
 
     public async Task<int> GetDefaultUserRoleIdAsync(CancellationToken cancellationToken = default)
@@ -629,6 +653,8 @@ public partial class AuthService
             user.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
         }
+
+        await MarkUserLoginAsync(user, CancellationToken.None);
 
         return new LoginResponse
         {

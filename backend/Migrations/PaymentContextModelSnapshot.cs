@@ -6411,6 +6411,31 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
 
+                    b.Property<string>("LastActivityAction")
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastActivityAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastActivityIpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastActivitySection")
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastActivityUserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastLoginAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastLogoutAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("LastName")
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
@@ -6496,6 +6521,12 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsExternalContractor")
                         .HasDatabaseName("idx_users_isexternalcontractor");
+
+                    b.HasIndex("LastActivityAt")
+                        .HasDatabaseName("idx_users_last_activity");
+
+                    b.HasIndex("LastLoginAt")
+                        .HasDatabaseName("idx_users_last_login");
 
                     b.HasIndex("RoleId")
                         .HasDatabaseName("idx_users_role");
