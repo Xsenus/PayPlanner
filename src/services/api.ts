@@ -3411,6 +3411,15 @@ export class ApiService {
     return this.request<ClientCaseCourtSyncLog[]>(`/v2/cases/${caseId}/court-sync/logs`);
   }
 
+  async getCourtSyncJournal(params: { take?: number; status?: string; search?: string } = {}) {
+    const query = new URLSearchParams();
+    if (params.take) query.set('take', String(params.take));
+    if (params.status) query.set('status', params.status);
+    if (params.search) query.set('search', params.search);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return this.request<ClientCaseCourtSyncJournalEntry[]>(`/v2/cases/court-sync/logs${suffix}`);
+  }
+
   async getCaseCourtDirectory(includeInactive = false) {
     const query = includeInactive ? '?includeInactive=true' : '';
     return this.request<ClientCaseCourt[]>(`/v2/cases/court-directory${query}`);
@@ -4899,6 +4908,7 @@ import type {
   ClientCaseAccessRequestResolution,
   ClientCaseActivity,
   ClientCaseConversationEntry,
+  ClientCaseCourtSyncJournalEntry,
   ClientCaseCourtSyncLog,
   ClientCaseCourtSyncRun,
   ClientCaseDocument,

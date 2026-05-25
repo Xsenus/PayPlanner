@@ -12,6 +12,7 @@ import { BankDirectorySettings } from './BankDirectorySettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
 import { ContractDocumentTemplateSettings } from './ContractDocumentTemplateSettings';
+import { CourtSyncJournalSettings } from './CourtSyncJournalSettings';
 import { FeatureFlagSettings } from './FeatureFlagSettings';
 import { AppVersionSettings } from './AppVersionSettings';
 import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettings';
@@ -1519,6 +1520,8 @@ export function AppSettings() {
                 </div>
 
                 <FeatureFlagSettings />
+
+                <CourtSyncJournalSettings />
 
                 <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
                   <div className="mb-6">

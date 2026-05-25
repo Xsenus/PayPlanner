@@ -1093,6 +1093,22 @@ export interface ClientCaseCourtSyncLog {
   actorName?: string | null;
 }
 
+export interface ClientCaseCourtSyncJournalEntry {
+  id: string;
+  logId: number;
+  clientCaseId: number;
+  clientCaseTitle: string;
+  caseNumber?: string | null;
+  ownerName?: string | null;
+  courtName?: string | null;
+  courtCaseNumber?: string | null;
+  courtUrl?: string | null;
+  status: ClientCaseCourtSyncLog['status'];
+  message: string;
+  occurredAt?: string | null;
+  actorName?: string | null;
+}
+
 export type ClientCaseRelatedPartySourceType = 'client' | 'externalContact' | 'legalEntity';
 
 export interface ClientCaseRelatedParty {

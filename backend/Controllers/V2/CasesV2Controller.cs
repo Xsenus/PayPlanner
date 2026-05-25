@@ -5426,6 +5426,65 @@ public class CasesV2Controller : ControllerBase
         return Ok(logs);
     }
 
+    [HttpGet("court-sync/logs")]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseCourtSyncJournalEntryDto>>> GetCourtSyncJournal(
+        [FromQuery] int take = 50,
+        [FromQuery] string? status = null,
+        [FromQuery] string? search = null,
+        CancellationToken ct = default)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var limit = Math.Clamp(take, 1, 200);
+        var statusFilter = NormalizeOptional(status);
+        var searchFilter = NormalizeOptional(search);
+
+        var caseRows = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .AsNoTracking()
+            .Where(item => item.EventHistory != null && item.EventHistory != string.Empty)
+            .Select(item => new CourtSyncJournalCaseRow(
+                item.Id,
+                item.Title,
+                item.CaseNumber,
+                item.Client != null
+                    ? item.Client.Name
+                    : item.LegalEntity != null
+                        ? ((item.LegalEntity.ShortName != null && item.LegalEntity.ShortName != string.Empty)
+                            ? item.LegalEntity.ShortName
+                            : item.LegalEntity.FullName ?? string.Empty)
+                        : string.Empty,
+                item.CourtName,
+                item.CourtCaseNumber,
+                item.CourtUrl,
+                item.EventHistory))
+            .ToListAsync(ct);
+
+        var entries = caseRows
+            .SelectMany(row => SplitCaseHistory(row.EventHistory)
+                .Select((line, index) => new { row, line, index })
+                .Where(item => IsCourtSyncHistoryLine(item.line))
+                .Select(item => MapCourtSyncJournalEntry(item.row, item.line, item.index)))
+            .Where(item => string.IsNullOrWhiteSpace(statusFilter) || string.Equals(item.Status, statusFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(item => string.IsNullOrWhiteSpace(searchFilter) || CourtSyncJournalEntryMatches(item, searchFilter))
+            .OrderByDescending(item => item.OccurredAt ?? DateTime.MinValue)
+            .ThenByDescending(item => item.ClientCaseId)
+            .ThenByDescending(item => item.LogId)
+            .Take(limit)
+            .ToList();
+
+        return Ok(entries);
+    }
+
     [HttpPost("{id:int}/court-sync/run")]
     public async Task<ActionResult<ClientCaseCourtSyncRunDto>> RunCourtSync(int id, CancellationToken ct)
     {
@@ -9251,6 +9310,45 @@ public class CasesV2Controller : ControllerBase
         };
     }
 
+    private static ClientCaseCourtSyncJournalEntryDto MapCourtSyncJournalEntry(CourtSyncJournalCaseRow row, string line, int index)
+    {
+        var log = MapCourtSyncLog(row.ClientCaseId, line, index);
+        return new ClientCaseCourtSyncJournalEntryDto
+        {
+            Id = $"{row.ClientCaseId}-{log.Id}",
+            LogId = log.Id,
+            ClientCaseId = row.ClientCaseId,
+            ClientCaseTitle = row.Title,
+            CaseNumber = row.CaseNumber,
+            OwnerName = row.OwnerName,
+            CourtName = row.CourtName,
+            CourtCaseNumber = row.CourtCaseNumber,
+            CourtUrl = row.CourtUrl,
+            Status = log.Status,
+            Message = log.Message,
+            OccurredAt = log.OccurredAt,
+            ActorName = log.ActorName,
+        };
+    }
+
+    private static bool CourtSyncJournalEntryMatches(ClientCaseCourtSyncJournalEntryDto entry, string search)
+    {
+        var values = new[]
+        {
+            entry.ClientCaseTitle,
+            entry.CaseNumber,
+            entry.OwnerName,
+            entry.CourtName,
+            entry.CourtCaseNumber,
+            entry.CourtUrl,
+            entry.Status,
+            entry.Message,
+            entry.ActorName ?? string.Empty,
+        };
+
+        return values.Any(value => value.Contains(search, StringComparison.OrdinalIgnoreCase));
+    }
+
     private static bool TryParseCaseHistoryTimestamp(string line, out DateTime timestamp)
     {
         timestamp = default;
@@ -10032,6 +10130,23 @@ public class CasesV2Controller : ControllerBase
         public string? ActorName { get; set; }
     }
 
+    public sealed class ClientCaseCourtSyncJournalEntryDto
+    {
+        public string Id { get; set; } = string.Empty;
+        public int LogId { get; set; }
+        public int ClientCaseId { get; set; }
+        public string ClientCaseTitle { get; set; } = string.Empty;
+        public string CaseNumber { get; set; } = string.Empty;
+        public string OwnerName { get; set; } = string.Empty;
+        public string CourtName { get; set; } = string.Empty;
+        public string CourtCaseNumber { get; set; } = string.Empty;
+        public string CourtUrl { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public DateTime? OccurredAt { get; set; }
+        public string? ActorName { get; set; }
+    }
+
     public sealed class UpdateCaseDocumentRequest
     {
         public string? DocumentType { get; set; }
@@ -10178,6 +10293,16 @@ public class CasesV2Controller : ControllerBase
         int CreatedCourtParties,
         int CreatedCourtActDocuments,
         int CreatedProceduralDeadlines);
+
+    private readonly record struct CourtSyncJournalCaseRow(
+        int ClientCaseId,
+        string Title,
+        string CaseNumber,
+        string OwnerName,
+        string CourtName,
+        string CourtCaseNumber,
+        string CourtUrl,
+        string EventHistory);
 
     private readonly record struct SudrfCourtActDeadlineSpec(
         string DeadlineType,

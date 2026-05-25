@@ -3718,6 +3718,107 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtSyncJournal_ReturnsVisibleLogsAcrossCases()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var otherResponsible = await CreateUserAsync(db, "other@example.com", "Другой");
+        var visibleClient = new Client
+        {
+            Name = "Земцов Виктор Александрович",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var hiddenClient = new Client
+        {
+            Name = "Скрытый клиент",
+            IsActive = true,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        var visibleCase = new ClientCase
+        {
+            Client = visibleClient,
+            Title = "Земцов - суд",
+            CaseNumber = "CRM-1",
+            CourtName = "Арбитражный суд Самарской области",
+            CourtCaseNumber = "А55-12345/2026",
+            CourtUrl = "https://example.sudrf.ru/case",
+            EventHistory = """
+                18.05.2026 10:30: Ручная проверка судебного источника зафиксирована. Инициатор: Владелец.
+                18.05.2026 10:40: Проверка судебного источника не выполнена: источник временно недоступен. Инициатор: Владелец.
+                18.05.2026 10:45: Комментарий по делу: обычная история.
+                """,
+            Status = ClientCaseStatus.Open,
+        };
+        var hiddenCase = new ClientCase
+        {
+            Client = hiddenClient,
+            Title = "Скрытый суд",
+            CourtCaseNumber = "А40-999/2026",
+            EventHistory = "18.05.2026 10:50: Ручная проверка судебного источника зафиксирована. Инициатор: Другой.",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        db.ClientCases.AddRange(visibleCase, hiddenCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetCourtSyncJournal(take: 50, status: null, search: null, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var logs = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtSyncJournalEntryDto>>(ok.Value);
+
+        Assert.Equal(2, logs.Count);
+        Assert.All(logs, item => Assert.Equal(visibleCase.Id, item.ClientCaseId));
+        Assert.Contains(logs, item => item.Status == "manual-check-recorded");
+        Assert.Contains(logs, item => item.Status == "external-sync-error");
+        Assert.All(logs, item => Assert.Equal("Земцов - суд", item.ClientCaseTitle));
+        Assert.All(logs, item => Assert.Equal("Земцов Виктор Александрович", item.OwnerName));
+    }
+
+    [Fact]
+    public async Task CourtSyncJournal_FiltersByStatusAndSearch()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db, "manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var client = new Client
+        {
+            Name = "Земцов Виктор Александрович",
+            IsActive = true,
+            ResponsibleUserId = manager.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Земцов - суд",
+            CourtName = "Арбитражный суд Самарской области",
+            CourtCaseNumber = "А55-12345/2026",
+            EventHistory = """
+                18.05.2026 10:30: Ручная проверка судебного источника зафиксирована. Инициатор: Руководитель.
+                18.05.2026 10:40: Проверка судебного источника не выполнена: источник временно недоступен. Инициатор: Руководитель.
+                """,
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, manager);
+
+        var result = await controller.GetCourtSyncJournal(
+            take: 50,
+            status: "external-sync-error",
+            search: "временно недоступен",
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var log = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtSyncJournalEntryDto>>(ok.Value));
+
+        Assert.Equal("external-sync-error", log.Status);
+        Assert.Equal("А55-12345/2026", log.CourtCaseNumber);
+        Assert.Contains("временно недоступен", log.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunCourtSync_ExplainsMissingCourtBinding()
     {
         await using var db = await CreateContextAsync();
