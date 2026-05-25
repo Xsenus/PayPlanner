@@ -5728,7 +5728,7 @@ public class CasesV2Controller : ControllerBase
         if (hearings.Count > 0)
         {
             var existingEvents = await _db.ClientCaseCourtEvents
-                .Where(item => item.ClientCaseId == clientCase.Id && item.SourceType == "sudrf")
+                .Where(item => item.ClientCaseId == clientCase.Id)
                 .ToListAsync(ct);
 
             foreach (var hearing in hearings)
@@ -5736,8 +5736,7 @@ public class CasesV2Controller : ControllerBase
                 var scheduledAt = hearing.ScheduledAt!.Value;
                 var title = Truncate(NormalizeOptional(hearing.Title) ?? "Судебное заседание", 200);
                 var existing = existingEvents.FirstOrDefault(item =>
-                    item.ScheduledAt == scheduledAt
-                    && item.Title.Equals(title, StringComparison.OrdinalIgnoreCase));
+                    CourtEventMatchesSudrfHearing(item, scheduledAt, title, courtData, hearing));
                 var summary = Truncate(hearing.SourceSummary, 1000);
 
                 if (existing is null)
@@ -5773,6 +5772,7 @@ public class CasesV2Controller : ControllerBase
                 }
 
                 var updated = false;
+                updated |= UpdateCourtEventString(existing.SourceType, "sudrf", value => existing.SourceType = value, 64);
                 updated |= UpdateCourtEventString(existing.CourtName, courtData.CourtName, value => existing.CourtName = value, 200);
                 updated |= UpdateCourtEventString(existing.CourtCaseNumber, courtData.CaseNumber, value => existing.CourtCaseNumber = value, 100);
                 updated |= UpdateCourtEventString(existing.Courtroom, hearing.Place, value => existing.Courtroom = value, 120);
@@ -5940,6 +5940,44 @@ public class CasesV2Controller : ControllerBase
             setValue(next);
             return true;
         }
+
+    }
+
+    private static bool CourtEventMatchesSudrfHearing(
+        ClientCaseCourtEvent existing,
+        DateTime scheduledAt,
+        string title,
+        SudrfCourtCaseData courtData,
+        SudrfCourtMovementEvent hearing)
+    {
+        if (existing.ScheduledAt != scheduledAt)
+        {
+            return false;
+        }
+
+        var existingTitle = NormalizeCourtSyncText(existing.Title);
+        var sourceTitle = NormalizeCourtSyncText(title);
+        if (string.Equals(existingTitle, sourceTitle, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var isExistingHearing =
+            string.Equals(existing.EventType, "hearing", StringComparison.OrdinalIgnoreCase)
+            || existingTitle.Contains("судебное заседание", StringComparison.OrdinalIgnoreCase);
+        if (!isExistingHearing)
+        {
+            return false;
+        }
+
+        if (string.Equals(existing.SourceType, "sudrf", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return SameNormalizedCourtSyncText(existing.CourtCaseNumber, courtData.CaseNumber)
+            || SameNormalizedCourtSyncText(existing.Courtroom, hearing.Place)
+            || SameNormalizedCourtSyncText(existing.CourtName, courtData.CourtName);
     }
 
     private async Task<int> SyncSudrfCourtActDeadlinesAsync(
@@ -9296,6 +9334,45 @@ public class CasesV2Controller : ControllerBase
     {
         var normalized = value?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string NormalizeCourtSyncText(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        if (normalized is null)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(normalized.Length);
+        var previousWasWhitespace = false;
+        foreach (var ch in normalized)
+        {
+            if (char.IsWhiteSpace(ch))
+            {
+                if (!previousWasWhitespace)
+                {
+                    builder.Append(' ');
+                    previousWasWhitespace = true;
+                }
+
+                continue;
+            }
+
+            builder.Append(char.ToLowerInvariant(ch));
+            previousWasWhitespace = false;
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static bool SameNormalizedCourtSyncText(string? left, string? right)
+    {
+        var normalizedLeft = NormalizeCourtSyncText(left);
+        var normalizedRight = NormalizeCourtSyncText(right);
+        return normalizedLeft.Length > 0
+            && normalizedRight.Length > 0
+            && string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Truncate(string value, int maxLength)

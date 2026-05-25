@@ -3681,6 +3681,85 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task RunCourtSync_ReusesExistingManualCourtEventAtSameHearingTime()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Тестовый клиент",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с ручным заседанием",
+            CourtUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=77",
+            CourtCaseNumber = "33-77/2026",
+            Status = ClientCaseStatus.Open,
+        };
+        var manualEvent = new ClientCaseCourtEvent
+        {
+            ClientCase = clientCase,
+            EventType = "hearing",
+            Title = "Предварительное судебное заседание",
+            ScheduledAt = new DateTime(2026, 5, 27, 15, 0, 0),
+            AllDay = false,
+            CourtCaseNumber = "33-77/2026",
+            Courtroom = "зал 12",
+            SourceType = "manual",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseCourtEvents.Add(manualEvent);
+        await db.SaveChangesAsync();
+
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = clientCase.CourtUrl,
+            CourtName = "Хабаровский краевой суд",
+            CaseNumber = "33-77/2026",
+            Instance = "appeal",
+            MovementEvents =
+            [
+                new()
+                {
+                    Title = "Судебное заседание",
+                    ScheduledAt = new DateTime(2026, 5, 27, 15, 0, 0),
+                    Place = "зал 12",
+                    SourceSummary = "Судебное заседание; 27.05.2026 15:00; место: зал 12",
+                    Result = "Назначено",
+                },
+            ],
+        };
+        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
+
+        var result = await controller.RunCourtSync(clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
+        Assert.Equal("external-sync-completed", dto.Status);
+        Assert.Equal(0, dto.CreatedCourtEvents);
+        Assert.Equal(1, dto.UpdatedCourtEvents);
+
+        var events = await db.ClientCaseCourtEvents
+            .Where(item => item.ClientCaseId == clientCase.Id)
+            .ToListAsync();
+        var courtEvent = Assert.Single(events);
+        Assert.Equal(manualEvent.Id, courtEvent.Id);
+        Assert.Equal("sudrf", courtEvent.SourceType);
+        Assert.Equal("Предварительное судебное заседание", courtEvent.Title);
+        Assert.Equal("Хабаровский краевой суд", courtEvent.CourtName);
+        Assert.Equal("зал 12", courtEvent.Courtroom);
+
+        var history = await db.ClientCaseCourtEventHistory.SingleAsync(item => item.ClientCaseCourtEventId == courtEvent.Id);
+        Assert.Equal("updated", history.Action);
+    }
+
+    [Fact]
     public async Task CourtSyncLogs_ReturnManualCheckHistory()
     {
         await using var db = await CreateContextAsync();
