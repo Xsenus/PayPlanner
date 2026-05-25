@@ -1720,6 +1720,71 @@ export interface LegalWorkReport {
   upcomingDeadlines: LegalWorkDeadlineItem[];
 }
 
+export interface CaseFinanceStatusItem {
+  status: string;
+  statusLabel: string;
+  caseCount: number;
+  feeTotal: number;
+  paidTotal: number;
+  outstandingTotal: number;
+  collectionRate: number;
+}
+
+export interface CaseFinanceResponsibleItem {
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  caseCount: number;
+  feeTotal: number;
+  paidTotal: number;
+  outstandingTotal: number;
+  collectionRate: number;
+}
+
+export interface CaseFinanceItem {
+  caseId: number;
+  caseNumber: string;
+  caseTitle: string;
+  clientName: string;
+  caseType: string;
+  status: string;
+  statusLabel: string;
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  createdAt: string;
+  startDate?: string | null;
+  dueDate?: string | null;
+  feeAmount: number;
+  paidTotal: number;
+  outstandingTotal: number;
+  paymentRate: number;
+  financeState: string;
+  financeStateLabel: string;
+}
+
+export interface CaseFinanceReport {
+  generatedAt: string;
+  from: string;
+  to: string;
+  statusFilter: string;
+  responsibleUserIdFilter?: number | null;
+  caseTypeFilter: string;
+  limit: number;
+  totalCases: number;
+  activeCases: number;
+  closedCases: number;
+  feeTotal: number;
+  paidTotal: number;
+  outstandingTotal: number;
+  collectionRate: number;
+  fullyPaidCaseCount: number;
+  partiallyPaidCaseCount: number;
+  unpaidCaseCount: number;
+  overpaidCaseCount: number;
+  byStatus: CaseFinanceStatusItem[];
+  byResponsible: CaseFinanceResponsibleItem[];
+  items: CaseFinanceItem[];
+}
+
 export interface CaseActivityReportItem {
   caseId: number;
   caseNumber: string;

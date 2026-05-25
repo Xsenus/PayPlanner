@@ -198,6 +198,40 @@ public class ReportsController : ControllerBase
         return File(pdf, "application/pdf", $"legal-work-report-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf");
     }
 
+    [HttpGet("case-finance")]
+    public async Task<ActionResult<CaseFinanceReportDto>> CaseFinance(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (casesVisibility is null || accountsVisibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var (start, end) = ResolveLegalWorkPeriod(from, to);
+        var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
+        var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildCaseFinanceReportAsync(start, end, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     private async Task<(LegalWorkReportDto? Report, IActionResult? Error)> BuildLegalWorkExportReportAsync(
         DateTime? from,
         DateTime? to,
@@ -1102,6 +1136,179 @@ public class ReportsController : ControllerBase
             OverdueDeadlines = overdueDeadlines.Take(15).ToList(),
             UpcomingDeadlines = upcomingDeadlines.Take(15).ToList(),
         };
+    }
+
+    private async Task<CaseFinanceReportDto> BuildCaseFinanceReportAsync(
+        DateTime start,
+        DateTime end,
+        LegalWorkReportFilters filters,
+        int limit,
+        DataVisibilityAccess casesVisibility,
+        DataVisibilityAccess accountsVisibility,
+        CancellationToken ct)
+    {
+        var endInclusive = end.Date.AddDays(1).AddTicks(-1);
+        var caseQuery = _db.ClientCases
+            .AsNoTracking()
+            .WithCaseIncludes()
+            .ApplyClientCaseVisibility(casesVisibility)
+            .Where(item => item.CreatedAt <= endInclusive
+                && (item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost
+                    || (item.StartDate.HasValue && item.StartDate.Value >= start.Date)
+                    || (item.DueDate.HasValue && item.DueDate.Value >= start.Date)));
+
+        if (TryParseClientCaseStatus(filters.Status, out var statusFilter))
+        {
+            caseQuery = caseQuery.Where(item => item.Status == statusFilter);
+        }
+
+        if (filters.ResponsibleUserId.HasValue)
+        {
+            caseQuery = caseQuery.Where(item => item.ResponsibleUserId == filters.ResponsibleUserId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filters.CaseType))
+        {
+            caseQuery = caseQuery.Where(item => item.CaseType != null && item.CaseType.Contains(filters.CaseType));
+        }
+
+        var cases = await caseQuery.ToListAsync(ct);
+        var caseIds = cases.Select(item => item.Id).Distinct().ToArray();
+        var payments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, ct);
+        var paidByCase = payments
+            .GroupBy(item => item.CaseId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(item => ResolvePaidAmount(item.Amount, item.PaidAmount, item.Status)));
+
+        var rows = cases
+            .Select(item => BuildCaseFinanceItem(item, paidByCase.GetValueOrDefault(item.Id)))
+            .OrderByDescending(item => item.OutstandingTotal)
+            .ThenBy(item => item.DueDate ?? DateTime.MaxValue)
+            .ThenBy(item => item.CaseTitle)
+            .ToList();
+
+        var feeTotal = rows.Sum(item => item.FeeAmount);
+        var paidTotal = rows.Sum(item => item.PaidTotal);
+        var outstandingTotal = rows.Sum(item => item.OutstandingTotal);
+
+        return new CaseFinanceReportDto
+        {
+            GeneratedAt = DateTime.UtcNow,
+            From = start,
+            To = end,
+            StatusFilter = filters.Status ?? string.Empty,
+            ResponsibleUserIdFilter = filters.ResponsibleUserId,
+            CaseTypeFilter = filters.CaseType ?? string.Empty,
+            Limit = limit,
+            TotalCases = rows.Count,
+            ActiveCases = rows.Count(item => item.Status == nameof(ClientCaseStatus.Open) || item.Status == nameof(ClientCaseStatus.OnHold)),
+            ClosedCases = rows.Count(item => item.Status == nameof(ClientCaseStatus.Closed) || item.Status == nameof(ClientCaseStatus.Lost)),
+            FeeTotal = feeTotal,
+            PaidTotal = paidTotal,
+            OutstandingTotal = outstandingTotal,
+            CollectionRate = CalculatePercent(paidTotal, feeTotal),
+            FullyPaidCaseCount = rows.Count(item => item.FinanceState == "paid"),
+            PartiallyPaidCaseCount = rows.Count(item => item.FinanceState == "partial"),
+            UnpaidCaseCount = rows.Count(item => item.FinanceState == "unpaid"),
+            OverpaidCaseCount = rows.Count(item => item.FinanceState == "overpaid"),
+            ByStatus = rows
+                .GroupBy(item => new { item.Status, item.StatusLabel })
+                .OrderBy(group => group.Key.Status)
+                .Select(group =>
+                {
+                    var groupFee = group.Sum(item => item.FeeAmount);
+                    var groupPaid = group.Sum(item => item.PaidTotal);
+                    return new CaseFinanceStatusItemDto
+                    {
+                        Status = group.Key.Status,
+                        StatusLabel = group.Key.StatusLabel,
+                        CaseCount = group.Count(),
+                        FeeTotal = groupFee,
+                        PaidTotal = groupPaid,
+                        OutstandingTotal = group.Sum(item => item.OutstandingTotal),
+                        CollectionRate = CalculatePercent(groupPaid, groupFee),
+                    };
+                })
+                .ToList(),
+            ByResponsible = rows
+                .GroupBy(item => new { item.ResponsibleUserId, item.ResponsibleName })
+                .OrderByDescending(group => group.Sum(item => item.OutstandingTotal))
+                .ThenBy(group => group.Key.ResponsibleName)
+                .Select(group =>
+                {
+                    var groupFee = group.Sum(item => item.FeeAmount);
+                    var groupPaid = group.Sum(item => item.PaidTotal);
+                    return new CaseFinanceResponsibleItemDto
+                    {
+                        ResponsibleUserId = group.Key.ResponsibleUserId,
+                        ResponsibleName = group.Key.ResponsibleName,
+                        CaseCount = group.Count(),
+                        FeeTotal = groupFee,
+                        PaidTotal = groupPaid,
+                        OutstandingTotal = group.Sum(item => item.OutstandingTotal),
+                        CollectionRate = CalculatePercent(groupPaid, groupFee),
+                    };
+                })
+                .Take(25)
+                .ToList(),
+            Items = rows.Take(limit).ToList(),
+        };
+    }
+
+    private static CaseFinanceItemDto BuildCaseFinanceItem(ClientCase clientCase, decimal paid)
+    {
+        var fee = Math.Max(0m, clientCase.FeeAmount);
+        var outstanding = Math.Max(0m, fee - paid);
+        var paymentRate = CalculatePercent(paid, fee);
+        var (financeState, financeStateLabel) = ResolveCaseFinanceState(fee, paid, outstanding);
+
+        return new CaseFinanceItemDto
+        {
+            CaseId = clientCase.Id,
+            CaseNumber = clientCase.CaseNumber,
+            CaseTitle = clientCase.Title,
+            ClientName = ResolveCaseOwnerName(clientCase),
+            CaseType = NormalizeReportText(clientCase.CaseType, "Не указан"),
+            Status = clientCase.Status.ToString(),
+            StatusLabel = FormatCaseStatus(clientCase.Status),
+            ResponsibleUserId = clientCase.ResponsibleUserId,
+            ResponsibleName = ResolveCaseResponsibleName(clientCase),
+            CreatedAt = clientCase.CreatedAt,
+            StartDate = clientCase.StartDate,
+            DueDate = clientCase.DueDate,
+            FeeAmount = fee,
+            PaidTotal = paid,
+            OutstandingTotal = outstanding,
+            PaymentRate = paymentRate,
+            FinanceState = financeState,
+            FinanceStateLabel = financeStateLabel,
+        };
+    }
+
+    private static (string State, string Label) ResolveCaseFinanceState(decimal fee, decimal paid, decimal outstanding)
+    {
+        if (fee <= 0m)
+        {
+            return ("noFee", "Без гонорара");
+        }
+
+        if (paid > fee)
+        {
+            return ("overpaid", "Переплата");
+        }
+
+        if (outstanding <= 0m)
+        {
+            return ("paid", "Оплачено");
+        }
+
+        if (paid > 0m)
+        {
+            return ("partial", "Частично оплачено");
+        }
+
+        return ("unpaid", "Не оплачено");
     }
 
     private static IReadOnlyList<LegalWorkCaseItemDto> BuildLegalWorkCaseItems(

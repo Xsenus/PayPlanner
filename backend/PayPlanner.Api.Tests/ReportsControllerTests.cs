@@ -1084,6 +1084,160 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CaseFinance_UsesVisibleCasesAndPayments()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "case-finance-lawyer", Description = "Lawyer" };
+        var visibleUser = new User
+        {
+            Email = "visible-case-finance@example.test",
+            FullName = "Visible Case Finance User",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = "hidden-case-finance@example.test",
+            FullName = "Hidden Case Finance User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Accounts,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var today = DateTime.UtcNow.Date;
+        var visibleClient = new Client { Name = "Visible Finance Client", ResponsibleUserId = visibleUser.Id };
+        var hiddenClient = new Client { Name = "Hidden Finance Client", ResponsibleUserId = hiddenUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var visibleCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "FIN-VISIBLE",
+            Title = "Visible finance case",
+            CaseType = "Банкротство",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = today.AddDays(-10),
+            StartDate = today.AddDays(-10),
+            DueDate = today.AddDays(20),
+            FeeAmount = 30_000m,
+        };
+        var hiddenCase = new ClientCase
+        {
+            ClientId = hiddenClient.Id,
+            CaseNumber = "FIN-HIDDEN",
+            Title = "Hidden finance case",
+            CaseType = "Наследство",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = hiddenUser.Id,
+            CreatedAt = today.AddDays(-10),
+            StartDate = today.AddDays(-10),
+            DueDate = today.AddDays(20),
+            FeeAmount = 90_000m,
+        };
+        db.ClientCases.AddRange(visibleCase, hiddenCase);
+        await db.SaveChangesAsync();
+
+        var visiblePayment = new Payment
+        {
+            ClientId = visibleClient.Id,
+            ClientCaseId = visibleCase.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 12_000m,
+            PaidAmount = 12_000m,
+            Date = today,
+            PlannedDate = today,
+            CreatedAt = today,
+        };
+        visiblePayment.Responsibles.Add(new PaymentResponsible { UserId = visibleUser.Id });
+        var hiddenPayment = new Payment
+        {
+            ClientId = hiddenClient.Id,
+            ClientCaseId = hiddenCase.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 50_000m,
+            PaidAmount = 50_000m,
+            Date = today,
+            PlannedDate = today,
+            CreatedAt = today,
+        };
+        hiddenPayment.Responsibles.Add(new PaymentResponsible { UserId = hiddenUser.Id });
+        db.Payments.AddRange(visiblePayment, hiddenPayment);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var action = await controller.CaseFinance(
+            today.AddDays(-30),
+            today.AddDays(30),
+            nameof(ClientCaseStatus.Open),
+            visibleUser.Id,
+            "Банк",
+            10,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CaseFinanceReportDto>(ok.Value);
+        Assert.Equal(1, report.TotalCases);
+        Assert.Equal(1, report.ActiveCases);
+        Assert.Equal(0, report.ClosedCases);
+        Assert.Equal(30_000m, report.FeeTotal);
+        Assert.Equal(12_000m, report.PaidTotal);
+        Assert.Equal(18_000m, report.OutstandingTotal);
+        Assert.Equal(40m, report.CollectionRate);
+        Assert.Equal(1, report.PartiallyPaidCaseCount);
+        Assert.Equal(0, report.UnpaidCaseCount);
+        Assert.Equal(nameof(ClientCaseStatus.Open), report.StatusFilter);
+        Assert.Equal(visibleUser.Id, report.ResponsibleUserIdFilter);
+        Assert.Equal("Банк", report.CaseTypeFilter);
+
+        var item = Assert.Single(report.Items);
+        Assert.Equal(visibleCase.Id, item.CaseId);
+        Assert.Equal("FIN-VISIBLE", item.CaseNumber);
+        Assert.Equal("Частично оплачено", item.FinanceStateLabel);
+        Assert.Equal(40m, item.PaymentRate);
+
+        var status = Assert.Single(report.ByStatus);
+        Assert.Equal(30_000m, status.FeeTotal);
+        Assert.Equal(12_000m, status.PaidTotal);
+        Assert.Equal(18_000m, status.OutstandingTotal);
+
+        var responsible = Assert.Single(report.ByResponsible);
+        Assert.Equal(visibleUser.Id, responsible.ResponsibleUserId);
+        Assert.Equal(18_000m, responsible.OutstandingTotal);
+        Assert.DoesNotContain(report.Items, row => row.CaseId == hiddenCase.Id);
+    }
+
+    [Fact]
     public async Task CashFlow_UsesPaymentVisibilityForLinkedOperations()
     {
         await using var db = await CreateContextAsync();

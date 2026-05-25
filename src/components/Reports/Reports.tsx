@@ -30,6 +30,7 @@ import { useMoneyCategoryReport } from '../../hooks/useMoneyCategoryReport';
 import { useCounterpartyReport } from '../../hooks/useCounterpartyReport';
 import { useProjectReport } from '../../hooks/useProjectReport';
 import { useLegalWorkReport } from '../../hooks/useLegalWorkReport';
+import { useCaseFinanceReport } from '../../hooks/useCaseFinanceReport';
 import { useCaseActivityReport } from '../../hooks/useCaseActivityReport';
 import { useCurrentCasesReport } from '../../hooks/useCurrentCasesReport';
 import { useLawyerWorkloadReport } from '../../hooks/useLawyerWorkloadReport';
@@ -57,7 +58,7 @@ import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicke
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -204,6 +205,30 @@ export function exportLegalWorkReport(report: LegalWorkReport) {
   });
 
   downloadCsv('legal-work-report.csv', rows);
+}
+
+function exportCaseFinanceReport(report: CaseFinanceReport) {
+  const rows: unknown[][] = [
+    ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус дела', 'Финансовый статус', 'Гонорар', 'Оплачено', 'Остаток', 'Оплачено %', 'Срок дела'],
+  ];
+
+  report.items.forEach((item) => {
+    rows.push([
+      item.caseNumber ? `${item.caseNumber} · ${item.caseTitle}` : item.caseTitle,
+      item.clientName,
+      item.responsibleName,
+      item.caseType,
+      item.statusLabel,
+      item.financeStateLabel,
+      item.feeAmount,
+      item.paidTotal,
+      item.outstandingTotal,
+      item.paymentRate,
+      item.dueDate ? formatDate(item.dueDate) : '',
+    ]);
+  });
+
+  downloadCsv('case-finance-report.csv', rows);
 }
 
 function exportCaseActivityReport(report: CaseActivityReport) {
@@ -1634,6 +1659,205 @@ function LegalWorkReportSection({
                   )) : (
                     <tr>
                       <td colSpan={7} className="px-3 py-8 text-center text-slate-500">Дела по выбранным условиям не найдены.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function CaseFinanceReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+  onOpenCase,
+}: {
+  report: CaseFinanceReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+  onOpenCase?: (caseId: number) => void;
+}) {
+  const rows = report?.items ?? [];
+  const responsibleRows = report?.byResponsible ?? [];
+  const statusRows = report?.byStatus ?? [];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+            <Wallet className="h-3.5 w-3.5" />
+            Финансы дел
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Финансовый отчет по делам</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Показывает гонорар, оплату, остаток и финансовый статус по делам с учетом доступа к делам и платежам.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportCaseFinanceReport(report)}
+            disabled={!report}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка финансового отчета по делам...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить финансовый отчет по делам</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для отчета.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Гонорар"
+              value={formatCurrency(report.feeTotal)}
+              icon={Wallet}
+              tone="income"
+              subtitle={`${report.totalCases} дел, активных: ${report.activeCases}`}
+            />
+            <MetricCard
+              title="Оплачено"
+              value={formatCurrency(report.paidTotal)}
+              icon={CheckCircle2}
+              tone="profit"
+              subtitle={`Собрано: ${report.collectionRate}%`}
+            />
+            <MetricCard
+              title="Остаток"
+              value={formatCurrency(report.outstandingTotal)}
+              icon={AlertTriangle}
+              tone="expense"
+              subtitle={`Без оплаты: ${report.unpaidCaseCount}, частично: ${report.partiallyPaidCaseCount}`}
+            />
+            <MetricCard
+              title="Оплачено дел"
+              value={String(report.fullyPaidCaseCount)}
+              icon={Percent}
+              tone="rate"
+              subtitle={report.overpaidCaseCount > 0 ? `С переплатой: ${report.overpaidCaseCount}` : `Лимит строк: ${report.limit}`}
+            />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">По ответственным</h3>
+                <div className="mt-4 space-y-3">
+                  {responsibleRows.length > 0 ? responsibleRows.slice(0, 8).map((item) => (
+                    <div key={`${item.responsibleUserId ?? 'none'}-${item.responsibleName}`} className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium text-slate-900">{item.responsibleName}</div>
+                          <div className="mt-1 text-xs text-slate-500">{item.caseCount} дел · собрано {item.collectionRate}%</div>
+                        </div>
+                        <div className="text-right text-sm">
+                          <div className="font-semibold text-slate-900">{formatCurrency(item.outstandingTotal)}</div>
+                          <div className="text-slate-500">остаток</div>
+                        </div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-5 text-center text-sm text-slate-500">
+                      Ответственные не найдены.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">По статусам дел</h3>
+                <div className="mt-4 space-y-3">
+                  {statusRows.length > 0 ? statusRows.map((item) => (
+                    <div key={item.status} className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm">
+                      <div>
+                        <div className="font-medium text-slate-900">{item.statusLabel}</div>
+                        <div className="mt-1 text-xs text-slate-500">{item.caseCount} дел · собрано {item.collectionRate}%</div>
+                      </div>
+                      <div className="text-right text-sm">
+                        <div className="font-semibold text-slate-900">{formatCurrency(item.outstandingTotal)}</div>
+                        <div className="text-slate-500">из {formatCurrency(item.feeTotal)}</div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-5 text-center text-sm text-slate-500">
+                      Статусы не найдены.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-3xl border border-slate-100 bg-slate-50/70">
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Дело</th>
+                    <th className="px-4 py-3 font-semibold">Ответственный</th>
+                    <th className="px-4 py-3 text-right font-semibold">Гонорар</th>
+                    <th className="px-4 py-3 text-right font-semibold">Оплачено</th>
+                    <th className="px-4 py-3 text-right font-semibold">Остаток</th>
+                    <th className="px-4 py-3 font-semibold">Статус</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white/80">
+                  {rows.length > 0 ? rows.map((row) => (
+                    <tr key={row.caseId} className="align-top">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-900">{row.clientName}</div>
+                        <button
+                          type="button"
+                          onClick={() => onOpenCase?.(row.caseId)}
+                          className="mt-1 inline-flex items-center gap-1 text-left font-semibold text-blue-700 transition hover:text-blue-900 hover:underline"
+                        >
+                          {row.caseNumber ? `${row.caseNumber} · ` : ''}{row.caseTitle}
+                          <ArrowUpRight className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="mt-1 text-xs text-slate-500">{row.caseType} · {row.statusLabel}</div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{row.responsibleName}</td>
+                      <td className="px-4 py-3 text-right text-slate-600">{formatCurrency(row.feeAmount)}</td>
+                      <td className="px-4 py-3 text-right text-slate-600">
+                        <div>{formatCurrency(row.paidTotal)}</div>
+                        <div className="text-xs text-slate-500">{row.paymentRate}%</div>
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatCurrency(row.outstandingTotal)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${row.financeState === 'paid' ? 'bg-emerald-50 text-emerald-700' : row.financeState === 'unpaid' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                          {row.financeStateLabel}
+                        </span>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        Финансовые строки по выбранным условиям не найдены.
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -4858,6 +5082,15 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     reload: reloadLegalWorkReport,
   } = useLegalWorkReport(cashFlowDates);
   const {
+    report: caseFinanceReport,
+    loading: caseFinanceReportLoading,
+    error: caseFinanceReportError,
+    reload: reloadCaseFinanceReport,
+  } = useCaseFinanceReport({
+    ...cashFlowDates,
+    limit: 100,
+  });
+  const {
     report: caseActivityReport,
     loading: caseActivityReportLoading,
     error: caseActivityReportError,
@@ -5367,6 +5600,14 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               error={legalWorkReportError}
               filters={cashFlowDates}
               onReload={reloadLegalWorkReport}
+              onOpenCase={onOpenCase}
+            />
+
+            <CaseFinanceReportSection
+              report={caseFinanceReport}
+              loading={caseFinanceReportLoading}
+              error={caseFinanceReportError}
+              onReload={reloadCaseFinanceReport}
               onOpenCase={onOpenCase}
             />
 
