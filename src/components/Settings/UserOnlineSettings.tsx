@@ -4,21 +4,82 @@ import { apiService } from '../../services/api';
 import type { UserOnlineResponse, UserOnlineStatus } from '../../types/userActivity';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
-function formatDateTime(value?: string | null) {
-  if (!value) return '—';
+const AUTO_REFRESH_MS = 10000;
 
-  try {
-    return new Date(value).toLocaleString('ru-RU');
-  } catch {
-    return value;
-  }
+const sectionLabels: Record<string, string> = {
+  session: 'Активность в системе',
+  auth: 'Авторизация',
+  navigation: 'Навигация',
+  settings: 'Настройки',
+  'users-online': 'Пользователи онлайн',
+  users: 'Пользователи',
+  roles: 'Роли',
+  clients: 'Клиенты',
+  clientDetail: 'Карточка клиента',
+  cases: 'Дела',
+  caseDetail: 'Карточка дела',
+  tasks: 'Журнал задач',
+  tasksCalendar: 'Календарь задач',
+  tasksApprovals: 'Согласования задач',
+  calendar: 'Календарь',
+  accounts: 'Счета',
+  accountsIncome: 'Доходные счета',
+  accountsExpense: 'Расходные счета',
+  acts: 'Акты',
+  contracts: 'Договоры',
+  payments: 'Платежи',
+  paymentsIncome: 'Доходные платежи',
+  paymentsExpense: 'Расходные платежи',
+  reports: 'Отчеты',
+  dictionaries: 'Справочники',
+  audit: 'Аудит объектов',
+  userActivity: 'Контроль пользователей',
+};
+
+const actionLabels: Record<string, string> = {
+  heartbeat: 'Активность',
+  login: 'Вход',
+  logout: 'Выход',
+  open_tab: 'Открыт раздел',
+  CreateAsync: 'Создание',
+  GetAsync: 'Просмотр',
+  UpdateAsync: 'Изменение',
+  DeleteAsync: 'Удаление',
+  CleanupAsync: 'Очистка',
+};
+
+function parseServerDate(value?: string | null) {
+  if (!value) return null;
+
+  const normalized = /(?:z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateTime(value?: string | null) {
+  const date = parseServerDate(value);
+  if (!date) return '—';
+
+  return date.toLocaleString('ru-RU');
+}
+
+function formatDate(value?: string | null) {
+  const date = parseServerDate(value);
+  if (!date) return '—';
+
+  return date.toLocaleDateString('ru-RU');
+}
+
+function formatTime(value?: string | null) {
+  const date = parseServerDate(value);
+  if (!date) return '—';
+
+  return date.toLocaleTimeString('ru-RU');
 }
 
 function formatRelativeActivity(value?: string | null) {
-  if (!value) return 'не было активности';
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const date = parseServerDate(value);
+  if (!date) return 'не было активности';
 
   const diffMs = Date.now() - date.getTime();
   const diffMinutes = Math.max(0, Math.floor(diffMs / 60000));
@@ -30,6 +91,15 @@ function formatRelativeActivity(value?: string | null) {
 
   const diffDays = Math.floor(diffHours / 24);
   return `${diffDays} дн. назад`;
+}
+
+function translateValue(value?: string | null, labels: Record<string, string> = {}) {
+  if (!value) return '—';
+
+  const trimmed = value.trim();
+  if (!trimmed) return '—';
+
+  return labels[trimmed] ?? labels[trimmed.toLowerCase()] ?? trimmed;
 }
 
 function getUserStatusLabel(user: UserOnlineStatus) {
@@ -73,7 +143,11 @@ export function UserOnlineSettings() {
 
   useEffect(() => {
     void load();
-    const intervalId = window.setInterval(() => void load(true), 30000);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void load(true);
+      }
+    }, AUTO_REFRESH_MS);
     return () => window.clearInterval(intervalId);
   }, [load]);
 
@@ -111,23 +185,24 @@ export function UserOnlineSettings() {
           </button>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
-          <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="flex min-h-[112px] flex-col items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-center">
             <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Сейчас онлайн</div>
             <div className="mt-2 text-2xl font-semibold text-emerald-800">{data?.onlineUsers ?? 0}</div>
           </div>
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <div className="flex min-h-[112px] flex-col items-center justify-center rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Всего пользователей</div>
             <div className="mt-2 text-2xl font-semibold text-gray-900">{data?.totalUsers ?? 0}</div>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex min-h-[112px] flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-4 text-center">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Отключены / не одобрены</div>
             <div className="mt-2 text-2xl font-semibold text-slate-800">{inactiveCount}</div>
           </div>
-        </div>
-
-        <div className="mt-4 text-xs text-gray-500">
-          Обновлено: {formatDateTime(data?.generatedAt)}
+          <div className="flex min-h-[112px] flex-col items-center justify-center rounded-xl border border-blue-100 bg-blue-50 p-4 text-center">
+            <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Обновлено</div>
+            <div className="mt-2 text-lg font-semibold text-blue-900">{formatDate(data?.generatedAt)}</div>
+            <div className="mt-1 text-sm font-medium text-blue-700">{formatTime(data?.generatedAt)}</div>
+          </div>
         </div>
       </div>
 
@@ -138,7 +213,7 @@ export function UserOnlineSettings() {
       )}
 
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-        <div className="overflow-x-auto">
+        <div className={`overflow-x-auto transition-opacity duration-300 ${refreshing ? 'opacity-70' : 'opacity-100'}`}>
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -187,8 +262,8 @@ export function UserOnlineSettings() {
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(user.lastLoginAt)}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">
-                    <div>{user.lastSection || '—'}</div>
-                    <div className="mt-1 text-xs text-gray-500">{user.lastAction || '—'}</div>
+                    <div>{translateValue(user.lastSection, sectionLabels)}</div>
+                    <div className="mt-1 text-xs text-gray-500">{translateValue(user.lastAction, actionLabels)}</div>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700">{user.lastIpAddress || '—'}</td>
                 </tr>

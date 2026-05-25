@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiService } from '../../services/api';
 import { UserOnlineSettings } from './UserOnlineSettings';
@@ -18,9 +18,15 @@ describe('UserOnlineSettings', () => {
     vi.mocked(apiService.sendUserActivityHeartbeat).mockResolvedValue(undefined);
   });
 
-  it('shows online users and last login data', async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows online users, translated activity and split refresh time', async () => {
+    const nowWithoutTimezone = new Date().toISOString().replace(/Z$/, '');
+
     vi.mocked(apiService.getUsersOnline).mockResolvedValue({
-      generatedAt: '2026-05-25T08:00:00Z',
+      generatedAt: '2026-05-25T08:00:00',
       onlineThresholdMinutes: 5,
       totalUsers: 2,
       onlineUsers: 1,
@@ -34,8 +40,8 @@ describe('UserOnlineSettings', () => {
           isActive: true,
           isApproved: true,
           isOnline: true,
-          lastActivityAt: new Date().toISOString(),
-          lastLoginAt: '2026-05-25T07:40:00Z',
+          lastActivityAt: nowWithoutTimezone,
+          lastLoginAt: '2026-05-25T07:40:00',
           lastLogoutAt: null,
           lastAction: 'heartbeat',
           lastSection: 'session',
@@ -69,12 +75,38 @@ describe('UserOnlineSettings', () => {
     expect(screen.getByText('Петр Петров')).toBeTruthy();
     expect(screen.getByText('Онлайн')).toBeTruthy();
     expect(screen.getByText('Офлайн')).toBeTruthy();
+    expect(screen.getByText('только что')).toBeTruthy();
+    expect(screen.getByText('Активность в системе')).toBeTruthy();
+    expect(screen.getByText('Активность')).toBeTruthy();
+    expect(screen.getByText('Обновлено')).toBeTruthy();
+    expect(screen.getByText('25.05.2026')).toBeTruthy();
     expect(screen.getByText('127.0.0.1')).toBeTruthy();
 
     await waitFor(() => {
       expect(apiService.getUsersOnline).toHaveBeenCalledTimes(1);
       expect(apiService.sendUserActivityHeartbeat).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('auto-refreshes every 10 seconds while the section is visible', async () => {
+    const intervalSpy = vi.spyOn(window, 'setInterval');
+    vi.mocked(apiService.getUsersOnline).mockResolvedValue({
+      generatedAt: '2026-05-25T08:00:00',
+      onlineThresholdMinutes: 5,
+      totalUsers: 0,
+      onlineUsers: 0,
+      users: [],
+    });
+
+    const { unmount } = render(<UserOnlineSettings />);
+
+    await waitFor(() => {
+      expect(apiService.getUsersOnline).toHaveBeenCalledTimes(1);
+    });
+
+    expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 10000);
+    unmount();
+    intervalSpy.mockRestore();
   });
 
   it('shows loading error', async () => {
