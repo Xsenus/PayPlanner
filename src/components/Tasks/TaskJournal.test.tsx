@@ -909,11 +909,29 @@ describe('TaskJournal', () => {
 
     await waitFor(() => expect(screen.getByTestId('task-timeline-body-grid')).toBeTruthy());
     expect(screen.getByTestId('task-view-timeline').getAttribute('aria-pressed')).toBe('true');
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
+        viewMode: 'timeline',
+      });
+    });
 
     fireEvent.click(screen.getByTestId('task-view-list'));
 
     await waitFor(() => expect(screen.getByTestId('task-table')).toBeTruthy());
     expect(screen.getByTestId('task-view-list').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('restores the saved journal presentation mode for the current user', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'timeline',
+      periodMode: 'week',
+    }));
+
+    await renderJournal([createTask({ dueAt: todayAt(11), plannedDurationMinutes: 60 })], { waitForTitle: null });
+
+    await waitFor(() => expect(screen.getByTestId('task-timeline-body-grid')).toBeTruthy());
+    expect(screen.getByTestId('task-view-timeline').getAttribute('aria-pressed')).toBe('true');
   });
 
   it('filters tasks authored by the current user from the quick controls', async () => {

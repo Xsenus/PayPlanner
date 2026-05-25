@@ -85,6 +85,7 @@ type TaskJournalProps = {
 type TaskForm = TaskJournalUpsertPayload & { dueAt: string; approvalDueAt: string | null };
 
 type TaskJournalFilterPreferences = {
+  viewMode: ViewMode;
   quickFilter: QuickFilter;
   metricFilter: MetricFilter;
   search: string;
@@ -183,8 +184,9 @@ function getDefaultQuickFilter(userId: number | null, mode: TaskJournalMode = 'j
   return userId ? 'assignedToMe' : 'all';
 }
 
-function createDefaultFilterPreferences(userId: number | null, mode: TaskJournalMode = 'journal'): TaskJournalFilterPreferences {
+function createDefaultFilterPreferences(userId: number | null, mode: TaskJournalMode = 'journal', viewMode: ViewMode = 'list'): TaskJournalFilterPreferences {
   return {
+    viewMode,
     quickFilter: getDefaultQuickFilter(userId, mode),
     metricFilter: 'none',
     search: '',
@@ -200,6 +202,10 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
 
 function isQuickFilter(value: unknown): value is QuickFilter {
   return value === 'all' || value === 'assignedToMe' || value === 'authoredByMe';
+}
+
+function isViewMode(value: unknown): value is ViewMode {
+  return value === 'list' || value === 'board' || value === 'calendar' || value === 'timeline';
 }
 
 function isMetricFilter(value: unknown): value is MetricFilter {
@@ -254,8 +260,8 @@ function getTaskDateRangeBounds(dateFrom: string, dateTo: string) {
   return { from, to };
 }
 
-function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJournalMode = 'journal'): TaskJournalFilterPreferences {
-  const defaults = createDefaultFilterPreferences(userId, mode);
+function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJournalMode = 'journal', viewMode: ViewMode = 'list'): TaskJournalFilterPreferences {
+  const defaults = createDefaultFilterPreferences(userId, mode, viewMode);
   if (typeof window === 'undefined') {
     return defaults;
   }
@@ -268,6 +274,7 @@ function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJourn
 
     const parsed = JSON.parse(raw) as Partial<TaskJournalFilterPreferences>;
     return {
+      viewMode: isViewMode(parsed.viewMode) ? parsed.viewMode : defaults.viewMode,
       quickFilter: isQuickFilter(parsed.quickFilter) ? parsed.quickFilter : defaults.quickFilter,
       metricFilter: isMetricFilter(parsed.metricFilter) ? parsed.metricFilter : defaults.metricFilter,
       search: typeof parsed.search === 'string' ? parsed.search : defaults.search,
@@ -1159,7 +1166,7 @@ export function TaskJournal({
   const isApprovalsMode = mode === 'approvals';
   const initialPreferencesRef = useRef<TaskJournalFilterPreferences | null>(null);
   if (initialPreferencesRef.current === null) {
-    initialPreferencesRef.current = readTaskJournalFilterPreferences(currentUserId, mode);
+    initialPreferencesRef.current = readTaskJournalFilterPreferences(currentUserId, mode, initialView);
   }
 
   const initialPreferences = initialPreferencesRef.current;
@@ -1181,7 +1188,7 @@ export function TaskJournal({
   const [search, setSearch] = useState(initialPreferences.search);
   const [dateFromFilter, setDateFromFilter] = useState(initialPreferences.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
-  const [viewMode, setViewMode] = useState<ViewMode>(initialView);
+  const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
   const [statusFilter, setStatusFilter] = useState<TaskJournalStatus | 'active' | 'all'>(initialPreferences.statusFilter);
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
@@ -1203,8 +1210,14 @@ export function TaskJournal({
   const routeTaskRequestRef = useRef(0);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
   const skipNextFilterSaveRef = useRef(false);
+  const previousInitialViewRef = useRef(initialView);
 
   useEffect(() => {
+    if (previousInitialViewRef.current === initialView) {
+      return;
+    }
+
+    previousInitialViewRef.current = initialView;
     setViewMode(initialView);
   }, [initialView]);
 
@@ -1214,9 +1227,10 @@ export function TaskJournal({
       return;
     }
 
-    const nextPreferences = readTaskJournalFilterPreferences(currentUserId, mode);
+    const nextPreferences = readTaskJournalFilterPreferences(currentUserId, mode, initialView);
     skipNextFilterSaveRef.current = true;
     setFilterOwnerKey(nextOwnerKey);
+    setViewMode(nextPreferences.viewMode);
     setQuickFilter(nextPreferences.quickFilter);
     setMetricFilter(nextPreferences.metricFilter);
     setSearch(nextPreferences.search);
@@ -1227,7 +1241,7 @@ export function TaskJournal({
     setTypeFilter(nextPreferences.typeFilter);
     setPriorityFilter(nextPreferences.priorityFilter);
     setPeriodMode(nextPreferences.periodMode);
-  }, [currentUserId, filterOwnerKey, mode]);
+  }, [currentUserId, filterOwnerKey, initialView, mode]);
 
   useEffect(() => {
     if (skipNextFilterSaveRef.current) {
@@ -1236,6 +1250,7 @@ export function TaskJournal({
     }
 
     writeTaskJournalFilterPreferences(currentUserId, {
+      viewMode,
       quickFilter,
       metricFilter,
       search,
@@ -1247,7 +1262,7 @@ export function TaskJournal({
       priorityFilter,
       periodMode,
     }, mode);
-  }, [assigneeFilter, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter]);
+  }, [assigneeFilter, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
