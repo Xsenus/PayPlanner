@@ -327,6 +327,7 @@ const emptyForm = (
     contractorPaymentAmount: null,
     contractorPaymentDueDate: null,
     contractorPaymentOnResult: false,
+    contractorPaymentResultDelayDays: null,
     type: 'task',
     priority: 'normal',
     status: 'new',
@@ -1808,8 +1809,18 @@ export function TaskJournal({
         toast.error('Укажите сумму оплаты исполнителю.', 'Журнал задач');
         return;
       }
-      if (!form.contractorPaymentDueDate) {
-        toast.error('Укажите дату оплаты исполнителю.', 'Журнал задач');
+      if (form.contractorPaymentOnResult && form.contractorPaymentDueDate) {
+        toast.error('Укажите либо точную дату оплаты, либо оплату по результату. Одновременно эти поля заполнять нельзя.', 'Журнал задач');
+        return;
+      }
+      if (form.contractorPaymentOnResult) {
+        const delayDays = Number(form.contractorPaymentResultDelayDays);
+        if (form.contractorPaymentResultDelayDays === null || form.contractorPaymentResultDelayDays === undefined || !Number.isFinite(delayDays) || delayDays < 0 || delayDays > 365) {
+          toast.error('Укажите количество дней для оплаты по результату от 0 до 365.', 'Журнал задач');
+          return;
+        }
+      } else if (!form.contractorPaymentDueDate) {
+        toast.error('Укажите дату оплаты исполнителю или включите оплату по результату.', 'Журнал задач');
         return;
       }
     }
@@ -1834,6 +1845,9 @@ export function TaskJournal({
         ? new Date(`${form.contractorPaymentDueDate}T00:00:00`).toISOString()
         : null,
       contractorPaymentOnResult: Boolean(form.contractorPaymentEnabled && form.contractorPaymentOnResult),
+      contractorPaymentResultDelayDays: form.contractorPaymentEnabled && form.contractorPaymentOnResult
+        ? Number(form.contractorPaymentResultDelayDays)
+        : null,
       tags: unique(form.tags),
       reminders: form.reminders.length ? form.reminders : ['atDue'],
       channels: form.channels.length ? form.channels : ['inApp'],
@@ -4444,6 +4458,7 @@ function TaskModal({
         contractorPaymentAmount: state.task.contractorPaymentAmount ?? null,
         contractorPaymentDueDate: state.task.contractorPaymentDueDate ?? null,
         contractorPaymentOnResult: Boolean(state.task.contractorPaymentOnResult),
+        contractorPaymentResultDelayDays: state.task.contractorPaymentResultDelayDays ?? null,
         contractorPaymentId: state.task.contractorPaymentId ?? null,
         contractorPaymentStatus: state.task.contractorPaymentStatus ?? null,
         type: state.task.type,
@@ -5251,7 +5266,7 @@ function TaskModal({
                     className="form-input bg-white"
                   />
                 </Field>
-                <Field label="Дата оплаты">
+                <Field label="Точная дата оплаты">
                   <input
                     type="date"
                     value={form.contractorPaymentDueDate ? String(form.contractorPaymentDueDate).split('T')[0] : ''}
@@ -5261,17 +5276,53 @@ function TaskModal({
                     className="form-input bg-white"
                   />
                 </Field>
-                <label className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-white px-3 py-3 text-sm font-medium text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(form.contractorPaymentOnResult)}
-                    onChange={(event) => update('contractorPaymentOnResult', event.target.checked)}
-                    disabled={isReadOnly}
-                    data-testid="task-contractor-payment-on-result"
-                    className="h-4 w-4 rounded border-slate-300 text-emerald-600"
-                  />
-                  Оплата по результату
-                </label>
+                <div className="rounded-xl border border-emerald-100 bg-white px-3 py-3">
+                  <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.contractorPaymentOnResult)}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setForm((prev) => ({
+                          ...prev,
+                          contractorPaymentOnResult: checked,
+                          contractorPaymentResultDelayDays: checked
+                            ? prev.contractorPaymentResultDelayDays ?? 5
+                            : null,
+                        }));
+                      }}
+                      disabled={isReadOnly}
+                      data-testid="task-contractor-payment-on-result"
+                      className="h-4 w-4 rounded border-slate-300 text-emerald-600"
+                    />
+                    Оплата по результату
+                  </label>
+                  {form.contractorPaymentOnResult ? (
+                    <label className="mt-3 block text-xs font-medium text-slate-600">
+                      Через дней после результата
+                      <input
+                        type="number"
+                        min="0"
+                        max="365"
+                        step="1"
+                        value={form.contractorPaymentResultDelayDays ?? ''}
+                        onChange={(event) => update('contractorPaymentResultDelayDays', event.target.value === '' ? null : Number(event.target.value))}
+                        disabled={isReadOnly}
+                        data-testid="task-contractor-payment-result-delay-days"
+                        className="form-input mt-1 bg-white"
+                      />
+                    </label>
+                  ) : null}
+                </div>
+                {form.contractorPaymentOnResult && form.contractorPaymentDueDate ? (
+                  <div className="md:col-span-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    Заполните только один вариант: точную дату оплаты или оплату по результату.
+                  </div>
+                ) : form.contractorPaymentOnResult ? (
+                  <div className="md:col-span-3 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-slate-600">
+                    Если задача уже закрыта, платеж будет поставлен от даты закрытия. Если задача еще не закрыта, платеж появится после перевода в работу.
+                  </div>
+                ) : null}
                 {form.contractorPaymentId ? (
                   <div className="md:col-span-3 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-slate-600">
                     Платеж #{form.contractorPaymentId}

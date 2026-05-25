@@ -24,6 +24,7 @@ public class TaskJournalItemDto
     public decimal? ContractorPaymentAmount { get; set; }
     public string? ContractorPaymentDueDate { get; set; }
     public bool ContractorPaymentOnResult { get; set; }
+    public int? ContractorPaymentResultDelayDays { get; set; }
     public int? ContractorPaymentId { get; set; }
     public string ContractorPaymentStatus { get; set; } = string.Empty;
     public string Type { get; set; } = "task";

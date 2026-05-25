@@ -6066,6 +6066,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
+                    b.Property<int?>("ContractorPaymentResultDelayDays")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp without time zone")

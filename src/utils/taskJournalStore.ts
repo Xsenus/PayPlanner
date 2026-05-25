@@ -52,6 +52,7 @@ export interface TaskJournalItem {
   contractorPaymentAmount?: number | null;
   contractorPaymentDueDate?: string | null;
   contractorPaymentOnResult?: boolean;
+  contractorPaymentResultDelayDays?: number | null;
   contractorPaymentId?: number | null;
   contractorPaymentStatus?: string | null;
   type: TaskJournalType;

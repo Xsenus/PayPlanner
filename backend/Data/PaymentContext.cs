@@ -2191,6 +2191,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.ContractorPaymentAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.ContractorPaymentDueDate).HasColumnType("date");
             entity.Property(e => e.ContractorPaymentOnResult).HasDefaultValue(false);
+            entity.Property(e => e.ContractorPaymentResultDelayDays);
             entity.Property(e => e.Type).HasMaxLength(32).HasDefaultValue("task").IsRequired();
             entity.Property(e => e.Priority).HasMaxLength(32).HasDefaultValue("normal").IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue("new").IsRequired();

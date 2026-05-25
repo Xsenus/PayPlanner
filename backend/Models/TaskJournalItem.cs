@@ -52,6 +52,8 @@ public class TaskJournalItem
 
     public bool ContractorPaymentOnResult { get; set; }
 
+    public int? ContractorPaymentResultDelayDays { get; set; }
+
     public int? ContractorPaymentId { get; set; }
     public Payment? ContractorPayment { get; set; }
 

@@ -1102,8 +1102,8 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getByTestId('task-contractor-payment-checkbox'));
     fireEvent.change(screen.getByTestId('task-contractor-payment-amount'), { target: { value: '7500' } });
-    fireEvent.change(screen.getByTestId('task-contractor-payment-date'), { target: { value: '2026-06-07' } });
     fireEvent.click(screen.getByTestId('task-contractor-payment-on-result'));
+    fireEvent.change(screen.getByTestId('task-contractor-payment-result-delay-days'), { target: { value: '5' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
 
     await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
@@ -1111,8 +1111,9 @@ describe('TaskJournal', () => {
       assigneeUserId: 9,
       contractorPaymentEnabled: true,
       contractorPaymentAmount: 7500,
-      contractorPaymentDueDate: new Date('2026-06-07T00:00:00').toISOString(),
+      contractorPaymentDueDate: null,
       contractorPaymentOnResult: true,
+      contractorPaymentResultDelayDays: 5,
     }));
   });
 

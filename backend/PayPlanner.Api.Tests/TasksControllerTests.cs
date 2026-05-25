@@ -1594,7 +1594,6 @@ public class TasksControllerTests
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var assignee = await CreateAdminUserAsync(db, "contractor-result@example.com", "Исполнитель по результату", isExternalContractor: true);
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
-        var dueDate = new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc);
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var createResult = await controller.CreateTask(new UpsertTaskJournalItemRequest
@@ -1605,8 +1604,8 @@ public class TasksControllerTests
             DueAt = DateTime.UtcNow.AddHours(2),
             ContractorPaymentEnabled = true,
             ContractorPaymentAmount = 7_000m,
-            ContractorPaymentDueDate = dueDate,
             ContractorPaymentOnResult = true,
+            ContractorPaymentResultDelayDays = 5,
         }, CancellationToken.None);
 
         var created = Assert.IsType<CreatedResult>(createResult.Result);
@@ -1631,8 +1630,79 @@ public class TasksControllerTests
             .SingleAsync();
         Assert.Equal(PaymentStatus.Pending, payment.Status);
         Assert.Equal(7_000m, payment.Amount);
-        Assert.Equal(dueDate.Date, payment.Date);
+        Assert.Equal(DateTime.UtcNow.Date.AddDays(5), payment.Date);
         Assert.Contains(payment.Responsibles, responsible => responsible.UserId == assignee.Id);
+    }
+
+    [Fact]
+    public async Task CreateTask_RejectsContractorPaymentWhenExactDateAndResultDelayBothSet()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var assignee = await CreateAdminUserAsync(db, "contractor-conflict@example.com", "Привлеченный исполнитель", isExternalContractor: true);
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            AssigneeUserId = assignee.Id,
+            Title = "Выполнить поручение",
+            DueAt = DateTime.UtcNow.AddHours(2),
+            ContractorPaymentEnabled = true,
+            ContractorPaymentAmount = 7_000m,
+            ContractorPaymentDueDate = DateTime.UtcNow.AddDays(3),
+            ContractorPaymentOnResult = true,
+            ContractorPaymentResultDelayDays = 5,
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("либо точную дату оплаты", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await db.Payments.ToListAsync());
+    }
+
+    [Fact]
+    public async Task UpdateStatus_InProgressCreatesContractorPaymentFromResultDelay()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var assignee = await CreateAdminUserAsync(db, "contractor-progress@example.com", "Исполнитель по результату", isExternalContractor: true);
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var createResult = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            AssigneeUserId = assignee.Id,
+            Title = "Выполнить поручение",
+            DueAt = DateTime.UtcNow.AddHours(2),
+            ContractorPaymentEnabled = true,
+            ContractorPaymentAmount = 6_500m,
+            ContractorPaymentOnResult = true,
+            ContractorPaymentResultDelayDays = 5,
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        Assert.Null(createdDto.ContractorPaymentId);
+        Assert.Empty(await db.Payments.ToListAsync());
+
+        var statusResult = await controller.UpdateStatus(createdDto.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "inProgress",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(statusResult.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("inProgress", dto.Status);
+        Assert.True(dto.ContractorPaymentOnResult);
+        Assert.Equal(5, dto.ContractorPaymentResultDelayDays);
+        Assert.NotNull(dto.ContractorPaymentId);
+
+        var payment = await db.Payments.SingleAsync();
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.Equal(6_500m, payment.Amount);
+        Assert.Equal(DateTime.UtcNow.Date.AddDays(5), payment.Date);
     }
 
     [Fact]

@@ -1354,6 +1354,7 @@ public class TasksController : ControllerBase
             ContractorPaymentAmount = NormalizeMoneyAmount(request.ContractorPaymentAmount),
             ContractorPaymentDueDate = NormalizeDateOnly(request.ContractorPaymentDueDate),
             ContractorPaymentOnResult = request.ContractorPaymentOnResult,
+            ContractorPaymentResultDelayDays = NormalizeContractorPaymentResultDelayDays(request.ContractorPaymentResultDelayDays),
             Type = NormalizeEnumValue(request.Type, AllowedTypes, "task"),
             Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal"),
             Status = nextStatus,
@@ -1369,7 +1370,7 @@ public class TasksController : ControllerBase
         AddTaskHistory(entity, access, "Задача создана.");
         _db.TaskJournalItems.Add(entity);
         await _db.SaveChangesAsync(ct);
-        await SyncContractorPaymentAsync(entity, ct);
+        await SyncContractorPaymentAsync(entity, GetContractorPaymentResultBaseDate(null, nextStatus, entity.CreatedAt), ct);
         await _db.SaveChangesAsync(ct);
         await _notificationService.NotifyTaskAssignedAsync(entity, access.DisplayName, access.UserId, ct);
         if (IsApprovalActiveStatus(entity.Status))
@@ -1455,6 +1456,7 @@ public class TasksController : ControllerBase
         entity.ContractorPaymentAmount = NormalizeMoneyAmount(request.ContractorPaymentAmount);
         entity.ContractorPaymentDueDate = NormalizeDateOnly(request.ContractorPaymentDueDate);
         entity.ContractorPaymentOnResult = request.ContractorPaymentOnResult;
+        entity.ContractorPaymentResultDelayDays = NormalizeContractorPaymentResultDelayDays(request.ContractorPaymentResultDelayDays);
         entity.Type = NormalizeEnumValue(request.Type, AllowedTypes, "task");
         entity.Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal");
         entity.Status = nextStatus;
@@ -1488,7 +1490,7 @@ public class TasksController : ControllerBase
             _db.TaskJournalComments.Add(userComment);
         }
 
-        await SyncContractorPaymentAsync(entity, ct);
+        await SyncContractorPaymentAsync(entity, GetContractorPaymentResultBaseDate(previousStatus, nextStatus, entity.UpdatedAt), ct);
         await _db.SaveChangesAsync(ct);
         if (changeLabels.Count > 0)
         {
@@ -1588,7 +1590,7 @@ public class TasksController : ControllerBase
             AddTaskHistory(entity, access, $"Изменено: {string.Join(", ", parts)}.");
         }
 
-        await SyncContractorPaymentAsync(entity, ct);
+        await SyncContractorPaymentAsync(entity, GetContractorPaymentResultBaseDate(oldStatus, entity.Status, entity.UpdatedAt), ct);
         await _db.SaveChangesAsync(ct);
         if (statusChanged || resultChanged)
         {
@@ -2834,7 +2836,20 @@ public class TasksController : ControllerBase
                 return "Укажите сумму оплаты исполнителю.";
             }
 
-            if (NormalizeDateOnly(request.ContractorPaymentDueDate) is null)
+            var hasPaymentDate = NormalizeDateOnly(request.ContractorPaymentDueDate) is not null;
+            if (request.ContractorPaymentOnResult && hasPaymentDate)
+            {
+                return "Укажите либо точную дату оплаты, либо оплату по результату. Одновременно эти поля заполнять нельзя.";
+            }
+
+            if (request.ContractorPaymentOnResult)
+            {
+                if (NormalizeContractorPaymentResultDelayDays(request.ContractorPaymentResultDelayDays) is null)
+                {
+                    return "Укажите количество дней для оплаты по результату.";
+                }
+            }
+            else if (!hasPaymentDate)
             {
                 return "Укажите дату оплаты исполнителю.";
             }
@@ -2880,6 +2895,7 @@ public class TasksController : ControllerBase
             ContractorPaymentAmount = entity.ContractorPaymentAmount,
             ContractorPaymentDueDate = entity.ContractorPaymentDueDate.HasValue ? ToIso(entity.ContractorPaymentDueDate.Value) : null,
             ContractorPaymentOnResult = entity.ContractorPaymentOnResult,
+            ContractorPaymentResultDelayDays = entity.ContractorPaymentResultDelayDays,
             ContractorPaymentId = entity.ContractorPaymentId,
             ContractorPaymentStatus = entity.ContractorPayment?.Status.ToString() ?? string.Empty,
             Type = entity.Type,
@@ -2965,6 +2981,16 @@ public class TasksController : ControllerBase
     private static DateTime? NormalizeDateOnly(DateTime? value)
         => value.HasValue && value.Value != default ? value.Value.Date : null;
 
+    private static int? NormalizeContractorPaymentResultDelayDays(int? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        return value.Value is >= 0 and <= 365 ? value.Value : null;
+    }
+
     private async Task<string?> ValidateContractorPaymentRequestAsync(
         UpsertTaskJournalItemRequest request,
         int? assigneeUserId,
@@ -3010,7 +3036,7 @@ public class TasksController : ControllerBase
         return (int)Math.Round(minutes / 15m, MidpointRounding.AwayFromZero) * 15;
     }
 
-    private async Task SyncContractorPaymentAsync(TaskJournalItem entity, CancellationToken ct)
+    private async Task SyncContractorPaymentAsync(TaskJournalItem entity, DateTime? resultBaseDate, CancellationToken ct)
     {
         var payment = await ResolveContractorPaymentAsync(entity, ct);
         var shouldHavePayment = await ShouldCreateOrKeepContractorPaymentAsync(entity, ct);
@@ -3032,7 +3058,12 @@ public class TasksController : ControllerBase
             return;
         }
 
-        var dueDate = NormalizeDateOnly(entity.ContractorPaymentDueDate)!.Value;
+        var dueDate = ResolveContractorPaymentDueDate(entity, payment, resultBaseDate);
+        if (dueDate is null)
+        {
+            return;
+        }
+
         var amount = NormalizeMoneyAmount(entity.ContractorPaymentAmount)!.Value;
         var description = BuildContractorPaymentDescription(entity);
         var systemNotes = BuildContractorPaymentSystemNotes(entity);
@@ -3046,8 +3077,8 @@ public class TasksController : ControllerBase
                 Status = PaymentStatus.Pending,
                 Amount = amount,
                 PaidAmount = 0m,
-                Date = dueDate,
-                PlannedDate = dueDate,
+                Date = dueDate.Value,
+                PlannedDate = dueDate.Value,
                 Description = description,
                 CounterpartyName = assigneeName,
                 Notes = "Автоматически создано из задачи.",
@@ -3084,8 +3115,8 @@ public class TasksController : ControllerBase
         payment.Type = PaymentType.Expense;
         payment.Status = PaymentStatus.Pending;
         payment.Amount = amount;
-        payment.Date = dueDate;
-        payment.PlannedDate = dueDate;
+        payment.Date = dueDate.Value;
+        payment.PlannedDate = dueDate.Value;
         payment.Description = description;
         payment.CounterpartyName = assigneeName;
         payment.SystemNotes = systemNotes;
@@ -3148,13 +3179,24 @@ public class TasksController : ControllerBase
     {
         if (!entity.ContractorPaymentEnabled
             || !entity.AssigneeUserId.HasValue
-            || NormalizeMoneyAmount(entity.ContractorPaymentAmount) is null
-            || NormalizeDateOnly(entity.ContractorPaymentDueDate) is null)
+            || NormalizeMoneyAmount(entity.ContractorPaymentAmount) is null)
         {
             return false;
         }
 
-        if (entity.ContractorPaymentOnResult && !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase))
+        if (entity.ContractorPaymentOnResult)
+        {
+            if (NormalizeContractorPaymentResultDelayDays(entity.ContractorPaymentResultDelayDays) is null)
+            {
+                return false;
+            }
+
+            if (!IsContractorPaymentResultTriggerStatus(entity.Status))
+            {
+                return false;
+            }
+        }
+        else if (NormalizeDateOnly(entity.ContractorPaymentDueDate) is null)
         {
             return false;
         }
@@ -3162,6 +3204,38 @@ public class TasksController : ControllerBase
         return await _db.Users
             .AsNoTracking()
             .AnyAsync(user => user.Id == entity.AssigneeUserId.Value && user.IsExternalContractor, ct);
+    }
+
+    private static bool IsContractorPaymentResultTriggerStatus(string? status)
+        => string.Equals(status, "inProgress", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, "done", StringComparison.OrdinalIgnoreCase);
+
+    private static DateTime? GetContractorPaymentResultBaseDate(string? oldStatus, string? nextStatus, DateTime? changedAt)
+        => IsContractorPaymentResultTriggerStatus(nextStatus)
+           && !string.Equals(oldStatus, nextStatus, StringComparison.OrdinalIgnoreCase)
+            ? changedAt?.Date ?? DateTime.UtcNow.Date
+            : null;
+
+    private static DateTime? ResolveContractorPaymentDueDate(TaskJournalItem entity, Payment? payment, DateTime? resultBaseDate)
+    {
+        if (!entity.ContractorPaymentOnResult)
+        {
+            return NormalizeDateOnly(entity.ContractorPaymentDueDate);
+        }
+
+        var delayDays = NormalizeContractorPaymentResultDelayDays(entity.ContractorPaymentResultDelayDays);
+        if (delayDays is null)
+        {
+            return null;
+        }
+
+        if (resultBaseDate is null && payment is not null && payment.Date != default)
+        {
+            return payment.Date.Date;
+        }
+
+        var baseDate = (resultBaseDate ?? entity.UpdatedAt ?? entity.CreatedAt).Date;
+        return baseDate.AddDays(delayDays.Value);
     }
 
     private static bool CanChangeGeneratedContractorPayment(Payment payment)
@@ -3925,6 +3999,7 @@ public class TasksController : ControllerBase
         AddIfChanged(changes, "Сумма оплаты исполнителю", FormatMoney(NormalizeMoneyAmount(entity.ContractorPaymentAmount)), FormatMoney(NormalizeMoneyAmount(request.ContractorPaymentAmount)));
         AddIfChanged(changes, "Дата оплаты исполнителю", FormatOptionalDate(NormalizeDateOnly(entity.ContractorPaymentDueDate)), FormatOptionalDate(NormalizeDateOnly(request.ContractorPaymentDueDate)));
         AddIfChanged(changes, "Оплата по результату", FormatYesNo(entity.ContractorPaymentOnResult), FormatYesNo(request.ContractorPaymentOnResult));
+        AddIfChanged(changes, "Срок оплаты по результату", FormatOptionalNumber(entity.ContractorPaymentResultDelayDays), FormatOptionalNumber(NormalizeContractorPaymentResultDelayDays(request.ContractorPaymentResultDelayDays)));
 
         return changes;
     }
@@ -3959,6 +4034,9 @@ public class TasksController : ControllerBase
 
     private static string FormatMoney(decimal? value)
         => value.HasValue ? value.Value.ToString("N2", CultureInfo.GetCultureInfo("ru-RU")) + " ₽" : "не указано";
+
+    private static string FormatOptionalNumber(int? value)
+        => value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : "не указано";
 
     private static string FormatYesNo(bool value)
         => value ? "да" : "нет";
