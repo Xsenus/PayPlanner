@@ -1485,6 +1485,10 @@ public class CasesV2ControllerTests
         Assert.Contains("SUMMARY:Судебное заседание", ics, StringComparison.Ordinal);
         Assert.Contains("SUMMARY:Срок апелляции", ics, StringComparison.Ordinal);
         Assert.Contains("SUMMARY:Подготовить позицию", ics, StringComparison.Ordinal);
+        Assert.Contains("BEGIN:VALARM", ics, StringComparison.Ordinal);
+        Assert.Contains("TRIGGER:-PT1H", ics, StringComparison.Ordinal);
+        Assert.Contains("TRIGGER:-PT15M", ics, StringComparison.Ordinal);
+        Assert.Contains("DESCRIPTION:Напоминание: Подготовить позицию", ics, StringComparison.Ordinal);
     }
 
     [Fact]

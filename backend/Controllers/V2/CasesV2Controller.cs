@@ -4031,11 +4031,26 @@ public class CasesV2Controller : ControllerBase
             builder.AppendLine($"SUMMARY:{EscapeIcsText(item.Title)}");
             builder.AppendLine($"DESCRIPTION:{EscapeIcsText(BuildCaseCalendarIcsDescription(item))}");
             builder.AppendLine("STATUS:CONFIRMED");
+            if (!item.AllDay)
+            {
+                AppendCaseCalendarIcsAlarm(builder, item, "PT1H");
+                AppendCaseCalendarIcsAlarm(builder, item, "PT15M");
+            }
+
             builder.AppendLine("END:VEVENT");
         }
 
         builder.AppendLine("END:VCALENDAR");
         return builder.ToString().ReplaceLineEndings("\r\n");
+    }
+
+    private static void AppendCaseCalendarIcsAlarm(StringBuilder builder, CaseCalendarEventDto item, string triggerBeforeStart)
+    {
+        builder.AppendLine("BEGIN:VALARM");
+        builder.AppendLine("ACTION:DISPLAY");
+        builder.AppendLine($"DESCRIPTION:{EscapeIcsText($"Напоминание: {item.Title}")}");
+        builder.AppendLine($"TRIGGER:-{triggerBeforeStart}");
+        builder.AppendLine("END:VALARM");
     }
 
     private static string BuildCaseCalendarIcsDescription(CaseCalendarEventDto item)
