@@ -1029,8 +1029,10 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        var exists = await BuildVisibleTasksQuery(access).AnyAsync(item => item.Id == id, ct);
-        if (!exists)
+        var task = await BuildVisibleTasksQuery(access)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (task is null)
         {
             return NotFound();
         }
@@ -1043,7 +1045,8 @@ public class TasksController : ControllerBase
             .ThenByDescending(item => item.Id)
             .ToListAsync(ct);
 
-        return Ok(MapFiles(files));
+        var caseDocumentIds = await ResolveTaskCaseDocumentIdsAsync(task.ClientCaseId, files, ct);
+        return Ok(MapFiles(files, caseDocumentIds));
     }
 
     [HttpPost("{id:int}/files")]
@@ -1159,7 +1162,7 @@ public class TasksController : ControllerBase
                     await _caseDocumentStorage.SaveAsync(caseDocumentStoragePath, caseStream, ct);
                 }
 
-                _db.ClientCaseDocuments.Add(new ClientCaseDocument
+                var caseDocument = new ClientCaseDocument
                 {
                     ClientCaseId = entity.ClientCaseId.Value,
                     DocumentKey = caseDocumentKey,
@@ -1174,7 +1177,8 @@ public class TasksController : ControllerBase
                     UploadedByUserId = taskFile.UploadedByUserId,
                     UploadedByName = taskFile.UploadedByName,
                     UploadedAt = taskFile.UploadedAt,
-                });
+                };
+                _db.ClientCaseDocuments.Add(caseDocument);
             }
 
             entity.UpdatedAt = DateTime.UtcNow;
@@ -1188,7 +1192,11 @@ public class TasksController : ControllerBase
 
             await _db.SaveChangesAsync(ct);
 
-            return Created($"/api/tasks/{entity.Id}/files/{taskFile.Id}", MapFile(taskFile, true));
+            var caseDocumentIds = await ResolveTaskCaseDocumentIdsAsync(entity.ClientCaseId, [taskFile], ct);
+            return Created($"/api/tasks/{entity.Id}/files/{taskFile.Id}", MapFile(
+                taskFile,
+                true,
+                caseDocumentIds.GetValueOrDefault(BuildTaskCaseDocumentLookupKey(taskFile.DocumentKey, taskFile.Version))));
         }
         catch
         {
@@ -3719,7 +3727,40 @@ public class TasksController : ControllerBase
             UpdatedAt = comment.UpdatedAt.HasValue ? ToIso(comment.UpdatedAt.Value) : null,
         };
 
-    private static IReadOnlyList<TaskJournalFileDto> MapFiles(IReadOnlyCollection<TaskJournalFile> files)
+    private async Task<Dictionary<string, int>> ResolveTaskCaseDocumentIdsAsync(
+        int? clientCaseId,
+        IReadOnlyCollection<TaskJournalFile> files,
+        CancellationToken ct)
+    {
+        if (!clientCaseId.HasValue || files.Count == 0)
+        {
+            return [];
+        }
+
+        var caseDocumentKeys = files
+            .Select(file => BuildTaskCaseDocumentKey(file.TaskJournalItemId, file.DocumentKey))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return await _db.ClientCaseDocuments
+            .AsNoTracking()
+            .Where(item => item.ClientCaseId == clientCaseId.Value && caseDocumentKeys.Contains(item.DocumentKey))
+            .Select(item => new
+            {
+                item.Id,
+                item.DocumentKey,
+                item.Version,
+            })
+            .ToDictionaryAsync(
+                item => BuildTaskCaseDocumentLookupKey(item.DocumentKey, item.Version),
+                item => item.Id,
+                StringComparer.OrdinalIgnoreCase,
+                ct);
+    }
+
+    private static IReadOnlyList<TaskJournalFileDto> MapFiles(
+        IReadOnlyCollection<TaskJournalFile> files,
+        IReadOnlyDictionary<string, int>? caseDocumentIds = null)
     {
         var latestVersions = files
             .GroupBy(file => file.DocumentKey, StringComparer.OrdinalIgnoreCase)
@@ -3729,11 +3770,14 @@ public class TasksController : ControllerBase
                 StringComparer.OrdinalIgnoreCase);
 
         return files
-            .Select(file => MapFile(file, latestVersions.TryGetValue(file.DocumentKey, out var latest) && file.Version == latest))
+            .Select(file => MapFile(
+                file,
+                latestVersions.TryGetValue(file.DocumentKey, out var latest) && file.Version == latest,
+                caseDocumentIds?.GetValueOrDefault(BuildTaskCaseDocumentLookupKey(file.DocumentKey, file.Version))))
             .ToList();
     }
 
-    private static TaskJournalFileDto MapFile(TaskJournalFile file, bool isLatestVersion)
+    private static TaskJournalFileDto MapFile(TaskJournalFile file, bool isLatestVersion, int? clientCaseDocumentId = null)
         => new()
         {
             Id = file.Id,
@@ -3747,6 +3791,7 @@ public class TasksController : ControllerBase
             UploadedByName = file.UploadedByName,
             UploadedAt = ToIso(file.UploadedAt),
             IsLatestVersion = isLatestVersion,
+            ClientCaseDocumentId = clientCaseDocumentId,
         };
 
     private static string? NormalizeDocumentKey(string? value)
@@ -3804,6 +3849,9 @@ public class TasksController : ControllerBase
 
         return prefix + suffix;
     }
+
+    private static string BuildTaskCaseDocumentLookupKey(string documentKey, int version)
+        => $"{documentKey}:{version.ToString(CultureInfo.InvariantCulture)}";
 
     private string ResolveTaskFilePath(string storagePath)
     {

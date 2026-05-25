@@ -6070,6 +6070,7 @@ function TaskModal({
                             </div>
                             <div className="mt-1 text-xs text-slate-500">
                               {formatFileSize(file.sizeBytes)} · {file.uploadedByName} · {formatDateTime(file.uploadedAt)}
+                              {file.clientCaseDocumentId ? ` · Документ дела #${file.clientCaseDocumentId}` : ''}
                             </div>
                           </div>
                           <div className="flex shrink-0 gap-2">

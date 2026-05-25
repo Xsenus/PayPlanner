@@ -1822,7 +1822,8 @@ public class TasksControllerTests
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
-        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var clientCase = await CreateCaseAsync(db, client.Id, "Документы по задаче");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, clientCaseId: clientCase.Id);
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
         var firstResult = await controller.UploadFile(
@@ -1845,13 +1846,16 @@ public class TasksControllerTests
         Assert.Equal(1, first.Version);
         Assert.Equal(2, second.Version);
         Assert.True(second.IsLatestVersion);
+        Assert.NotNull(first.ClientCaseDocumentId);
+        Assert.NotNull(second.ClientCaseDocumentId);
 
         var filesResult = await controller.GetFiles(task.Id, CancellationToken.None);
         var filesOk = Assert.IsType<OkObjectResult>(filesResult.Result);
         var files = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalFileDto>>(filesOk.Value);
         Assert.Equal(2, files.Count);
-        Assert.Contains(files, item => item.Id == first.Id && !item.IsLatestVersion);
-        Assert.Contains(files, item => item.Id == second.Id && item.IsLatestVersion);
+        Assert.Contains(files, item => item.Id == first.Id && !item.IsLatestVersion && item.ClientCaseDocumentId == first.ClientCaseDocumentId);
+        Assert.Contains(files, item => item.Id == second.Id && item.IsLatestVersion && item.ClientCaseDocumentId == second.ClientCaseDocumentId);
+        Assert.Equal(2, await db.ClientCaseDocuments.CountAsync(item => item.ClientCaseId == clientCase.Id && item.DocumentKey.StartsWith($"task-{task.Id}-")));
 
         var download = await controller.DownloadFile(task.Id, second.Id, CancellationToken.None);
         var physicalFile = Assert.IsType<PhysicalFileResult>(download);

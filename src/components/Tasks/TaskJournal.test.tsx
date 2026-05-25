@@ -1892,6 +1892,7 @@ describe('TaskJournal', () => {
         uploadedByName: 'Администратор',
         uploadedAt: todayAt(10),
         isLatestVersion: true,
+        clientCaseDocumentId: 42,
       },
     ]);
 
@@ -1899,6 +1900,7 @@ describe('TaskJournal', () => {
 
     await openFirstTaskForEdit();
     expect((await screen.findAllByText('document.pdf')).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Документ дела #42/u)).toBeTruthy();
 
     const fileInputs = document.querySelectorAll('input[type="file"]');
     fireEvent.change(fileInputs[1], {

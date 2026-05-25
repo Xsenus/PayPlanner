@@ -108,6 +108,7 @@ export interface TaskJournalFile {
   uploadedByName: string;
   uploadedAt: string;
   isLatestVersion: boolean;
+  clientCaseDocumentId?: number | null;
 }
 
 export interface TaskJournalAssignee {

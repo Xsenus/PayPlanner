@@ -78,6 +78,7 @@ public class TaskJournalFileDto
     public string UploadedByName { get; set; } = string.Empty;
     public string UploadedAt { get; set; } = string.Empty;
     public bool IsLatestVersion { get; set; }
+    public int? ClientCaseDocumentId { get; set; }
 }
 
 public class TaskJournalAssigneeDto
