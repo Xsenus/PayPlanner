@@ -68,6 +68,7 @@ interface CaseDetailPageProps {
   onCreateInvoice?: (caseItem: ClientCase) => void;
   onCreatePayment?: (caseItem: ClientCase) => void;
   canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
@@ -998,6 +999,7 @@ export function CaseDetailPage({
   onCreateInvoice,
   onCreatePayment,
   canEdit = true,
+  canDelete = true,
 }: CaseDetailPageProps) {
   const initialViewState = readCaseDetailViewState(caseId);
   const [caseItem, setCaseItem] = useState<ClientCase | null>(null);
@@ -1802,6 +1804,7 @@ export function CaseDetailPage({
 
   const generateDocument = async () => {
     if (!caseItem) return;
+    if (!canManageDocuments) return;
 
     setGeneratingDocument(true);
     setError(null);
@@ -1828,6 +1831,7 @@ export function CaseDetailPage({
 
   const uploadDocument = async () => {
     if (!caseItem) return;
+    if (!canManageDocuments) return;
     if (!documentFile) {
       setError('Выберите файл документа для загрузки.');
       return;
@@ -1914,6 +1918,7 @@ export function CaseDetailPage({
 
   const updateDocument = async (caseDocument: ClientCaseDocument, payload: { documentType: string; status: string }) => {
     if (!caseItem) return;
+    if (!canManageDocuments) return;
 
     setUpdatingDocumentId(caseDocument.id);
     setError(null);
@@ -1934,6 +1939,7 @@ export function CaseDetailPage({
 
   const uploadDocumentVersion = async (caseDocument: ClientCaseDocument, file: File | null | undefined) => {
     if (!caseItem || !file) return;
+    if (!canManageDocuments) return;
 
     setUploadingDocumentVersionId(caseDocument.id);
     setError(null);
@@ -1954,6 +1960,7 @@ export function CaseDetailPage({
 
   const deleteDocument = async (caseDocument: ClientCaseDocument) => {
     if (!caseItem) return;
+    if (!canDeleteDocuments) return;
     if (!window.confirm(`Удалить документ «${caseDocument.originalFileName}»?`)) return;
 
     setDeletingDocumentId(caseDocument.id);
@@ -2680,6 +2687,8 @@ export function CaseDetailPage({
   const inactivitySummary = getInactivitySummary(caseItem);
   const courtSyncSummary = getCourtSyncSummary(caseItem);
   const canRevealCaseSensitiveData = canEdit && (caseItem.canRevealSensitiveData ?? true);
+  const canManageDocuments = canEdit;
+  const canDeleteDocuments = canManageDocuments && canDelete;
 
   if (editPageOpen && caseEditDraft) {
     return (
@@ -3163,122 +3172,130 @@ export function CaseDetailPage({
                   <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Документы дела</h2>
                   <div className="mt-1 text-sm text-slate-500">Версии и шаблоны хранятся в истории документов дела.</div>
                 </div>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                  <label className="text-sm font-medium text-slate-700">
-                    <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Шаблон</span>
-                    <select
-                      aria-label="Шаблон документа дела"
-                      value={documentTemplateKey}
-                      onChange={(event) => setDocumentTemplateKey(event.target.value)}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 sm:w-56">
-                      {availableDocumentTemplates.map((template) => (
-                        <option key={template.key} value={template.key}>{template.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <button type="button" onClick={() => void generateDocument()} disabled={generatingDocument || availableDocumentTemplates.length === 0} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
-                    {generatingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Сформировать
-                  </button>
-                </div>
-              </div>
-              <section className="rounded-xl border border-slate-200 p-4">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Загрузить файл</h2>
-                <datalist id={documentTypeListId}>
-                  {documentTypeOptions.map((type) => (
-                    <option key={type} value={type} />
-                  ))}
-                </datalist>
-                <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_180px_180px_220px_220px_auto]">
-                  <label className="text-sm font-medium text-slate-700">
-                    <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Файл</span>
-                    <input
-                      aria-label="Файл документа"
-                      type="file"
-                      onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-blue-700"
-                    />
-                  </label>
-                  <label className="text-sm font-medium text-slate-700">
-                    <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Тип</span>
-                    <input
-                      aria-label="Тип документа"
-                      list={documentTypeListId}
-                      value={documentTypeDraft}
-                      onChange={(event) => setDocumentTypeDraft(event.target.value)}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                      placeholder="Иск"
-                    />
-                  </label>
-                  <label className="text-sm font-medium text-slate-700">
-                    <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
-                    <select
-                      aria-label="Статус документа"
-                      value={documentStatusDraft}
-                      onChange={(event) => setDocumentStatusDraft(event.target.value)}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                    >
-                      <option value="">По умолчанию: Подготовлен</option>
-                      {documentStatusOptions.map((status) => (
-                        <option key={status} value={status}>{status}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="text-sm font-medium text-slate-700">
-                    <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Источник</span>
-                    <select
-                      aria-label="Источник документа"
-                      value={documentSourceType}
-                      onChange={(event) => {
-                        setDocumentSourceType(event.target.value as DocumentSourceType);
-                        setDocumentSourceId('');
-                      }}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                    >
-                      <option value="case">Только дело</option>
-                      <option value="task">Задача</option>
-                      <option value="courtEvent">Судебное событие</option>
-                      <option value="workOrder">Заказ-наряд</option>
-                      <option value="invoice">Счет</option>
-                      <option value="stage">Этап дела</option>
-                    </select>
-                  </label>
-                  {documentSourceType === 'stage' ? (
+                {canManageDocuments ? (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                     <label className="text-sm font-medium text-slate-700">
-                      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Этап</span>
-                      <input
-                        aria-label="Этап документа"
-                        value={documentSourceStage}
-                        onChange={(event) => setDocumentSourceStage(event.target.value)}
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                        placeholder={caseItem.stage || 'pretrial'}
-                      />
-                    </label>
-                  ) : (
-                    <label className="text-sm font-medium text-slate-700">
-                      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Объект</span>
+                      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Шаблон</span>
                       <select
-                        aria-label="Объект документа"
-                        value={documentSourceId}
-                        onChange={(event) => setDocumentSourceId(event.target.value)}
-                        disabled={documentSourceType === 'case' || documentSourceType === 'workOrder' || documentSourceOptions.length === 0}
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400"
-                      >
-                        <option value="">{documentSourceType === 'case' ? 'Не требуется' : 'Выберите объект'}</option>
-                        {documentSourceOptions.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
+                        aria-label="Шаблон документа дела"
+                        value={documentTemplateKey}
+                        onChange={(event) => setDocumentTemplateKey(event.target.value)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 sm:w-56">
+                        {availableDocumentTemplates.map((template) => (
+                          <option key={template.key} value={template.key}>{template.label}</option>
                         ))}
                       </select>
                     </label>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => void uploadDocument()}
-                    disabled={uploadingDocument}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 md:self-end">
-                    {uploadingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Загрузить
-                  </button>
-                </div>
-              </section>
+                    <button type="button" onClick={() => void generateDocument()} disabled={generatingDocument || availableDocumentTemplates.length === 0} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                      {generatingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Сформировать
+                    </button>
+                  </div>
+                ) : (
+                  <div className="max-w-md rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    Документы доступны только для просмотра. Загрузка, новые версии, генерация, изменение и удаление требуют права на редактирование дела.
+                  </div>
+                )}
+              </div>
+              {canManageDocuments ? (
+                <section className="rounded-xl border border-slate-200 p-4">
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Загрузить файл</h2>
+                  <datalist id={documentTypeListId}>
+                    {documentTypeOptions.map((type) => (
+                      <option key={type} value={type} />
+                    ))}
+                  </datalist>
+                  <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_180px_180px_220px_220px_auto]">
+                    <label className="text-sm font-medium text-slate-700">
+                      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Файл</span>
+                      <input
+                        aria-label="Файл документа"
+                        type="file"
+                        onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-blue-700"
+                      />
+                    </label>
+                    <label className="text-sm font-medium text-slate-700">
+                      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Тип</span>
+                      <input
+                        aria-label="Тип документа"
+                        list={documentTypeListId}
+                        value={documentTypeDraft}
+                        onChange={(event) => setDocumentTypeDraft(event.target.value)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                        placeholder="Иск"
+                      />
+                    </label>
+                    <label className="text-sm font-medium text-slate-700">
+                      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
+                      <select
+                        aria-label="Статус документа"
+                        value={documentStatusDraft}
+                        onChange={(event) => setDocumentStatusDraft(event.target.value)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="">По умолчанию: Подготовлен</option>
+                        {documentStatusOptions.map((status) => (
+                          <option key={status} value={status}>{status}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-sm font-medium text-slate-700">
+                      <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Источник</span>
+                      <select
+                        aria-label="Источник документа"
+                        value={documentSourceType}
+                        onChange={(event) => {
+                          setDocumentSourceType(event.target.value as DocumentSourceType);
+                          setDocumentSourceId('');
+                        }}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="case">Только дело</option>
+                        <option value="task">Задача</option>
+                        <option value="courtEvent">Судебное событие</option>
+                        <option value="workOrder">Заказ-наряд</option>
+                        <option value="invoice">Счет</option>
+                        <option value="stage">Этап дела</option>
+                      </select>
+                    </label>
+                    {documentSourceType === 'stage' ? (
+                      <label className="text-sm font-medium text-slate-700">
+                        <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Этап</span>
+                        <input
+                          aria-label="Этап документа"
+                          value={documentSourceStage}
+                          onChange={(event) => setDocumentSourceStage(event.target.value)}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                          placeholder={caseItem.stage || 'pretrial'}
+                        />
+                      </label>
+                    ) : (
+                      <label className="text-sm font-medium text-slate-700">
+                        <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Объект</span>
+                        <select
+                          aria-label="Объект документа"
+                          value={documentSourceId}
+                          onChange={(event) => setDocumentSourceId(event.target.value)}
+                          disabled={documentSourceType === 'case' || documentSourceType === 'workOrder' || documentSourceOptions.length === 0}
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400"
+                        >
+                          <option value="">{documentSourceType === 'case' ? 'Не требуется' : 'Выберите объект'}</option>
+                          {documentSourceOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void uploadDocument()}
+                      disabled={uploadingDocument}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 md:self-end">
+                      {uploadingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Загрузить
+                    </button>
+                  </div>
+                </section>
+              ) : null}
               {documentsLoading ? (
                 <LoadingBlock label="Загрузка документов дела..." />
               ) : (
@@ -3291,6 +3308,8 @@ export function CaseDetailPage({
                   deletingDocumentId={deletingDocumentId}
                   documentTypeOptions={documentTypeOptions}
                   documentStatusOptions={documentStatusOptions}
+                  canEdit={canManageDocuments}
+                  canDelete={canDeleteDocuments}
                   onPreview={(caseDocument) => void previewDocument(caseDocument)}
                   onDownload={(caseDocument) => void downloadDocument(caseDocument)}
                   onUploadVersion={(caseDocument, file) => void uploadDocumentVersion(caseDocument, file)}
@@ -5684,6 +5703,8 @@ function DocumentList({
   deletingDocumentId,
   documentTypeOptions,
   documentStatusOptions,
+  canEdit,
+  canDelete,
   onPreview,
   onDownload,
   onUploadVersion,
@@ -5698,6 +5719,8 @@ function DocumentList({
   deletingDocumentId: number | null;
   documentTypeOptions: string[];
   documentStatusOptions: string[];
+  canEdit: boolean;
+  canDelete: boolean;
   onPreview: (caseDocument: ClientCaseDocument) => void;
   onDownload: (caseDocument: ClientCaseDocument) => void;
   onUploadVersion: (caseDocument: ClientCaseDocument, file: File | null | undefined) => void;
@@ -5814,6 +5837,8 @@ function DocumentList({
               deleting={deletingDocumentId === document.id}
               documentTypeOptions={documentTypeOptions}
               documentStatusOptions={documentStatusOptions}
+              canEdit={canEdit}
+              canDelete={canDelete}
               onPreview={onPreview}
               onDownload={onDownload}
               onUploadVersion={onUploadVersion}
@@ -5870,6 +5895,8 @@ function DocumentCard({
   deleting,
   documentTypeOptions,
   documentStatusOptions,
+  canEdit,
+  canDelete,
   onPreview,
   onDownload,
   onUploadVersion,
@@ -5885,6 +5912,8 @@ function DocumentCard({
   deleting: boolean;
   documentTypeOptions: string[];
   documentStatusOptions: string[];
+  canEdit: boolean;
+  canDelete: boolean;
   onPreview: (caseDocument: ClientCaseDocument) => void;
   onDownload: (caseDocument: ClientCaseDocument) => void;
   onUploadVersion: (caseDocument: ClientCaseDocument, file: File | null | undefined) => void;
@@ -5948,7 +5977,8 @@ function DocumentCard({
             list={documentTypeListId}
             value={documentType}
             onChange={(event) => setDocumentType(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            disabled={!canEdit}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
           />
         </label>
         <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
@@ -5957,7 +5987,8 @@ function DocumentCard({
             aria-label={`Статус документа ${document.originalFileName}`}
             value={status}
             onChange={(event) => setStatus(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            disabled={!canEdit}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm normal-case tracking-normal text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
           >
             {statusOptions.map((option) => (
               <option key={option} value={option}>{option}</option>
@@ -5966,14 +5997,16 @@ function DocumentCard({
         </label>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-        <button
-          type="button"
-          onClick={() => onUpdate(document, { documentType, status })}
-          disabled={updating || deleting}
-          aria-label={`Сохранить документ ${document.originalFileName}`}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
-          {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Сохранить
-        </button>
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => onUpdate(document, { documentType, status })}
+            disabled={updating || deleting}
+            aria-label={`Сохранить документ ${document.originalFileName}`}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+            {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Сохранить
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => onPreview(document)}
@@ -5990,29 +6023,33 @@ function DocumentCard({
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
           {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Скачать
         </button>
-        <label
-          className={`inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 ${uploadingVersion || updating || deleting ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-        >
-          {uploadingVersion ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />} Новая версия
-          <input
-            aria-label={`Загрузить новую версию документа ${document.originalFileName}`}
-            type="file"
-            className="sr-only"
-            disabled={uploadingVersion || updating || deleting}
-            onChange={(event) => {
-              onUploadVersion(document, event.currentTarget.files?.[0]);
-              event.currentTarget.value = '';
-            }}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => onDelete(document)}
-          disabled={updating || deleting}
-          aria-label={`Удалить документ ${document.originalFileName}`}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
-          {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Удалить
-        </button>
+        {canEdit ? (
+          <label
+            className={`inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 ${uploadingVersion || updating || deleting ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+          >
+            {uploadingVersion ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />} Новая версия
+            <input
+              aria-label={`Загрузить новую версию документа ${document.originalFileName}`}
+              type="file"
+              className="sr-only"
+              disabled={uploadingVersion || updating || deleting}
+              onChange={(event) => {
+                onUploadVersion(document, event.currentTarget.files?.[0]);
+                event.currentTarget.value = '';
+              }}
+            />
+          </label>
+        ) : null}
+        {canDelete ? (
+          <button
+            type="button"
+            onClick={() => onDelete(document)}
+            disabled={updating || deleting}
+            aria-label={`Удалить документ ${document.originalFileName}`}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
+            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Удалить
+          </button>
+        ) : null}
       </div>
     </div>
   );

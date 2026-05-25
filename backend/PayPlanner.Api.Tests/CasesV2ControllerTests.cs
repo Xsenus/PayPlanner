@@ -2356,6 +2356,145 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Documents_ForbidMutationsWithoutCaseEditPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "documents-viewer@example.com", "Наблюдатель документов");
+        viewer.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanEdit = false;
+        var client = new Client
+        {
+            Name = "Земцов Виктор Александрович",
+            IsActive = true,
+            ResponsibleUserId = viewer.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Земцов - банкротство",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = viewer.Id,
+        };
+        var document = new ClientCaseDocument
+        {
+            ClientCase = clientCase,
+            DocumentKey = "claim",
+            Version = 1,
+            DocumentType = "Иск",
+            Status = "Подготовлен",
+            OriginalFileName = "claim.txt",
+            StoredFileName = "claim-v1.txt",
+            StoragePath = "15/claim-v1.txt",
+            ContentType = "text/plain",
+            SizeBytes = 5,
+            UploadedByUserId = viewer.Id,
+            UploadedByName = viewer.FullName,
+            UploadedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, viewer);
+
+        var listResult = await controller.GetDocuments(clientCase.Id, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(listResult.Result);
+
+        var uploadResult = await controller.UploadDocument(
+            clientCase.Id,
+            CreateFormFile("blocked", "blocked.txt"),
+            "Иск",
+            "Подготовлен",
+            documentKey: null,
+            ct: CancellationToken.None);
+        Assert.IsType<ForbidResult>(uploadResult.Result);
+
+        var versionResult = await controller.UploadDocumentVersionById(
+            document.Id,
+            CreateFormFile("blocked", "blocked-v2.txt"),
+            documentType: null,
+            status: null,
+            ct: CancellationToken.None);
+        Assert.IsType<ForbidResult>(versionResult.Result);
+
+        var generateResult = await controller.GenerateDocumentTemplate(
+            clientCase.Id,
+            new CasesV2Controller.GenerateCaseDocumentTemplateRequest { TemplateKey = "claim" },
+            CancellationToken.None);
+        Assert.IsType<ForbidResult>(generateResult.Result);
+
+        var updateResult = await controller.UpdateDocument(
+            clientCase.Id,
+            document.Id,
+            new CasesV2Controller.UpdateCaseDocumentRequest { Status = "Отправлен" },
+            CancellationToken.None);
+        Assert.IsType<ForbidResult>(updateResult.Result);
+
+        var updateByIdResult = await controller.UpdateDocumentById(
+            document.Id,
+            new CasesV2Controller.UpdateCaseDocumentRequest { Status = "Отправлен" },
+            CancellationToken.None);
+        Assert.IsType<ForbidResult>(updateByIdResult.Result);
+    }
+
+    [Fact]
+    public async Task Documents_ForbidDeleteWithoutCaseDeletePermission()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "documents-owner@example.com", "Владелец документов");
+        owner.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanDelete = false;
+        var client = new Client
+        {
+            Name = "Земцов Виктор Александрович",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Земцов - банкротство",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var document = new ClientCaseDocument
+        {
+            ClientCase = clientCase,
+            DocumentKey = "claim",
+            Version = 1,
+            DocumentType = "Иск",
+            Status = "Подготовлен",
+            OriginalFileName = "claim.txt",
+            StoredFileName = "claim-v1.txt",
+            StoragePath = "15/claim-v1.txt",
+            ContentType = "text/plain",
+            SizeBytes = 5,
+            UploadedByUserId = owner.Id,
+            UploadedByName = owner.FullName,
+            UploadedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, owner);
+
+        var uploadResult = await controller.UploadDocument(
+            clientCase.Id,
+            CreateFormFile("allowed", "allowed.txt"),
+            "Иск",
+            "Подготовлен",
+            documentKey: null,
+            ct: CancellationToken.None);
+        Assert.IsType<CreatedResult>(uploadResult.Result);
+
+        var deleteResult = await controller.DeleteDocument(clientCase.Id, document.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(deleteResult);
+        Assert.Contains(await db.ClientCaseDocuments.ToListAsync(), item => item.Id == document.Id);
+    }
+
+    [Fact]
     public async Task DocumentTemplates_ReturnsSupportedCaseDocumentTemplates()
     {
         await using var db = await CreateContextAsync();

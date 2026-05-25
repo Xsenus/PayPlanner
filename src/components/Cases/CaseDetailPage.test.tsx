@@ -1559,6 +1559,32 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('shows case documents in read-only mode without mutation actions', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+
+    expect(await screen.findByText(/Документы доступны только для просмотра/u)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Сформировать$/u })).toBeNull();
+    expect(screen.queryByLabelText('Файл документа')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Сохранить документ Заявление.docx' })).toBeNull();
+    expect(screen.queryByLabelText('Загрузить новую версию документа Заявление.docx')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Удалить документ Заявление.docx' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Скачать документ Заявление.docx' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Предпросмотр документа Заявление.docx' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('hides document delete action when case delete permission is disabled', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit canDelete={false} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+
+    expect(await screen.findByRole('button', { name: 'Сохранить документ Заявление.docx' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Удалить документ Заявление.docx' })).toBeNull();
+  });
+
   it('updates and deletes a case document from the documents tab', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
