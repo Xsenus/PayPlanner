@@ -564,6 +564,50 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('limit=25');
   });
 
+  it('loads current cases report with filters', async () => {
+    const payload = {
+      generatedAt: '2026-05-26T10:00:00Z',
+      asOf: '2026-05-26T00:00:00',
+      statusFilter: 'Open',
+      responsibleUserIdFilter: 7,
+      caseTypeFilter: 'bankruptcy',
+      limit: 50,
+      totalCurrentCases: 1,
+      openCases: 1,
+      onHoldCases: 0,
+      overdueCases: 1,
+      withoutResponsibleCount: 0,
+      withOpenTasksCount: 1,
+      withOverdueTasksCount: 1,
+      withOverdueDeadlinesCount: 0,
+      byStatus: [],
+      byResponsible: [],
+      items: [],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getCurrentCasesReport({
+      asOf: '2026-05-26',
+      status: 'Open',
+      responsibleUserId: 7,
+      caseType: 'bankruptcy',
+      limit: 50,
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/current-cases?');
+    expect(String(url)).toContain('asOf=2026-05-26');
+    expect(String(url)).toContain('status=Open');
+    expect(String(url)).toContain('responsibleUserId=7');
+    expect(String(url)).toContain('caseType=bankruptcy');
+    expect(String(url)).toContain('limit=50');
+  });
+
   it('loads direction report with filters', async () => {
     const payload = {
       from: '2026-05-01T00:00:00',

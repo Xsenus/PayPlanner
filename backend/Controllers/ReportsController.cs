@@ -276,6 +276,48 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("current-cases")]
+    public async Task<ActionResult<CurrentCasesReportDto>> CurrentCases(
+        [FromQuery] DateTime? asOf,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        if (casesVisibility is null || tasksVisibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var effectiveAsOf = asOf?.Date ?? DateTime.UtcNow.Date;
+        var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
+        var filters = new CurrentCasesReportFilters(
+            NormalizeOptional(status),
+            responsibleUserId,
+            NormalizeOptional(caseType));
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildCurrentCasesReportAsync(
+                effectiveAsOf,
+                filters,
+                effectiveLimit,
+                casesVisibility,
+                tasksVisibility,
+                cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     [HttpGet("overdue-deadlines")]
     public async Task<ActionResult<OverdueProceduralDeadlinesReportDto>> OverdueDeadlines(
         [FromQuery] DateTime? asOf,
@@ -1734,6 +1776,192 @@ public class ReportsController : ControllerBase
             SourceType = item.SourceType,
             SourceId = item.SourceId,
         };
+
+    private async Task<CurrentCasesReportDto> BuildCurrentCasesReportAsync(
+        DateTime asOf,
+        CurrentCasesReportFilters filters,
+        int limit,
+        DataVisibilityAccess casesVisibility,
+        DataVisibilityAccess tasksVisibility,
+        CancellationToken ct)
+    {
+        var caseQuery = _db.ClientCases
+            .AsNoTracking()
+            .WithCaseIncludes()
+            .ApplyClientCaseVisibility(casesVisibility)
+            .Where(item => item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost);
+
+        if (TryParseClientCaseStatus(filters.Status, out var statusFilter))
+        {
+            caseQuery = caseQuery.Where(item => item.Status == statusFilter);
+        }
+
+        if (filters.ResponsibleUserId.HasValue)
+        {
+            caseQuery = caseQuery.Where(item => item.ResponsibleUserId == filters.ResponsibleUserId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filters.CaseType))
+        {
+            caseQuery = caseQuery.Where(item => item.CaseType != null && item.CaseType.Contains(filters.CaseType));
+        }
+
+        var cases = await caseQuery.ToListAsync(ct);
+        var caseIds = cases.Select(item => item.Id).Distinct().ToArray();
+
+        var taskRows = caseIds.Length == 0
+            ? new List<LegalWorkTaskRow>()
+            : await _db.TaskJournalItems
+                .AsNoTracking()
+                .ApplyTaskVisibility(tasksVisibility)
+                .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))
+                .Select(item => new LegalWorkTaskRow(
+                    item.Id,
+                    item.ClientCaseId,
+                    item.AssigneeUserId,
+                    item.AssigneeName,
+                    item.Status,
+                    item.Priority,
+                    item.DueAt,
+                    item.PlannedDurationMinutes))
+                .ToListAsync(ct);
+
+        var deadlineRows = caseIds.Length == 0
+            ? new List<CurrentCaseDeadlineRow>()
+            : await _db.ClientCaseProceduralDeadlines
+                .AsNoTracking()
+                .Where(item =>
+                    caseIds.Contains(item.ClientCaseId)
+                    && (item.Status == "active" || item.Status == "moved"))
+                .Select(item => new CurrentCaseDeadlineRow(
+                    item.ClientCaseId,
+                    item.DeadlineType,
+                    item.Title,
+                    item.DueAt))
+                .ToListAsync(ct);
+
+        var tasksByCase = taskRows
+            .Where(item => item.ClientCaseId.HasValue)
+            .GroupBy(item => item.ClientCaseId!.Value)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        var deadlinesByCase = deadlineRows
+            .GroupBy(item => item.ClientCaseId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        var rows = cases
+            .Select(clientCase => MapCurrentCaseReportItem(
+                clientCase,
+                tasksByCase.GetValueOrDefault(clientCase.Id) ?? [],
+                deadlinesByCase.GetValueOrDefault(clientCase.Id) ?? [],
+                asOf))
+            .ToList();
+
+        var orderedRows = rows
+            .OrderByDescending(item => item.IsOverdue)
+            .ThenByDescending(item => item.OverdueDeadlineCount)
+            .ThenByDescending(item => item.OverdueTaskCount)
+            .ThenBy(item => item.DueDate ?? DateTime.MaxValue)
+            .ThenBy(item => item.CaseTitle)
+            .ToList();
+
+        return new CurrentCasesReportDto
+        {
+            GeneratedAt = DateTime.UtcNow,
+            AsOf = asOf,
+            StatusFilter = filters.Status ?? string.Empty,
+            ResponsibleUserIdFilter = filters.ResponsibleUserId,
+            CaseTypeFilter = filters.CaseType ?? string.Empty,
+            Limit = limit,
+            TotalCurrentCases = rows.Count,
+            OpenCases = rows.Count(item => item.Status == nameof(ClientCaseStatus.Open)),
+            OnHoldCases = rows.Count(item => item.Status == nameof(ClientCaseStatus.OnHold)),
+            OverdueCases = rows.Count(item => item.IsOverdue),
+            WithoutResponsibleCount = rows.Count(item => !item.ResponsibleUserId.HasValue),
+            WithOpenTasksCount = rows.Count(item => item.OpenTaskCount > 0),
+            WithOverdueTasksCount = rows.Count(item => item.OverdueTaskCount > 0),
+            WithOverdueDeadlinesCount = rows.Count(item => item.OverdueDeadlineCount > 0),
+            ByStatus = rows
+                .GroupBy(item => new { item.Status, item.StatusLabel })
+                .OrderBy(group => group.Key.Status)
+                .Select(group => new CurrentCasesStatusItemDto
+                {
+                    Status = group.Key.Status,
+                    StatusLabel = group.Key.StatusLabel,
+                    Count = group.Count(),
+                    OverdueCases = group.Count(item => item.IsOverdue),
+                    OpenTasks = group.Sum(item => item.OpenTaskCount),
+                })
+                .ToList(),
+            ByResponsible = rows
+                .GroupBy(item => new { item.ResponsibleUserId, item.ResponsibleName })
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key.ResponsibleName)
+                .Select(group => new CurrentCasesResponsibleItemDto
+                {
+                    ResponsibleUserId = group.Key.ResponsibleUserId,
+                    ResponsibleName = group.Key.ResponsibleName,
+                    CaseCount = group.Count(),
+                    OverdueCases = group.Count(item => item.IsOverdue),
+                    OpenTasks = group.Sum(item => item.OpenTaskCount),
+                    OverdueTasks = group.Sum(item => item.OverdueTaskCount),
+                    OverdueDeadlines = group.Sum(item => item.OverdueDeadlineCount),
+                })
+                .ToList(),
+            Items = orderedRows.Take(limit).ToList(),
+        };
+    }
+
+    private static CurrentCaseReportItemDto MapCurrentCaseReportItem(
+        ClientCase clientCase,
+        IReadOnlyCollection<LegalWorkTaskRow> tasks,
+        IReadOnlyCollection<CurrentCaseDeadlineRow> deadlines,
+        DateTime asOf)
+    {
+        var openTasks = tasks.Where(item => IsOpenTaskStatus(item.Status)).ToList();
+        var overdueTasks = openTasks.Where(item => item.DueAt.Date < asOf.Date).ToList();
+        var onApprovalTasks = openTasks
+            .Where(item => string.Equals(item.Status, "onApproval", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.Status, "overdueApproval", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var overdueDeadlines = deadlines.Where(item => item.DueAt.Date < asOf.Date).ToList();
+        var nextDeadline = deadlines
+            .Where(item => item.DueAt.Date >= asOf.Date)
+            .OrderBy(item => item.DueAt)
+            .FirstOrDefault();
+        var lastActivityAt = ResolveCaseLastActivityAt(clientCase, null);
+
+        return new CurrentCaseReportItemDto
+        {
+            CaseId = clientCase.Id,
+            CaseNumber = clientCase.CaseNumber,
+            CaseTitle = clientCase.Title,
+            CaseType = NormalizeReportText(clientCase.CaseType, "Не указан"),
+            ClientName = ResolveCaseOwnerName(clientCase),
+            Status = clientCase.Status.ToString(),
+            StatusLabel = FormatCaseStatus(clientCase.Status),
+            ResponsibleUserId = clientCase.ResponsibleUserId,
+            ResponsibleName = ResolveCaseResponsibleName(clientCase),
+            CreatedAt = clientCase.CreatedAt,
+            StartDate = clientCase.StartDate,
+            DueDate = clientCase.DueDate,
+            NextHearingAt = clientCase.NextHearingAt,
+            DaysInWork = Math.Max(0, (asOf.Date - (clientCase.StartDate ?? clientCase.CreatedAt).Date).Days),
+            DaysUntilDue = clientCase.DueDate.HasValue
+                ? (clientCase.DueDate.Value.Date - asOf.Date).Days
+                : null,
+            IsOverdue = clientCase.DueDate.HasValue && clientCase.DueDate.Value.Date < asOf.Date,
+            OpenTaskCount = openTasks.Count,
+            OverdueTaskCount = overdueTasks.Count,
+            OnApprovalTaskCount = onApprovalTasks.Count,
+            ActiveDeadlineCount = deadlines.Count,
+            OverdueDeadlineCount = overdueDeadlines.Count,
+            NextDeadlineAt = nextDeadline?.DueAt,
+            NextDeadlineLabel = nextDeadline is null
+                ? string.Empty
+                : NormalizeReportText(nextDeadline.Title, ResolveProceduralDeadlineTypeLabel(nextDeadline.DeadlineType)),
+            LastActivityAt = lastActivityAt,
+        };
+    }
 
     private static IReadOnlyList<LegalWorkResponsibleItemDto> BuildLegalWorkResponsibleItems(
         IReadOnlyCollection<ClientCase> cases,
@@ -4249,6 +4477,11 @@ public class ReportsController : ControllerBase
         int? ResponsibleUserId,
         string? CaseType);
 
+    private sealed record CurrentCasesReportFilters(
+        string? Status,
+        int? ResponsibleUserId,
+        string? CaseType);
+
     private sealed record CaseActivityReportSettings(
         int InactivityDays,
         int EscalationDays);
@@ -4262,6 +4495,12 @@ public class ReportsController : ControllerBase
         int? OwnerId,
         string OwnerType,
         string OwnerName);
+
+    private sealed record CurrentCaseDeadlineRow(
+        int ClientCaseId,
+        string DeadlineType,
+        string Title,
+        DateTime DueAt);
 
     private sealed record DeadlineSourceRow(
         string Type,

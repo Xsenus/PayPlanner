@@ -448,6 +448,176 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CurrentCases_UsesCaseAndTaskVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "current-cases-lawyer", Description = "Lawyer" };
+        var visibleUser = new User
+        {
+            Email = "visible-current-cases@example.test",
+            FullName = "Visible Current User",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = "hidden-current-cases@example.test",
+            FullName = "Hidden Current User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var visibleClient = new Client { Name = "Visible Current Client", ResponsibleUserId = visibleUser.Id };
+        var hiddenClient = new Client { Name = "Hidden Current Client", ResponsibleUserId = hiddenUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var asOf = new DateTime(2026, 5, 26);
+        var visibleCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "CURRENT-VISIBLE",
+            Title = "Visible current case",
+            CaseType = "Банкротство",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = asOf.AddDays(-20),
+            StartDate = asOf.AddDays(-15),
+            DueDate = asOf.AddDays(-1),
+        };
+        var onHoldCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "CURRENT-HOLD",
+            Title = "On hold current case",
+            CaseType = "Наследство",
+            Status = ClientCaseStatus.OnHold,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = asOf.AddDays(-10),
+            StartDate = asOf.AddDays(-10),
+            DueDate = asOf.AddDays(10),
+        };
+        var hiddenCase = new ClientCase
+        {
+            ClientId = hiddenClient.Id,
+            CaseNumber = "CURRENT-HIDDEN",
+            Title = "Hidden current case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = hiddenUser.Id,
+            CreatedAt = asOf.AddDays(-20),
+            DueDate = asOf.AddDays(-1),
+        };
+        var closedCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "CURRENT-CLOSED",
+            Title = "Closed current case",
+            Status = ClientCaseStatus.Closed,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = asOf.AddDays(-20),
+            DueDate = asOf.AddDays(-1),
+        };
+        db.ClientCases.AddRange(visibleCase, onHoldCase, hiddenCase, closedCase);
+        await db.SaveChangesAsync();
+
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                ClientCaseId = visibleCase.Id,
+                ObjectName = visibleCase.Title,
+                Title = "Visible overdue task",
+                AssigneeUserId = visibleUser.Id,
+                AssigneeName = visibleUser.FullName,
+                DueAt = asOf.AddDays(-1).AddHours(9),
+                Status = "new",
+                Priority = "high",
+                Type = "task",
+                CreatedAt = asOf.AddDays(-3),
+            },
+            new TaskJournalItem
+            {
+                ClientCaseId = hiddenCase.Id,
+                ObjectName = hiddenCase.Title,
+                Title = "Hidden overdue task",
+                AssigneeUserId = hiddenUser.Id,
+                AssigneeName = hiddenUser.FullName,
+                DueAt = asOf.AddDays(-1).AddHours(9),
+                Status = "new",
+                Priority = "high",
+                Type = "task",
+                CreatedAt = asOf.AddDays(-3),
+            });
+        db.ClientCaseProceduralDeadlines.Add(new ClientCaseProceduralDeadline
+        {
+            ClientCaseId = visibleCase.Id,
+            DeadlineType = "appeal",
+            Title = "Подать апелляцию",
+            DueAt = asOf.AddDays(-2),
+            Status = "active",
+            CreatedAt = asOf.AddDays(-10),
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var action = await controller.CurrentCases(asOf, null, null, null, 50, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CurrentCasesReportDto>(ok.Value);
+        Assert.Equal(2, report.TotalCurrentCases);
+        Assert.Equal(1, report.OpenCases);
+        Assert.Equal(1, report.OnHoldCases);
+        Assert.Equal(1, report.OverdueCases);
+        Assert.Equal(1, report.WithOverdueTasksCount);
+        Assert.Equal(1, report.WithOverdueDeadlinesCount);
+        Assert.DoesNotContain(report.Items, item => item.CaseNumber == "CURRENT-HIDDEN");
+        Assert.DoesNotContain(report.Items, item => item.CaseNumber == "CURRENT-CLOSED");
+
+        var visibleRow = Assert.Single(report.Items, item => item.CaseNumber == "CURRENT-VISIBLE");
+        Assert.True(visibleRow.IsOverdue);
+        Assert.Equal(1, visibleRow.OpenTaskCount);
+        Assert.Equal(1, visibleRow.OverdueTaskCount);
+        Assert.Equal(1, visibleRow.ActiveDeadlineCount);
+        Assert.Equal(1, visibleRow.OverdueDeadlineCount);
+        Assert.Equal(15, visibleRow.DaysInWork);
+
+        var filteredAction = await controller.CurrentCases(asOf, nameof(ClientCaseStatus.OnHold), visibleUser.Id, "Наслед", 10, CancellationToken.None);
+        var filteredReport = Assert.IsType<CurrentCasesReportDto>(Assert.IsType<OkObjectResult>(filteredAction.Result).Value);
+        var filteredRow = Assert.Single(filteredReport.Items);
+        Assert.Equal("CURRENT-HOLD", filteredRow.CaseNumber);
+        Assert.Equal(nameof(ClientCaseStatus.OnHold), filteredReport.StatusFilter);
+        Assert.Equal(visibleUser.Id, filteredReport.ResponsibleUserIdFilter);
+        Assert.Equal("Наслед", filteredReport.CaseTypeFilter);
+    }
+
+    [Fact]
     public async Task OverdueDeadlines_UsesVisibleProceduralDeadlines()
     {
         await using var db = await CreateContextAsync();

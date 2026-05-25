@@ -1762,6 +1762,71 @@ export interface CaseActivityReport {
   items: CaseActivityReportItem[];
 }
 
+export interface CurrentCasesStatusItem {
+  status: string;
+  statusLabel: string;
+  count: number;
+  overdueCases: number;
+  openTasks: number;
+}
+
+export interface CurrentCasesResponsibleItem {
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  caseCount: number;
+  overdueCases: number;
+  openTasks: number;
+  overdueTasks: number;
+  overdueDeadlines: number;
+}
+
+export interface CurrentCaseReportItem {
+  caseId: number;
+  caseNumber: string;
+  caseTitle: string;
+  caseType: string;
+  clientName: string;
+  status: string;
+  statusLabel: string;
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  createdAt: string;
+  startDate?: string | null;
+  dueDate?: string | null;
+  nextHearingAt?: string | null;
+  daysInWork: number;
+  daysUntilDue?: number | null;
+  isOverdue: boolean;
+  openTaskCount: number;
+  overdueTaskCount: number;
+  onApprovalTaskCount: number;
+  activeDeadlineCount: number;
+  overdueDeadlineCount: number;
+  nextDeadlineAt?: string | null;
+  nextDeadlineLabel: string;
+  lastActivityAt: string;
+}
+
+export interface CurrentCasesReport {
+  generatedAt: string;
+  asOf: string;
+  statusFilter: string;
+  responsibleUserIdFilter?: number | null;
+  caseTypeFilter: string;
+  limit: number;
+  totalCurrentCases: number;
+  openCases: number;
+  onHoldCases: number;
+  overdueCases: number;
+  withoutResponsibleCount: number;
+  withOpenTasksCount: number;
+  withOverdueTasksCount: number;
+  withOverdueDeadlinesCount: number;
+  byStatus: CurrentCasesStatusItem[];
+  byResponsible: CurrentCasesResponsibleItem[];
+  items: CurrentCaseReportItem[];
+}
+
 export interface OverdueProceduralDeadlineTypeItem {
   deadlineType: string;
   deadlineTypeLabel: string;
