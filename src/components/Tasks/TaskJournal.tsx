@@ -74,6 +74,7 @@ type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
 type TaskCalendarColorMode = 'smart' | 'priority' | 'status';
 type TaskCalendarConflictPolicy = 'warn' | 'block';
+type TaskCalendarLoadWarningMode = 'strict' | 'standard' | 'relaxed';
 type TaskPlanningReportFormat = 'html' | 'word' | 'pdf';
 type ModalState = { mode: 'create' | 'edit' | 'view'; task?: TaskJournalItem; dueAt?: string } | null;
 type TaskJournalMode = 'journal' | 'approvals';
@@ -92,6 +93,7 @@ type TaskJournalFilterPreferences = {
   viewMode: ViewMode;
   calendarColorMode: TaskCalendarColorMode;
   calendarConflictPolicy: TaskCalendarConflictPolicy;
+  calendarLoadWarningMode: TaskCalendarLoadWarningMode;
   quickFilter: QuickFilter;
   metricFilter: MetricFilter;
   search: string;
@@ -154,6 +156,12 @@ const TASK_CALENDAR_CONFLICT_POLICY_OPTIONS: Array<{ value: TaskCalendarConflict
   { value: 'block', label: 'Запрещать' },
 ];
 
+const TASK_CALENDAR_LOAD_WARNING_MODE_OPTIONS: Array<{ value: TaskCalendarLoadWarningMode; label: string }> = [
+  { value: 'strict', label: 'Строго' },
+  { value: 'standard', label: 'Обычно' },
+  { value: 'relaxed', label: 'Мягко' },
+];
+
 const BULK_STATUS_OPTIONS = STATUS_OPTIONS.filter((option) => option.value !== 'approved' && option.value !== 'done');
 
 const REMINDER_OPTIONS: Array<{ value: TaskJournalReminder; label: string }> = TASK_REMINDER_DEFAULT_OPTIONS;
@@ -206,6 +214,7 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
     viewMode,
     calendarColorMode: 'smart',
     calendarConflictPolicy: 'warn',
+    calendarLoadWarningMode: 'standard',
     quickFilter: getDefaultQuickFilter(userId, mode),
     metricFilter: 'none',
     search: '',
@@ -233,6 +242,10 @@ function isTaskCalendarColorMode(value: unknown): value is TaskCalendarColorMode
 
 function isTaskCalendarConflictPolicy(value: unknown): value is TaskCalendarConflictPolicy {
   return value === 'warn' || value === 'block';
+}
+
+function isTaskCalendarLoadWarningMode(value: unknown): value is TaskCalendarLoadWarningMode {
+  return value === 'strict' || value === 'standard' || value === 'relaxed';
 }
 
 function isMetricFilter(value: unknown): value is MetricFilter {
@@ -304,6 +317,7 @@ function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJourn
       viewMode: isViewMode(parsed.viewMode) ? parsed.viewMode : defaults.viewMode,
       calendarColorMode: isTaskCalendarColorMode(parsed.calendarColorMode) ? parsed.calendarColorMode : defaults.calendarColorMode,
       calendarConflictPolicy: isTaskCalendarConflictPolicy(parsed.calendarConflictPolicy) ? parsed.calendarConflictPolicy : defaults.calendarConflictPolicy,
+      calendarLoadWarningMode: isTaskCalendarLoadWarningMode(parsed.calendarLoadWarningMode) ? parsed.calendarLoadWarningMode : defaults.calendarLoadWarningMode,
       quickFilter: isQuickFilter(parsed.quickFilter) ? parsed.quickFilter : defaults.quickFilter,
       metricFilter: isMetricFilter(parsed.metricFilter) ? parsed.metricFilter : defaults.metricFilter,
       search: typeof parsed.search === 'string' ? parsed.search : defaults.search,
@@ -910,6 +924,38 @@ function getTaskCalendarCardTone(task: TaskJournalItem, colorMode: TaskCalendarC
   return 'border-slate-100 bg-slate-50 text-slate-900';
 }
 
+function getTaskCalendarLoadWarningThresholds(mode: TaskCalendarLoadWarningMode) {
+  switch (mode) {
+    case 'strict':
+      return {
+        warningTaskCount: 3,
+        warningDurationMinutes: 3 * 60,
+        criticalTaskCount: 5,
+        criticalDurationMinutes: 5 * 60,
+        assigneeWarningTaskCount: 3,
+        assigneeWarningDurationMinutes: 4 * 60,
+      };
+    case 'relaxed':
+      return {
+        warningTaskCount: 8,
+        warningDurationMinutes: 7 * 60,
+        criticalTaskCount: 10,
+        criticalDurationMinutes: 9 * 60,
+        assigneeWarningTaskCount: 8,
+        assigneeWarningDurationMinutes: 8 * 60,
+      };
+    default:
+      return {
+        warningTaskCount: 5,
+        warningDurationMinutes: 5 * 60,
+        criticalTaskCount: 8,
+        criticalDurationMinutes: 8 * 60,
+        assigneeWarningTaskCount: 5,
+        assigneeWarningDurationMinutes: 6 * 60,
+      };
+  }
+}
+
 function formatTimeOnly(value: Date | string) {
   const date = typeof value === 'string' ? new Date(value) : value;
   return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -1340,6 +1386,7 @@ export function TaskJournal({
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
   const [calendarColorMode, setCalendarColorMode] = useState<TaskCalendarColorMode>(initialPreferences.calendarColorMode);
   const [calendarConflictPolicy, setCalendarConflictPolicy] = useState<TaskCalendarConflictPolicy>(initialPreferences.calendarConflictPolicy);
+  const [calendarLoadWarningMode, setCalendarLoadWarningMode] = useState<TaskCalendarLoadWarningMode>(initialPreferences.calendarLoadWarningMode);
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
   const [statusFilter, setStatusFilter] = useState<TaskJournalStatus | 'active' | 'all'>(initialPreferences.statusFilter);
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
@@ -1384,6 +1431,7 @@ export function TaskJournal({
     setViewMode(nextPreferences.viewMode);
     setCalendarColorMode(nextPreferences.calendarColorMode);
     setCalendarConflictPolicy(nextPreferences.calendarConflictPolicy);
+    setCalendarLoadWarningMode(nextPreferences.calendarLoadWarningMode);
     setQuickFilter(nextPreferences.quickFilter);
     setMetricFilter(nextPreferences.metricFilter);
     setSearch(nextPreferences.search);
@@ -1406,6 +1454,7 @@ export function TaskJournal({
       viewMode,
       calendarColorMode,
       calendarConflictPolicy,
+      calendarLoadWarningMode,
       quickFilter,
       metricFilter,
       search,
@@ -1417,7 +1466,7 @@ export function TaskJournal({
       priorityFilter,
       periodMode,
     }, mode);
-  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
+  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
@@ -2743,6 +2792,25 @@ export function TaskJournal({
               ))}
             </div>
 
+            <div className="flex rounded-xl bg-slate-100 p-1" aria-label="Порог предупреждений о загрузке календаря задач">
+              <span className="inline-flex items-center gap-1 px-2 text-sm font-semibold text-slate-500">
+                <AlarmClock className="h-4 w-4" />
+                Загрузка
+              </span>
+              {TASK_CALENDAR_LOAD_WARNING_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setCalendarLoadWarningMode(option.value)}
+                  aria-pressed={calendarLoadWarningMode === option.value}
+                  data-testid={`task-load-warning-${option.value}`}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${calendarLoadWarningMode === option.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
             <div className="flex rounded-xl bg-slate-100 p-1">
               <button
                 type="button"
@@ -2870,6 +2938,7 @@ export function TaskJournal({
               tasks={filteredTasks}
               mode={periodMode}
               colorMode={calendarColorMode}
+              loadWarningMode={calendarLoadWarningMode}
               anchorDate={calendarAnchorDate}
               selectedDate={calendarSelectedDate}
               highlightedTaskId={highlightedTaskId}
@@ -4038,6 +4107,7 @@ function TaskCalendar({
   tasks,
   mode,
   colorMode,
+  loadWarningMode,
   anchorDate,
   selectedDate,
   highlightedTaskId,
@@ -4061,6 +4131,7 @@ function TaskCalendar({
   tasks: TaskJournalItem[];
   mode: PeriodMode;
   colorMode: TaskCalendarColorMode;
+  loadWarningMode: TaskCalendarLoadWarningMode;
   anchorDate: Date;
   selectedDate: Date;
   highlightedTaskId: number | null;
@@ -4115,6 +4186,10 @@ function TaskCalendar({
   const selectedTasks = useMemo(
     () => tasksByDate.get(toDateKey(selectedDate)) ?? [],
     [selectedDate, tasksByDate],
+  );
+  const loadWarningThresholds = useMemo(
+    () => getTaskCalendarLoadWarningThresholds(loadWarningMode),
+    [loadWarningMode],
   );
   const conflictTaskIds = useMemo(() => {
     const ids = new Set<number>();
@@ -4179,11 +4254,14 @@ function TaskCalendar({
           urgent: item.urgent,
           duration: item.duration,
           overlaps,
-          hasConflict: item.count >= 5 || item.duration >= 6 * 60 || overlaps > 0,
+          hasConflict:
+            item.count >= loadWarningThresholds.assigneeWarningTaskCount ||
+            item.duration >= loadWarningThresholds.assigneeWarningDurationMinutes ||
+            overlaps > 0,
         };
       })
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ru'));
-  }, [selectedTasks]);
+  }, [loadWarningThresholds, selectedTasks]);
   const periodTaskCount = visibleDays.reduce((count, day) => count + (tasksByDate.get(toDateKey(day))?.length ?? 0), 0);
   const calendarGridClass = mode === 'day' ? 'grid-cols-1' : 'grid-cols-7';
   const calendarMinWidthClass = mode === 'day' ? 'min-w-[320px]' : 'min-w-[860px]';
@@ -4244,6 +4322,9 @@ function TaskCalendar({
                   const activeDayTasks = dayTasks.filter((task) => isTaskJournalActive(task.status));
                   const activeDayDuration = activeDayTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
                   const hasConflict = dayTasks.some((task) => conflictTaskIds.has(task.id));
+                  const hasHighLoad =
+                    activeDayTasks.length >= loadWarningThresholds.warningTaskCount ||
+                    activeDayDuration >= loadWarningThresholds.warningDurationMinutes;
                   const isSelected = isSameDay(day, selectedDate);
                   const isCurrentMonth = mode !== 'month' || isSameMonth(day, anchorDate);
 
@@ -4258,7 +4339,7 @@ function TaskCalendar({
                           ? 'border-blue-300 bg-blue-50 text-blue-800 ring-2 ring-blue-100'
                           : hasConflict
                             ? 'border-rose-200 bg-rose-50 text-rose-700'
-                            : activeDayTasks.length >= 5 || activeDayDuration >= 5 * 60
+                            : hasHighLoad
                               ? 'border-amber-200 bg-amber-50 text-amber-700'
                               : isCurrentMonth
                                 ? 'border-slate-200 bg-white text-slate-700'
@@ -4294,10 +4375,16 @@ function TaskCalendar({
                 const activeDayTasks = dayTasks.filter((task) => isTaskJournalActive(task.status));
                 const activeDayDuration = activeDayTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
                 const dayConflictCount = dayTasks.filter((task) => conflictTaskIds.has(task.id)).length;
+                const hasCriticalLoad =
+                  activeDayTasks.length >= loadWarningThresholds.criticalTaskCount ||
+                  activeDayDuration >= loadWarningThresholds.criticalDurationMinutes;
+                const hasHighLoad =
+                  activeDayTasks.length >= loadWarningThresholds.warningTaskCount ||
+                  activeDayDuration >= loadWarningThresholds.warningDurationMinutes;
                 const dayLoadClass =
-                  activeDayTasks.length >= 8 || activeDayDuration >= 8 * 60
+                  hasCriticalLoad
                     ? 'border-rose-200 bg-rose-50/70'
-                    : activeDayTasks.length >= 5 || activeDayDuration >= 5 * 60
+                    : hasHighLoad
                       ? 'border-amber-200 bg-amber-50/70'
                       : '';
 
@@ -4340,8 +4427,8 @@ function TaskCalendar({
                           <span className="mt-0.5 block text-[11px] font-semibold text-rose-600">
                             Конфликт
                           </span>
-                        ) : activeDayTasks.length >= 5 || activeDayDuration >= 5 * 60 ? (
-                          <span className={`mt-0.5 block text-[11px] font-semibold ${activeDayTasks.length >= 8 || activeDayDuration >= 8 * 60 ? 'text-rose-600' : 'text-amber-600'}`}>
+                        ) : hasHighLoad ? (
+                          <span className={`mt-0.5 block text-[11px] font-semibold ${hasCriticalLoad ? 'text-rose-600' : 'text-amber-600'}`}>
                             Высокая загрузка
                           </span>
                         ) : null}

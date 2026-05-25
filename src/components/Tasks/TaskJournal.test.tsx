@@ -1704,6 +1704,46 @@ describe('TaskJournal', () => {
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
   });
 
+  it('saves and applies the selected calendar load warning mode', async () => {
+    await renderJournal([
+      createTask({ dueAt: todayAt(9), plannedDurationMinutes: 60 }),
+      createTask({ id: 102, title: 'Вторая задача', dueAt: todayAt(10), plannedDurationMinutes: 60 }),
+      createTask({ id: 103, title: 'Третья задача', dueAt: todayAt(11), plannedDurationMinutes: 60 }),
+    ], { initialView: 'calendar' });
+
+    expect(screen.queryByText('Высокая загрузка')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('task-load-warning-strict'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Высокая загрузка')).toBeTruthy();
+      expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
+        calendarLoadWarningMode: 'strict',
+      });
+    });
+  });
+
+  it('restores the saved relaxed calendar load warning mode', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'calendar',
+      periodMode: 'week',
+      calendarLoadWarningMode: 'relaxed',
+    }));
+
+    await renderJournal([
+      createTask({ dueAt: todayAt(9), plannedDurationMinutes: 60 }),
+      createTask({ id: 102, title: 'Вторая задача', dueAt: todayAt(10), plannedDurationMinutes: 60 }),
+      createTask({ id: 103, title: 'Третья задача', dueAt: todayAt(11), plannedDurationMinutes: 60 }),
+      createTask({ id: 104, title: 'Четвертая задача', dueAt: todayAt(12), plannedDurationMinutes: 60 }),
+      createTask({ id: 105, title: 'Пятая задача', dueAt: todayAt(13), plannedDurationMinutes: 60 }),
+    ], { waitForTitle: null });
+
+    await waitFor(() => expect(screen.getByTestId('task-load-warning-relaxed').getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.queryByText('Высокая загрузка')).toBeNull();
+    expect(screen.queryByText(/Есть риск конфликта/i)).toBeNull();
+  });
+
   it('renders a weekly workload timeline with color legend', async () => {
     await renderJournal([
       createTask({ assigneeUserId: 7, assigneeName: 'Администратор' }),
