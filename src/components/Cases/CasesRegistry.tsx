@@ -369,6 +369,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [registryExporting, setRegistryExporting] = useState(false);
+  const [registryExcelExporting, setRegistryExcelExporting] = useState(false);
+  const [registryPdfExporting, setRegistryPdfExporting] = useState(false);
   const [registryPrinting, setRegistryPrinting] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -675,6 +677,44 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       setError(extractDisplayErrorMessage(err, 'Не удалось выгрузить реестр дел в CSV.'));
     } finally {
       setRegistryExporting(false);
+    }
+  };
+
+  const exportRegistryExcel = async () => {
+    if (!canExportCases) {
+      setError('У роли нет права на выгрузку реестра дел.');
+      return;
+    }
+
+    setRegistryExcelExporting(true);
+    setError(null);
+    try {
+      const { blob, fileName } = await apiService.exportCasesRegistryExcel(buildRegistryQueryParams());
+      downloadBlob(fileName || 'cases-registry.xls', blob);
+      setNotice('Реестр дел выгружен в Excel.');
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось выгрузить реестр дел в Excel.'));
+    } finally {
+      setRegistryExcelExporting(false);
+    }
+  };
+
+  const exportRegistryPdf = async () => {
+    if (!canExportCases) {
+      setError('У роли нет права на выгрузку реестра дел.');
+      return;
+    }
+
+    setRegistryPdfExporting(true);
+    setError(null);
+    try {
+      const { blob, fileName } = await apiService.exportCasesRegistryPdf(buildRegistryQueryParams());
+      downloadBlob(fileName || 'cases-registry.pdf', blob);
+      setNotice('Реестр дел выгружен в PDF.');
+    } catch (err) {
+      setError(extractDisplayErrorMessage(err, 'Не удалось выгрузить реестр дел в PDF.'));
+    } finally {
+      setRegistryPdfExporting(false);
     }
   };
 
@@ -1252,6 +1292,20 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                   disabled={loading || registryExporting}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
                   {registryExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void exportRegistryExcel()}
+                  disabled={loading || registryExcelExporting}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  {registryExcelExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void exportRegistryPdf()}
+                  disabled={loading || registryPdfExporting}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  {registryPdfExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF
                 </button>
                 <button
                   type="button"

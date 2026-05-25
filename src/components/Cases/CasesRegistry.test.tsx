@@ -24,6 +24,8 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getCasesV2: vi.fn(),
     exportCasesRegistryCsv: vi.fn(),
+    exportCasesRegistryExcel: vi.fn(),
+    exportCasesRegistryPdf: vi.fn(),
     getCasesRegistryPrintHtml: vi.fn(),
     getActResponsibles: vi.fn(),
     bulkUpdateCases: vi.fn(),
@@ -148,6 +150,16 @@ describe('CasesRegistry', () => {
     vi.mocked(apiService.exportCasesRegistryCsv).mockResolvedValue({
       blob: new Blob(['csv'], { type: 'text/csv' }),
       fileName: 'cases-registry.csv',
+    });
+    vi.mocked(apiService.exportCasesRegistryExcel).mockReset();
+    vi.mocked(apiService.exportCasesRegistryExcel).mockResolvedValue({
+      blob: new Blob(['xls'], { type: 'application/vnd.ms-excel' }),
+      fileName: 'cases-registry.xls',
+    });
+    vi.mocked(apiService.exportCasesRegistryPdf).mockReset();
+    vi.mocked(apiService.exportCasesRegistryPdf).mockResolvedValue({
+      blob: new Blob(['pdf'], { type: 'application/pdf' }),
+      fileName: 'cases-registry.pdf',
     });
     vi.mocked(apiService.getCasesRegistryPrintHtml).mockReset();
     vi.mocked(apiService.getCasesRegistryPrintHtml).mockResolvedValue('<html><body>cases</body></html>');
@@ -325,6 +337,26 @@ describe('CasesRegistry', () => {
     expect(createObjectUrl).toHaveBeenCalled();
     expect(anchorClick).toHaveBeenCalled();
 
+    fireEvent.click(screen.getByRole('button', { name: /^Excel$/u }));
+    await waitFor(() => {
+      expect(apiService.exportCasesRegistryExcel).toHaveBeenCalledWith(expect.objectContaining({
+        search: 'земцов',
+        status: 'Open',
+        sortBy: 'createdAt',
+        sortDir: 'desc',
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^PDF$/u }));
+    await waitFor(() => {
+      expect(apiService.exportCasesRegistryPdf).toHaveBeenCalledWith(expect.objectContaining({
+        search: 'земцов',
+        status: 'Open',
+        sortBy: 'createdAt',
+        sortDir: 'desc',
+      }));
+    });
+
     createObjectUrl.mockRestore();
     revokeObjectUrl.mockRestore();
     anchorClick.mockRestore();
@@ -363,6 +395,8 @@ describe('CasesRegistry', () => {
     await screen.findByText('ЗЕМЦОВ - банкротство');
 
     expect(screen.queryByRole('button', { name: /^CSV$/u })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Excel$/u })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^PDF$/u })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Печать' })).toBeNull();
   });
 

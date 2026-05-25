@@ -12,6 +12,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.LegalIntegrations;
 using PayPlanner.Api.Services.LegalIntegrations.Models;
 using PayPlanner.Api.Services.Notifications;
@@ -492,7 +493,8 @@ public class CasesV2ControllerTests
                 FeeAmount = 50_000m,
             });
         await db.SaveChangesAsync();
-        var controller = CreateController(db, owner);
+        var pdfService = new FakeInvoiceDocumentPdfService("pdf");
+        var controller = CreateController(db, owner, pdfService: pdfService);
 
         var result = await controller.ExportRegistryCsv(
             clientId: null,
@@ -521,6 +523,59 @@ public class CasesV2ControllerTests
         Assert.Contains("В работе", csv);
         Assert.DoesNotContain("CASE-002", csv);
         Assert.DoesNotContain("Скрытое дело", csv);
+
+        var excelResult = await controller.ExportRegistryExcel(
+            clientId: null,
+            legalEntityId: null,
+            status: ClientCaseStatus.Open,
+            search: "дело",
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: "title",
+            sortDir: "asc",
+            scope: null,
+            ct: CancellationToken.None);
+
+        var excelFile = Assert.IsType<FileContentResult>(excelResult);
+        Assert.Equal("application/vnd.ms-excel; charset=utf-8", excelFile.ContentType);
+        Assert.StartsWith("cases-registry-", excelFile.FileDownloadName);
+        Assert.EndsWith(".xls", excelFile.FileDownloadName);
+        var excel = Encoding.UTF8.GetString(excelFile.FileContents);
+        Assert.Contains("Excel.Sheet", excel);
+        Assert.Contains("CASE-001", excel);
+        Assert.Contains("Видимое дело", excel);
+        Assert.DoesNotContain("CASE-002", excel);
+
+        var pdfResult = await controller.ExportRegistryPdf(
+            clientId: null,
+            legalEntityId: null,
+            status: ClientCaseStatus.Open,
+            search: "дело",
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: "title",
+            sortDir: "asc",
+            scope: null,
+            ct: CancellationToken.None);
+
+        var pdfFile = Assert.IsType<FileContentResult>(pdfResult);
+        Assert.Equal("application/pdf", pdfFile.ContentType);
+        Assert.StartsWith("cases-registry-", pdfFile.FileDownloadName);
+        Assert.EndsWith(".pdf", pdfFile.FileDownloadName);
+        Assert.Equal(Encoding.UTF8.GetBytes("pdf"), pdfFile.FileContents);
+        Assert.Contains("Реестр дел", pdfService.LastHtml);
+        Assert.Contains("CASE-001", pdfService.LastHtml);
+        Assert.DoesNotContain("CASE-002", pdfService.LastHtml);
     }
 
     [Fact]
@@ -551,6 +606,42 @@ public class CasesV2ControllerTests
             ct: CancellationToken.None);
 
         Assert.IsType<ForbidResult>(result);
+
+        var excelResult = await controller.ExportRegistryExcel(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: null,
+            sortDir: null,
+            scope: null,
+            ct: CancellationToken.None);
+        var pdfResult = await controller.ExportRegistryPdf(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: null,
+            sortDir: null,
+            scope: null,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(excelResult);
+        Assert.IsType<ForbidResult>(pdfResult);
     }
 
     [Fact]
@@ -4612,11 +4703,12 @@ public class CasesV2ControllerTests
         PaymentContext db,
         User user,
         string? contentRootPath = null,
-        ISudrfCourtSyncService? sudrfCourtSyncService = null)
+        ISudrfCourtSyncService? sudrfCourtSyncService = null,
+        IInvoiceDocumentPdfService? pdfService = null)
         => new(db, new TestWebHostEnvironment
         {
             ContentRootPath = contentRootPath ?? Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N")),
-        }, sudrfCourtSyncService: sudrfCourtSyncService)
+        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService)
         {
             ControllerContext = new ControllerContext
             {
@@ -4631,6 +4723,17 @@ public class CasesV2ControllerTests
                 },
             },
         };
+
+    private sealed class FakeInvoiceDocumentPdfService(string content) : IInvoiceDocumentPdfService
+    {
+        public string LastHtml { get; private set; } = string.Empty;
+
+        public Task<byte[]> RenderAsync(string html, CancellationToken ct = default)
+        {
+            LastHtml = html;
+            return Task.FromResult(Encoding.UTF8.GetBytes(content));
+        }
+    }
 
     private static IFormFile CreateFormFile(string content, string fileName, string contentType = "text/plain")
     {

@@ -1026,6 +1026,39 @@ export interface SimpleDictionaryMergeResult {
 }
 
 type SortDir = 'asc' | 'desc';
+type CasesRegistryExportParams = {
+  clientId?: number;
+  legalEntityId?: number;
+  status?: string;
+  search?: string;
+  responsibleUserId?: number;
+  caseType?: string;
+  priority?: string;
+  from?: string;
+  to?: string;
+  minFee?: number;
+  maxFee?: number;
+  scope?: 'all' | 'active' | 'archive' | 'mine' | string;
+  activity?: 'all' | 'active' | 'inactive' | string;
+  inactiveDays?: number;
+  sortBy?:
+    | 'createdAt'
+    | 'title'
+    | 'status'
+    | 'caseNumber'
+    | 'client'
+    | 'caseType'
+    | 'stage'
+    | 'responsible'
+    | 'startDate'
+    | 'dueDate'
+    | 'feeAmount'
+    | 'priority'
+    | 'court'
+    | 'nextHearingAt'
+    | 'lastViewedAt';
+  sortDir?: SortDir;
+};
 type ActsSortKey =
   | 'date'
   | 'number'
@@ -3107,39 +3140,7 @@ export class ApiService {
     return this.request<PagedResult<ClientCase>>(`/v2/cases${q}`);
   }
 
-  async exportCasesRegistryCsv(params?: {
-    clientId?: number;
-    legalEntityId?: number;
-    status?: string;
-    search?: string;
-    responsibleUserId?: number;
-    caseType?: string;
-    priority?: string;
-    from?: string;
-    to?: string;
-    minFee?: number;
-    maxFee?: number;
-    scope?: 'all' | 'active' | 'archive' | 'mine' | string;
-    activity?: 'all' | 'active' | 'inactive' | string;
-    inactiveDays?: number;
-    sortBy?:
-      | 'createdAt'
-      | 'title'
-      | 'status'
-      | 'caseNumber'
-      | 'client'
-      | 'caseType'
-      | 'stage'
-      | 'responsible'
-      | 'startDate'
-      | 'dueDate'
-      | 'feeAmount'
-      | 'priority'
-      | 'court'
-      | 'nextHearingAt'
-      | 'lastViewedAt';
-    sortDir?: SortDir;
-  }) {
+  async exportCasesRegistryCsv(params?: CasesRegistryExportParams) {
     const q = buildQuery(params ?? {});
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/v2/cases/export.csv${q}`, {
@@ -3162,39 +3163,53 @@ export class ApiService {
     };
   }
 
-  async getCasesRegistryPrintHtml(params?: {
-    clientId?: number;
-    legalEntityId?: number;
-    status?: string;
-    search?: string;
-    responsibleUserId?: number;
-    caseType?: string;
-    priority?: string;
-    from?: string;
-    to?: string;
-    minFee?: number;
-    maxFee?: number;
-    scope?: 'all' | 'active' | 'archive' | 'mine' | string;
-    activity?: 'all' | 'active' | 'inactive' | string;
-    inactiveDays?: number;
-    sortBy?:
-      | 'createdAt'
-      | 'title'
-      | 'status'
-      | 'caseNumber'
-      | 'client'
-      | 'caseType'
-      | 'stage'
-      | 'responsible'
-      | 'startDate'
-      | 'dueDate'
-      | 'feeAmount'
-      | 'priority'
-      | 'court'
-      | 'nextHearingAt'
-      | 'lastViewedAt';
-    sortDir?: SortDir;
-  }) {
+  async exportCasesRegistryExcel(params?: CasesRegistryExportParams) {
+    const q = buildQuery(params ?? {});
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/v2/cases/export.xls${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} at ${API_BASE_URL}/v2/cases/export.xls ${text ? `- ${text}` : ''}`,
+      );
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName:
+        parseContentDispositionFileName(response.headers.get('content-disposition')) ??
+        'cases-registry.xls',
+    };
+  }
+
+  async exportCasesRegistryPdf(params?: CasesRegistryExportParams) {
+    const q = buildQuery(params ?? {});
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/v2/cases/export.pdf${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} at ${API_BASE_URL}/v2/cases/export.pdf ${text ? `- ${text}` : ''}`,
+      );
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName:
+        parseContentDispositionFileName(response.headers.get('content-disposition')) ??
+        'cases-registry.pdf',
+    };
+  }
+
+  async getCasesRegistryPrintHtml(params?: CasesRegistryExportParams) {
     const q = buildQuery(params ?? {});
     return this.request<string>(`/v2/cases/print${q}`);
   }

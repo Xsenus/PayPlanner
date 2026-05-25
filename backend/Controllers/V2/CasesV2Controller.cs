@@ -11,6 +11,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Invoices;
 using PayPlanner.Api.Services.LegalIntegrations;
 using PayPlanner.Api.Services.LegalIntegrations.Models;
 using PayPlanner.Api.Services.Notifications;
@@ -101,16 +102,19 @@ public class CasesV2Controller : ControllerBase
 
     private readonly PaymentContext _db;
     private readonly ICaseDocumentStorage _caseDocumentStorage;
+    private readonly IInvoiceDocumentPdfService? _pdfService;
     private readonly ISudrfCourtSyncService? _sudrfCourtSyncService;
 
     public CasesV2Controller(
         PaymentContext db,
         IWebHostEnvironment? environment = null,
         ICaseDocumentStorage? caseDocumentStorage = null,
-        ISudrfCourtSyncService? sudrfCourtSyncService = null)
+        ISudrfCourtSyncService? sudrfCourtSyncService = null,
+        IInvoiceDocumentPdfService? pdfService = null)
     {
         _db = db;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
+        _pdfService = pdfService;
         _sudrfCourtSyncService = sudrfCourtSyncService;
     }
 
@@ -237,44 +241,133 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] int? inactiveDays = null,
         CancellationToken ct = default)
     {
-        if (await RequireCasesPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
+        var (items, error) = await LoadRegistryExportItemsAsync(
+            clientId,
+            legalEntityId,
+            status,
+            search,
+            responsibleUserId,
+            caseType,
+            priority,
+            from,
+            to,
+            minFee,
+            maxFee,
+            sortBy,
+            sortDir,
+            scope,
+            activity,
+            inactiveDays,
+            ct);
+        if (error is not null)
         {
-            return forbidden;
+            return error;
         }
 
-        var visibility = await ResolveCasesVisibilityAsync(ct);
-        if (visibility is null)
-        {
-            return Unauthorized();
-        }
-
-        var items = await BuildRegistryQuery(
-                visibility,
-                clientId,
-                legalEntityId,
-                status,
-                search,
-                responsibleUserId,
-                caseType,
-                priority,
-                from,
-                to,
-                minFee,
-                maxFee,
-                sortBy,
-                sortDir,
-                scope,
-                activity,
-                inactiveDays)
-            .Take(MaxRegistryExportRows)
-            .AsNoTracking()
-            .ToListAsync(ct);
-        await ApplyFinanceSummaryAsync(items, ct);
-        await ApplyTaskSummaryAsync(items, ct);
-
-        var bytes = BuildRegistryCsv(items);
+        var bytes = BuildRegistryCsv(items!);
         var fileName = $"cases-registry-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv";
         return File(bytes, "text/csv; charset=utf-8", fileName);
+    }
+
+    [HttpGet("export.xls")]
+    public async Task<IActionResult> ExportRegistryExcel(
+        [FromQuery] int? clientId,
+        [FromQuery] int? legalEntityId,
+        [FromQuery] ClientCaseStatus? status,
+        [FromQuery] string? search,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] string? priority,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] decimal? minFee,
+        [FromQuery] decimal? maxFee,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        [FromQuery] string? scope = null,
+        [FromQuery] string? activity = null,
+        [FromQuery] int? inactiveDays = null,
+        CancellationToken ct = default)
+    {
+        var (items, error) = await LoadRegistryExportItemsAsync(
+            clientId,
+            legalEntityId,
+            status,
+            search,
+            responsibleUserId,
+            caseType,
+            priority,
+            from,
+            to,
+            minFee,
+            maxFee,
+            sortBy,
+            sortDir,
+            scope,
+            activity,
+            inactiveDays,
+            ct);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        var bytes = BuildRegistryExcel(items!);
+        var fileName = $"cases-registry-{DateTime.UtcNow:yyyyMMdd-HHmmss}.xls";
+        return File(bytes, "application/vnd.ms-excel; charset=utf-8", fileName);
+    }
+
+    [HttpGet("export.pdf")]
+    public async Task<IActionResult> ExportRegistryPdf(
+        [FromQuery] int? clientId,
+        [FromQuery] int? legalEntityId,
+        [FromQuery] ClientCaseStatus? status,
+        [FromQuery] string? search,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] string? priority,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] decimal? minFee,
+        [FromQuery] decimal? maxFee,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        [FromQuery] string? scope = null,
+        [FromQuery] string? activity = null,
+        [FromQuery] int? inactiveDays = null,
+        CancellationToken ct = default)
+    {
+        var (items, error) = await LoadRegistryExportItemsAsync(
+            clientId,
+            legalEntityId,
+            status,
+            search,
+            responsibleUserId,
+            caseType,
+            priority,
+            from,
+            to,
+            minFee,
+            maxFee,
+            sortBy,
+            sortDir,
+            scope,
+            activity,
+            inactiveDays,
+            ct);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        if (_pdfService is null)
+        {
+            return Problem("Сервис формирования PDF недоступен.");
+        }
+
+        var bytes = await _pdfService.RenderAsync(BuildRegistryPrintHtml(items!), ct);
+        var fileName = $"cases-registry-{DateTime.UtcNow:yyyyMMdd-HHmmss}.pdf";
+        return File(bytes, "application/pdf", fileName);
     }
 
     [HttpGet("print")]
@@ -297,15 +390,60 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] int? inactiveDays = null,
         CancellationToken ct = default)
     {
+        var (items, error) = await LoadRegistryExportItemsAsync(
+            clientId,
+            legalEntityId,
+            status,
+            search,
+            responsibleUserId,
+            caseType,
+            priority,
+            from,
+            to,
+            minFee,
+            maxFee,
+            sortBy,
+            sortDir,
+            scope,
+            activity,
+            inactiveDays,
+            ct);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        return Content(BuildRegistryPrintHtml(items!), "text/html; charset=utf-8", Encoding.UTF8);
+    }
+
+    private async Task<(IReadOnlyList<ClientCase>? Items, IActionResult? Error)> LoadRegistryExportItemsAsync(
+        int? clientId,
+        int? legalEntityId,
+        ClientCaseStatus? status,
+        string? search,
+        int? responsibleUserId,
+        string? caseType,
+        string? priority,
+        DateTime? from,
+        DateTime? to,
+        decimal? minFee,
+        decimal? maxFee,
+        string? sortBy,
+        string? sortDir,
+        string? scope,
+        string? activity,
+        int? inactiveDays,
+        CancellationToken ct)
+    {
         if (await RequireCasesPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
         {
-            return forbidden;
+            return (null, forbidden);
         }
 
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return (null, Unauthorized());
         }
 
         var items = await BuildRegistryQuery(
@@ -332,7 +470,7 @@ public class CasesV2Controller : ControllerBase
         await ApplyFinanceSummaryAsync(items, ct);
         await ApplyTaskSummaryAsync(items, ct);
 
-        return Content(BuildRegistryPrintHtml(items), "text/html; charset=utf-8", Encoding.UTF8);
+        return (items, null);
     }
 
     private IQueryable<ClientCase> BuildRegistryQuery(
@@ -904,6 +1042,102 @@ public class CasesV2Controller : ControllerBase
         return result;
     }
 
+    private static byte[] BuildRegistryExcel(IReadOnlyCollection<ClientCase> items)
+    {
+        var generatedAt = DateTime.Now.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        var totalFee = items.Sum(item => item.FeeAmount);
+        var totalIncome = items.Sum(item => item.IncomeTotal);
+        var totalPaid = items.Sum(item => item.IncomePaid);
+        var totalDebt = items.Sum(item => item.IncomeOutstanding);
+        var builder = new StringBuilder()
+            .AppendLine("""<?xml version="1.0" encoding="utf-8"?>""")
+            .AppendLine("""<?mso-application progid="Excel.Sheet"?>""")
+            .AppendLine("""<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">""")
+            .AppendLine("""  <Worksheet ss:Name="Реестр дел">""")
+            .AppendLine("    <Table>");
+
+        AppendExcelRow(builder, "Реестр дел");
+        AppendExcelRow(builder, "Сформировано", generatedAt);
+        AppendExcelRow(builder, "Ограничение выгрузки", $"Первые {MaxRegistryExportRows} строк текущей выборки");
+        AppendExcelRow(builder);
+        AppendExcelRow(builder, "Дел", items.Count.ToString(CultureInfo.InvariantCulture));
+        AppendExcelRow(builder, "Гонорар", FormatMoney(totalFee));
+        AppendExcelRow(builder, "Счета", FormatMoney(totalIncome));
+        AppendExcelRow(builder, "Оплачено", FormatMoney(totalPaid));
+        AppendExcelRow(builder, "Долг", FormatMoney(totalDebt));
+        AppendExcelRow(builder);
+        AppendExcelRow(
+            builder,
+            "№ дела",
+            "Название",
+            "Клиент/юр. лицо",
+            "Ответственный",
+            "Статус",
+            "Тип",
+            "Этап",
+            "Создано",
+            "Начало",
+            "Срок",
+            "Открытые задачи",
+            "Просроченные задачи",
+            "Выполненные задачи",
+            "Прогресс",
+            "Последняя активность",
+            "Гонорар",
+            "Счета",
+            "Оплачено",
+            "Долг",
+            "Последний просмотр",
+            "Активность подтвердил",
+            "Приоритет",
+            "Суд",
+            "№ в суде",
+            "Заседание");
+
+        foreach (var item in items)
+        {
+            AppendExcelRow(
+                builder,
+                item.CaseNumber,
+                item.Title,
+                GetOwnerName(item),
+                GetResponsibleName(item),
+                GetCaseStatusLabel(item.Status),
+                item.CaseType,
+                item.Stage,
+                FormatRuDate(item.CreatedAt),
+                FormatRuDate(item.StartDate),
+                FormatRuDate(item.DueDate),
+                item.OpenTaskCount.ToString(CultureInfo.InvariantCulture),
+                item.OverdueTaskCount.ToString(CultureInfo.InvariantCulture),
+                item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
+                $"{item.TaskProgressPercent}%",
+                FormatRuDateTime(GetLatestCaseActivityAt(item)),
+                FormatMoney(item.FeeAmount),
+                FormatMoney(item.IncomeTotal),
+                FormatMoney(item.IncomePaid),
+                FormatMoney(item.IncomeOutstanding),
+                FormatRuDateTime(item.LastViewedAt),
+                item.ActivityConfirmedByUserName,
+                GetPriorityLabel(item.Priority),
+                item.CourtName,
+                item.CourtCaseNumber,
+                FormatRuDateTime(item.NextHearingAt));
+        }
+
+        builder
+            .AppendLine("    </Table>")
+            .AppendLine("  </Worksheet>")
+            .AppendLine("</Workbook>");
+
+        var preamble = Encoding.UTF8.GetPreamble();
+        var body = Encoding.UTF8.GetBytes(builder.ToString());
+        var result = new byte[preamble.Length + body.Length];
+        Buffer.BlockCopy(preamble, 0, result, 0, preamble.Length);
+        Buffer.BlockCopy(body, 0, result, preamble.Length, body.Length);
+        return result;
+    }
+
     private static string BuildRegistryPrintHtml(IReadOnlyCollection<ClientCase> items)
     {
         var generatedAt = DateTime.Now.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
@@ -996,6 +1230,19 @@ public class CasesV2Controller : ControllerBase
 
     private static string CsvCell(string? value)
         => $"\"{(value ?? string.Empty).Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+
+    private static void AppendExcelRow(StringBuilder builder, params string?[] values)
+    {
+        builder.Append("      <Row>");
+        foreach (var value in values)
+        {
+            builder.Append("<Cell><Data ss:Type=\"String\">")
+                .Append(Html(value))
+                .Append("</Data></Cell>");
+        }
+
+        builder.AppendLine("</Row>");
+    }
 
     private static string Html(string? value)
         => WebUtility.HtmlEncode(value ?? string.Empty);
