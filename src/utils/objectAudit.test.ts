@@ -99,6 +99,7 @@ describe('objectAudit utilities', () => {
   it('translates technical audit labels and hides Codex actors', () => {
     expect(getObjectAuditActionLabel('DataRepair')).toBe('Исправление данных');
     expect(getObjectAuditActionLabel('Automation')).toBe('Автоконтроль');
+    expect(getObjectAuditActionLabel('Downloaded')).toBe('Скачивание');
     expect(getObjectAuditTypeLabel('task-journal-item')).toBe('Задача');
     expect(getObjectAuditTypeLabel('invoice-line-item')).toBe('Позиция счета');
     expect(getObjectAuditTypeLabel('client-case-document')).toBe('Документ дела');

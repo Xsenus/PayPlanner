@@ -2839,6 +2839,24 @@ public class CasesV2ControllerTests
         Assert.Equal(fullPath, file.FileName);
         Assert.Equal("text/plain", file.ContentType);
         Assert.Equal("claim.txt", file.FileDownloadName);
+
+        var scopedResult = await controller.DownloadDocument(clientCase.Id, document.Id, CancellationToken.None);
+        var scopedFile = Assert.IsType<PhysicalFileResult>(scopedResult);
+        Assert.Equal(fullPath, scopedFile.FileName);
+        Assert.Equal("claim.txt", scopedFile.FileDownloadName);
+
+        var auditEvents = await db.ObjectAuditEvents
+            .Where(item => item.ObjectType == "client-case-document")
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Equal(2, auditEvents.Count);
+        Assert.All(auditEvents, auditEvent =>
+        {
+            Assert.Equal(document.Id, auditEvent.ObjectId);
+            Assert.Equal("Downloaded", auditEvent.Action);
+            Assert.Contains("claim.txt", auditEvent.Description, StringComparison.Ordinal);
+            Assert.Contains("\"clientCaseId\"", auditEvent.MetadataJson, StringComparison.Ordinal);
+        });
     }
 
     [Fact]

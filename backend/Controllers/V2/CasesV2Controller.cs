@@ -3490,6 +3490,9 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        AddCaseDocumentAuditEvent(clientCase, document, "Downloaded", $"Документ «{document.OriginalFileName}» скачан.");
+        await _db.SaveChangesAsync(ct);
+
         var fullPath = _caseDocumentStorage.ResolvePath(document.StoragePath);
         return PhysicalFile(fullPath, document.ContentType, document.OriginalFileName);
     }
@@ -3516,14 +3519,16 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
-        var canViewCase = await _db.ClientCases
+        var clientCase = await _db.ClientCases
             .ApplyClientCaseVisibility(visibility)
-            .AsNoTracking()
-            .AnyAsync(item => item.Id == document.ClientCaseId, ct);
-        if (!canViewCase || !_caseDocumentStorage.Exists(document.StoragePath))
+            .FirstOrDefaultAsync(item => item.Id == document.ClientCaseId, ct);
+        if (clientCase is null || !_caseDocumentStorage.Exists(document.StoragePath))
         {
             return NotFound();
         }
+
+        AddCaseDocumentAuditEvent(clientCase, document, "Downloaded", $"Документ «{document.OriginalFileName}» скачан.");
+        await _db.SaveChangesAsync(ct);
 
         var fullPath = _caseDocumentStorage.ResolvePath(document.StoragePath);
         return PhysicalFile(fullPath, document.ContentType, document.OriginalFileName);

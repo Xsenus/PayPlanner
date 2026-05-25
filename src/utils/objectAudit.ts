@@ -465,6 +465,8 @@ export function getObjectAuditActionLabel(action?: string | null): string {
       return 'Изменение';
     case 'deleted':
       return 'Удаление';
+    case 'downloaded':
+      return 'Скачивание';
     case 'restored':
       return 'Восстановление';
     case 'automation':
@@ -485,6 +487,8 @@ export function getObjectAuditActionTone(action?: string | null): string {
       return 'border-blue-200 bg-blue-50 text-blue-700';
     case 'deleted':
       return 'border-rose-200 bg-rose-50 text-rose-700';
+    case 'downloaded':
+      return 'border-cyan-200 bg-cyan-50 text-cyan-700';
     case 'restored':
       return 'border-teal-200 bg-teal-50 text-teal-700';
     case 'automation':
