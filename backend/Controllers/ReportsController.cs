@@ -276,6 +276,43 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("overdue-deadlines")]
+    public async Task<ActionResult<OverdueProceduralDeadlinesReportDto>> OverdueDeadlines(
+        [FromQuery] DateTime? asOf,
+        [FromQuery] string? deadlineType,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        if (casesVisibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var effectiveAsOf = (asOf?.Date ?? DateTime.UtcNow.Date);
+        var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
+        var normalizedDeadlineType = NormalizeOptional(deadlineType);
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildOverdueProceduralDeadlinesReportAsync(
+                effectiveAsOf,
+                normalizedDeadlineType,
+                responsibleUserId,
+                effectiveLimit,
+                casesVisibility,
+                cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     [HttpGet("cash-flow")]
     public async Task<ActionResult<CashFlowReportDto>> CashFlow(
         [FromQuery] DateTime? from,
@@ -1583,6 +1620,121 @@ public class ReportsController : ControllerBase
         };
     }
 
+    private async Task<OverdueProceduralDeadlinesReportDto> BuildOverdueProceduralDeadlinesReportAsync(
+        DateTime asOf,
+        string? deadlineType,
+        int? responsibleUserId,
+        int limit,
+        DataVisibilityAccess casesVisibility,
+        CancellationToken ct)
+    {
+        var visibleCaseIdsQuery = _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(casesVisibility)
+            .Select(item => item.Id);
+
+        var query = _db.ClientCaseProceduralDeadlines
+            .AsNoTracking()
+            .Include(item => item.ClientCase)
+                .ThenInclude(item => item.Client)
+            .Include(item => item.ClientCase)
+                .ThenInclude(item => item.LegalEntity)
+            .Include(item => item.ClientCase)
+                .ThenInclude(item => item.ResponsibleUser)
+            .Include(item => item.TaskJournalItem)
+            .Include(item => item.ClientCaseDocument)
+            .Where(item =>
+                visibleCaseIdsQuery.Contains(item.ClientCaseId)
+                && item.DueAt < asOf.Date
+                && (item.Status == "active" || item.Status == "moved"));
+
+        if (!string.IsNullOrWhiteSpace(deadlineType))
+        {
+            query = query.Where(item => item.DeadlineType == deadlineType);
+        }
+
+        if (responsibleUserId.HasValue)
+        {
+            query = query.Where(item => item.ClientCase.ResponsibleUserId == responsibleUserId.Value);
+        }
+
+        var rows = await query
+            .ToListAsync(ct);
+
+        var items = rows
+            .Select(item => MapOverdueProceduralDeadlineItem(item, asOf))
+            .OrderByDescending(item => item.DaysOverdue)
+            .ThenBy(item => item.DueAt)
+            .ThenBy(item => item.CaseTitle)
+            .ThenBy(item => item.Title)
+            .ToList();
+
+        return new OverdueProceduralDeadlinesReportDto
+        {
+            GeneratedAt = DateTime.UtcNow,
+            AsOf = asOf,
+            DeadlineTypeFilter = deadlineType ?? string.Empty,
+            ResponsibleUserIdFilter = responsibleUserId,
+            Limit = limit,
+            TotalOverdueCount = items.Count,
+            CriticalOverdueCount = items.Count(item => item.DaysOverdue >= 7),
+            WithoutResponsibleCount = items.Count(item => !item.ResponsibleUserId.HasValue),
+            ByType = items
+                .GroupBy(item => new { item.DeadlineType, item.DeadlineTypeLabel })
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key.DeadlineTypeLabel)
+                .Select(group => new OverdueProceduralDeadlineTypeItemDto
+                {
+                    DeadlineType = group.Key.DeadlineType,
+                    DeadlineTypeLabel = group.Key.DeadlineTypeLabel,
+                    Count = group.Count(),
+                    CriticalCount = group.Count(item => item.DaysOverdue >= 7),
+                })
+                .ToList(),
+            ByResponsible = items
+                .GroupBy(item => new { item.ResponsibleUserId, item.ResponsibleName })
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key.ResponsibleName)
+                .Select(group => new OverdueProceduralDeadlineResponsibleItemDto
+                {
+                    ResponsibleUserId = group.Key.ResponsibleUserId,
+                    ResponsibleName = group.Key.ResponsibleName,
+                    Count = group.Count(),
+                    CriticalCount = group.Count(item => item.DaysOverdue >= 7),
+                })
+                .ToList(),
+            Items = items.Take(limit).ToList(),
+        };
+    }
+
+    private static OverdueProceduralDeadlineItemDto MapOverdueProceduralDeadlineItem(
+        ClientCaseProceduralDeadline item,
+        DateTime asOf)
+        => new()
+        {
+            DeadlineId = item.Id,
+            CaseId = item.ClientCaseId,
+            CaseNumber = item.ClientCase.CaseNumber,
+            CaseTitle = item.ClientCase.Title,
+            ClientName = ResolveCaseOwnerName(item.ClientCase),
+            ResponsibleUserId = item.ClientCase.ResponsibleUserId,
+            ResponsibleName = ResolveCaseResponsibleName(item.ClientCase),
+            DeadlineType = item.DeadlineType,
+            DeadlineTypeLabel = ResolveProceduralDeadlineTypeLabel(item.DeadlineType),
+            Title = NormalizeReportText(item.Title, ResolveProceduralDeadlineTypeLabel(item.DeadlineType)),
+            Description = item.Description,
+            DueAt = item.DueAt,
+            DaysOverdue = Math.Max(0, (asOf.Date - item.DueAt.Date).Days),
+            Status = item.Status,
+            StatusLabel = ResolveProceduralDeadlineStatusLabel(item.Status),
+            TaskJournalItemId = item.TaskJournalItemId,
+            TaskTitle = item.TaskJournalItem?.Title ?? string.Empty,
+            ClientCaseDocumentId = item.ClientCaseDocumentId,
+            DocumentName = item.ClientCaseDocument?.OriginalFileName ?? string.Empty,
+            SourceType = item.SourceType,
+            SourceId = item.SourceId,
+        };
+
     private static IReadOnlyList<LegalWorkResponsibleItemDto> BuildLegalWorkResponsibleItems(
         IReadOnlyCollection<ClientCase> cases,
         IReadOnlyCollection<LegalWorkTaskRow> openTasks,
@@ -1871,6 +2023,29 @@ public class ReportsController : ControllerBase
             ClientCaseStatus.Closed => "Закрыто",
             ClientCaseStatus.Lost => "Проиграно",
             _ => status.ToString(),
+        };
+
+    private static string ResolveProceduralDeadlineTypeLabel(string value)
+        => value.ToLowerInvariant() switch
+        {
+            "appeal" => "Апелляция",
+            "cassation" => "Кассация",
+            "motion" => "Ходатайство",
+            "objection" => "Возражения",
+            "claim" => "Подача заявления",
+            "hearing" => "Судебное заседание",
+            "document" => "Документ",
+            _ => value,
+        };
+
+    private static string ResolveProceduralDeadlineStatusLabel(string value)
+        => value.ToLowerInvariant() switch
+        {
+            "active" => "Активен",
+            "moved" => "Перенесен",
+            "closed" => "Закрыт",
+            "cancelled" => "Отменен",
+            _ => value,
         };
 
     private static bool IsFinishedCaseStatus(ClientCaseStatus status)

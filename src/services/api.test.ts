@@ -528,6 +528,42 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('caseType=bankruptcy');
   });
 
+  it('loads overdue procedural deadlines report with filters', async () => {
+    const payload = {
+      generatedAt: '2026-05-26T10:00:00Z',
+      asOf: '2026-05-26T00:00:00',
+      deadlineTypeFilter: 'appeal',
+      responsibleUserIdFilter: 7,
+      limit: 25,
+      totalOverdueCount: 1,
+      criticalOverdueCount: 1,
+      withoutResponsibleCount: 0,
+      byType: [],
+      byResponsible: [],
+      items: [],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getOverdueProceduralDeadlinesReport({
+      asOf: '2026-05-26',
+      deadlineType: 'appeal',
+      responsibleUserId: 7,
+      limit: 25,
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/overdue-deadlines?');
+    expect(String(url)).toContain('asOf=2026-05-26');
+    expect(String(url)).toContain('deadlineType=appeal');
+    expect(String(url)).toContain('responsibleUserId=7');
+    expect(String(url)).toContain('limit=25');
+  });
+
   it('loads direction report with filters', async () => {
     const payload = {
       from: '2026-05-01T00:00:00',

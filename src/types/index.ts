@@ -1762,6 +1762,58 @@ export interface CaseActivityReport {
   items: CaseActivityReportItem[];
 }
 
+export interface OverdueProceduralDeadlineTypeItem {
+  deadlineType: string;
+  deadlineTypeLabel: string;
+  count: number;
+  criticalCount: number;
+}
+
+export interface OverdueProceduralDeadlineResponsibleItem {
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  count: number;
+  criticalCount: number;
+}
+
+export interface OverdueProceduralDeadlineItem {
+  deadlineId: number;
+  caseId: number;
+  caseNumber: string;
+  caseTitle: string;
+  clientName: string;
+  responsibleUserId?: number | null;
+  responsibleName: string;
+  deadlineType: string;
+  deadlineTypeLabel: string;
+  title: string;
+  description: string;
+  dueAt: string;
+  daysOverdue: number;
+  status: string;
+  statusLabel: string;
+  taskJournalItemId?: number | null;
+  taskTitle: string;
+  clientCaseDocumentId?: number | null;
+  documentName: string;
+  sourceType: string;
+  sourceId?: number | null;
+}
+
+export interface OverdueProceduralDeadlinesReport {
+  generatedAt: string;
+  asOf: string;
+  deadlineTypeFilter: string;
+  responsibleUserIdFilter?: number | null;
+  limit: number;
+  totalOverdueCount: number;
+  criticalOverdueCount: number;
+  withoutResponsibleCount: number;
+  byType: OverdueProceduralDeadlineTypeItem[];
+  byResponsible: OverdueProceduralDeadlineResponsibleItem[];
+  items: OverdueProceduralDeadlineItem[];
+}
+
 export interface DirectionReportItem {
   directionName: string;
   income: number;

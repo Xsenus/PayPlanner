@@ -4127,6 +4127,16 @@ export class ApiService {
     return this.request<CaseActivityReport>(`/reports/case-activity${q}`);
   }
 
+  async getOverdueProceduralDeadlinesReport(params?: {
+    asOf?: string;
+    deadlineType?: string;
+    responsibleUserId?: number;
+    limit?: number;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<OverdueProceduralDeadlinesReport>(`/reports/overdue-deadlines${q}`);
+  }
+
   async getDirectionReport(params?: {
     from?: string;
     to?: string;
@@ -4970,6 +4980,7 @@ import type {
   ProjectReport,
   LegalWorkReport,
   CaseActivityReport,
+  OverdueProceduralDeadlinesReport,
   DirectionReport,
   SalesPointReport,
   VatReport,

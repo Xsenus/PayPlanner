@@ -31,6 +31,7 @@ import { useCounterpartyReport } from '../../hooks/useCounterpartyReport';
 import { useProjectReport } from '../../hooks/useProjectReport';
 import { useLegalWorkReport } from '../../hooks/useLegalWorkReport';
 import { useCaseActivityReport } from '../../hooks/useCaseActivityReport';
+import { useOverdueProceduralDeadlinesReport } from '../../hooks/useOverdueProceduralDeadlinesReport';
 import { useDirectionReport } from '../../hooks/useDirectionReport';
 import { useSalesPointReport } from '../../hooks/useSalesPointReport';
 import { useVatReport } from '../../hooks/useVatReport';
@@ -54,7 +55,7 @@ import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicke
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -225,6 +226,29 @@ function exportCaseActivityReport(report: CaseActivityReport) {
   });
 
   downloadCsv('case-activity-report.csv', rows);
+}
+
+function exportOverdueProceduralDeadlinesReport(report: OverdueProceduralDeadlinesReport) {
+  const rows: unknown[][] = [
+    ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип срока', 'Срок', 'Дата', 'Дней просрочки', 'Статус', 'Задача', 'Документ'],
+  ];
+
+  report.items.forEach((item) => {
+    rows.push([
+      item.caseNumber ? `${item.caseNumber} · ${item.caseTitle}` : item.caseTitle,
+      item.clientName,
+      item.responsibleName,
+      item.deadlineTypeLabel,
+      item.title,
+      formatDate(item.dueAt),
+      item.daysOverdue,
+      item.statusLabel,
+      item.taskTitle || (item.taskJournalItemId ? `Задача #${item.taskJournalItemId}` : ''),
+      item.documentName || (item.clientCaseDocumentId ? `Документ #${item.clientCaseDocumentId}` : ''),
+    ]);
+  });
+
+  downloadCsv('overdue-procedural-deadlines-report.csv', rows);
 }
 
 function sourceLabel(source: MoneyOperationSource) {
@@ -1558,6 +1582,197 @@ function LegalWorkReportSection({
                   )) : (
                     <tr>
                       <td colSpan={7} className="px-3 py-8 text-center text-slate-500">Дела по выбранным условиям не найдены.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function OverdueProceduralDeadlinesReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+  onOpenCase,
+}: {
+  report: OverdueProceduralDeadlinesReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+  onOpenCase?: (caseId: number) => void;
+}) {
+  const rows = report?.items ?? [];
+  const typeRows = report?.byType ?? [];
+  const responsibleRows = report?.byResponsible ?? [];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-rose-100 bg-rose-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-rose-700">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Просроченные сроки
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по просроченным процессуальным срокам</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Показывает активные и перенесенные сроки по видимым делам, которые уже вышли за дату исполнения.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportOverdueProceduralDeadlinesReport(report)}
+            disabled={!report}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка отчета по просроченным срокам...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить отчет по просроченным срокам</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для отчета.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+            <MetricCard
+              title="Просрочено сроков"
+              value={String(report.totalOverdueCount)}
+              icon={AlertTriangle}
+              tone="expense"
+              subtitle={`Дата контроля: ${formatDate(report.asOf)}`}
+            />
+            <MetricCard
+              title="Критичных"
+              value={String(report.criticalOverdueCount)}
+              icon={Flag}
+              tone="rate"
+              subtitle="Просрочка 7 дней и больше"
+            />
+            <MetricCard
+              title="Без ответственного"
+              value={String(report.withoutResponsibleCount)}
+              icon={FolderKanban}
+              tone="profit"
+              subtitle="Нужно назначить ответственного по делу"
+            />
+            <MetricCard
+              title="Строк в отчете"
+              value={String(rows.length)}
+              icon={FileText}
+              tone="income"
+              subtitle={`Лимит показа: ${report.limit}`}
+            />
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">По типам сроков</h3>
+                <div className="mt-4 space-y-3">
+                  {typeRows.length > 0 ? typeRows.map((item) => (
+                    <div key={item.deadlineType} className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm">
+                      <div className="font-medium text-slate-900">{item.deadlineTypeLabel}</div>
+                      <div className="text-right text-sm text-slate-500">
+                        <div>{item.count} всего</div>
+                        {item.criticalCount > 0 ? <div className="text-rose-600">{item.criticalCount} крит.</div> : null}
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-5 text-center text-sm text-slate-500">
+                      Типы сроков не найдены.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">По ответственным</h3>
+                <div className="mt-4 space-y-3">
+                  {responsibleRows.length > 0 ? responsibleRows.slice(0, 8).map((item) => (
+                    <div key={`${item.responsibleUserId ?? 'none'}-${item.responsibleName}`} className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm">
+                      <div className="font-medium text-slate-900">{item.responsibleName}</div>
+                      <div className="text-right text-sm text-slate-500">
+                        <div>{item.count} сроков</div>
+                        {item.criticalCount > 0 ? <div className="text-rose-600">{item.criticalCount} крит.</div> : null}
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-5 text-center text-sm text-slate-500">
+                      Ответственные не найдены.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-3xl border border-slate-100 bg-slate-50/70">
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Срок</th>
+                    <th className="px-4 py-3 font-semibold">Дело</th>
+                    <th className="px-4 py-3 font-semibold">Ответственный</th>
+                    <th className="px-4 py-3 text-right font-semibold">Просрочка</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white/80">
+                  {rows.length > 0 ? rows.map((row) => (
+                    <tr key={row.deadlineId} className="align-top">
+                      <td className="px-4 py-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-rose-600">{row.deadlineTypeLabel}</div>
+                        <div className="mt-1 font-semibold text-slate-950">{row.title}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {formatDate(row.dueAt)} · {row.statusLabel}
+                          {row.taskTitle ? ` · ${row.taskTitle}` : ''}
+                          {row.documentName ? ` · ${row.documentName}` : ''}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-900">{row.clientName}</div>
+                        <button
+                          type="button"
+                          onClick={() => onOpenCase?.(row.caseId)}
+                          className="mt-1 inline-flex items-center gap-1 text-left text-xs font-medium text-blue-700 transition hover:text-blue-900 hover:underline"
+                        >
+                          {row.caseNumber ? `${row.caseNumber} · ` : ''}{row.caseTitle}
+                          <ArrowUpRight className="h-3 w-3" />
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{row.responsibleName}</td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                          {row.daysOverdue} дн.
+                        </span>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
+                        Просроченных процессуальных сроков нет.
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -4208,6 +4423,14 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
     limit: 50,
   });
   const {
+    report: overdueDeadlinesReport,
+    loading: overdueDeadlinesReportLoading,
+    error: overdueDeadlinesReportError,
+    reload: reloadOverdueDeadlinesReport,
+  } = useOverdueProceduralDeadlinesReport({
+    limit: 100,
+  });
+  const {
     report: directionReport,
     loading: directionReportLoading,
     error: directionReportError,
@@ -4683,6 +4906,14 @@ export function Reports({ onOpenCase }: ReportsProps = {}) {
               error={legalWorkReportError}
               filters={cashFlowDates}
               onReload={reloadLegalWorkReport}
+              onOpenCase={onOpenCase}
+            />
+
+            <OverdueProceduralDeadlinesReportSection
+              report={overdueDeadlinesReport}
+              loading={overdueDeadlinesReportLoading}
+              error={overdueDeadlinesReportError}
+              onReload={reloadOverdueDeadlinesReport}
               onOpenCase={onOpenCase}
             />
 
