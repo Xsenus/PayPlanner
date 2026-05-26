@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services.LegalIntegrations;
 
@@ -29,17 +30,20 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
     private readonly IOptionsMonitor<AppFeatureFlagsOptions> _featureFlags;
     private readonly IConfiguration _configuration;
     private readonly ILogger<ClientCaseCourtSyncSchedulerService> _logger;
+    private readonly ISystemJobRunStateService? _jobRunState;
 
     public ClientCaseCourtSyncSchedulerService(
         IServiceScopeFactory scopeFactory,
         IOptionsMonitor<AppFeatureFlagsOptions> featureFlags,
         IConfiguration configuration,
-        ILogger<ClientCaseCourtSyncSchedulerService> logger)
+        ILogger<ClientCaseCourtSyncSchedulerService> logger,
+        ISystemJobRunStateService? jobRunState = null)
     {
         _scopeFactory = scopeFactory;
         _featureFlags = featureFlags;
         _configuration = configuration;
         _logger = logger;
+        _jobRunState = jobRunState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -56,6 +60,7 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             var nextDelay = DefaultInterval;
+            var startedAt = DateTime.UtcNow;
             try
             {
                 var settings = await ResolveSettingsAsync(stoppingToken);
@@ -64,11 +69,44 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
                 {
                     var processed = await RunOnceAsync(settings.BatchSize, stoppingToken);
                     _logger.LogInformation("Automatic court source sync finished. Processed cases: {Count}.", processed);
+                    if (_jobRunState is not null)
+                    {
+                        await _jobRunState.RecordSuccessAsync(
+                            SystemJobKeys.CourtSync,
+                            startedAt,
+                            processed,
+                            null,
+                            processed > 0
+                                ? $"Проверено дел по судебным источникам: {processed}."
+                                : "Проверка судебной синхронизации выполнена, подходящих дел не найдено.",
+                            stoppingToken);
+                    }
+                }
+                else if (_jobRunState is not null)
+                {
+                    await _jobRunState.RecordSuccessAsync(
+                        SystemJobKeys.CourtSync,
+                        startedAt,
+                        0,
+                        null,
+                        settings.IsEnabled
+                            ? "Судебная синхронизация ожидает включения feature flag."
+                            : "Судебная синхронизация выключена в настройках.",
+                        stoppingToken);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Automatic court source sync failed.");
+                if (_jobRunState is not null)
+                {
+                    await _jobRunState.RecordFailureAsync(
+                        SystemJobKeys.CourtSync,
+                        startedAt,
+                        ex,
+                        "Фоновая судебная синхронизация завершилась с ошибкой.",
+                        stoppingToken);
+                }
             }
 
             try

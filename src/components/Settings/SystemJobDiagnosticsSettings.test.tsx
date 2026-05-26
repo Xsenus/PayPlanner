@@ -30,6 +30,11 @@ describe('SystemJobDiagnosticsSettings', () => {
           lastActivityAt: '2026-05-26T10:00:00Z',
           lastActivityDescription: 'Создана автоматическая копия.',
           nextRunHint: 'Следующая проверка расписания выполняется фоновым сервисом.',
+          lastRunStatus: 'success',
+          lastRunStatusText: 'Успешно',
+          lastRunStartedAt: '2026-05-26T09:59:00Z',
+          lastRunFinishedAt: '2026-05-26T10:00:00Z',
+          lastRunError: null,
         },
         {
           key: 'court-sync',
@@ -44,6 +49,11 @@ describe('SystemJobDiagnosticsSettings', () => {
           lastActivityAt: null,
           lastActivityDescription: null,
           nextRunHint: 'Фоновая судебная синхронизация не запускается автоматически.',
+          lastRunStatus: 'error',
+          lastRunStatusText: 'Ошибка',
+          lastRunStartedAt: '2026-05-26T11:00:00Z',
+          lastRunFinishedAt: '2026-05-26T11:00:10Z',
+          lastRunError: 'feature flag disabled',
         },
       ],
     });
@@ -57,6 +67,8 @@ describe('SystemJobDiagnosticsSettings', () => {
     expect(screen.getByText('Синхронизация судебных источников')).toBeTruthy();
     expect(screen.getByText('Расписание: 02:00,14:00')).toBeTruthy();
     expect(screen.getByText('Ожидает feature flag')).toBeTruthy();
+    expect(screen.getByText('Успешно')).toBeTruthy();
+    expect(screen.getByText('feature flag disabled')).toBeTruthy();
     expect(screen.getByText('Всего сервисов')).toBeTruthy();
     expect(screen.getByText('Ожидает условий')).toBeTruthy();
   });

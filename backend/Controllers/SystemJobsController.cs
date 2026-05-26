@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalIntegrations;
 
 namespace PayPlanner.Api.Controllers;
@@ -24,15 +25,18 @@ public sealed class SystemJobsController : ControllerBase
     private readonly PaymentContext _db;
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions> _featureFlags;
+    private readonly ISystemJobRunStateService? _jobRunState;
 
     public SystemJobsController(
         PaymentContext db,
         IConfiguration configuration,
-        IOptionsMonitor<AppFeatureFlagsOptions> featureFlags)
+        IOptionsMonitor<AppFeatureFlagsOptions> featureFlags,
+        ISystemJobRunStateService? jobRunState = null)
     {
         _db = db;
         _configuration = configuration;
         _featureFlags = featureFlags;
+        _jobRunState = jobRunState;
     }
 
     [HttpGet("diagnostics")]
@@ -53,7 +57,7 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == UserActivityRetentionDaysKey)
             .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
 
-        var items = new List<SystemJobDiagnosticsItemDto>
+        var rawItems = new List<SystemJobDiagnosticsItemDto>
         {
             await BuildDatabaseBackupJobAsync(settings, ct),
             await BuildTaskReminderJobAsync(now, ct),
@@ -62,11 +66,14 @@ public sealed class SystemJobsController : ControllerBase
             await BuildMoneyBalanceReconciliationJobAsync(ct),
             await BuildUserActivityRetentionJobAsync(settings, ct),
         };
+        var lastRuns = _jobRunState is null
+            ? new Dictionary<string, SystemJobRunState>(StringComparer.OrdinalIgnoreCase)
+            : await _jobRunState.GetLastRunsAsync(rawItems.Select(item => item.Key), ct);
 
         return Ok(new SystemJobDiagnosticsDto
         {
             GeneratedAt = now,
-            Items = items,
+            Items = rawItems.Select(item => WithLastRun(item, lastRuns)).ToList(),
         });
     }
 
@@ -302,4 +309,35 @@ public sealed class SystemJobsController : ControllerBase
 
     private static int? ParseNullableInt(string? value)
         => int.TryParse(value, out var parsed) && parsed > 0 ? parsed : null;
+
+    private static SystemJobDiagnosticsItemDto WithLastRun(
+        SystemJobDiagnosticsItemDto item,
+        IReadOnlyDictionary<string, SystemJobRunState> lastRuns)
+    {
+        if (!lastRuns.TryGetValue(item.Key, out var state))
+        {
+            return item;
+        }
+
+        return new SystemJobDiagnosticsItemDto
+        {
+            Key = item.Key,
+            Name = item.Name,
+            Description = item.Description,
+            Enabled = item.Enabled,
+            Status = item.Status,
+            StatusText = item.StatusText,
+            IntervalText = item.IntervalText,
+            PendingCount = item.PendingCount,
+            LastProcessedCount = item.LastProcessedCount,
+            LastActivityAt = item.LastActivityAt,
+            LastActivityDescription = item.LastActivityDescription,
+            NextRunHint = item.NextRunHint,
+            LastRunStatus = state.Status,
+            LastRunStatusText = state.Status == "success" ? "Успешно" : state.Status == "error" ? "Ошибка" : "Неизвестно",
+            LastRunStartedAt = state.StartedAt,
+            LastRunFinishedAt = state.FinishedAt,
+            LastRunError = state.ErrorMessage,
+        };
+    }
 }

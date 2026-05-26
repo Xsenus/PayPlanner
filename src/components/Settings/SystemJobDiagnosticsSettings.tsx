@@ -27,6 +27,18 @@ function getStatusClasses(status: string) {
   return 'border-slate-200 bg-slate-50 text-slate-600';
 }
 
+function getRunStatusClasses(status?: string | null) {
+  if (status === 'success') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  }
+
+  if (status === 'error') {
+    return 'border-red-200 bg-red-50 text-red-700';
+  }
+
+  return 'border-slate-200 bg-slate-50 text-slate-600';
+}
+
 function JobStatusIcon({ status }: { status: string }) {
   if (status === 'active') {
     return <CheckCircle2 className="h-5 w-5 text-emerald-600" />;
@@ -69,13 +81,26 @@ function JobDiagnosticsCard({ item }: { item: SystemJobDiagnosticsItemDto }) {
           <div className="mt-1 text-slate-900">{item.lastProcessedCount ?? '—'}</div>
         </div>
         <div className="rounded-xl bg-slate-50 p-3">
-          <div className="font-medium text-slate-500">Последняя активность</div>
-          <div className="mt-1 text-slate-900">{formatDateTime(item.lastActivityAt)}</div>
+          <div className="font-medium text-slate-500">Последний запуск</div>
+          <div className="mt-1 text-slate-900">{formatDateTime(item.lastRunFinishedAt)}</div>
         </div>
       </div>
 
-      {item.lastActivityDescription || item.nextRunHint ? (
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+        <span className={`rounded-full border px-3 py-1 font-semibold ${getRunStatusClasses(item.lastRunStatus)}`}>
+          {item.lastRunStatusText || 'Запуск не зафиксирован'}
+        </span>
+        {item.lastRunStartedAt ? (
+          <span className="text-slate-500">Начало: {formatDateTime(item.lastRunStartedAt)}</span>
+        ) : null}
+        {item.lastRunError ? (
+          <span className="text-red-700">{item.lastRunError}</span>
+        ) : null}
+      </div>
+
+      {item.lastActivityAt || item.lastActivityDescription || item.nextRunHint ? (
         <div className="mt-4 space-y-2 text-sm leading-6 text-slate-600">
+          {item.lastActivityAt ? <p>Последняя видимая активность: {formatDateTime(item.lastActivityAt)}</p> : null}
           {item.lastActivityDescription ? <p>{item.lastActivityDescription}</p> : null}
           {item.nextRunHint ? <p>{item.nextRunHint}</p> : null}
         </div>

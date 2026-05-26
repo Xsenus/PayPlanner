@@ -14,14 +14,17 @@ public sealed class MoneyBalanceReconciliationSchedulerService : BackgroundServi
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<MoneyBalanceReconciliationSchedulerService> _logger;
+    private readonly ISystemJobRunStateService? _jobRunState;
     private DateTime? _lastRunDate;
 
     public MoneyBalanceReconciliationSchedulerService(
         IServiceScopeFactory scopeFactory,
-        ILogger<MoneyBalanceReconciliationSchedulerService> logger)
+        ILogger<MoneyBalanceReconciliationSchedulerService> logger,
+        ISystemJobRunStateService? jobRunState = null)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _jobRunState = jobRunState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -44,6 +47,7 @@ public sealed class MoneyBalanceReconciliationSchedulerService : BackgroundServi
                 var targetDate = DateTime.UtcNow.Date.AddDays(-1);
                 if (_lastRunDate != targetDate)
                 {
+                    var startedAt = DateTime.UtcNow;
                     var result = await RunForDateAsync(targetDate, stoppingToken);
                     _lastRunDate = targetDate;
                     _logger.LogInformation(
@@ -52,11 +56,32 @@ public sealed class MoneyBalanceReconciliationSchedulerService : BackgroundServi
                         result?.Created ?? 0,
                         result?.Updated ?? 0,
                         result?.IssueCount ?? 0);
+                    if (_jobRunState is not null)
+                    {
+                        await _jobRunState.RecordSuccessAsync(
+                            SystemJobKeys.MoneyBalanceReconciliation,
+                            startedAt,
+                            (result?.Created ?? 0) + (result?.Updated ?? 0),
+                            null,
+                            result is null
+                                ? $"Сверка денежных остатков за {targetDate:dd.MM.yyyy} не вернула результат."
+                                : $"Сверка за {targetDate:dd.MM.yyyy}: создано {result.Created}, обновлено {result.Updated}, расхождений {result.IssueCount}.",
+                            stoppingToken);
+                    }
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Daily money balance reconciliation failed.");
+                if (_jobRunState is not null)
+                {
+                    await _jobRunState.RecordFailureAsync(
+                        SystemJobKeys.MoneyBalanceReconciliation,
+                        DateTime.UtcNow,
+                        ex,
+                        "Ежедневная сверка денежных остатков завершилась с ошибкой.",
+                        stoppingToken);
+                }
             }
 
             try

@@ -20,4 +20,9 @@ public sealed class SystemJobDiagnosticsItemDto
     public DateTime? LastActivityAt { get; init; }
     public string? LastActivityDescription { get; init; }
     public string? NextRunHint { get; init; }
+    public string? LastRunStatus { get; init; }
+    public string? LastRunStatusText { get; init; }
+    public DateTime? LastRunStartedAt { get; init; }
+    public DateTime? LastRunFinishedAt { get; init; }
+    public string? LastRunError { get; init; }
 }

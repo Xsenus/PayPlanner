@@ -2,12 +2,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services.LegalIntegrations;
+using PayPlanner.Api.Services;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -116,6 +118,18 @@ public class SystemJobsControllerTests
                 {
                     ExternalCourtSync = true,
                 },
+            }),
+            new FakeSystemJobRunStateService(new Dictionary<string, SystemJobRunState>
+            {
+                [SystemJobKeys.CourtSync] = new()
+                {
+                    JobKey = SystemJobKeys.CourtSync,
+                    Status = "success",
+                    StartedAt = now.AddMinutes(-5),
+                    FinishedAt = now.AddMinutes(-4),
+                    ProcessedCount = 3,
+                    Summary = "Проверено дел: 3.",
+                },
             }));
 
         var result = await controller.GetDiagnostics(CancellationToken.None);
@@ -128,6 +142,7 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == "task-reminders" && item.PendingCount == 1 && item.LastActivityDescription == "Reminder sent");
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
+        Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastRunStatus == "success" && item.LastRunStatusText == "Успешно");
         Assert.Contains(dto.Items, item => item.Key == "money-balance-reconciliation" && item.LastProcessedCount == 2);
         Assert.Contains(dto.Items, item => item.Key == "user-activity-retention" && item.Enabled && item.NextRunHint!.Contains("30"));
         Assert.All(dto.Items, item =>
@@ -172,6 +187,33 @@ public class SystemJobsControllerTests
         Assert.Equal("Ожидает feature flag", courtSync.StatusText);
     }
 
+    [Fact]
+    public async Task SystemJobRunStateService_RoundTripsLastRunState()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var factory = new TestPaymentContextFactory(scope.Options);
+        var service = new SystemJobRunStateService(factory, NullLogger<SystemJobRunStateService>.Instance);
+        var startedAt = DateTime.UtcNow.AddMinutes(-2);
+
+        await service.RecordSuccessAsync(
+            SystemJobKeys.TaskReminders,
+            startedAt,
+            processedCount: 4,
+            skippedCount: 1,
+            summary: "Отправлены напоминания.",
+            CancellationToken.None);
+
+        var states = await service.GetLastRunsAsync([SystemJobKeys.TaskReminders], CancellationToken.None);
+        var state = Assert.Single(states.Values);
+
+        Assert.Equal(SystemJobKeys.TaskReminders, state.JobKey);
+        Assert.Equal("success", state.Status);
+        Assert.Equal(4, state.ProcessedCount);
+        Assert.Equal(1, state.SkippedCount);
+        Assert.Equal("Отправлены напоминания.", state.Summary);
+        Assert.Null(state.ErrorMessage);
+    }
+
     private static async Task<TestDbScope> CreateDbScopeAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -183,7 +225,7 @@ public class SystemJobsControllerTests
         var db = new PaymentContext(options, useObjectAuditModel: false);
         await db.Database.EnsureCreatedAsync();
 
-        return new TestDbScope(connection, db);
+        return new TestDbScope(connection, options, db);
     }
 
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
@@ -200,8 +242,45 @@ public class SystemJobsControllerTests
         public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 
-    private sealed class TestDbScope(SqliteConnection connection, PaymentContext db) : IAsyncDisposable
+    private sealed class FakeSystemJobRunStateService(IReadOnlyDictionary<string, SystemJobRunState> states) : ISystemJobRunStateService
     {
+        public Task RecordSuccessAsync(
+            string jobKey,
+            DateTime startedAt,
+            int? processedCount,
+            int? skippedCount,
+            string summary,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task RecordFailureAsync(
+            string jobKey,
+            DateTime startedAt,
+            Exception exception,
+            string? summary = null,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<IReadOnlyDictionary<string, SystemJobRunState>> GetLastRunsAsync(
+            IEnumerable<string> jobKeys,
+            CancellationToken cancellationToken = default)
+        {
+            var requested = jobKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult<IReadOnlyDictionary<string, SystemJobRunState>>(
+                states
+                    .Where(item => requested.Contains(item.Key))
+                    .ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase));
+        }
+    }
+
+    private sealed class TestPaymentContextFactory(DbContextOptions<PaymentContext> options) : IDbContextFactory<PaymentContext>
+    {
+        public PaymentContext CreateDbContext() => new(options, useObjectAuditModel: false);
+    }
+
+    private sealed class TestDbScope(SqliteConnection connection, DbContextOptions<PaymentContext> options, PaymentContext db) : IAsyncDisposable
+    {
+        public DbContextOptions<PaymentContext> Options { get; } = options;
         public PaymentContext Db { get; } = db;
 
         public async ValueTask DisposeAsync()

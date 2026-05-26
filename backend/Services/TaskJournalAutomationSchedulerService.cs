@@ -29,15 +29,18 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TaskJournalAutomationSchedulerService> _logger;
+    private readonly ISystemJobRunStateService? _jobRunState;
 
     public TaskJournalAutomationSchedulerService(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
-        ILogger<TaskJournalAutomationSchedulerService> logger)
+        ILogger<TaskJournalAutomationSchedulerService> logger,
+        ISystemJobRunStateService? jobRunState = null)
     {
         _scopeFactory = scopeFactory;
         _configuration = configuration;
         _logger = logger;
+        _jobRunState = jobRunState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -76,6 +79,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
 
     public async Task<TaskJournalAutomationSchedulerResult> RunOnceAsync(CancellationToken cancellationToken = default)
     {
+        var startedAt = DateTime.UtcNow;
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -84,6 +88,17 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             var settings = await LoadSettingsAsync(context, cancellationToken);
             if (!settings.Enabled)
             {
+                if (_jobRunState is not null)
+                {
+                    await _jobRunState.RecordSuccessAsync(
+                        SystemJobKeys.CaseInactivityControl,
+                        startedAt,
+                        0,
+                        null,
+                        "Автоконтроль неактивных дел выключен в настройках.",
+                        cancellationToken);
+                }
+
                 return TaskJournalAutomationSchedulerResult.Disabled;
             }
 
@@ -167,11 +182,35 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 await NotifyCreatedAutomationTasksAsync(notificationService, createdTasks, cancellationToken);
             }
 
-            return new TaskJournalAutomationSchedulerResult(created, candidates.Count - created, true, null);
+            var result = new TaskJournalAutomationSchedulerResult(created, candidates.Count - created, true, null);
+            if (_jobRunState is not null)
+            {
+                await _jobRunState.RecordSuccessAsync(
+                    SystemJobKeys.CaseInactivityControl,
+                    startedAt,
+                    created,
+                    result.SkippedCount,
+                    created > 0
+                        ? $"Создано контрольных задач по неактивным делам: {created}."
+                        : "Проверка неактивных дел выполнена, новые контрольные задачи не требовались.",
+                    cancellationToken);
+            }
+
+            return result;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to create automatic task journal case-control tasks.");
+            if (_jobRunState is not null)
+            {
+                await _jobRunState.RecordFailureAsync(
+                    SystemJobKeys.CaseInactivityControl,
+                    startedAt,
+                    ex,
+                    "Автоконтроль неактивных дел завершился с ошибкой.",
+                    cancellationToken);
+            }
+
             return new TaskJournalAutomationSchedulerResult(0, 0, true, ex.Message);
         }
     }

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services.UserActivity;
 
@@ -10,13 +11,16 @@ public sealed class UserActivityRetentionService : BackgroundService
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<UserActivityRetentionService> _logger;
+    private readonly ISystemJobRunStateService? _jobRunState;
 
     public UserActivityRetentionService(
         IServiceScopeFactory scopeFactory,
-        ILogger<UserActivityRetentionService> logger)
+        ILogger<UserActivityRetentionService> logger,
+        ISystemJobRunStateService? jobRunState = null)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _jobRunState = jobRunState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -36,11 +40,33 @@ public sealed class UserActivityRetentionService : BackgroundService
         {
             try
             {
-                await TickAsync(stoppingToken);
+                var startedAt = DateTime.UtcNow;
+                var deleted = await TickAsync(stoppingToken);
+                if (_jobRunState is not null)
+                {
+                    await _jobRunState.RecordSuccessAsync(
+                        SystemJobKeys.UserActivityRetention,
+                        startedAt,
+                        deleted,
+                        null,
+                        deleted > 0
+                            ? $"Удалено устаревших записей журнала действий: {deleted}."
+                            : "Проверка срока хранения журнала действий выполнена, удаление не требовалось.",
+                        stoppingToken);
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "UserActivityRetentionService tick failed.");
+                if (_jobRunState is not null)
+                {
+                    await _jobRunState.RecordFailureAsync(
+                        SystemJobKeys.UserActivityRetention,
+                        DateTime.UtcNow,
+                        ex,
+                        "Очистка журнала действий завершилась с ошибкой.",
+                        stoppingToken);
+                }
             }
 
             try
@@ -55,7 +81,7 @@ public sealed class UserActivityRetentionService : BackgroundService
         _logger.LogInformation("UserActivityRetentionService stopped.");
     }
 
-    private async Task TickAsync(CancellationToken cancellationToken)
+    private async Task<int> TickAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var activityService = scope.ServiceProvider.GetRequiredService<IUserActivityService>();
@@ -65,7 +91,7 @@ public sealed class UserActivityRetentionService : BackgroundService
         var settings = await activityService.GetSettingsAsync(cancellationToken);
         if (!settings.RetentionDays.HasValue)
         {
-            return;
+            return 0;
         }
 
         var cutoff = DateTime.UtcNow.AddDays(-settings.RetentionDays.Value);
@@ -77,7 +103,7 @@ public sealed class UserActivityRetentionService : BackgroundService
 
         if (deleted <= 0)
         {
-            return;
+            return 0;
         }
 
         await sqliteMaintenanceService.CheckpointAsync(cancellationToken);
@@ -86,5 +112,6 @@ public sealed class UserActivityRetentionService : BackgroundService
             deleted,
             cutoff,
             settings.RetentionDays.Value);
+        return deleted;
     }
 }

@@ -546,6 +546,11 @@ export interface SystemJobDiagnosticsItemDto {
   lastActivityAt?: string | null;
   lastActivityDescription?: string | null;
   nextRunHint?: string | null;
+  lastRunStatus?: string | null;
+  lastRunStatusText?: string | null;
+  lastRunStartedAt?: string | null;
+  lastRunFinishedAt?: string | null;
+  lastRunError?: string | null;
 }
 
 export interface SystemJobDiagnosticsDto {

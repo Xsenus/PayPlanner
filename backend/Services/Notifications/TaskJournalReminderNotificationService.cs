@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services.Notifications;
 
@@ -18,15 +19,18 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TaskJournalReminderNotificationService> _logger;
+    private readonly ISystemJobRunStateService? _jobRunState;
 
     public TaskJournalReminderNotificationService(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
-        ILogger<TaskJournalReminderNotificationService> logger)
+        ILogger<TaskJournalReminderNotificationService> logger,
+        ISystemJobRunStateService? jobRunState = null)
     {
         _scopeFactory = scopeFactory;
         _configuration = configuration;
         _logger = logger;
+        _jobRunState = jobRunState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -38,7 +42,20 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
         {
             if (IsEnabled())
             {
-                await ProcessDueRemindersAsync(stoppingToken);
+                var startedAt = DateTime.UtcNow;
+                var sent = await ProcessDueRemindersAsync(stoppingToken);
+                if (_jobRunState is not null && sent >= 0)
+                {
+                    await _jobRunState.RecordSuccessAsync(
+                        SystemJobKeys.TaskReminders,
+                        startedAt,
+                        sent,
+                        null,
+                        sent > 0
+                            ? $"Отправлено напоминаний по задачам: {sent}."
+                            : "Проверка напоминаний выполнена, новых отправок не было.",
+                        stoppingToken);
+                }
             }
 
             try
@@ -55,8 +72,9 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
     private bool IsEnabled()
         => _configuration.GetValue("Notifications:TaskReminders:Enabled", true);
 
-    private async Task ProcessDueRemindersAsync(CancellationToken cancellationToken)
+    private async Task<int> ProcessDueRemindersAsync(CancellationToken cancellationToken)
     {
+        var sent = 0;
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -90,14 +108,28 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                         continue;
                     }
 
-                    await notificationService.NotifyTaskReminderAsync(task, reminder, nowUtc, cancellationToken);
+                    var deliveries = await notificationService.NotifyTaskReminderAsync(task, reminder, nowUtc, cancellationToken);
+                    sent += deliveries.Count;
                 }
             }
+
+            return sent;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to process task journal reminder notifications.");
+            if (_jobRunState is not null)
+            {
+                await _jobRunState.RecordFailureAsync(
+                    SystemJobKeys.TaskReminders,
+                    DateTime.UtcNow,
+                    ex,
+                    "Проверка напоминаний по задачам завершилась с ошибкой.",
+                    cancellationToken);
+            }
         }
+
+        return -1;
     }
 
     private static bool IsReminderDue(TaskJournalItem task, string reminderKey, DateTime nowUtc)
