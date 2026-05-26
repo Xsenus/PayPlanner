@@ -193,6 +193,23 @@ export interface CalendarSyncReadinessItemDto {
   message: string;
 }
 
+export interface CalendarSyncSettingsDto {
+  syncMode: string;
+  conflictResolutionMode: string;
+  requireManualConfirmation: boolean;
+  dryRunConfirmed: boolean;
+  notes: string;
+  updatedAt?: string | null;
+}
+
+export interface UpdateCalendarSyncSettingsRequest {
+  syncMode?: string;
+  conflictResolutionMode?: string;
+  requireManualConfirmation?: boolean;
+  dryRunConfirmed?: boolean;
+  notes?: string;
+}
+
 export interface RolePermissionAuditRoleDto {
   roleId: number;
   roleName: string;
@@ -1288,6 +1305,17 @@ export class ApiService {
 
   async getCalendarSyncReadiness() {
     return this.request<CalendarSyncReadinessDto>('/calendar-sync/readiness');
+  }
+
+  async getCalendarSyncSettings() {
+    return this.request<CalendarSyncSettingsDto>('/calendar-sync/settings');
+  }
+
+  async updateCalendarSyncSettings(payload: UpdateCalendarSyncSettingsRequest) {
+    return this.request<CalendarSyncSettingsDto>('/calendar-sync/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
   }
 
   // ===== Acts =====

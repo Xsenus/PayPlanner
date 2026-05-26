@@ -120,6 +120,49 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('/calendar-sync/readiness');
   });
 
+  it('loads calendar sync settings from the backend', async () => {
+    const payload = {
+      syncMode: 'hybrid',
+      conflictResolutionMode: 'manualConfirmation',
+      requireManualConfirmation: true,
+      dryRunConfirmed: false,
+      notes: '',
+      updatedAt: '2026-05-26T17:00:00Z',
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getCalendarSyncSettings();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/calendar-sync/settings');
+  });
+
+  it('updates calendar sync settings', async () => {
+    const payload = {
+      syncMode: 'crmMaster',
+      conflictResolutionMode: 'crmWins',
+      requireManualConfirmation: false,
+      dryRunConfirmed: true,
+      notes: 'Проверено',
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ...payload, updatedAt: '2026-05-26T17:00:00Z' }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.updateCalendarSyncSettings(payload);
+
+    expect(result.syncMode).toBe('crmMaster');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/calendar-sync/settings');
+    expect(init?.method).toBe('PUT');
+    expect(JSON.parse(String(init?.body))).toEqual(payload);
+  });
+
   it('loads latest app version from the backend', async () => {
     const payload = {
       currentVersion: '1.12.0',

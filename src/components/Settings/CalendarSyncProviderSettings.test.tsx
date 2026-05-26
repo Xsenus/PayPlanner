@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CalendarSyncProviderSettings } from './CalendarSyncProviderSettings';
@@ -6,6 +6,8 @@ import { CalendarSyncProviderSettings } from './CalendarSyncProviderSettings';
 const apiMock = vi.hoisted(() => ({
   getCalendarSyncProviders: vi.fn(),
   getCalendarSyncReadiness: vi.fn(),
+  getCalendarSyncSettings: vi.fn(),
+  updateCalendarSyncSettings: vi.fn(),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -79,6 +81,22 @@ describe('CalendarSyncProviderSettings', () => {
         },
       ],
     });
+    apiMock.getCalendarSyncSettings.mockResolvedValue({
+      syncMode: 'notConfigured',
+      conflictResolutionMode: 'manualConfirmation',
+      requireManualConfirmation: true,
+      dryRunConfirmed: false,
+      notes: '',
+      updatedAt: null,
+    });
+    apiMock.updateCalendarSyncSettings.mockImplementation(async (payload) => ({
+      syncMode: payload.syncMode,
+      conflictResolutionMode: payload.conflictResolutionMode,
+      requireManualConfirmation: payload.requireManualConfirmation,
+      dryRunConfirmed: payload.dryRunConfirmed,
+      notes: payload.notes,
+      updatedAt: '2026-05-26T17:10:00Z',
+    }));
   });
 
   it('shows provider diagnostics and readiness checklist', async () => {
@@ -87,10 +105,30 @@ describe('CalendarSyncProviderSettings', () => {
     expect(await screen.findByText('Провайдеры календарной синхронизации')).toBeTruthy();
     expect(screen.getByText('ICS-файлы')).toBeTruthy();
     expect(screen.getByText('Google Calendar')).toBeTruthy();
+    expect(screen.getByText('Модель синхронизации и конфликты')).toBeTruthy();
     expect(screen.getByText('Готовность к подключению Google/Яндекс')).toBeTruthy();
     expect(screen.getByText('Выполнено обязательных шагов: 1 из 2. Пока все обязательные пункты не закрыты, внешняя синхронизация остается подготовительным контуром.')).toBeTruthy();
     expect(screen.getByText('Правила конфликтов')).toBeTruthy();
     expect(screen.getByText('Нужна подготовка')).toBeTruthy();
+  });
+
+  it('saves calendar sync conflict settings', async () => {
+    render(<CalendarSyncProviderSettings />);
+
+    await screen.findByText('Модель синхронизации и конфликты');
+    fireEvent.change(screen.getByLabelText('Главный источник событий'), { target: { value: 'hybrid' } });
+    fireEvent.click(screen.getByLabelText('Dry-run на копии базы выполнен'));
+    fireEvent.change(screen.getByLabelText('Комментарий к решению'), { target: { value: 'Согласовано с руководителем.' } });
+    fireEvent.click(screen.getByRole('button', { name: /Сохранить/i }));
+
+    await waitFor(() => expect(apiMock.updateCalendarSyncSettings).toHaveBeenCalledWith({
+      syncMode: 'hybrid',
+      conflictResolutionMode: 'manualConfirmation',
+      requireManualConfirmation: true,
+      dryRunConfirmed: true,
+      notes: 'Согласовано с руководителем.',
+    }));
+    expect(await screen.findByText('Настройки внешних календарей сохранены.')).toBeTruthy();
   });
 
   it('shows a readable loading error', async () => {

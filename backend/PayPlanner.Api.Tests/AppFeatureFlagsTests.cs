@@ -1,7 +1,11 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Controllers;
+using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalIntegrations;
@@ -122,15 +126,16 @@ public class AppFeatureFlagsTests
     }
 
     [Fact]
-    public void CalendarSyncController_ReturnsProviderDiagnosticsFromFeatureFlag()
+    public async Task CalendarSyncController_ReturnsProviderDiagnosticsFromFeatureFlag()
     {
+        await using var scope = await CreateDbScopeAsync();
         var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions
         {
             Legal = new LegalFeatureFlagsOptions
             {
                 ExternalCalendarSync = true,
             },
-        }));
+        }), scope.Db);
 
         var result = controller.GetProviders();
         var ok = Assert.IsType<OkObjectResult>(result.Result);
@@ -161,23 +166,82 @@ public class AppFeatureFlagsTests
     }
 
     [Fact]
-    public void CalendarSyncController_ReturnsReadinessFromFeatureFlag()
+    public async Task CalendarSyncController_ReturnsReadinessFromFeatureFlag()
     {
+        await using var scope = await CreateDbScopeAsync();
         var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions
         {
             Legal = new LegalFeatureFlagsOptions
             {
                 ExternalCalendarSync = false,
             },
-        }));
+        }), scope.Db);
 
-        var result = controller.GetReadiness();
+        var result = await controller.GetReadiness(CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var readiness = Assert.IsType<CalendarSyncReadinessDto>(ok.Value);
 
         Assert.False(readiness.ExternalCalendarSyncEnabled);
         Assert.False(readiness.ReadyToConnect);
         Assert.Contains(readiness.Items, item => item.Key == "feature-flag" && item.Status == "disabled");
+    }
+
+    [Fact]
+    public async Task CalendarSyncController_SavesSettingsAndUsesThemInReadiness()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions
+        {
+            Legal = new LegalFeatureFlagsOptions
+            {
+                ExternalCalendarSync = true,
+            },
+        }), scope.Db);
+
+        var update = await controller.UpdateSettings(new UpdateCalendarSyncSettingsRequest
+        {
+            SyncMode = "hybrid",
+            ConflictResolutionMode = "manualConfirmation",
+            RequireManualConfirmation = false,
+            DryRunConfirmed = true,
+            Notes = "Проверено на копии базы.",
+        }, CancellationToken.None);
+        var updated = Assert.IsType<CalendarSyncSettingsDto>(Assert.IsType<OkObjectResult>(update.Result).Value);
+
+        Assert.Equal("hybrid", updated.SyncMode);
+        Assert.Equal("manualConfirmation", updated.ConflictResolutionMode);
+        Assert.True(updated.RequireManualConfirmation);
+        Assert.True(updated.DryRunConfirmed);
+
+        var readinessResult = await controller.GetReadiness(CancellationToken.None);
+        var readiness = Assert.IsType<CalendarSyncReadinessDto>(Assert.IsType<OkObjectResult>(readinessResult.Result).Value);
+
+        Assert.False(readiness.ReadyToConnect);
+        Assert.Contains(readiness.Items, item => item.Key == "conflict-policy" && item.IsReady && item.Status == "ready");
+        Assert.Contains(readiness.Items, item => item.Key == "dry-run" && item.IsReady && item.Status == "ready");
+        Assert.Contains(readiness.Items, item => item.Key == "google-oauth" && !item.IsReady);
+    }
+
+    [Fact]
+    public async Task CalendarSyncController_NormalizesInvalidSettings()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()), scope.Db);
+
+        var result = await controller.UpdateSettings(new UpdateCalendarSyncSettingsRequest
+        {
+            SyncMode = "unexpected",
+            ConflictResolutionMode = "unsafe",
+            RequireManualConfirmation = false,
+            DryRunConfirmed = false,
+            Notes = new string('x', 600),
+        }, CancellationToken.None);
+        var settings = Assert.IsType<CalendarSyncSettingsDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+
+        Assert.Equal("notConfigured", settings.SyncMode);
+        Assert.Equal("manualConfirmation", settings.ConflictResolutionMode);
+        Assert.True(settings.RequireManualConfirmation);
+        Assert.Equal(500, settings.Notes.Length);
     }
 
     private sealed class TestOptionsSnapshot<T> : IOptionsSnapshot<T>
@@ -191,5 +255,30 @@ public class AppFeatureFlagsTests
         public T Value { get; }
 
         public T Get(string? name) => Value;
+    }
+
+    private static async Task<TestDbScope> CreateDbScopeAsync()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection)
+            .Options;
+        var db = new PaymentContext(options, useObjectAuditModel: false);
+        await db.Database.EnsureCreatedAsync();
+
+        return new TestDbScope(connection, db);
+    }
+
+    private sealed class TestDbScope(SqliteConnection connection, PaymentContext db) : IAsyncDisposable
+    {
+        public PaymentContext Db { get; } = db;
+
+        public async ValueTask DisposeAsync()
+        {
+            await Db.DisposeAsync();
+            await connection.DisposeAsync();
+        }
     }
 }

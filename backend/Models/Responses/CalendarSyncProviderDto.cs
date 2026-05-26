@@ -34,3 +34,13 @@ public sealed class CalendarSyncReadinessItemDto
     public string Severity { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
 }
+
+public sealed class CalendarSyncSettingsDto
+{
+    public string SyncMode { get; set; } = "notConfigured";
+    public string ConflictResolutionMode { get; set; } = "manualConfirmation";
+    public bool RequireManualConfirmation { get; set; } = true;
+    public bool DryRunConfirmed { get; set; }
+    public string Notes { get; set; } = string.Empty;
+    public DateTime? UpdatedAt { get; set; }
+}

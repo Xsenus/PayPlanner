@@ -1,13 +1,22 @@
-import { AlertTriangle, CalendarDays, CheckCircle2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, RefreshCw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { apiService, type CalendarSyncProviderDto, type CalendarSyncReadinessDto } from '../../services/api';
+import {
+  apiService,
+  type CalendarSyncProviderDto,
+  type CalendarSyncReadinessDto,
+  type CalendarSyncSettingsDto,
+} from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 export function CalendarSyncProviderSettings() {
   const [providers, setProviders] = useState<CalendarSyncProviderDto[]>([]);
   const [readiness, setReadiness] = useState<CalendarSyncReadinessDto | null>(null);
+  const [settings, setSettings] = useState<CalendarSyncSettingsDto | null>(null);
+  const [draft, setDraft] = useState<CalendarSyncSettingsDto | null>(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   const availableCount = useMemo(
     () => providers.filter((provider) => provider.isAvailable).length,
@@ -24,16 +33,24 @@ export function CalendarSyncProviderSettings() {
     [readiness],
   );
 
+  const applyLoadedSettings = (next: CalendarSyncSettingsDto) => {
+    setSettings(next);
+    setDraft({ ...next });
+  };
+
   const loadCalendarSyncState = async () => {
     setLoading(true);
     setError(null);
+    setSaveMessage(null);
     try {
-      const [loadedProviders, loadedReadiness] = await Promise.all([
+      const [loadedProviders, loadedReadiness, loadedSettings] = await Promise.all([
         apiService.getCalendarSyncProviders(),
         apiService.getCalendarSyncReadiness(),
+        apiService.getCalendarSyncSettings(),
       ]);
       setProviders(loadedProviders);
       setReadiness(loadedReadiness);
+      applyLoadedSettings(loadedSettings);
     } catch (loadError) {
       setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить состояние внешних календарей.'));
     } finally {
@@ -44,6 +61,35 @@ export function CalendarSyncProviderSettings() {
   useEffect(() => {
     void loadCalendarSyncState();
   }, []);
+
+  const updateDraft = (patch: Partial<CalendarSyncSettingsDto>) => {
+    setDraft((current) => (current ? { ...current, ...patch } : current));
+    setSaveMessage(null);
+  };
+
+  const saveSettings = async () => {
+    if (!draft) return;
+
+    setSaving(true);
+    setError(null);
+    setSaveMessage(null);
+    try {
+      const updated = await apiService.updateCalendarSyncSettings({
+        syncMode: draft.syncMode,
+        conflictResolutionMode: draft.conflictResolutionMode,
+        requireManualConfirmation: draft.requireManualConfirmation,
+        dryRunConfirmed: draft.dryRunConfirmed,
+        notes: draft.notes,
+      });
+      applyLoadedSettings(updated);
+      setReadiness(await apiService.getCalendarSyncReadiness());
+      setSaveMessage('Настройки внешних календарей сохранены.');
+    } catch (saveError) {
+      setError(extractDisplayErrorMessage(saveError, 'Не удалось сохранить настройки внешних календарей.'));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -102,6 +148,96 @@ export function CalendarSyncProviderSettings() {
         Доступно сейчас: {availableCount} из {providers.length || 0}. Google и Яндекс не запускаются автоматически, пока внешний календарный feature flag и OAuth-настройки не будут приняты отдельно.
       </div>
 
+      {draft ? (
+        <div className="mt-5 rounded-2xl border border-gray-200 bg-white p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h5 className="text-sm font-semibold text-gray-900">Модель синхронизации и конфликты</h5>
+              <p className="mt-1 text-xs leading-5 text-gray-600">
+                Эти настройки фиксируют правила перед подключением Google/Яндекс и обновляют чек-лист готовности.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void saveSettings()}
+              disabled={saving}
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-sky-600 px-3 text-xs font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Save className="h-4 w-4" />
+              <span>{saving ? 'Сохраняем' : 'Сохранить'}</span>
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            <label className="block">
+              <span className="text-xs font-semibold text-gray-700">Главный источник событий</span>
+              <select
+                value={draft.syncMode}
+                onChange={(event) => updateDraft({ syncMode: event.target.value })}
+                className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              >
+                {syncModeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-semibold text-gray-700">Правило спорных изменений</span>
+              <select
+                value={draft.conflictResolutionMode}
+                onChange={(event) => updateDraft({ conflictResolutionMode: event.target.value })}
+                className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              >
+                {conflictResolutionOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            <label className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-xs text-gray-700">
+              <input
+                type="checkbox"
+                checked={draft.requireManualConfirmation}
+                onChange={(event) => updateDraft({ requireManualConfirmation: event.target.checked })}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+              />
+              <span>Требовать ручное подтверждение спорных изменений</span>
+            </label>
+            <label className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-xs text-gray-700">
+              <input
+                type="checkbox"
+                checked={draft.dryRunConfirmed}
+                onChange={(event) => updateDraft({ dryRunConfirmed: event.target.checked })}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+              />
+              <span>Dry-run на копии базы выполнен</span>
+            </label>
+          </div>
+
+          <label className="mt-4 block">
+            <span className="text-xs font-semibold text-gray-700">Комментарий к решению</span>
+            <textarea
+              value={draft.notes}
+              onChange={(event) => updateDraft({ notes: event.target.value })}
+              maxLength={500}
+              rows={3}
+              className="mt-1 w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              placeholder="Например: модель согласована с руководителем, dry-run проверен на копии базы."
+            />
+          </label>
+
+          {saveMessage ? (
+            <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">{saveMessage}</div>
+          ) : null}
+          {settings?.updatedAt ? (
+            <p className="mt-2 text-[11px] text-gray-500">Последнее сохранение: {new Date(settings.updatedAt).toLocaleString('ru-RU')}</p>
+          ) : null}
+        </div>
+      ) : null}
+
       {readiness ? (
         <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -143,6 +279,20 @@ export function CalendarSyncProviderSettings() {
     </div>
   );
 }
+
+const syncModeOptions = [
+  { value: 'notConfigured', label: 'Не выбрано' },
+  { value: 'crmMaster', label: 'CRM главная' },
+  { value: 'externalMaster', label: 'Внешний календарь главный' },
+  { value: 'hybrid', label: 'Гибридная модель' },
+];
+
+const conflictResolutionOptions = [
+  { value: 'manualConfirmation', label: 'Ручное подтверждение' },
+  { value: 'crmWins', label: 'Оставлять версию CRM' },
+  { value: 'externalWins', label: 'Принимать внешний календарь' },
+  { value: 'latestWins', label: 'Брать последнее изменение' },
+];
 
 function Capability({ enabled, label }: { enabled: boolean; label: string }) {
   return (
