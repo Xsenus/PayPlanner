@@ -32,6 +32,7 @@ public sealed class SystemJobsController : ControllerBase
     private readonly TaskJournalReminderNotificationService? _taskReminderRunner;
     private readonly NotificationRetrySchedulerService? _notificationRetryRunner;
     private readonly NotificationDeliveryRetentionService? _notificationDeliveryRetentionRunner;
+    private readonly CalendarSyncSchedulerService? _calendarSyncRunner;
     private readonly TaskJournalAutomationSchedulerService? _caseControlRunner;
     private readonly ClientCaseCourtSyncSchedulerService? _courtSyncRunner;
     private readonly MoneyBalanceReconciliationSchedulerService? _moneyBalanceRunner;
@@ -46,6 +47,7 @@ public sealed class SystemJobsController : ControllerBase
         TaskJournalReminderNotificationService? taskReminderRunner = null,
         NotificationRetrySchedulerService? notificationRetryRunner = null,
         NotificationDeliveryRetentionService? notificationDeliveryRetentionRunner = null,
+        CalendarSyncSchedulerService? calendarSyncRunner = null,
         TaskJournalAutomationSchedulerService? caseControlRunner = null,
         ClientCaseCourtSyncSchedulerService? courtSyncRunner = null,
         MoneyBalanceReconciliationSchedulerService? moneyBalanceRunner = null,
@@ -59,6 +61,7 @@ public sealed class SystemJobsController : ControllerBase
         _taskReminderRunner = taskReminderRunner;
         _notificationRetryRunner = notificationRetryRunner;
         _notificationDeliveryRetentionRunner = notificationDeliveryRetentionRunner;
+        _calendarSyncRunner = calendarSyncRunner;
         _caseControlRunner = caseControlRunner;
         _courtSyncRunner = courtSyncRunner;
         _moneyBalanceRunner = moneyBalanceRunner;
@@ -83,6 +86,10 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == NotificationDeliveryRetentionService.RetentionDaysSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.IntervalHoursSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.BatchSizeSettingKey ||
+                item.Key == CalendarSyncSchedulerService.EnabledSettingKey ||
+                item.Key == CalendarSyncSchedulerService.IntervalMinutesSettingKey ||
+                item.Key == CalendarSyncSchedulerService.BatchSizeSettingKey ||
+                item.Key == CalendarSyncSchedulerService.LookAheadDaysSettingKey ||
                 item.Key == CaseControlEnabledKey ||
                 item.Key == CaseControlInactiveDaysKey ||
                 item.Key == CaseControlLimitKey ||
@@ -98,6 +105,7 @@ public sealed class SystemJobsController : ControllerBase
             await BuildTaskReminderJobAsync(now, ct),
             await BuildNotificationRetryJobAsync(settings, ct),
             await BuildNotificationDeliveryRetentionJobAsync(settings, ct),
+            await BuildExternalCalendarSyncJobAsync(settings, ct),
             await BuildCaseControlJobAsync(settings, now, ct),
             await BuildCourtSyncJobAsync(settings, ct),
             await BuildMoneyBalanceReconciliationJobAsync(ct),
@@ -179,6 +187,20 @@ public sealed class SystemJobsController : ControllerBase
                             ? $"Удалено устаревших технических записей доставки уведомлений: {processedCount}."
                             : "Проверка срока хранения технических логов уведомлений выполнена, удаление не требовалось."
                         : "Очистка технических логов уведомлений выключена в настройках.";
+                    break;
+
+                case SystemJobKeys.ExternalCalendarSync:
+                    EnsureRunner(_calendarSyncRunner);
+                    var calendarSyncResult = await _calendarSyncRunner!.RunOnceAsync(ct);
+                    processedCount = calendarSyncResult.ProcessedCount;
+                    skippedCount = calendarSyncResult.SkippedCount;
+                    summary = calendarSyncResult.Enabled
+                        ? calendarSyncResult.ReadyToConnect
+                            ? processedCount > 0
+                                ? $"Проверено событий для внешних календарей: {processedCount}."
+                                : "Проверка внешних календарей выполнена, событий для синхронизации не найдено."
+                            : calendarSyncResult.Message ?? "Внешние календари еще не готовы к запуску."
+                        : "Фоновая проверка внешних календарей выключена в настройках.";
                     break;
 
                 case SystemJobKeys.CaseInactivityControl:
@@ -431,6 +453,77 @@ public sealed class SystemJobsController : ControllerBase
         };
     }
 
+    private async Task<SystemJobDiagnosticsItemDto> BuildExternalCalendarSyncJobAsync(
+        IReadOnlyDictionary<string, string> settings,
+        CancellationToken ct)
+    {
+        var schedulerEnabled = ParseBool(
+            settings.GetValueOrDefault(CalendarSyncSchedulerService.EnabledSettingKey),
+            _configuration.GetValue("CalendarSync:Scheduler:Enabled", false));
+        var intervalMinutes = CalendarSyncSchedulerService.NormalizeInterval(ParseInt(
+            settings.GetValueOrDefault(CalendarSyncSchedulerService.IntervalMinutesSettingKey),
+            _configuration.GetValue("CalendarSync:Scheduler:IntervalMinutes", CalendarSyncSchedulerService.DefaultIntervalMinutes)));
+        var batchSize = CalendarSyncSchedulerService.NormalizeBatchSize(ParseInt(
+            settings.GetValueOrDefault(CalendarSyncSchedulerService.BatchSizeSettingKey),
+            _configuration.GetValue("CalendarSync:Scheduler:BatchSize", CalendarSyncSchedulerService.DefaultBatchSize)));
+        var lookAheadDays = CalendarSyncSchedulerService.NormalizeLookAheadDays(ParseInt(
+            settings.GetValueOrDefault(CalendarSyncSchedulerService.LookAheadDaysSettingKey),
+            _configuration.GetValue("CalendarSync:Scheduler:LookAheadDays", CalendarSyncSchedulerService.DefaultLookAheadDays)));
+        var state = _calendarSyncRunner is null
+            ? new CalendarSyncSchedulerState(
+                schedulerEnabled,
+                _featureFlags.CurrentValue.Legal.ExternalCalendarSync,
+                CalendarSyncProviderRegistry.BuildReadiness(_featureFlags.CurrentValue.Legal.ExternalCalendarSync),
+                0,
+                null,
+                intervalMinutes,
+                batchSize,
+                lookAheadDays)
+            : await _calendarSyncRunner.BuildDiagnosticsStateAsync(ct);
+
+        var enabled = state.SchedulerEnabled && state.FeatureEnabled;
+        var ready = state.Readiness.ReadyToConnect;
+        var blockedCount = state.BlockingRequiredItems;
+        var status = !state.FeatureEnabled
+            ? "blocked"
+            : !state.SchedulerEnabled
+                ? "disabled"
+                : ready
+                    ? "active"
+                    : "warning";
+        var statusText = !state.FeatureEnabled
+            ? "Ожидает feature flag"
+            : !state.SchedulerEnabled
+                ? "Выключено"
+                : ready
+                    ? "Готово к проверке"
+                    : "Требует подготовки";
+
+        return new SystemJobDiagnosticsItemDto
+        {
+            Key = SystemJobKeys.ExternalCalendarSync,
+            Name = "Внешние календари Google/Яндекс",
+            Description = "Проверяет готовность внешней календарной синхронизации и события-кандидаты без изменения внешних календарей до настройки OAuth.",
+            Enabled = enabled,
+            Status = status,
+            StatusText = statusText,
+            IntervalText = $"Каждые {state.IntervalMinutes} мин., горизонт {state.LookAheadDays} дн.",
+            PendingCount = state.CandidateCount,
+            LastProcessedCount = state.BatchSize,
+            LastActivityAt = state.OldestCandidateAt,
+            LastActivityDescription = state.OldestCandidateAt is null ? null : $"Ближайшее событие-кандидат: {state.OldestCandidateAt:dd.MM.yyyy HH:mm}.",
+            NextRunHint = ready
+                ? $"За один запуск проверяется до {state.BatchSize} событий. Внешняя запись остается подготовительным контуром до OAuth."
+                : $"Не закрыто обязательных пунктов готовности: {blockedCount}.",
+            ManualRunEnabled = state.SchedulerEnabled && state.FeatureEnabled,
+            ManualRunHint = state.FeatureEnabled
+                ? state.SchedulerEnabled
+                    ? "Можно вручную выполнить подготовительную проверку внешних календарей."
+                    : "Ручной запуск недоступен, пока фоновая проверка внешних календарей выключена."
+                : "Ручной запуск недоступен, пока feature flag внешних календарей выключен.",
+        };
+    }
+
     private async Task<SystemJobDiagnosticsItemDto> BuildCaseControlJobAsync(
         IReadOnlyDictionary<string, string> settings,
         DateTime now,
@@ -602,6 +695,10 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == NotificationDeliveryRetentionService.RetentionDaysSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.IntervalHoursSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.BatchSizeSettingKey ||
+                item.Key == CalendarSyncSchedulerService.EnabledSettingKey ||
+                item.Key == CalendarSyncSchedulerService.IntervalMinutesSettingKey ||
+                item.Key == CalendarSyncSchedulerService.BatchSizeSettingKey ||
+                item.Key == CalendarSyncSchedulerService.LookAheadDaysSettingKey ||
                 item.Key == CaseControlEnabledKey ||
                 item.Key == CaseControlInactiveDaysKey ||
                 item.Key == CaseControlLimitKey ||
@@ -617,6 +714,7 @@ public sealed class SystemJobsController : ControllerBase
             SystemJobKeys.TaskReminders => await BuildTaskReminderJobAsync(DateTime.UtcNow, ct),
             SystemJobKeys.NotificationRetry => await BuildNotificationRetryJobAsync(settings, ct),
             SystemJobKeys.NotificationDeliveryRetention => await BuildNotificationDeliveryRetentionJobAsync(settings, ct),
+            SystemJobKeys.ExternalCalendarSync => await BuildExternalCalendarSyncJobAsync(settings, ct),
             SystemJobKeys.CaseInactivityControl => await BuildCaseControlJobAsync(settings, DateTime.UtcNow, ct),
             SystemJobKeys.CourtSync => await BuildCourtSyncJobAsync(settings, ct),
             SystemJobKeys.MoneyBalanceReconciliation => await BuildMoneyBalanceReconciliationJobAsync(ct),

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -36,6 +37,10 @@ public class SystemJobsControllerTests
             new SystemSetting { Key = NotificationDeliveryRetentionService.RetentionDaysSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = NotificationDeliveryRetentionService.IntervalHoursSettingKey, Value = "12", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = NotificationDeliveryRetentionService.BatchSizeSettingKey, Value = "25", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncSchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncSchedulerService.IntervalMinutesSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncSchedulerService.BatchSizeSettingKey, Value = "50", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncSchedulerService.LookAheadDaysSettingKey, Value = "60", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = "user-activity.retention-days", Value = "30", CreatedAt = now, UpdatedAt = now });
         var role = new Role { Name = $"admin-{Guid.NewGuid():N}", Description = "Admin" };
         scope.Db.Roles.Add(role);
@@ -140,6 +145,7 @@ public class SystemJobsControllerTests
                 Legal = new LegalFeatureFlagsOptions
                 {
                     ExternalCourtSync = true,
+                    ExternalCalendarSync = true,
                 },
             }),
             new FakeSystemJobRunStateService(new Dictionary<string, SystemJobRunState>
@@ -160,11 +166,12 @@ public class SystemJobsControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
 
-        Assert.Equal(8, dto.Items.Count);
+        Assert.Equal(9, dto.Items.Count);
         Assert.Contains(dto.Items, item => item.Key == "database-backup" && item.Enabled && item.IntervalText.Contains("02:00"));
         Assert.Contains(dto.Items, item => item.Key == "task-reminders" && item.PendingCount == 1 && item.LastActivityDescription == "Reminder sent");
         Assert.Contains(dto.Items, item => item.Key == "notification-retry" && item.PendingCount == 1 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "notification-delivery-retention" && item.PendingCount == 1 && item.LastProcessedCount == 25 && item.ManualRunEnabled);
+        Assert.Contains(dto.Items, item => item.Key == "external-calendar-sync" && item.Status == "warning" && item.LastProcessedCount == 50 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastRunStatus == "success" && item.LastRunStatusText == "Успешно");
@@ -310,6 +317,87 @@ public class SystemJobsControllerTests
         Assert.DoesNotContain("old-failed", eventKeys);
         Assert.Contains("old-pending", eventKeys);
         Assert.Contains("fresh-sent", eventKeys);
+    }
+
+    [Fact]
+    public async Task CalendarSyncSchedulerService_CountsCandidatesOnlyAfterReadiness()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting { Key = CalendarSyncSchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncSchedulerService.BatchSizeSettingKey, Value = "10", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncSchedulerService.LookAheadDaysSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting
+            {
+                Key = "calendarSync.settings",
+                Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+                {
+                    SyncMode = "crmMaster",
+                    ConflictResolutionMode = "manualConfirmation",
+                    RequireManualConfirmation = true,
+                    DryRunConfirmed = true,
+                    UpdatedAt = now,
+                }, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        scope.Db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                ObjectName = "CASE-1",
+                Title = "Future task",
+                DueAt = now.AddDays(2),
+                Status = "new",
+            },
+            new TaskJournalItem
+            {
+                ObjectName = "CASE-2",
+                Title = "Completed task",
+                DueAt = now.AddDays(3),
+                Status = "done",
+            });
+        var client = new Client { Name = "Calendar client" };
+        scope.Db.Clients.Add(client);
+        await scope.Db.SaveChangesAsync();
+        scope.Db.ClientCases.Add(new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "CASE-3",
+            Status = ClientCaseStatus.Open,
+            Title = "Case with hearing",
+            NextHearingAt = now.AddDays(5),
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new CalendarSyncSchedulerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            new TestOptionsMonitor<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions
+            {
+                Legal = new LegalFeatureFlagsOptions
+                {
+                    ExternalCalendarSync = true,
+                },
+            }),
+            NullLogger<CalendarSyncSchedulerService>.Instance);
+
+        var state = await service.BuildDiagnosticsStateAsync(CancellationToken.None);
+
+        Assert.True(state.SchedulerEnabled);
+        Assert.True(state.FeatureEnabled);
+        Assert.False(state.Readiness.ReadyToConnect);
+        Assert.Equal(2, state.CandidateCount);
+
+        var result = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.True(result.Enabled);
+        Assert.False(result.ReadyToConnect);
+        Assert.Equal(0, result.ProcessedCount);
+        Assert.True(result.SkippedCount > 0);
     }
 
     [Fact]
