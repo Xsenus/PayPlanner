@@ -42,20 +42,7 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
         {
             if (IsEnabled())
             {
-                var startedAt = DateTime.UtcNow;
-                var sent = await ProcessDueRemindersAsync(stoppingToken);
-                if (_jobRunState is not null && sent >= 0)
-                {
-                    await _jobRunState.RecordSuccessAsync(
-                        SystemJobKeys.TaskReminders,
-                        startedAt,
-                        sent,
-                        null,
-                        sent > 0
-                            ? $"Отправлено напоминаний по задачам: {sent}."
-                            : "Проверка напоминаний выполнена, новых отправок не было.",
-                        stoppingToken);
-                }
+                await RunOnceAsync(stoppingToken);
             }
 
             try
@@ -71,6 +58,26 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
 
     private bool IsEnabled()
         => _configuration.GetValue("Notifications:TaskReminders:Enabled", true);
+
+    public async Task<int> RunOnceAsync(CancellationToken cancellationToken = default)
+    {
+        var startedAt = DateTime.UtcNow;
+        var sent = await ProcessDueRemindersAsync(cancellationToken);
+        if (_jobRunState is not null && sent >= 0)
+        {
+            await _jobRunState.RecordSuccessAsync(
+                SystemJobKeys.TaskReminders,
+                startedAt,
+                sent,
+                null,
+                sent > 0
+                    ? $"Отправлено напоминаний по задачам: {sent}."
+                    : "Проверка напоминаний выполнена, новых отправок не было.",
+                cancellationToken);
+        }
+
+        return sent;
+    }
 
     private async Task<int> ProcessDueRemindersAsync(CancellationToken cancellationToken)
     {

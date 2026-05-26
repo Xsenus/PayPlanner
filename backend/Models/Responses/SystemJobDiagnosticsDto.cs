@@ -25,4 +25,17 @@ public sealed class SystemJobDiagnosticsItemDto
     public DateTime? LastRunStartedAt { get; init; }
     public DateTime? LastRunFinishedAt { get; init; }
     public string? LastRunError { get; init; }
+    public bool ManualRunEnabled { get; init; }
+    public string? ManualRunHint { get; init; }
+}
+
+public sealed class SystemJobManualRunResultDto
+{
+    public string JobKey { get; init; } = string.Empty;
+    public DateTime StartedAt { get; init; }
+    public DateTime FinishedAt { get; init; }
+    public int? ProcessedCount { get; init; }
+    public int? SkippedCount { get; init; }
+    public string Summary { get; init; } = string.Empty;
+    public SystemJobDiagnosticsDto Diagnostics { get; init; } = new();
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, Play, RefreshCw } from 'lucide-react';
 import { apiService, type SystemJobDiagnosticsDto, type SystemJobDiagnosticsItemDto } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
@@ -51,7 +51,15 @@ function JobStatusIcon({ status }: { status: string }) {
   return <Clock3 className="h-5 w-5 text-slate-500" />;
 }
 
-function JobDiagnosticsCard({ item }: { item: SystemJobDiagnosticsItemDto }) {
+function JobDiagnosticsCard({
+  item,
+  onRun,
+  running,
+}: {
+  item: SystemJobDiagnosticsItemDto;
+  onRun: (jobKey: string) => void;
+  running: boolean;
+}) {
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -96,6 +104,18 @@ function JobDiagnosticsCard({ item }: { item: SystemJobDiagnosticsItemDto }) {
         {item.lastRunError ? (
           <span className="text-red-700">{item.lastRunError}</span>
         ) : null}
+        {item.manualRunEnabled ? (
+          <button
+            type="button"
+            onClick={() => onRun(item.key)}
+            disabled={running}
+            className="ml-auto inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-1.5 font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+            title={item.manualRunHint || 'Запустить сервис вручную'}
+          >
+            {running ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            Запустить
+          </button>
+        ) : null}
       </div>
 
       {item.lastActivityAt || item.lastActivityDescription || item.nextRunHint ? (
@@ -112,7 +132,9 @@ function JobDiagnosticsCard({ item }: { item: SystemJobDiagnosticsItemDto }) {
 export function SystemJobDiagnosticsSettings() {
   const [diagnostics, setDiagnostics] = useState<SystemJobDiagnosticsDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [runningJobKey, setRunningJobKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -123,6 +145,19 @@ export function SystemJobDiagnosticsSettings() {
       setError(extractDisplayErrorMessage(err, 'Не удалось загрузить диагностику фоновых сервисов.'));
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const runJob = useCallback(async (jobKey: string) => {
+    setRunningJobKey(jobKey);
+    setRunError(null);
+    try {
+      const result = await apiService.runSystemJob(jobKey);
+      setDiagnostics(result.diagnostics);
+    } catch (err) {
+      setRunError(extractDisplayErrorMessage(err, 'Не удалось запустить фоновый сервис.'));
+    } finally {
+      setRunningJobKey(null);
     }
   }, []);
 
@@ -191,6 +226,12 @@ export function SystemJobDiagnosticsSettings() {
         </div>
       ) : null}
 
+      {runError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {runError}
+        </div>
+      ) : null}
+
       {loading && !diagnostics ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
           Загружаем диагностику...
@@ -199,7 +240,12 @@ export function SystemJobDiagnosticsSettings() {
 
       <div className="space-y-4">
         {(diagnostics?.items ?? []).map((item) => (
-          <JobDiagnosticsCard key={item.key} item={item} />
+          <JobDiagnosticsCard
+            key={item.key}
+            item={item}
+            onRun={runJob}
+            running={runningJobKey === item.key}
+          />
         ))}
       </div>
     </div>

@@ -551,11 +551,23 @@ export interface SystemJobDiagnosticsItemDto {
   lastRunStartedAt?: string | null;
   lastRunFinishedAt?: string | null;
   lastRunError?: string | null;
+  manualRunEnabled?: boolean;
+  manualRunHint?: string | null;
 }
 
 export interface SystemJobDiagnosticsDto {
   generatedAt: string;
   items: SystemJobDiagnosticsItemDto[];
+}
+
+export interface SystemJobManualRunResultDto {
+  jobKey: string;
+  startedAt: string;
+  finishedAt: string;
+  processedCount?: number | null;
+  skippedCount?: number | null;
+  summary: string;
+  diagnostics: SystemJobDiagnosticsDto;
 }
 
 export interface DatabaseBackupCreateResultDto {
@@ -1776,6 +1788,12 @@ export class ApiService {
 
   async getSystemJobDiagnostics() {
     return this.request<SystemJobDiagnosticsDto>('/system/jobs/diagnostics');
+  }
+
+  async runSystemJob(jobKey: string) {
+    return this.request<SystemJobManualRunResultDto>(`/system/jobs/${encodeURIComponent(jobKey)}/run`, {
+      method: 'POST',
+    });
   }
 
   async updateDatabaseBackupSettings(payload: {

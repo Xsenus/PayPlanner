@@ -130,12 +130,17 @@ else
 builder.Services.AddHostedService<DatabaseBackupSchedulerService>();
 builder.Services.AddHostedService<PaymentStatusUpdater>();
 builder.Services.AddHostedService<InvoicePaymentStateReconciliationService>();
-builder.Services.AddHostedService<TaskJournalReminderNotificationService>();
-builder.Services.AddHostedService<TaskJournalAutomationSchedulerService>();
+builder.Services.AddSingleton<TaskJournalReminderNotificationService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalReminderNotificationService>());
+builder.Services.AddSingleton<TaskJournalAutomationSchedulerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalAutomationSchedulerService>());
 builder.Services.AddHostedService<TelegramBotPollingService>();
-builder.Services.AddHostedService<MoneyBalanceReconciliationSchedulerService>();
-builder.Services.AddHostedService<ClientCaseCourtSyncSchedulerService>();
-builder.Services.AddHostedService<UserActivityRetentionService>();
+builder.Services.AddSingleton<MoneyBalanceReconciliationSchedulerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<MoneyBalanceReconciliationSchedulerService>());
+builder.Services.AddSingleton<ClientCaseCourtSyncSchedulerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ClientCaseCourtSyncSchedulerService>());
+builder.Services.AddSingleton<UserActivityRetentionService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UserActivityRetentionService>());
 
 builder.Services.AddCors(options =>
 {

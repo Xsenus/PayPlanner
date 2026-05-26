@@ -40,20 +40,7 @@ public sealed class UserActivityRetentionService : BackgroundService
         {
             try
             {
-                var startedAt = DateTime.UtcNow;
-                var deleted = await TickAsync(stoppingToken);
-                if (_jobRunState is not null)
-                {
-                    await _jobRunState.RecordSuccessAsync(
-                        SystemJobKeys.UserActivityRetention,
-                        startedAt,
-                        deleted,
-                        null,
-                        deleted > 0
-                            ? $"Удалено устаревших записей журнала действий: {deleted}."
-                            : "Проверка срока хранения журнала действий выполнена, удаление не требовалось.",
-                        stoppingToken);
-                }
+                await RunOnceAsync(stoppingToken);
             }
             catch (Exception ex)
             {
@@ -79,6 +66,26 @@ public sealed class UserActivityRetentionService : BackgroundService
         }
 
         _logger.LogInformation("UserActivityRetentionService stopped.");
+    }
+
+    public async Task<int> RunOnceAsync(CancellationToken cancellationToken = default)
+    {
+        var startedAt = DateTime.UtcNow;
+        var deleted = await TickAsync(cancellationToken);
+        if (_jobRunState is not null)
+        {
+            await _jobRunState.RecordSuccessAsync(
+                SystemJobKeys.UserActivityRetention,
+                startedAt,
+                deleted,
+                null,
+                deleted > 0
+                    ? $"Удалено устаревших записей журнала действий: {deleted}."
+                    : "Проверка срока хранения журнала действий выполнена, удаление не требовалось.",
+                cancellationToken);
+        }
+
+        return deleted;
     }
 
     private async Task<int> TickAsync(CancellationToken cancellationToken)

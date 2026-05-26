@@ -5,6 +5,7 @@ import { SystemJobDiagnosticsSettings } from './SystemJobDiagnosticsSettings';
 
 const apiMock = vi.hoisted(() => ({
   getSystemJobDiagnostics: vi.fn(),
+  runSystemJob: vi.fn(),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -35,6 +36,8 @@ describe('SystemJobDiagnosticsSettings', () => {
           lastRunStartedAt: '2026-05-26T09:59:00Z',
           lastRunFinishedAt: '2026-05-26T10:00:00Z',
           lastRunError: null,
+          manualRunEnabled: true,
+          manualRunHint: 'Можно вручную создать резервную копию базы данных.',
         },
         {
           key: 'court-sync',
@@ -54,8 +57,22 @@ describe('SystemJobDiagnosticsSettings', () => {
           lastRunStartedAt: '2026-05-26T11:00:00Z',
           lastRunFinishedAt: '2026-05-26T11:00:10Z',
           lastRunError: 'feature flag disabled',
+          manualRunEnabled: false,
+          manualRunHint: 'Ручной запуск доступен только после включения feature flag.',
         },
       ],
+    });
+    apiMock.runSystemJob.mockResolvedValue({
+      jobKey: 'database-backup',
+      startedAt: '2026-05-26T12:05:00Z',
+      finishedAt: '2026-05-26T12:05:02Z',
+      processedCount: 1,
+      skippedCount: null,
+      summary: 'Создана ручная резервная копия базы данных.',
+      diagnostics: {
+        generatedAt: '2026-05-26T12:05:02Z',
+        items: [],
+      },
     });
   });
 
@@ -80,6 +97,14 @@ describe('SystemJobDiagnosticsSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: /Обновить/i }));
 
     await waitFor(() => expect(apiMock.getSystemJobDiagnostics).toHaveBeenCalledTimes(2));
+  });
+
+  it('runs enabled job manually and refreshes diagnostics from response', async () => {
+    render(<SystemJobDiagnosticsSettings />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Запустить/i }));
+
+    await waitFor(() => expect(apiMock.runSystemJob).toHaveBeenCalledWith('database-backup'));
   });
 
   it('shows readable loading error', async () => {

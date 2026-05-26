@@ -7,6 +7,8 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalIntegrations;
+using PayPlanner.Api.Services.Notifications;
+using PayPlanner.Api.Services.UserActivity;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -26,17 +28,35 @@ public sealed class SystemJobsController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions> _featureFlags;
     private readonly ISystemJobRunStateService? _jobRunState;
+    private readonly DatabaseBackupService? _databaseBackupService;
+    private readonly TaskJournalReminderNotificationService? _taskReminderRunner;
+    private readonly TaskJournalAutomationSchedulerService? _caseControlRunner;
+    private readonly ClientCaseCourtSyncSchedulerService? _courtSyncRunner;
+    private readonly MoneyBalanceReconciliationSchedulerService? _moneyBalanceRunner;
+    private readonly UserActivityRetentionService? _userActivityRetentionRunner;
 
     public SystemJobsController(
         PaymentContext db,
         IConfiguration configuration,
         IOptionsMonitor<AppFeatureFlagsOptions> featureFlags,
-        ISystemJobRunStateService? jobRunState = null)
+        ISystemJobRunStateService? jobRunState = null,
+        DatabaseBackupService? databaseBackupService = null,
+        TaskJournalReminderNotificationService? taskReminderRunner = null,
+        TaskJournalAutomationSchedulerService? caseControlRunner = null,
+        ClientCaseCourtSyncSchedulerService? courtSyncRunner = null,
+        MoneyBalanceReconciliationSchedulerService? moneyBalanceRunner = null,
+        UserActivityRetentionService? userActivityRetentionRunner = null)
     {
         _db = db;
         _configuration = configuration;
         _featureFlags = featureFlags;
         _jobRunState = jobRunState;
+        _databaseBackupService = databaseBackupService;
+        _taskReminderRunner = taskReminderRunner;
+        _caseControlRunner = caseControlRunner;
+        _courtSyncRunner = courtSyncRunner;
+        _moneyBalanceRunner = moneyBalanceRunner;
+        _userActivityRetentionRunner = userActivityRetentionRunner;
     }
 
     [HttpGet("diagnostics")]
@@ -77,6 +97,125 @@ public sealed class SystemJobsController : ControllerBase
         });
     }
 
+    [HttpPost("{jobKey}/run")]
+    public async Task<ActionResult<SystemJobManualRunResultDto>> RunJob(string jobKey, CancellationToken ct)
+    {
+        var item = await BuildSingleJobAsync(jobKey, ct);
+        if (item is null)
+        {
+            return NotFound(new { message = "Фоновый сервис не найден." });
+        }
+
+        if (!item.ManualRunEnabled)
+        {
+            return BadRequest(new { message = item.ManualRunHint ?? "Ручной запуск для этого сервиса сейчас недоступен." });
+        }
+
+        var startedAt = DateTime.UtcNow;
+        int? processedCount = null;
+        int? skippedCount = null;
+        string summary;
+
+        try
+        {
+            switch (item.Key)
+            {
+                case SystemJobKeys.DatabaseBackup:
+                    EnsureRunner(_databaseBackupService);
+                    await _databaseBackupService!.CreateManualBackupAsync(ct);
+                    processedCount = 1;
+                    summary = "Создана ручная резервная копия базы данных.";
+                    await RecordManualSuccessAsync(item.Key, startedAt, processedCount, skippedCount, summary, ct);
+                    break;
+
+                case SystemJobKeys.TaskReminders:
+                    EnsureRunner(_taskReminderRunner);
+                    processedCount = await _taskReminderRunner!.RunOnceAsync(ct);
+                    if (processedCount < 0)
+                    {
+                        throw new InvalidOperationException("Проверка напоминаний завершилась с ошибкой.");
+                    }
+
+                    summary = processedCount > 0
+                        ? $"Отправлено напоминаний по задачам: {processedCount}."
+                        : "Проверка напоминаний выполнена, новых отправок не было.";
+                    break;
+
+                case SystemJobKeys.CaseInactivityControl:
+                    EnsureRunner(_caseControlRunner);
+                    var caseControlResult = await _caseControlRunner!.RunOnceAsync(ct);
+                    processedCount = caseControlResult.CreatedCount;
+                    skippedCount = caseControlResult.SkippedCount;
+                    if (!string.IsNullOrWhiteSpace(caseControlResult.Error))
+                    {
+                        throw new InvalidOperationException(caseControlResult.Error);
+                    }
+
+                    summary = caseControlResult.Enabled
+                        ? processedCount > 0
+                            ? $"Создано контрольных задач по неактивным делам: {processedCount}."
+                            : "Проверка неактивных дел выполнена, новые контрольные задачи не требовались."
+                        : "Автоконтроль неактивных дел выключен в настройках.";
+                    break;
+
+                case SystemJobKeys.CourtSync:
+                    EnsureRunner(_courtSyncRunner);
+                    processedCount = await _courtSyncRunner!.RunOnceAsync(ct);
+                    summary = processedCount > 0
+                        ? $"Проверено дел по судебным источникам: {processedCount}."
+                        : "Проверка судебной синхронизации выполнена, подходящих дел не найдено.";
+                    await RecordManualSuccessAsync(item.Key, startedAt, processedCount, skippedCount, summary, ct);
+                    break;
+
+                case SystemJobKeys.MoneyBalanceReconciliation:
+                    EnsureRunner(_moneyBalanceRunner);
+                    var targetDate = DateTime.UtcNow.Date.AddDays(-1);
+                    var moneyResult = await _moneyBalanceRunner!.RunForDateAsync(targetDate, ct);
+                    processedCount = (moneyResult?.Created ?? 0) + (moneyResult?.Updated ?? 0);
+                    summary = moneyResult is null
+                        ? $"Сверка денежных остатков за {targetDate:dd.MM.yyyy} не вернула результат."
+                        : $"Сверка за {targetDate:dd.MM.yyyy}: создано {moneyResult.Created}, обновлено {moneyResult.Updated}, расхождений {moneyResult.IssueCount}.";
+                    await RecordManualSuccessAsync(item.Key, startedAt, processedCount, skippedCount, summary, ct);
+                    break;
+
+                case SystemJobKeys.UserActivityRetention:
+                    EnsureRunner(_userActivityRetentionRunner);
+                    processedCount = await _userActivityRetentionRunner!.RunOnceAsync(ct);
+                    summary = processedCount > 0
+                        ? $"Удалено устаревших записей журнала действий: {processedCount}."
+                        : "Проверка срока хранения журнала действий выполнена, удаление не требовалось.";
+                    break;
+
+                default:
+                    return NotFound(new { message = "Фоновый сервис не найден." });
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await RecordManualFailureAsync(item.Key, startedAt, ex, ct);
+            return Problem(
+                detail: ex.Message,
+                title: "Не удалось выполнить ручной запуск фонового сервиса.",
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+
+        var finishedAt = DateTime.UtcNow;
+        var diagnosticsResult = await GetDiagnostics(ct);
+        var diagnosticsOk = diagnosticsResult.Result as OkObjectResult;
+        var diagnostics = diagnosticsOk?.Value as SystemJobDiagnosticsDto ?? new SystemJobDiagnosticsDto();
+
+        return Ok(new SystemJobManualRunResultDto
+        {
+            JobKey = item.Key,
+            StartedAt = startedAt,
+            FinishedAt = finishedAt,
+            ProcessedCount = processedCount,
+            SkippedCount = skippedCount,
+            Summary = summary,
+            Diagnostics = diagnostics,
+        });
+    }
+
     private async Task<SystemJobDiagnosticsItemDto> BuildDatabaseBackupJobAsync(
         IReadOnlyDictionary<string, string> settings,
         CancellationToken ct)
@@ -112,6 +251,8 @@ public sealed class SystemJobsController : ControllerBase
             LastActivityAt = lastBackup?.CreatedAt,
             LastActivityDescription = lastBackup?.Description,
             NextRunHint = enabled ? "Следующая проверка расписания выполняется фоновым сервисом." : "Автоматические резервные копии отключены.",
+            ManualRunEnabled = true,
+            ManualRunHint = "Можно вручную создать резервную копию базы данных.",
         };
     }
 
@@ -152,6 +293,8 @@ public sealed class SystemJobsController : ControllerBase
             LastActivityAt = lastReminder?.CreatedAt,
             LastActivityDescription = lastReminder?.Subject,
             NextRunHint = enabled ? "Сервис проверяет задачи с напоминаниями на ближайшие 7 дней." : "Отправка напоминаний выключена в конфигурации.",
+            ManualRunEnabled = enabled,
+            ManualRunHint = enabled ? "Можно вручную проверить и отправить наступившие напоминания." : "Ручной запуск недоступен, пока напоминания по задачам выключены.",
         };
     }
 
@@ -200,6 +343,8 @@ public sealed class SystemJobsController : ControllerBase
             LastActivityAt = lastAutomation?.CreatedAt,
             LastActivityDescription = lastAutomation?.Description,
             NextRunHint = enabled ? $"Порог неактивности: {inactivityDays} дн., лимит за запуск: {limit}." : "Автоматическое создание контрольных задач выключено.",
+            ManualRunEnabled = enabled,
+            ManualRunHint = enabled ? "Можно вручную проверить неактивные дела и создать контрольные задачи." : "Ручной запуск недоступен, пока автоконтроль неактивных дел выключен.",
         };
     }
 
@@ -245,6 +390,8 @@ public sealed class SystemJobsController : ControllerBase
             LastActivityAt = lastCourtSync?.CreatedAt,
             LastActivityDescription = lastCourtSync is null ? null : $"Последнее дело с судебной активностью: {lastCourtSync.Description}",
             NextRunHint = enabled ? $"За один запуск обрабатывается до {batchSize} дел." : "Фоновая судебная синхронизация не запускается автоматически.",
+            ManualRunEnabled = enabled,
+            ManualRunHint = enabled ? "Можно вручную запустить синхронизацию судебных источников." : "Ручной запуск доступен только после включения настройки и feature flag судебной синхронизации.",
         };
     }
 
@@ -271,6 +418,8 @@ public sealed class SystemJobsController : ControllerBase
                 ? null
                 : $"Последняя сверка за {lastResult.Date:dd.MM.yyyy}, расхождений: {lastResult.IssueCount}.",
             NextRunHint = "Сервис сверяет предыдущий календарный день один раз в сутки.",
+            ManualRunEnabled = true,
+            ManualRunHint = "Можно вручную запустить сверку денежных остатков за предыдущий день.",
         };
     }
 
@@ -298,7 +447,72 @@ public sealed class SystemJobsController : ControllerBase
             LastActivityAt = oldestLogAt,
             LastActivityDescription = oldestLogAt is null ? null : $"Самая старая запись журнала: {oldestLogAt:dd.MM.yyyy HH:mm}.",
             NextRunHint = enabled ? $"Хранение журнала: {retentionDays} дн." : "Автоочистка не удаляет записи без заданного срока хранения.",
+            ManualRunEnabled = enabled,
+            ManualRunHint = enabled ? "Можно вручную выполнить очистку журнала действий по текущему сроку хранения." : "Ручной запуск недоступен, пока срок хранения журнала не задан.",
         };
+    }
+
+    private async Task<SystemJobDiagnosticsItemDto?> BuildSingleJobAsync(string jobKey, CancellationToken ct)
+    {
+        var normalized = (jobKey ?? string.Empty).Trim();
+        var settings = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.Key == DatabaseBackupEnabledKey ||
+                item.Key == DatabaseBackupScheduleKey ||
+                item.Key == CaseControlEnabledKey ||
+                item.Key == CaseControlInactiveDaysKey ||
+                item.Key == CaseControlLimitKey ||
+                item.Key == ClientCaseCourtSyncSchedulerService.EnabledSettingKey ||
+                item.Key == ClientCaseCourtSyncSchedulerService.IntervalMinutesSettingKey ||
+                item.Key == ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey ||
+                item.Key == UserActivityRetentionDaysKey)
+            .ToDictionaryAsync(item => item.Key, item => item.Value, ct);
+
+        return normalized switch
+        {
+            SystemJobKeys.DatabaseBackup => await BuildDatabaseBackupJobAsync(settings, ct),
+            SystemJobKeys.TaskReminders => await BuildTaskReminderJobAsync(DateTime.UtcNow, ct),
+            SystemJobKeys.CaseInactivityControl => await BuildCaseControlJobAsync(settings, DateTime.UtcNow, ct),
+            SystemJobKeys.CourtSync => await BuildCourtSyncJobAsync(settings, ct),
+            SystemJobKeys.MoneyBalanceReconciliation => await BuildMoneyBalanceReconciliationJobAsync(ct),
+            SystemJobKeys.UserActivityRetention => await BuildUserActivityRetentionJobAsync(settings, ct),
+            _ => null,
+        };
+    }
+
+    private async Task RecordManualSuccessAsync(
+        string jobKey,
+        DateTime startedAt,
+        int? processedCount,
+        int? skippedCount,
+        string summary,
+        CancellationToken ct)
+    {
+        if (_jobRunState is not null)
+        {
+            await _jobRunState.RecordSuccessAsync(jobKey, startedAt, processedCount, skippedCount, summary, ct);
+        }
+    }
+
+    private async Task RecordManualFailureAsync(
+        string jobKey,
+        DateTime startedAt,
+        Exception exception,
+        CancellationToken ct)
+    {
+        if (_jobRunState is not null)
+        {
+            await _jobRunState.RecordFailureAsync(jobKey, startedAt, exception, "Ручной запуск фонового сервиса завершился с ошибкой.", ct);
+        }
+    }
+
+    private static void EnsureRunner(object? runner)
+    {
+        if (runner is null)
+        {
+            throw new InvalidOperationException("Ручной запуск сервиса недоступен в текущей конфигурации приложения.");
+        }
     }
 
     private static bool ParseBool(string? value, bool fallback)
@@ -338,6 +552,8 @@ public sealed class SystemJobsController : ControllerBase
             LastRunStartedAt = state.StartedAt,
             LastRunFinishedAt = state.FinishedAt,
             LastRunError = state.ErrorMessage,
+            ManualRunEnabled = item.ManualRunEnabled,
+            ManualRunHint = item.ManualRunHint,
         };
     }
 }

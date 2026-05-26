@@ -143,6 +143,8 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastRunStatus == "success" && item.LastRunStatusText == "Успешно");
+        Assert.Contains(dto.Items, item => item.Key == "database-backup" && item.ManualRunEnabled);
+        Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "money-balance-reconciliation" && item.LastProcessedCount == 2);
         Assert.Contains(dto.Items, item => item.Key == "user-activity-retention" && item.Enabled && item.NextRunHint!.Contains("30"));
         Assert.All(dto.Items, item =>
@@ -185,6 +187,35 @@ public class SystemJobsControllerTests
         Assert.False(courtSync.Enabled);
         Assert.Equal("blocked", courtSync.Status);
         Assert.Equal("Ожидает feature flag", courtSync.StatusText);
+        Assert.False(courtSync.ManualRunEnabled);
+    }
+
+    [Fact]
+    public async Task RunJob_ReturnsBadRequestWhenManualRunIsDisabled()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting
+        {
+            Key = ClientCaseCourtSyncSchedulerService.EnabledSettingKey,
+            Value = "true",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await scope.Db.SaveChangesAsync();
+        var controller = new SystemJobsController(
+            scope.Db,
+            new ConfigurationBuilder().Build(),
+            new TestOptionsMonitor<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions
+            {
+                Legal = new LegalFeatureFlagsOptions
+                {
+                    ExternalCourtSync = false,
+                },
+            }));
+
+        var result = await controller.RunJob(SystemJobKeys.CourtSync, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
     }
 
     [Fact]

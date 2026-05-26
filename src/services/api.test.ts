@@ -190,6 +190,32 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('/system/jobs/diagnostics');
   });
 
+  it('runs system job manually through the backend', async () => {
+    const payload = {
+      jobKey: 'database-backup',
+      startedAt: '2026-05-26T12:05:00Z',
+      finishedAt: '2026-05-26T12:05:02Z',
+      processedCount: 1,
+      skippedCount: null,
+      summary: 'Создана ручная резервная копия базы данных.',
+      diagnostics: {
+        generatedAt: '2026-05-26T12:05:02Z',
+        items: [],
+      },
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.runSystemJob('database-backup');
+
+    expect(result).toEqual(payload);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/system/jobs/database-backup/run');
+    expect(init?.method).toBe('POST');
+  });
+
   it('loads latest app version from the backend', async () => {
     const payload = {
       currentVersion: '1.12.0',
