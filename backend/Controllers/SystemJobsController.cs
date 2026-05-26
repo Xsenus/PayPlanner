@@ -31,6 +31,7 @@ public sealed class SystemJobsController : ControllerBase
     private readonly DatabaseBackupService? _databaseBackupService;
     private readonly TaskJournalReminderNotificationService? _taskReminderRunner;
     private readonly NotificationRetrySchedulerService? _notificationRetryRunner;
+    private readonly NotificationDeliveryRetentionService? _notificationDeliveryRetentionRunner;
     private readonly TaskJournalAutomationSchedulerService? _caseControlRunner;
     private readonly ClientCaseCourtSyncSchedulerService? _courtSyncRunner;
     private readonly MoneyBalanceReconciliationSchedulerService? _moneyBalanceRunner;
@@ -44,6 +45,7 @@ public sealed class SystemJobsController : ControllerBase
         DatabaseBackupService? databaseBackupService = null,
         TaskJournalReminderNotificationService? taskReminderRunner = null,
         NotificationRetrySchedulerService? notificationRetryRunner = null,
+        NotificationDeliveryRetentionService? notificationDeliveryRetentionRunner = null,
         TaskJournalAutomationSchedulerService? caseControlRunner = null,
         ClientCaseCourtSyncSchedulerService? courtSyncRunner = null,
         MoneyBalanceReconciliationSchedulerService? moneyBalanceRunner = null,
@@ -56,6 +58,7 @@ public sealed class SystemJobsController : ControllerBase
         _databaseBackupService = databaseBackupService;
         _taskReminderRunner = taskReminderRunner;
         _notificationRetryRunner = notificationRetryRunner;
+        _notificationDeliveryRetentionRunner = notificationDeliveryRetentionRunner;
         _caseControlRunner = caseControlRunner;
         _courtSyncRunner = courtSyncRunner;
         _moneyBalanceRunner = moneyBalanceRunner;
@@ -76,6 +79,10 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == NotificationRetrySchedulerService.DelayMinutesSettingKey ||
                 item.Key == NotificationRetrySchedulerService.BatchSizeSettingKey ||
                 item.Key == NotificationRetrySchedulerService.MaxAttemptsSettingKey ||
+                item.Key == NotificationDeliveryRetentionService.EnabledSettingKey ||
+                item.Key == NotificationDeliveryRetentionService.RetentionDaysSettingKey ||
+                item.Key == NotificationDeliveryRetentionService.IntervalHoursSettingKey ||
+                item.Key == NotificationDeliveryRetentionService.BatchSizeSettingKey ||
                 item.Key == CaseControlEnabledKey ||
                 item.Key == CaseControlInactiveDaysKey ||
                 item.Key == CaseControlLimitKey ||
@@ -90,6 +97,7 @@ public sealed class SystemJobsController : ControllerBase
             await BuildDatabaseBackupJobAsync(settings, ct),
             await BuildTaskReminderJobAsync(now, ct),
             await BuildNotificationRetryJobAsync(settings, ct),
+            await BuildNotificationDeliveryRetentionJobAsync(settings, ct),
             await BuildCaseControlJobAsync(settings, now, ct),
             await BuildCourtSyncJobAsync(settings, ct),
             await BuildMoneyBalanceReconciliationJobAsync(ct),
@@ -160,6 +168,17 @@ public sealed class SystemJobsController : ControllerBase
                             ? $"Повторно отправлены уведомления: {processedCount}, пропущено: {skippedCount}."
                             : "Проверка ошибок доставки выполнена, уведомлений для повтора не найдено."
                         : "Повторная отправка уведомлений выключена в настройках.";
+                    break;
+
+                case SystemJobKeys.NotificationDeliveryRetention:
+                    EnsureRunner(_notificationDeliveryRetentionRunner);
+                    var retentionResult = await _notificationDeliveryRetentionRunner!.RunOnceAsync(ct);
+                    processedCount = retentionResult.DeletedCount;
+                    summary = retentionResult.Enabled
+                        ? processedCount > 0
+                            ? $"Удалено устаревших технических записей доставки уведомлений: {processedCount}."
+                            : "Проверка срока хранения технических логов уведомлений выполнена, удаление не требовалось."
+                        : "Очистка технических логов уведомлений выключена в настройках.";
                     break;
 
                 case SystemJobKeys.CaseInactivityControl:
@@ -361,6 +380,57 @@ public sealed class SystemJobsController : ControllerBase
         };
     }
 
+    private async Task<SystemJobDiagnosticsItemDto> BuildNotificationDeliveryRetentionJobAsync(
+        IReadOnlyDictionary<string, string> settings,
+        CancellationToken ct)
+    {
+        var enabled = ParseBool(
+            settings.GetValueOrDefault(NotificationDeliveryRetentionService.EnabledSettingKey),
+            _configuration.GetValue("Notifications:DeliveryRetention:Enabled", true));
+        var retentionDays = NotificationDeliveryRetentionService.NormalizeRetentionDays(ParseInt(
+            settings.GetValueOrDefault(NotificationDeliveryRetentionService.RetentionDaysSettingKey),
+            _configuration.GetValue("Notifications:DeliveryRetention:RetentionDays", NotificationDeliveryRetentionService.DefaultRetentionDays)));
+        var intervalHours = NotificationDeliveryRetentionService.NormalizeIntervalHours(ParseInt(
+            settings.GetValueOrDefault(NotificationDeliveryRetentionService.IntervalHoursSettingKey),
+            _configuration.GetValue("Notifications:DeliveryRetention:IntervalHours", NotificationDeliveryRetentionService.DefaultIntervalHours)));
+        var batchSize = NotificationDeliveryRetentionService.NormalizeBatchSize(ParseInt(
+            settings.GetValueOrDefault(NotificationDeliveryRetentionService.BatchSizeSettingKey),
+            _configuration.GetValue("Notifications:DeliveryRetention:BatchSize", NotificationDeliveryRetentionService.DefaultBatchSize)));
+        var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+        var pendingCount = _notificationDeliveryRetentionRunner is null
+            ? await _db.NotificationDeliveries
+                .AsNoTracking()
+                .Where(item => item.CreatedAt < cutoff && item.Status != NotificationDeliveryStatus.Pending)
+                .CountAsync(ct)
+            : await _notificationDeliveryRetentionRunner.CountEligibleDeliveriesAsync(ct);
+        var oldestDeliveryAt = await _db.NotificationDeliveries
+            .AsNoTracking()
+            .Where(item => item.Status != NotificationDeliveryStatus.Pending)
+            .OrderBy(item => item.CreatedAt)
+            .Select(item => (DateTime?)item.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+
+        return new SystemJobDiagnosticsItemDto
+        {
+            Key = SystemJobKeys.NotificationDeliveryRetention,
+            Name = "Очистка технических логов уведомлений",
+            Description = "Удаляет устаревшие технические записи доставки уведомлений по настроенному сроку хранения.",
+            Enabled = enabled,
+            Status = enabled ? "active" : "disabled",
+            StatusText = enabled ? "Включено" : "Выключено",
+            IntervalText = $"Каждые {intervalHours} ч., хранение {retentionDays} дн.",
+            PendingCount = pendingCount,
+            LastProcessedCount = batchSize,
+            LastActivityAt = oldestDeliveryAt,
+            LastActivityDescription = oldestDeliveryAt is null ? null : $"Самая старая техническая запись: {oldestDeliveryAt:dd.MM.yyyy HH:mm}.",
+            NextRunHint = enabled
+                ? $"За один запуск удаляется до {batchSize} устаревших записей; ожидают очистки: {pendingCount}."
+                : "Автоочистка технических логов уведомлений выключена.",
+            ManualRunEnabled = enabled,
+            ManualRunHint = enabled ? "Можно вручную выполнить очистку устаревших технических записей доставки." : "Ручной запуск недоступен, пока автоочистка выключена.",
+        };
+    }
+
     private async Task<SystemJobDiagnosticsItemDto> BuildCaseControlJobAsync(
         IReadOnlyDictionary<string, string> settings,
         DateTime now,
@@ -528,6 +598,10 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == NotificationRetrySchedulerService.DelayMinutesSettingKey ||
                 item.Key == NotificationRetrySchedulerService.BatchSizeSettingKey ||
                 item.Key == NotificationRetrySchedulerService.MaxAttemptsSettingKey ||
+                item.Key == NotificationDeliveryRetentionService.EnabledSettingKey ||
+                item.Key == NotificationDeliveryRetentionService.RetentionDaysSettingKey ||
+                item.Key == NotificationDeliveryRetentionService.IntervalHoursSettingKey ||
+                item.Key == NotificationDeliveryRetentionService.BatchSizeSettingKey ||
                 item.Key == CaseControlEnabledKey ||
                 item.Key == CaseControlInactiveDaysKey ||
                 item.Key == CaseControlLimitKey ||
@@ -542,6 +616,7 @@ public sealed class SystemJobsController : ControllerBase
             SystemJobKeys.DatabaseBackup => await BuildDatabaseBackupJobAsync(settings, ct),
             SystemJobKeys.TaskReminders => await BuildTaskReminderJobAsync(DateTime.UtcNow, ct),
             SystemJobKeys.NotificationRetry => await BuildNotificationRetryJobAsync(settings, ct),
+            SystemJobKeys.NotificationDeliveryRetention => await BuildNotificationDeliveryRetentionJobAsync(settings, ct),
             SystemJobKeys.CaseInactivityControl => await BuildCaseControlJobAsync(settings, DateTime.UtcNow, ct),
             SystemJobKeys.CourtSync => await BuildCourtSyncJobAsync(settings, ct),
             SystemJobKeys.MoneyBalanceReconciliation => await BuildMoneyBalanceReconciliationJobAsync(ct),

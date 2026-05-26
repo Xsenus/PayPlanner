@@ -134,6 +134,8 @@ builder.Services.AddSingleton<TaskJournalReminderNotificationService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalReminderNotificationService>());
 builder.Services.AddSingleton<NotificationRetrySchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationRetrySchedulerService>());
+builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationDeliveryRetentionService>());
 builder.Services.AddSingleton<TaskJournalAutomationSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalAutomationSchedulerService>());
 builder.Services.AddHostedService<TelegramBotPollingService>();

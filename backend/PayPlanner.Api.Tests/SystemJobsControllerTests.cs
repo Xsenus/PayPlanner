@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Controllers;
@@ -9,6 +10,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services.LegalIntegrations;
+using PayPlanner.Api.Services.Notifications;
 using PayPlanner.Api.Services;
 using Xunit;
 
@@ -30,6 +32,10 @@ public class SystemJobsControllerTests
             new SystemSetting { Key = ClientCaseCourtSyncSchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = ClientCaseCourtSyncSchedulerService.IntervalMinutesSettingKey, Value = "90", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey, Value = "12", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationDeliveryRetentionService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationDeliveryRetentionService.RetentionDaysSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationDeliveryRetentionService.IntervalHoursSettingKey, Value = "12", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationDeliveryRetentionService.BatchSizeSettingKey, Value = "25", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = "user-activity.retention-days", Value = "30", CreatedAt = now, UpdatedAt = now });
         var role = new Role { Name = $"admin-{Guid.NewGuid():N}", Description = "Admin" };
         scope.Db.Roles.Add(role);
@@ -84,6 +90,14 @@ public class SystemJobsControllerTests
             Status = "failed",
             Error = "SMTP temporary error",
             CreatedAt = now.AddMinutes(-30),
+        });
+        scope.Db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = "task:old:email",
+            Channel = "email",
+            Subject = "Old delivery",
+            Status = NotificationDeliveryStatus.Sent,
+            CreatedAt = now.AddDays(-40),
         });
         scope.Db.ObjectAuditEvents.Add(new ObjectAuditEvent
         {
@@ -146,10 +160,11 @@ public class SystemJobsControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
 
-        Assert.Equal(7, dto.Items.Count);
+        Assert.Equal(8, dto.Items.Count);
         Assert.Contains(dto.Items, item => item.Key == "database-backup" && item.Enabled && item.IntervalText.Contains("02:00"));
         Assert.Contains(dto.Items, item => item.Key == "task-reminders" && item.PendingCount == 1 && item.LastActivityDescription == "Reminder sent");
         Assert.Contains(dto.Items, item => item.Key == "notification-retry" && item.PendingCount == 1 && item.ManualRunEnabled);
+        Assert.Contains(dto.Items, item => item.Key == "notification-delivery-retention" && item.PendingCount == 1 && item.LastProcessedCount == 25 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastRunStatus == "success" && item.LastRunStatusText == "Успешно");
@@ -226,6 +241,75 @@ public class SystemJobsControllerTests
         var result = await controller.RunJob(SystemJobKeys.CourtSync, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task NotificationDeliveryRetentionService_DeletesOnlyExpiredCompletedDeliveries()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting { Key = NotificationDeliveryRetentionService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationDeliveryRetentionService.RetentionDaysSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationDeliveryRetentionService.BatchSizeSettingKey, Value = "10", CreatedAt = now, UpdatedAt = now });
+        scope.Db.NotificationDeliveries.AddRange(
+            new NotificationDelivery
+            {
+                EventKey = "old-sent",
+                Channel = NotificationChannels.Email,
+                Subject = "Old sent",
+                Status = NotificationDeliveryStatus.Sent,
+                CreatedAt = now.AddDays(-45),
+            },
+            new NotificationDelivery
+            {
+                EventKey = "old-failed",
+                Channel = NotificationChannels.Telegram,
+                Subject = "Old failed",
+                Status = NotificationDeliveryStatus.Failed,
+                CreatedAt = now.AddDays(-60),
+            },
+            new NotificationDelivery
+            {
+                EventKey = "old-pending",
+                Channel = NotificationChannels.Email,
+                Subject = "Old pending",
+                Status = NotificationDeliveryStatus.Pending,
+                CreatedAt = now.AddDays(-90),
+            },
+            new NotificationDelivery
+            {
+                EventKey = "fresh-sent",
+                Channel = NotificationChannels.Email,
+                Subject = "Fresh sent",
+                Status = NotificationDeliveryStatus.Sent,
+                CreatedAt = now.AddDays(-2),
+            });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new NotificationDeliveryRetentionService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<NotificationDeliveryRetentionService>.Instance);
+
+        Assert.Equal(2, await service.CountEligibleDeliveriesAsync(CancellationToken.None));
+
+        var result = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.True(result.Enabled);
+        Assert.Equal(2, result.DeletedCount);
+        scope.Db.ChangeTracker.Clear();
+        var eventKeys = await scope.Db.NotificationDeliveries
+            .AsNoTracking()
+            .Select(item => item.EventKey)
+            .ToListAsync();
+        Assert.DoesNotContain("old-sent", eventKeys);
+        Assert.DoesNotContain("old-failed", eventKeys);
+        Assert.Contains("old-pending", eventKeys);
+        Assert.Contains("fresh-sent", eventKeys);
     }
 
     [Fact]

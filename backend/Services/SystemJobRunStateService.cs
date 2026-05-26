@@ -10,6 +10,7 @@ public static class SystemJobKeys
     public const string DatabaseBackup = "database-backup";
     public const string TaskReminders = "task-reminders";
     public const string NotificationRetry = "notification-retry";
+    public const string NotificationDeliveryRetention = "notification-delivery-retention";
     public const string CaseInactivityControl = "case-inactivity-control";
     public const string CourtSync = "court-sync";
     public const string MoneyBalanceReconciliation = "money-balance-reconciliation";
