@@ -74,6 +74,7 @@ public static class UserNotificationTypes
     public const string CaseAccessResolved = "caseAccessResolved";
     public const string CaseCourtEvent = "caseCourtEvent";
     public const string CaseProceduralDeadline = "caseProceduralDeadline";
+    public const string CaseDocument = "caseDocument";
 
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
     [
@@ -90,7 +91,8 @@ public static class UserNotificationTypes
         new(CaseAccessRequested, "Запрос доступа к делу", "Исполнитель запросил доступ к скрытому делу.", "violet", "high", NotificationChannels.All, false, false),
         new(CaseAccessResolved, "Решение по доступу к делу", "Руководитель разрешил или отклонил доступ к скрытому делу.", "emerald", "normal", NotificationChannels.All, false, false),
         new(CaseCourtEvent, "Судебное событие", "По делу добавлено или обновлено судебное заседание, движение или судебный акт.", "cyan", "high", NotificationChannels.All, false, false),
-        new(CaseProceduralDeadline, "Процессуальный срок", "По делу добавлен, перенесен, закрыт или приближается процессуальный срок.", "amber", "high", NotificationChannels.All, false, false)
+        new(CaseProceduralDeadline, "Процессуальный срок", "По делу добавлен, перенесен, закрыт или приближается процессуальный срок.", "amber", "high", NotificationChannels.All, false, false),
+        new(CaseDocument, "Документы дела", "По делу загружен, сформирован, обновлен или удален документ.", "emerald", "normal", NotificationChannels.All, false, false)
     ];
 
     public static bool IsKnown(string? value)

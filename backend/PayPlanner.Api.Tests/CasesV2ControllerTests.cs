@@ -2414,6 +2414,26 @@ public class CasesV2ControllerTests
         Assert.Contains(documentAuditEvents, item => item.ObjectId == first.Id && item.Action == "Created");
         Assert.Contains(documentAuditEvents, item => item.ObjectId == second.Id && item.Action == "VersionCreated");
         Assert.Contains(documentAuditEvents, item => item.ObjectId == first.Id && item.Action == "Deleted");
+        var documentNotifications = await db.UserNotifications
+            .Where(item => item.Type == UserNotificationTypes.CaseDocument)
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Equal(3, documentNotifications.Count);
+        Assert.All(documentNotifications, item =>
+        {
+            Assert.Equal(owner.Id, item.RecipientUserId);
+            Assert.Equal("case", item.ObjectType);
+            Assert.Equal(clientCase.Id, item.ObjectId);
+        });
+        Assert.Contains(documentNotifications, item =>
+            item.MetadataJson.Contains($"\"clientCaseDocumentId\":{first.Id}", StringComparison.Ordinal)
+            && item.MetadataJson.Contains("\"action\":\"uploaded\"", StringComparison.Ordinal));
+        Assert.Contains(documentNotifications, item =>
+            item.MetadataJson.Contains($"\"clientCaseDocumentId\":{second.Id}", StringComparison.Ordinal)
+            && item.MetadataJson.Contains("\"action\":\"version-created\"", StringComparison.Ordinal));
+        Assert.Contains(documentNotifications, item =>
+            item.MetadataJson.Contains($"\"clientCaseDocumentId\":{first.Id}", StringComparison.Ordinal)
+            && item.MetadataJson.Contains("\"action\":\"deleted\"", StringComparison.Ordinal));
         await db.Entry(clientCase).ReloadAsync();
         Assert.Contains("Документ «claim.txt» загружен", clientCase.EventHistory, StringComparison.Ordinal);
         Assert.Contains("Документ «claim-v2.txt»: загружена новая версия", clientCase.EventHistory, StringComparison.Ordinal);
@@ -3183,6 +3203,13 @@ public class CasesV2ControllerTests
         Assert.Equal(dto.Id, auditEvent.ObjectId);
         Assert.Equal("Generated", auditEvent.Action);
         Assert.Contains("template-claim", auditEvent.MetadataJson, StringComparison.Ordinal);
+        var notification = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.CaseDocument);
+        Assert.Equal(owner.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains($"\"clientCaseDocumentId\":{dto.Id}", notification.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("\"action\":\"generated\"", notification.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains(dto.OriginalFileName, notification.BodyPreview, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3380,6 +3407,13 @@ public class CasesV2ControllerTests
         Assert.Equal(document.Id, auditEvent.ObjectId);
         Assert.Equal("Updated", auditEvent.Action);
         Assert.Contains("Отправлен", auditEvent.Description, StringComparison.Ordinal);
+        var notification = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.CaseDocument);
+        Assert.Equal(owner.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains($"\"clientCaseDocumentId\":{document.Id}", notification.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("\"action\":\"updated\"", notification.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("claim.pdf", notification.BodyPreview, StringComparison.Ordinal);
         Assert.Contains("Документ «claim.pdf»: статус «Подготовлен» → «Отправлен»", clientCase.EventHistory, StringComparison.Ordinal);
         Assert.Contains("Изменил: Владелец", clientCase.EventHistory, StringComparison.Ordinal);
     }
