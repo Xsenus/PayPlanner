@@ -76,6 +76,15 @@ public class SystemJobsControllerTests
             Subject = "Reminder sent",
             CreatedAt = now.AddMinutes(-30),
         });
+        scope.Db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = "task:1:email",
+            Channel = "email",
+            Subject = "Email failed",
+            Status = "failed",
+            Error = "SMTP temporary error",
+            CreatedAt = now.AddMinutes(-30),
+        });
         scope.Db.ObjectAuditEvents.Add(new ObjectAuditEvent
         {
             ObjectType = "client-case",
@@ -137,9 +146,10 @@ public class SystemJobsControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
 
-        Assert.Equal(6, dto.Items.Count);
+        Assert.Equal(7, dto.Items.Count);
         Assert.Contains(dto.Items, item => item.Key == "database-backup" && item.Enabled && item.IntervalText.Contains("02:00"));
         Assert.Contains(dto.Items, item => item.Key == "task-reminders" && item.PendingCount == 1 && item.LastActivityDescription == "Reminder sent");
+        Assert.Contains(dto.Items, item => item.Key == "notification-retry" && item.PendingCount == 1 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastRunStatus == "success" && item.LastRunStatusText == "Успешно");

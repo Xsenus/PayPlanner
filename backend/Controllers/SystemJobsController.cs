@@ -30,6 +30,7 @@ public sealed class SystemJobsController : ControllerBase
     private readonly ISystemJobRunStateService? _jobRunState;
     private readonly DatabaseBackupService? _databaseBackupService;
     private readonly TaskJournalReminderNotificationService? _taskReminderRunner;
+    private readonly NotificationRetrySchedulerService? _notificationRetryRunner;
     private readonly TaskJournalAutomationSchedulerService? _caseControlRunner;
     private readonly ClientCaseCourtSyncSchedulerService? _courtSyncRunner;
     private readonly MoneyBalanceReconciliationSchedulerService? _moneyBalanceRunner;
@@ -42,6 +43,7 @@ public sealed class SystemJobsController : ControllerBase
         ISystemJobRunStateService? jobRunState = null,
         DatabaseBackupService? databaseBackupService = null,
         TaskJournalReminderNotificationService? taskReminderRunner = null,
+        NotificationRetrySchedulerService? notificationRetryRunner = null,
         TaskJournalAutomationSchedulerService? caseControlRunner = null,
         ClientCaseCourtSyncSchedulerService? courtSyncRunner = null,
         MoneyBalanceReconciliationSchedulerService? moneyBalanceRunner = null,
@@ -53,6 +55,7 @@ public sealed class SystemJobsController : ControllerBase
         _jobRunState = jobRunState;
         _databaseBackupService = databaseBackupService;
         _taskReminderRunner = taskReminderRunner;
+        _notificationRetryRunner = notificationRetryRunner;
         _caseControlRunner = caseControlRunner;
         _courtSyncRunner = courtSyncRunner;
         _moneyBalanceRunner = moneyBalanceRunner;
@@ -68,6 +71,11 @@ public sealed class SystemJobsController : ControllerBase
             .Where(item =>
                 item.Key == DatabaseBackupEnabledKey ||
                 item.Key == DatabaseBackupScheduleKey ||
+                item.Key == NotificationRetrySchedulerService.EnabledSettingKey ||
+                item.Key == NotificationRetrySchedulerService.IntervalMinutesSettingKey ||
+                item.Key == NotificationRetrySchedulerService.DelayMinutesSettingKey ||
+                item.Key == NotificationRetrySchedulerService.BatchSizeSettingKey ||
+                item.Key == NotificationRetrySchedulerService.MaxAttemptsSettingKey ||
                 item.Key == CaseControlEnabledKey ||
                 item.Key == CaseControlInactiveDaysKey ||
                 item.Key == CaseControlLimitKey ||
@@ -81,6 +89,7 @@ public sealed class SystemJobsController : ControllerBase
         {
             await BuildDatabaseBackupJobAsync(settings, ct),
             await BuildTaskReminderJobAsync(now, ct),
+            await BuildNotificationRetryJobAsync(settings, ct),
             await BuildCaseControlJobAsync(settings, now, ct),
             await BuildCourtSyncJobAsync(settings, ct),
             await BuildMoneyBalanceReconciliationJobAsync(ct),
@@ -139,6 +148,18 @@ public sealed class SystemJobsController : ControllerBase
                     summary = processedCount > 0
                         ? $"Отправлено напоминаний по задачам: {processedCount}."
                         : "Проверка напоминаний выполнена, новых отправок не было.";
+                    break;
+
+                case SystemJobKeys.NotificationRetry:
+                    EnsureRunner(_notificationRetryRunner);
+                    var notificationRetryResult = await _notificationRetryRunner!.RunOnceAsync(ct);
+                    processedCount = notificationRetryResult.RetriedCount;
+                    skippedCount = notificationRetryResult.SkippedCount;
+                    summary = notificationRetryResult.Enabled
+                        ? processedCount > 0
+                            ? $"Повторно отправлены уведомления: {processedCount}, пропущено: {skippedCount}."
+                            : "Проверка ошибок доставки выполнена, уведомлений для повтора не найдено."
+                        : "Повторная отправка уведомлений выключена в настройках.";
                     break;
 
                 case SystemJobKeys.CaseInactivityControl:
@@ -295,6 +316,48 @@ public sealed class SystemJobsController : ControllerBase
             NextRunHint = enabled ? "Сервис проверяет задачи с напоминаниями на ближайшие 7 дней." : "Отправка напоминаний выключена в конфигурации.",
             ManualRunEnabled = enabled,
             ManualRunHint = enabled ? "Можно вручную проверить и отправить наступившие напоминания." : "Ручной запуск недоступен, пока напоминания по задачам выключены.",
+        };
+    }
+
+    private async Task<SystemJobDiagnosticsItemDto> BuildNotificationRetryJobAsync(
+        IReadOnlyDictionary<string, string> settings,
+        CancellationToken ct)
+    {
+        var enabled = ParseBool(
+            settings.GetValueOrDefault(NotificationRetrySchedulerService.EnabledSettingKey),
+            _configuration.GetValue("Notifications:Retry:Enabled", true));
+        var intervalMinutes = NotificationRetrySchedulerService.NormalizeInterval(ParseInt(
+            settings.GetValueOrDefault(NotificationRetrySchedulerService.IntervalMinutesSettingKey),
+            _configuration.GetValue("Notifications:Retry:IntervalMinutes", NotificationRetrySchedulerService.DefaultIntervalMinutes)));
+        var delayMinutes = NotificationRetrySchedulerService.NormalizeDelay(ParseInt(
+            settings.GetValueOrDefault(NotificationRetrySchedulerService.DelayMinutesSettingKey),
+            _configuration.GetValue("Notifications:Retry:DelayMinutes", NotificationRetrySchedulerService.DefaultDelayMinutes)));
+        var batchSize = NotificationRetrySchedulerService.NormalizeBatchSize(ParseInt(
+            settings.GetValueOrDefault(NotificationRetrySchedulerService.BatchSizeSettingKey),
+            _configuration.GetValue("Notifications:Retry:BatchSize", NotificationRetrySchedulerService.DefaultBatchSize)));
+        var maxAttempts = NotificationRetrySchedulerService.NormalizeMaxAttempts(ParseInt(
+            settings.GetValueOrDefault(NotificationRetrySchedulerService.MaxAttemptsSettingKey),
+            _configuration.GetValue("Notifications:Retry:MaxAttempts", NotificationRetrySchedulerService.DefaultMaxAttempts)));
+        var pendingCount = _notificationRetryRunner is null
+            ? await CountFailedExternalDeliveriesAsync(enabled, delayMinutes, ct)
+            : await _notificationRetryRunner.CountEligibleRetriesAsync(ct);
+
+        return new SystemJobDiagnosticsItemDto
+        {
+            Key = SystemJobKeys.NotificationRetry,
+            Name = "Повторная отправка уведомлений",
+            Description = "Повторяет отправку email и Telegram-уведомлений, которые завершились временной ошибкой канала.",
+            Enabled = enabled,
+            Status = enabled ? "active" : "disabled",
+            StatusText = enabled ? "Включено" : "Выключено",
+            IntervalText = $"Каждые {intervalMinutes} мин., задержка перед повтором {delayMinutes} мин.",
+            PendingCount = pendingCount,
+            LastProcessedCount = batchSize,
+            NextRunHint = enabled
+                ? $"За один запуск обрабатывается до {batchSize} ошибок, максимум попыток: {maxAttempts}."
+                : "Автоматическая повторная отправка уведомлений выключена.",
+            ManualRunEnabled = enabled,
+            ManualRunHint = enabled ? "Можно вручную проверить ошибки доставки и повторить отправку." : "Ручной запуск недоступен, пока повторная отправка уведомлений выключена.",
         };
     }
 
@@ -460,6 +523,11 @@ public sealed class SystemJobsController : ControllerBase
             .Where(item =>
                 item.Key == DatabaseBackupEnabledKey ||
                 item.Key == DatabaseBackupScheduleKey ||
+                item.Key == NotificationRetrySchedulerService.EnabledSettingKey ||
+                item.Key == NotificationRetrySchedulerService.IntervalMinutesSettingKey ||
+                item.Key == NotificationRetrySchedulerService.DelayMinutesSettingKey ||
+                item.Key == NotificationRetrySchedulerService.BatchSizeSettingKey ||
+                item.Key == NotificationRetrySchedulerService.MaxAttemptsSettingKey ||
                 item.Key == CaseControlEnabledKey ||
                 item.Key == CaseControlInactiveDaysKey ||
                 item.Key == CaseControlLimitKey ||
@@ -473,12 +541,33 @@ public sealed class SystemJobsController : ControllerBase
         {
             SystemJobKeys.DatabaseBackup => await BuildDatabaseBackupJobAsync(settings, ct),
             SystemJobKeys.TaskReminders => await BuildTaskReminderJobAsync(DateTime.UtcNow, ct),
+            SystemJobKeys.NotificationRetry => await BuildNotificationRetryJobAsync(settings, ct),
             SystemJobKeys.CaseInactivityControl => await BuildCaseControlJobAsync(settings, DateTime.UtcNow, ct),
             SystemJobKeys.CourtSync => await BuildCourtSyncJobAsync(settings, ct),
             SystemJobKeys.MoneyBalanceReconciliation => await BuildMoneyBalanceReconciliationJobAsync(ct),
             SystemJobKeys.UserActivityRetention => await BuildUserActivityRetentionJobAsync(settings, ct),
             _ => null,
         };
+    }
+
+    private async Task<int> CountFailedExternalDeliveriesAsync(
+        bool enabled,
+        int delayMinutes,
+        CancellationToken ct)
+    {
+        if (!enabled)
+        {
+            return 0;
+        }
+
+        var cutoff = DateTime.UtcNow.AddMinutes(-delayMinutes);
+        return await _db.NotificationDeliveries
+            .AsNoTracking()
+            .CountAsync(item =>
+                item.Status == NotificationDeliveryStatus.Failed &&
+                item.CreatedAt <= cutoff &&
+                (item.Channel == NotificationChannels.Email || item.Channel == NotificationChannels.Telegram),
+                ct);
     }
 
     private async Task RecordManualSuccessAsync(
