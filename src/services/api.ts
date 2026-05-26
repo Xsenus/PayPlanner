@@ -3703,6 +3703,17 @@ export class ApiService {
     });
   }
 
+  async getProceduralDeadlineCalendarSettings() {
+    return this.request<ProceduralDeadlineCalendarSettings>('/v2/cases/procedural-deadlines/calendar-settings');
+  }
+
+  async updateProceduralDeadlineCalendarSettings(payload: ProceduralDeadlineCalendarSettings) {
+    return this.request<ProceduralDeadlineCalendarSettings>('/v2/cases/procedural-deadlines/calendar-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getCaseDocument(documentId: number) {
     return this.request<ClientCaseDocument>(`/case-documents/${documentId}`);
   }
@@ -5005,6 +5016,7 @@ import type {
   ClientCaseCourtInstance,
   ClientCaseCourtParty,
   ClientCaseProceduralDeadline,
+  ProceduralDeadlineCalendarSettings,
   ProceduralDeadlineCalculationPayload,
   ProceduralDeadlineCalculationResult,
   UpsertClientCaseCourtComplaintPayload,

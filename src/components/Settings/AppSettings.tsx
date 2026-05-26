@@ -20,6 +20,7 @@ import { InvoiceDocumentTemplateSettings } from './InvoiceDocumentTemplateSettin
 import { MainCompanySettings } from './MainCompanySettings';
 import { MoneyAccountSettings } from './MoneyAccountSettings';
 import { NotificationSettings } from './NotificationSettings';
+import { ProceduralDeadlineCalendarSettings } from './ProceduralDeadlineCalendarSettings';
 import { SpreadsheetImportSettings } from './SpreadsheetImportSettings';
 import { TaskJournalSettings } from './TaskJournalSettings';
 import { UserOnlineSettings } from './UserOnlineSettings';
@@ -1088,7 +1089,12 @@ export function AppSettings() {
 
                 {activeFinancialRulesSubsection === 'invoices' && <InvoiceDocumentTemplateSettings />}
 
-                {activeFinancialRulesSubsection === 'case-documents' && <CaseDocumentTemplateSettings />}
+                {activeFinancialRulesSubsection === 'case-documents' && (
+                  <div className="space-y-6">
+                    <ProceduralDeadlineCalendarSettings />
+                    <CaseDocumentTemplateSettings />
+                  </div>
+                )}
 
                 {activeFinancialRulesSubsection === 'contracts' && (
                   <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">

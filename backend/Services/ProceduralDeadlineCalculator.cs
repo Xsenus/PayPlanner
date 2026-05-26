@@ -11,10 +11,11 @@ public static class ProceduralDeadlineCalculator
 
         var rule = NormalizeRule(request.Rule);
         var start = NormalizeDate(request.StartAt.Value);
+        var calendar = new ProceduralDeadlineCalendarOverrides(request.WorkingDates, request.AdditionalNonWorkingDates);
         var skippedNonWorkingDays = 0;
         var calculated = rule switch
         {
-            "workingDays" => AddWorkingDays(start, Math.Max(0, request.DaysToAdd ?? 0), out skippedNonWorkingDays),
+            "workingDays" => AddWorkingDays(start, Math.Max(0, request.DaysToAdd ?? 0), calendar, out skippedNonWorkingDays),
             "calendarDays" => start.AddDays(Math.Max(0, request.DaysToAdd ?? 0)),
             _ => start.AddMonths(Math.Max(0, request.MonthsToAdd ?? 0)),
         };
@@ -23,7 +24,7 @@ public static class ProceduralDeadlineCalculator
         var rollForwardDays = 0;
         if (request.RollForwardToWorkingDay)
         {
-            calculated = RollForwardToWorkingDay(calculated);
+            calculated = RollForwardToWorkingDay(calculated, calendar);
             rollForwardDays = (calculated.Date - rawDeadline.Date).Days;
         }
 
@@ -59,9 +60,12 @@ public static class ProceduralDeadlineCalculator
         }).DeadlineAt!.Value;
 
     public static DateTime RollForwardToWorkingDay(DateTime date)
+        => RollForwardToWorkingDay(date, ProceduralDeadlineCalendarOverrides.Empty);
+
+    public static DateTime RollForwardToWorkingDay(DateTime date, ProceduralDeadlineCalendarOverrides calendar)
     {
         var result = NormalizeDate(date);
-        while (IsRussianNonWorkingDay(result))
+        while (IsRussianNonWorkingDay(result, calendar))
         {
             result = result.AddDays(1);
         }
@@ -70,7 +74,29 @@ public static class ProceduralDeadlineCalculator
     }
 
     public static bool IsRussianNonWorkingDay(DateTime date)
-        => date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday || IsFixedRussianHoliday(date);
+        => IsRussianNonWorkingDay(date, ProceduralDeadlineCalendarOverrides.Empty);
+
+    public static bool IsRussianNonWorkingDay(DateTime date, ProceduralDeadlineCalendarOverrides calendar)
+    {
+        var key = ToDateKey(date);
+        if (calendar.WorkingDates.Contains(key))
+        {
+            return false;
+        }
+
+        if (calendar.AdditionalNonWorkingDates.Contains(key))
+        {
+            return true;
+        }
+
+        return date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday || IsFixedRussianHoliday(date);
+    }
+
+    public static bool IsRussianNonWorkingDay(DateTime date, IReadOnlyCollection<DateTime>? workingDates, IReadOnlyCollection<DateTime>? additionalNonWorkingDates)
+        => IsRussianNonWorkingDay(date, new ProceduralDeadlineCalendarOverrides(workingDates, additionalNonWorkingDates));
+
+    private static string ToDateKey(DateTime date)
+        => NormalizeDate(date).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
     public static bool IsFixedRussianHoliday(DateTime date)
         => (date.Month == 1 && date.Day is >= 1 and <= 8)
@@ -80,7 +106,11 @@ public static class ProceduralDeadlineCalculator
            || (date.Month == 6 && date.Day == 12)
            || (date.Month == 11 && date.Day == 4);
 
-    private static DateTime AddWorkingDays(DateTime start, int daysToAdd, out int skippedNonWorkingDays)
+    private static DateTime AddWorkingDays(
+        DateTime start,
+        int daysToAdd,
+        ProceduralDeadlineCalendarOverrides calendar,
+        out int skippedNonWorkingDays)
     {
         var current = start;
         var remaining = daysToAdd;
@@ -88,7 +118,7 @@ public static class ProceduralDeadlineCalculator
         while (remaining > 0)
         {
             current = current.AddDays(1);
-            if (!IsRussianNonWorkingDay(current))
+            if (!IsRussianNonWorkingDay(current, calendar))
             {
                 remaining--;
                 continue;
@@ -155,6 +185,29 @@ public sealed class ProceduralDeadlineCalculationRequest
     public int? MonthsToAdd { get; set; }
     public int? DaysToAdd { get; set; }
     public bool RollForwardToWorkingDay { get; set; } = true;
+    public List<DateTime> WorkingDates { get; set; } = [];
+    public List<DateTime> AdditionalNonWorkingDates { get; set; } = [];
+}
+
+public sealed class ProceduralDeadlineCalendarOverrides
+{
+    public static ProceduralDeadlineCalendarOverrides Empty { get; } = new([], []);
+
+    public ProceduralDeadlineCalendarOverrides(
+        IReadOnlyCollection<DateTime>? workingDates,
+        IReadOnlyCollection<DateTime>? additionalNonWorkingDates)
+    {
+        WorkingDates = NormalizeDates(workingDates);
+        AdditionalNonWorkingDates = NormalizeDates(additionalNonWorkingDates);
+    }
+
+    public IReadOnlySet<string> WorkingDates { get; }
+    public IReadOnlySet<string> AdditionalNonWorkingDates { get; }
+
+    private static IReadOnlySet<string> NormalizeDates(IReadOnlyCollection<DateTime>? dates)
+        => (dates ?? [])
+            .Select(static date => date.Date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))
+            .ToHashSet(StringComparer.Ordinal);
 }
 
 public sealed class ProceduralDeadlineCalculationResult

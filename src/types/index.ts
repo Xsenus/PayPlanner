@@ -674,6 +674,18 @@ export interface ProceduralDeadlineCalculationResult {
   skippedNonWorkingDays?: number;
   rollForwardDays?: number;
   explanation?: string;
+  calendarOverrides?: ProceduralDeadlineCalendarSettings | null;
+}
+
+export interface ProceduralDeadlineCalendarDate {
+  date: string;
+  note?: string | null;
+}
+
+export interface ProceduralDeadlineCalendarSettings {
+  workingDates: ProceduralDeadlineCalendarDate[];
+  nonWorkingDates: ProceduralDeadlineCalendarDate[];
+  updatedAt?: string | null;
 }
 
 export interface ClientCaseCourtEvent {

@@ -36,6 +36,7 @@ public class CasesV2Controller : ControllerBase
     private const string CaseHistoryCommentPrefix = "Комментарий по делу:";
     private const string CaseHistoryAuthorMarker = "Автор:";
     private const string CaseDocumentTemplatesSettingKey = "cases.documentTemplates";
+    private const string CaseProductionCalendarSettingKey = "cases.productionCalendar";
     private static readonly JsonSerializerOptions CaseDocumentTemplateJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly JsonSerializerOptions UserNotificationJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedCasePriorities = new(StringComparer.OrdinalIgnoreCase)
@@ -1665,10 +1666,15 @@ public class CasesV2Controller : ControllerBase
     }
 
     [HttpPost("procedural-deadlines/calculate")]
-    public ActionResult<ProceduralDeadlineCalculationDto> CalculateProceduralDeadlinePreview(
-        [FromBody] ProceduralDeadlineCalculationRequest? request)
+    public async Task<ActionResult<ProceduralDeadlineCalculationDto>> CalculateProceduralDeadlinePreview(
+        [FromBody] ProceduralDeadlineCalculationRequest? request,
+        CancellationToken ct)
     {
-        var result = ProceduralDeadlineCalculator.Calculate(request ?? new ProceduralDeadlineCalculationRequest());
+        var calculationRequest = request ?? new ProceduralDeadlineCalculationRequest();
+        var calendarSettings = await GetProductionCalendarSettingsAsync(ct);
+        calculationRequest.WorkingDates = MergeCalculationDates(calculationRequest.WorkingDates, calendarSettings.WorkingDates);
+        calculationRequest.AdditionalNonWorkingDates = MergeCalculationDates(calculationRequest.AdditionalNonWorkingDates, calendarSettings.NonWorkingDates);
+        var result = ProceduralDeadlineCalculator.Calculate(calculationRequest);
         if (result.Error is not null)
         {
             return BadRequest(new { message = result.Error });
@@ -1686,7 +1692,45 @@ public class CasesV2Controller : ControllerBase
             SkippedNonWorkingDays = result.SkippedNonWorkingDays,
             RollForwardDays = result.RollForwardDays,
             Explanation = result.Explanation,
+            CalendarOverrides = MapProductionCalendarSettings(calendarSettings),
         });
+    }
+
+    [HttpGet("procedural-deadlines/calendar-settings")]
+    public async Task<ActionResult<ProceduralDeadlineCalendarSettingsDto>> GetProceduralDeadlineCalendarSettings(CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        return Ok(MapProductionCalendarSettings(await GetProductionCalendarSettingsAsync(ct)));
+    }
+
+    [HttpPut("procedural-deadlines/calendar-settings")]
+    public async Task<ActionResult<ProceduralDeadlineCalendarSettingsDto>> UpdateProceduralDeadlineCalendarSettings(
+        [FromBody] UpsertProceduralDeadlineCalendarSettingsRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireDocumentTemplateEditPermissionAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var validation = BuildProductionCalendarSettings(request);
+        if (validation.Error is not null)
+        {
+            return BadRequest(new { message = validation.Error });
+        }
+
+        var storage = validation.Settings;
+        var now = DateTime.UtcNow;
+        storage.UpdatedAt = now;
+        var value = JsonSerializer.Serialize(storage, CaseDocumentTemplateJsonOptions);
+        await UpsertSystemSettingAsync(CaseProductionCalendarSettingKey, value, now, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(MapProductionCalendarSettings(storage));
     }
 
     [HttpGet("court-directory")]
@@ -7057,6 +7101,158 @@ public class CasesV2Controller : ControllerBase
     private static int ParseIntSetting(string? value, int fallback)
         => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
 
+    private async Task<ProductionCalendarSettingsStorage> GetProductionCalendarSettingsAsync(CancellationToken ct)
+    {
+        var rawJson = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(setting => setting.Key == CaseProductionCalendarSettingKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(ct);
+
+        return NormalizeProductionCalendarSettings(DeserializeProductionCalendarSettings(rawJson));
+    }
+
+    private static ProductionCalendarSettingsStorage? DeserializeProductionCalendarSettings(string? rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ProductionCalendarSettingsStorage>(rawJson, CaseDocumentTemplateJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static (ProductionCalendarSettingsStorage Settings, string? Error) BuildProductionCalendarSettings(
+        UpsertProceduralDeadlineCalendarSettingsRequest? request)
+    {
+        var workingDates = NormalizeProductionCalendarDates(request?.WorkingDates, out var workingError);
+        if (workingError is not null)
+        {
+            return (new ProductionCalendarSettingsStorage(), workingError);
+        }
+
+        var nonWorkingDates = NormalizeProductionCalendarDates(request?.NonWorkingDates, out var nonWorkingError);
+        if (nonWorkingError is not null)
+        {
+            return (new ProductionCalendarSettingsStorage(), nonWorkingError);
+        }
+
+        var workingKeys = workingDates.Select(static item => item.Date).ToHashSet(StringComparer.Ordinal);
+        var duplicate = nonWorkingDates.FirstOrDefault(item => workingKeys.Contains(item.Date));
+        if (duplicate is not null)
+        {
+            return (new ProductionCalendarSettingsStorage(), $"Дата {duplicate.Date} не может быть одновременно рабочей и нерабочей.");
+        }
+
+        return (NormalizeProductionCalendarSettings(new ProductionCalendarSettingsStorage
+        {
+            WorkingDates = workingDates,
+            NonWorkingDates = nonWorkingDates,
+        }), null);
+    }
+
+    private static ProductionCalendarSettingsStorage NormalizeProductionCalendarSettings(ProductionCalendarSettingsStorage? storage)
+        => new()
+        {
+            WorkingDates = NormalizeProductionCalendarDates(storage?.WorkingDates, out _),
+            NonWorkingDates = NormalizeProductionCalendarDates(storage?.NonWorkingDates, out _),
+            UpdatedAt = storage?.UpdatedAt,
+        };
+
+    private static List<ProductionCalendarDateStorage> NormalizeProductionCalendarDates(
+        IEnumerable<ProceduralDeadlineCalendarDateRequest>? dates,
+        out string? error)
+        => NormalizeProductionCalendarDates(
+            dates?.Select(static item => new ProductionCalendarDateStorage { Date = item.Date, Note = item.Note }),
+            out error);
+
+    private static List<ProductionCalendarDateStorage> NormalizeProductionCalendarDates(
+        IEnumerable<ProductionCalendarDateStorage>? dates,
+        out string? error)
+    {
+        error = null;
+        var result = new Dictionary<string, ProductionCalendarDateStorage>(StringComparer.Ordinal);
+        foreach (var date in dates ?? [])
+        {
+            if (!TryNormalizeProductionCalendarDate(date.Date, out var key))
+            {
+                error = "Укажите даты производственного календаря в формате ГГГГ-ММ-ДД.";
+                return [];
+            }
+
+            result[key] = new ProductionCalendarDateStorage
+            {
+                Date = key,
+                Note = NormalizeOptional(date.Note),
+            };
+        }
+
+        return result.Values.OrderBy(static item => item.Date, StringComparer.Ordinal).ToList();
+    }
+
+    private static bool TryNormalizeProductionCalendarDate(string? value, out string normalized)
+    {
+        normalized = string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var source = value.Trim();
+        if (source.Length >= 10)
+        {
+            source = source[..10];
+        }
+
+        if (!DateTime.TryParseExact(source, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            return false;
+        }
+
+        normalized = parsed.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return true;
+    }
+
+    private static List<DateTime> MergeCalculationDates(
+        IReadOnlyCollection<DateTime>? requestDates,
+        IReadOnlyCollection<ProductionCalendarDateStorage> settingDates)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var date in requestDates ?? [])
+        {
+            result.Add(date.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        }
+
+        foreach (var date in settingDates)
+        {
+            result.Add(date.Date);
+        }
+
+        return result
+            .OrderBy(static item => item, StringComparer.Ordinal)
+            .Select(static item => DateTime.SpecifyKind(DateTime.ParseExact(item, "yyyy-MM-dd", CultureInfo.InvariantCulture), DateTimeKind.Utc))
+            .ToList();
+    }
+
+    private static ProceduralDeadlineCalendarSettingsDto MapProductionCalendarSettings(ProductionCalendarSettingsStorage storage)
+        => new()
+        {
+            WorkingDates = storage.WorkingDates
+                .Select(static item => new ProceduralDeadlineCalendarDateDto { Date = item.Date, Note = item.Note })
+                .ToList(),
+            NonWorkingDates = storage.NonWorkingDates
+                .Select(static item => new ProceduralDeadlineCalendarDateDto { Date = item.Date, Note = item.Note })
+                .ToList(),
+            UpdatedAt = storage.UpdatedAt,
+        };
+
     private static CaseDocumentTemplateLibraryStorage? DeserializeCaseDocumentTemplateLibrary(string? rawJson)
     {
         if (string.IsNullOrWhiteSpace(rawJson))
@@ -10216,6 +10412,32 @@ public class CasesV2Controller : ControllerBase
         public int SkippedNonWorkingDays { get; set; }
         public int RollForwardDays { get; set; }
         public string Explanation { get; set; } = string.Empty;
+        public ProceduralDeadlineCalendarSettingsDto? CalendarOverrides { get; set; }
+    }
+
+    public sealed class ProceduralDeadlineCalendarSettingsDto
+    {
+        public List<ProceduralDeadlineCalendarDateDto> WorkingDates { get; set; } = [];
+        public List<ProceduralDeadlineCalendarDateDto> NonWorkingDates { get; set; } = [];
+        public DateTime? UpdatedAt { get; set; }
+    }
+
+    public sealed class ProceduralDeadlineCalendarDateDto
+    {
+        public string Date { get; set; } = string.Empty;
+        public string? Note { get; set; }
+    }
+
+    public sealed class UpsertProceduralDeadlineCalendarSettingsRequest
+    {
+        public List<ProceduralDeadlineCalendarDateRequest> WorkingDates { get; set; } = [];
+        public List<ProceduralDeadlineCalendarDateRequest> NonWorkingDates { get; set; } = [];
+    }
+
+    public sealed class ProceduralDeadlineCalendarDateRequest
+    {
+        public string Date { get; set; } = string.Empty;
+        public string? Note { get; set; }
     }
 
     public sealed class CaseCalendarEventDto
@@ -10572,6 +10794,19 @@ public class CasesV2Controller : ControllerBase
         public int Version { get; set; } = 1;
         public bool IsActive { get; set; } = true;
         public DateTime? UpdatedAt { get; set; }
+    }
+
+    private sealed class ProductionCalendarSettingsStorage
+    {
+        public List<ProductionCalendarDateStorage> WorkingDates { get; set; } = [];
+        public List<ProductionCalendarDateStorage> NonWorkingDates { get; set; } = [];
+        public DateTime? UpdatedAt { get; set; }
+    }
+
+    private sealed class ProductionCalendarDateStorage
+    {
+        public string Date { get; set; } = string.Empty;
+        public string? Note { get; set; }
     }
 
     private sealed class LegacySudrfCourtSyncProvider : ICourtSyncProvider

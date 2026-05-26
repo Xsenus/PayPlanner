@@ -2004,13 +2004,13 @@ public class CasesV2ControllerTests
         await using var db = await CreateContextAsync();
         var controller = CreateController(db, new User { Id = 1, Email = "owner@example.com", FullName = "Владелец" });
 
-        var result = controller.CalculateProceduralDeadlinePreview(new ProceduralDeadlineCalculationRequest
+        var result = await controller.CalculateProceduralDeadlinePreview(new ProceduralDeadlineCalculationRequest
         {
             StartAt = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
             Rule = "workingDays",
             DaysToAdd = 2,
             RollForwardToWorkingDay = true,
-        });
+        }, CancellationToken.None);
 
         var dto = Assert.IsType<CasesV2Controller.ProceduralDeadlineCalculationDto>(
             Assert.IsType<OkObjectResult>(result.Result).Value);
@@ -2021,6 +2021,65 @@ public class CasesV2ControllerTests
         Assert.Equal(3, dto.SkippedNonWorkingDays);
         Assert.Equal(0, dto.RollForwardDays);
         Assert.Contains("пропущено нерабочих дней: 3", dto.Explanation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProceduralDeadlineCalendarSettings_SaveAndAffectCalculation()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "calendar-settings@example.com", "Владелец");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = owner.RoleId,
+            Section = RolePermissionCatalog.Dictionaries,
+            CanView = true,
+            CanEdit = true,
+            ViewScope = DataVisibilityScope.All,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var updateResult = await controller.UpdateProceduralDeadlineCalendarSettings(
+            new CasesV2Controller.UpsertProceduralDeadlineCalendarSettingsRequest
+            {
+                WorkingDates =
+                [
+                    new CasesV2Controller.ProceduralDeadlineCalendarDateRequest
+                    {
+                        Date = "2026-05-02",
+                        Note = "Рабочая суббота",
+                    },
+                ],
+                NonWorkingDates =
+                [
+                    new CasesV2Controller.ProceduralDeadlineCalendarDateRequest
+                    {
+                        Date = "2026-05-04",
+                        Note = "Перенос выходного",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        var saved = Assert.IsType<CasesV2Controller.ProceduralDeadlineCalendarSettingsDto>(
+            Assert.IsType<OkObjectResult>(updateResult.Result).Value);
+        Assert.Contains(saved.WorkingDates, item => item.Date == "2026-05-02" && item.Note == "Рабочая суббота");
+        Assert.Contains(saved.NonWorkingDates, item => item.Date == "2026-05-04" && item.Note == "Перенос выходного");
+
+        var result = await controller.CalculateProceduralDeadlinePreview(new ProceduralDeadlineCalculationRequest
+        {
+            StartAt = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
+            Rule = "workingDays",
+            DaysToAdd = 2,
+            RollForwardToWorkingDay = true,
+        }, CancellationToken.None);
+
+        var dto = Assert.IsType<CasesV2Controller.ProceduralDeadlineCalculationDto>(
+            Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal(new DateTime(2026, 5, 5, 0, 0, 0, DateTimeKind.Utc), dto.DeadlineAt);
+        Assert.Equal(3, dto.SkippedNonWorkingDays);
+        Assert.NotNull(dto.CalendarOverrides);
+        Assert.Contains(dto.CalendarOverrides.WorkingDates, item => item.Date == "2026-05-02");
     }
 
     [Fact]

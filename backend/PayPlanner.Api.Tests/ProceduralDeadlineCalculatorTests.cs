@@ -52,4 +52,23 @@ public class ProceduralDeadlineCalculatorTests
         Assert.Equal(3, result.RollForwardDays);
         Assert.Contains("Дата перенесена на ближайший рабочий день: 04.05.2026", result.Explanation, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Calculate_WorkingDays_UsesManagedCalendarOverrides()
+    {
+        var result = ProceduralDeadlineCalculator.Calculate(new ProceduralDeadlineCalculationRequest
+        {
+            StartAt = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
+            Rule = "workingDays",
+            DaysToAdd = 2,
+            RollForwardToWorkingDay = true,
+            WorkingDates = [new DateTime(2026, 5, 2, 0, 0, 0, DateTimeKind.Utc)],
+            AdditionalNonWorkingDates = [new DateTime(2026, 5, 4, 0, 0, 0, DateTimeKind.Utc)],
+        });
+
+        Assert.Null(result.Error);
+        Assert.Equal(new DateTime(2026, 5, 5, 0, 0, 0, DateTimeKind.Utc), result.DeadlineAt);
+        Assert.Equal(3, result.SkippedNonWorkingDays);
+        Assert.Contains("пропущено нерабочих дней: 3", result.Explanation, StringComparison.Ordinal);
+    }
 }
