@@ -140,7 +140,7 @@ const CASE_COLUMN_CONFIGS: Array<{
   { key: 'createdAt', label: 'Создано', sortKey: 'createdAt', defaultWidth: 130 },
   { key: 'startDate', label: 'Начало', sortKey: 'startDate', defaultWidth: 130 },
   { key: 'dueDate', label: 'Срок', sortKey: 'dueDate', defaultWidth: 130 },
-  { key: 'lastViewedAt', label: 'Последний просмотр', sortKey: 'lastViewedAt', defaultWidth: 180 },
+  { key: 'lastViewedAt', label: 'Просмотр ответственным', sortKey: 'lastViewedAt', defaultWidth: 210 },
   { key: 'feeAmount', label: 'Гонорар', sortKey: 'feeAmount', defaultWidth: 140 },
   { key: 'priority', label: 'Приоритет', sortKey: 'priority', defaultWidth: 140 },
   { key: 'court', label: 'Суд', sortKey: 'court', defaultWidth: 240 },
@@ -181,6 +181,14 @@ function getResponsibleName(item: ClientCase, responsibles: ActResponsible[]) {
   );
 }
 
+function getResponsibleLastViewedAt(item: ClientCase) {
+  return item.lastViewedByResponsibleAt ?? item.lastViewedAt ?? null;
+}
+
+function getResponsibleLastViewedByName(item: ClientCase) {
+  return item.lastViewedByResponsibleUserName ?? item.lastViewedByUserName ?? null;
+}
+
 function getStatusClass(status?: string | null) {
   if (status === 'Closed') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
   if (status === 'Lost') return 'bg-rose-100 text-rose-700 border-rose-200';
@@ -216,7 +224,7 @@ function downloadBlob(fileName: string, blob: Blob) {
 }
 
 function getLatestCaseActivityAt(item: ClientCase) {
-  const values = [item.lastTaskAt, item.activityConfirmedAt, item.lastViewedAt]
+  const values = [item.lastTaskAt, item.activityConfirmedAt, getResponsibleLastViewedAt(item)]
     .map((value) => {
       if (!value) return null;
       const date = new Date(value);
@@ -884,7 +892,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       return;
     }
 
-    const header = ['№ дела', 'Название', 'Клиент/юр. лицо', 'Ответственный', 'Статус', 'Тип', 'Этап', 'Создано', 'Начало', 'Срок', 'Открытые задачи', 'Просроченные задачи', 'Выполненные задачи', 'Прогресс', 'Последняя активность', 'Гонорар', 'Счета', 'Оплачено', 'Долг', 'Последний просмотр', 'Активность подтвердил', 'Приоритет', 'Суд', '№ в суде', 'Заседание'];
+    const header = ['№ дела', 'Название', 'Клиент/юр. лицо', 'Ответственный', 'Статус', 'Тип', 'Этап', 'Создано', 'Начало', 'Срок', 'Открытые задачи', 'Просроченные задачи', 'Выполненные задачи', 'Прогресс', 'Последняя активность', 'Гонорар', 'Счета', 'Оплачено', 'Долг', 'Просмотр ответственным', 'Активность подтвердил', 'Приоритет', 'Суд', '№ в суде', 'Заседание'];
     const rows = sourceItems.map((item) => [
       item.caseNumber,
       item.title,
@@ -905,7 +913,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       formatMoney(item.incomeTotal),
       formatMoney(item.incomePaid),
       formatMoney(item.incomeOutstanding),
-      toRuDate(item.lastViewedAt),
+      toRuDate(getResponsibleLastViewedAt(item)),
       item.activityConfirmedByUserName || '',
       PRIORITY_LABELS[item.priority ?? ''] ?? item.priority,
       item.courtName,
@@ -1016,8 +1024,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       case 'lastViewedAt':
         return (
           <div>
-            <div>{toRuDate(item.lastViewedAt) || '—'}</div>
-            {item.lastViewedByUserName ? <div className="mt-1 text-xs text-slate-500">{item.lastViewedByUserName}</div> : null}
+            <div>{toRuDate(getResponsibleLastViewedAt(item)) || '—'}</div>
+            {getResponsibleLastViewedByName(item) ? <div className="mt-1 text-xs text-slate-500">{getResponsibleLastViewedByName(item)}</div> : null}
           </div>
         );
       case 'feeAmount':

@@ -756,11 +756,15 @@ function getDateTime(value?: string | null) {
   return Number.isFinite(time) ? time : null;
 }
 
+function getResponsibleLastViewedAt(caseItem: ClientCase) {
+  return caseItem.lastViewedByResponsibleAt ?? caseItem.lastViewedAt ?? null;
+}
+
 function getLatestCaseActivityTime(caseItem: ClientCase) {
   const dates = [
     getDateTime(caseItem.activityConfirmedAt),
     getDateTime(caseItem.lastTaskAt),
-    getDateTime(caseItem.lastViewedAt),
+    getDateTime(getResponsibleLastViewedAt(caseItem)),
     getDateTime(caseItem.auditUpdatedAt),
     getDateTime(caseItem.createdAt),
   ].filter((value): value is number => value !== null);
@@ -2689,6 +2693,8 @@ export function CaseDetailPage({
   const progress = caseItem.taskProgressPercent ?? 0;
   const overdueTasks = caseItem.overdueTaskCount ?? 0;
   const inactivitySummary = getInactivitySummary(caseItem);
+  const responsibleLastViewedAt = getResponsibleLastViewedAt(caseItem);
+  const responsibleLastViewedByName = caseItem.lastViewedByResponsibleUserName ?? caseItem.lastViewedByUserName ?? null;
   const courtSyncSummary = getCourtSyncSummary(caseItem);
   const canRevealCaseSensitiveData = canEdit && (caseItem.canRevealSensitiveData ?? true);
   const canManageDocuments = canEdit;
@@ -2900,6 +2906,7 @@ export function CaseDetailPage({
                 ['Суд', caseItem.courtName || '—'],
                 ['№ в суде', caseItem.courtCaseNumber || '—'],
                 ['Заседание', toRuDate(caseItem.nextHearingAt) || '—'],
+                ['Просмотр ответственным', responsibleLastViewedAt ? `${toRuDate(responsibleLastViewedAt)}${responsibleLastViewedByName ? ` · ${responsibleLastViewedByName}` : ''}` : '—'],
               ]} />
               <InfoSection title="Участники процесса" rows={[
                 ['Истец', caseItem.claimant || '—'],

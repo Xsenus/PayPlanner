@@ -258,6 +258,15 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public DateTime? LastViewedAt { get; set; }
 
+        [NotMapped]
+        public DateTime? LastViewedByResponsibleAt { get; set; }
+
+        [NotMapped]
+        public int? LastViewedByResponsibleUserId { get; set; }
+
+        [NotMapped]
+        public string LastViewedByResponsibleUserName { get; set; } = string.Empty;
+
         /// <summary>
         /// Пользователь, который последним открывал карточку дела.
         /// </summary>

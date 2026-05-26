@@ -543,6 +543,9 @@ export interface ClientCase {
   lastViewedAt?: string | null;
   lastViewedByUserId?: number | null;
   lastViewedByUserName?: string | null;
+  lastViewedByResponsibleAt?: string | null;
+  lastViewedByResponsibleUserId?: number | null;
+  lastViewedByResponsibleUserName?: string | null;
   activityConfirmedAt?: string | null;
   activityConfirmedByUserId?: number | null;
   activityConfirmedByUserName?: string | null;
@@ -879,6 +882,9 @@ export interface ClientCaseActivity {
   lastViewedAt?: string | null;
   lastViewedByUserId?: number | null;
   lastViewedByUserName?: string | null;
+  lastViewedByResponsibleAt?: string | null;
+  lastViewedByResponsibleUserId?: number | null;
+  lastViewedByResponsibleUserName?: string | null;
   activityConfirmedAt?: string | null;
   activityConfirmedByUserId?: number | null;
   activityConfirmedByUserName?: string | null;
@@ -926,6 +932,9 @@ export interface ClientCaseSummary {
   debtAmount: number;
   lastTaskAt?: string | null;
   lastViewedAt?: string | null;
+  lastViewedByResponsibleAt?: string | null;
+  lastViewedByResponsibleUserId?: number | null;
+  lastViewedByResponsibleUserName?: string | null;
 }
 
 export interface ClientCaseAccessRequest {

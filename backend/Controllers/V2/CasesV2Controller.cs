@@ -279,6 +279,7 @@ public class CasesV2Controller : ControllerBase
             .ToListAsync(ct);
         await ApplyFinanceSummaryAsync(items, ct);
         await ApplyTaskSummaryAsync(items, ct);
+        PopulateResponsibleViewAliases(items);
 
         return Ok(new { items, total, page, pageSize });
     }
@@ -531,6 +532,7 @@ public class CasesV2Controller : ControllerBase
             .ToListAsync(ct);
         await ApplyFinanceSummaryAsync(items, ct);
         await ApplyTaskSummaryAsync(items, ct);
+        PopulateResponsibleViewAliases(items);
 
         return (items, null);
     }
@@ -1050,7 +1052,7 @@ public class CasesV2Controller : ControllerBase
             "Счета",
             "Оплачено",
             "Долг",
-            "Последний просмотр",
+            "Просмотр ответственным",
             "Активность подтвердил",
             "Приоритет",
             "Суд",
@@ -1086,7 +1088,7 @@ public class CasesV2Controller : ControllerBase
                 FormatMoney(item.IncomeTotal),
                 FormatMoney(item.IncomePaid),
                 FormatMoney(item.IncomeOutstanding),
-                FormatRuDateTime(item.LastViewedAt),
+                FormatRuDateTime(item.LastViewedByResponsibleAt ?? item.LastViewedAt),
                 item.ActivityConfirmedByUserName,
                 GetPriorityLabel(item.Priority),
                 item.CourtName,
@@ -1149,7 +1151,7 @@ public class CasesV2Controller : ControllerBase
             "Счета",
             "Оплачено",
             "Долг",
-            "Последний просмотр",
+            "Просмотр ответственным",
             "Активность подтвердил",
             "Приоритет",
             "Суд",
@@ -1179,7 +1181,7 @@ public class CasesV2Controller : ControllerBase
                 FormatMoney(item.IncomeTotal),
                 FormatMoney(item.IncomePaid),
                 FormatMoney(item.IncomeOutstanding),
-                FormatRuDateTime(item.LastViewedAt),
+                FormatRuDateTime(item.LastViewedByResponsibleAt ?? item.LastViewedAt),
                 item.ActivityConfirmedByUserName,
                 GetPriorityLabel(item.Priority),
                 item.CourtName,
@@ -1866,6 +1868,7 @@ public class CasesV2Controller : ControllerBase
         {
             await ApplyFinanceSummaryAsync([entity], ct);
             await ApplyTaskSummaryAsync([entity], ct);
+            PopulateResponsibleViewAliases([entity]);
             var canRevealSensitiveData = await CanRevealCaseSensitiveDataAsync(ct);
             entity.CanRevealSensitiveData = canRevealSensitiveData;
             if (!canRevealSensitiveData)
@@ -4429,6 +4432,7 @@ public class CasesV2Controller : ControllerBase
             clientCase.LastViewedAt = now;
             clientCase.LastViewedByUserId = userId;
             clientCase.LastViewedByUserName = displayName;
+            PopulateResponsibleViewAliases([clientCase]);
         }
 
         if (request?.Confirmed == true)
@@ -4446,6 +4450,9 @@ public class CasesV2Controller : ControllerBase
             LastViewedAt = clientCase.LastViewedAt,
             LastViewedByUserId = clientCase.LastViewedByUserId,
             LastViewedByUserName = clientCase.LastViewedByUserName,
+            LastViewedByResponsibleAt = clientCase.LastViewedAt,
+            LastViewedByResponsibleUserId = clientCase.LastViewedByUserId,
+            LastViewedByResponsibleUserName = clientCase.LastViewedByUserName,
             ActivityConfirmedAt = clientCase.ActivityConfirmedAt,
             ActivityConfirmedByUserId = clientCase.ActivityConfirmedByUserId,
             ActivityConfirmedByUserName = clientCase.ActivityConfirmedByUserName,
@@ -4497,6 +4504,9 @@ public class CasesV2Controller : ControllerBase
             LastViewedAt = clientCase.LastViewedAt,
             LastViewedByUserId = clientCase.LastViewedByUserId,
             LastViewedByUserName = clientCase.LastViewedByUserName,
+            LastViewedByResponsibleAt = clientCase.LastViewedAt,
+            LastViewedByResponsibleUserId = clientCase.LastViewedByUserId,
+            LastViewedByResponsibleUserName = clientCase.LastViewedByUserName,
             ActivityConfirmedAt = clientCase.ActivityConfirmedAt,
             ActivityConfirmedByUserId = clientCase.ActivityConfirmedByUserId,
             ActivityConfirmedByUserName = clientCase.ActivityConfirmedByUserName,
@@ -7942,7 +7952,20 @@ public class CasesV2Controller : ControllerBase
             DebtAmount = debtAmount,
             LastTaskAt = clientCase.LastTaskAt,
             LastViewedAt = clientCase.LastViewedAt,
+            LastViewedByResponsibleAt = clientCase.LastViewedAt,
+            LastViewedByResponsibleUserId = clientCase.LastViewedByUserId,
+            LastViewedByResponsibleUserName = clientCase.LastViewedByUserName,
         };
+    }
+
+    private static void PopulateResponsibleViewAliases(IEnumerable<ClientCase> cases)
+    {
+        foreach (var clientCase in cases)
+        {
+            clientCase.LastViewedByResponsibleAt = clientCase.LastViewedAt;
+            clientCase.LastViewedByResponsibleUserId = clientCase.LastViewedByUserId;
+            clientCase.LastViewedByResponsibleUserName = clientCase.LastViewedByUserName;
+        }
     }
 
     private static ClientCaseAccessRequestListItemDto MapClientCaseAccessRequest(ClientCase clientCase)
@@ -10484,6 +10507,9 @@ public class CasesV2Controller : ControllerBase
         public DateTime? LastViewedAt { get; set; }
         public int? LastViewedByUserId { get; set; }
         public string LastViewedByUserName { get; set; } = string.Empty;
+        public DateTime? LastViewedByResponsibleAt { get; set; }
+        public int? LastViewedByResponsibleUserId { get; set; }
+        public string LastViewedByResponsibleUserName { get; set; } = string.Empty;
         public DateTime? ActivityConfirmedAt { get; set; }
         public int? ActivityConfirmedByUserId { get; set; }
         public string ActivityConfirmedByUserName { get; set; } = string.Empty;
@@ -10534,6 +10560,9 @@ public class CasesV2Controller : ControllerBase
         public decimal DebtAmount { get; set; }
         public DateTime? LastTaskAt { get; set; }
         public DateTime? LastViewedAt { get; set; }
+        public DateTime? LastViewedByResponsibleAt { get; set; }
+        public int? LastViewedByResponsibleUserId { get; set; }
+        public string LastViewedByResponsibleUserName { get; set; } = string.Empty;
     }
 
     public sealed class ClientCaseFinanceDetailDto

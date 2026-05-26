@@ -967,6 +967,7 @@ public class CasesV2ControllerTests
         Assert.NotNull(dto.LastTaskAt);
         Assert.True(dto.LastTaskAt >= new DateTime(2026, 5, 7, 10, 0, 0, DateTimeKind.Utc));
         Assert.Equal(new DateTime(2026, 5, 3, 10, 0, 0, DateTimeKind.Utc), dto.LastViewedAt);
+        Assert.Equal(new DateTime(2026, 5, 3, 10, 0, 0, DateTimeKind.Utc), dto.LastViewedByResponsibleAt);
     }
 
     [Fact]
@@ -3539,6 +3540,9 @@ public class CasesV2ControllerTests
         var dto = Assert.IsType<CasesV2Controller.ClientCaseActivityDto>(ok.Value);
         Assert.Equal(owner.Id, dto.LastViewedByUserId);
         Assert.Equal("Владелец", dto.LastViewedByUserName);
+        Assert.NotNull(dto.LastViewedByResponsibleAt);
+        Assert.Equal(owner.Id, dto.LastViewedByResponsibleUserId);
+        Assert.Equal("Владелец", dto.LastViewedByResponsibleUserName);
         Assert.Equal(owner.Id, dto.ActivityConfirmedByUserId);
         Assert.Contains("Активность по делу подтверждена", dto.EventHistory, StringComparison.Ordinal);
 
@@ -3658,6 +3662,8 @@ public class CasesV2ControllerTests
         var dto = Assert.IsType<CasesV2Controller.ClientCaseActivityDto>(ok.Value);
         Assert.Equal(viewedAt, dto.LastViewedAt);
         Assert.Equal(owner.Id, dto.LastViewedByUserId);
+        Assert.Equal(viewedAt, dto.LastViewedByResponsibleAt);
+        Assert.Equal(owner.Id, dto.LastViewedByResponsibleUserId);
 
         await db.Entry(clientCase).ReloadAsync();
         Assert.Equal(viewedAt, clientCase.LastViewedAt);
