@@ -1530,6 +1530,7 @@ public class CasesV2ControllerTests
             clientCaseId: null,
             responsibleUserId: null,
             includeTasks: true,
+            reminderMinutes: "120,30",
             ct: CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(exportResult);
@@ -1542,8 +1543,10 @@ public class CasesV2ControllerTests
         Assert.Contains("SUMMARY:Срок апелляции", ics, StringComparison.Ordinal);
         Assert.Contains("SUMMARY:Подготовить позицию", ics, StringComparison.Ordinal);
         Assert.Contains("BEGIN:VALARM", ics, StringComparison.Ordinal);
-        Assert.Contains("TRIGGER:-PT1H", ics, StringComparison.Ordinal);
-        Assert.Contains("TRIGGER:-PT15M", ics, StringComparison.Ordinal);
+        Assert.Contains("TRIGGER:-PT2H", ics, StringComparison.Ordinal);
+        Assert.Contains("TRIGGER:-PT30M", ics, StringComparison.Ordinal);
+        Assert.DoesNotContain("TRIGGER:-PT1H", ics, StringComparison.Ordinal);
+        Assert.DoesNotContain("TRIGGER:-PT15M", ics, StringComparison.Ordinal);
         Assert.Contains("DESCRIPTION:Напоминание: Подготовить позицию", ics, StringComparison.Ordinal);
     }
 
@@ -1563,6 +1566,7 @@ public class CasesV2ControllerTests
             clientCaseId: null,
             responsibleUserId: null,
             includeTasks: true,
+            reminderMinutes: null,
             ct: CancellationToken.None);
 
         Assert.IsType<ForbidResult>(result);

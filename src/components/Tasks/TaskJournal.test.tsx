@@ -578,10 +578,12 @@ describe('TaskJournal', () => {
 
     const panel = screen.getByText('Календарь дел').closest('section');
     expect(panel).not.toBeNull();
+    fireEvent.change(within(panel as HTMLElement).getByTestId('case-calendar-ics-reminder-preset'), { target: { value: 'twoHours' } });
     fireEvent.click(within(panel as HTMLElement).getByRole('button', { name: 'ICS' }));
 
     await waitFor(() => expect(apiMock.downloadCaseCalendarIcs).toHaveBeenCalledWith(expect.objectContaining({
       includeTasks: false,
+      reminderMinutes: [120, 30],
     })));
     expect(toastMock.success).toHaveBeenCalledWith('Календарь дел выгружен в ICS.', 'Календарь дел');
   });

@@ -1083,10 +1083,18 @@ type InvoicesSortKey =
 
 type ContractsSortKey = 'date' | 'number' | 'amount' | 'createdAt';
 
-function buildQuery(params: Record<string, string | number | boolean | undefined | null>) {
+function buildQuery(params: Record<string, string | number | boolean | ReadonlyArray<string | number | boolean> | undefined | null>) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === '') continue;
+    if (Array.isArray(v)) {
+      v.forEach((item) => {
+        if (item !== undefined && item !== null && item !== '') {
+          q.append(k, String(item));
+        }
+      });
+      continue;
+    }
     q.append(k, String(v));
   }
   const s = q.toString();
@@ -2310,10 +2318,11 @@ export class ApiService {
     });
   }
 
-  async downloadTaskJournalCalendar(params?: { from?: string; to?: string }) {
+  async downloadTaskJournalCalendar(params?: { from?: string; to?: string; reminderMinutes?: number[] }) {
     const q = buildQuery({
       from: params?.from,
       to: params?.to,
+      reminderMinutes: params?.reminderMinutes,
     });
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/tasks/calendar.ics${q}`, {
@@ -3612,6 +3621,7 @@ export class ApiService {
     clientCaseId?: number;
     responsibleUserId?: number;
     includeTasks?: boolean;
+    reminderMinutes?: number[];
   }) {
     const q = buildQuery({
       from: params?.from,
@@ -3619,6 +3629,7 @@ export class ApiService {
       clientCaseId: params?.clientCaseId,
       responsibleUserId: params?.responsibleUserId,
       includeTasks: params?.includeTasks,
+      reminderMinutes: params?.reminderMinutes,
     });
     return this.request<CaseCalendarEvent[]>(`/case-calendar/events${q}`);
   }
@@ -3646,6 +3657,7 @@ export class ApiService {
     clientCaseId?: number;
     responsibleUserId?: number;
     includeTasks?: boolean;
+    reminderMinutes?: number[];
   }) {
     const q = buildQuery({
       from: params?.from,
@@ -3653,6 +3665,7 @@ export class ApiService {
       clientCaseId: params?.clientCaseId,
       responsibleUserId: params?.responsibleUserId,
       includeTasks: params?.includeTasks,
+      reminderMinutes: params?.reminderMinutes,
     });
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/case-calendar/events.ics${q}`, {

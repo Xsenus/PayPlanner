@@ -405,6 +405,7 @@ public class TasksController : ControllerBase
     public async Task<IActionResult> ExportCalendar(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
+        [FromQuery] string? reminderMinutes,
         CancellationToken ct)
     {
         var access = await GetTaskAccessAsync(ct);
@@ -443,7 +444,8 @@ public class TasksController : ControllerBase
             .Take(1000)
             .ToListAsync(ct);
 
-        var calendar = BuildIcsCalendar(tasks);
+        var reminders = IcsReminderOptions.Normalize(reminderMinutes);
+        var calendar = BuildIcsCalendar(tasks, reminders);
         return File(
             Encoding.UTF8.GetBytes(calendar),
             "text/calendar; charset=utf-8",
@@ -3278,9 +3280,10 @@ public class TasksController : ControllerBase
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
 
-    private static string BuildIcsCalendar(IEnumerable<TaskJournalItem> tasks)
+    private static string BuildIcsCalendar(IEnumerable<TaskJournalItem> tasks, IReadOnlyList<int>? reminderMinutes = null)
     {
         var now = DateTime.UtcNow;
+        var reminders = reminderMinutes is { Count: > 0 } ? reminderMinutes : IcsReminderOptions.DefaultReminderMinutes;
         var builder = new StringBuilder();
         builder.AppendLine("BEGIN:VCALENDAR");
         builder.AppendLine("VERSION:2.0");
@@ -3310,8 +3313,10 @@ public class TasksController : ControllerBase
             builder.AppendLine($"SUMMARY:{EscapeIcsText(task.Title)}");
             builder.AppendLine($"DESCRIPTION:{EscapeIcsText(description)}");
             builder.AppendLine($"STATUS:{(task.Status == "done" ? "COMPLETED" : "CONFIRMED")}");
-            AppendIcsAlarm(builder, task, "PT1H");
-            AppendIcsAlarm(builder, task, "PT15M");
+            foreach (var minutes in reminders)
+            {
+                AppendIcsAlarm(builder, task, IcsReminderOptions.ToTriggerDuration(minutes));
+            }
             builder.AppendLine("END:VEVENT");
         }
 

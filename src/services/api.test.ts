@@ -305,6 +305,7 @@ describe('apiService case calendar', () => {
       to: '2026-06-30',
       responsibleUserId: 7,
       includeTasks: false,
+      reminderMinutes: [120, 30],
     });
 
     expect(result.fileName).toBe('case-calendar.ics');
@@ -315,6 +316,8 @@ describe('apiService case calendar', () => {
     expect(String(url)).toContain('to=2026-06-30');
     expect(String(url)).toContain('responsibleUserId=7');
     expect(String(url)).toContain('includeTasks=false');
+    expect(String(url)).toContain('reminderMinutes=120');
+    expect(String(url)).toContain('reminderMinutes=30');
   });
 });
 

@@ -77,6 +77,7 @@ type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
 type TaskCalendarColorMode = 'smart' | 'priority' | 'status';
 type TaskCalendarConflictPolicy = 'warn' | 'block';
 type TaskCalendarLoadWarningMode = 'strict' | 'standard' | 'relaxed';
+type IcsReminderPreset = 'default' | 'hour' | 'twoHours' | 'day';
 type TaskPlanningReportFormat = 'html' | 'word' | 'pdf';
 type ModalState = { mode: 'create' | 'edit' | 'view'; task?: TaskJournalItem; dueAt?: string } | null;
 type TaskJournalMode = 'journal' | 'approvals';
@@ -96,6 +97,7 @@ type TaskJournalFilterPreferences = {
   calendarColorMode: TaskCalendarColorMode;
   calendarConflictPolicy: TaskCalendarConflictPolicy;
   calendarLoadWarningMode: TaskCalendarLoadWarningMode;
+  icsReminderPreset: IcsReminderPreset;
   quickFilter: QuickFilter;
   metricFilter: MetricFilter;
   search: string;
@@ -166,6 +168,13 @@ const TASK_CALENDAR_LOAD_WARNING_MODE_OPTIONS: Array<{ value: TaskCalendarLoadWa
   { value: 'relaxed', label: 'Мягко' },
 ];
 
+const ICS_REMINDER_PRESET_OPTIONS: Array<{ value: IcsReminderPreset; label: string; minutes: number[] }> = [
+  { value: 'default', label: '1 ч + 15 мин', minutes: [60, 15] },
+  { value: 'hour', label: '1 час', minutes: [60] },
+  { value: 'twoHours', label: '2 ч + 30 мин', minutes: [120, 30] },
+  { value: 'day', label: '1 день', minutes: [1440] },
+];
+
 const BULK_STATUS_OPTIONS = STATUS_OPTIONS.filter((option) => option.value !== 'approved' && option.value !== 'done');
 
 const REMINDER_OPTIONS: Array<{ value: TaskJournalReminder; label: string }> = TASK_REMINDER_DEFAULT_OPTIONS;
@@ -219,6 +228,7 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
     calendarColorMode: 'smart',
     calendarConflictPolicy: 'warn',
     calendarLoadWarningMode: 'standard',
+    icsReminderPreset: 'default',
     quickFilter: getDefaultQuickFilter(userId, mode),
     metricFilter: 'none',
     search: '',
@@ -250,6 +260,10 @@ function isTaskCalendarConflictPolicy(value: unknown): value is TaskCalendarConf
 
 function isTaskCalendarLoadWarningMode(value: unknown): value is TaskCalendarLoadWarningMode {
   return value === 'strict' || value === 'standard' || value === 'relaxed';
+}
+
+function isIcsReminderPreset(value: unknown): value is IcsReminderPreset {
+  return ICS_REMINDER_PRESET_OPTIONS.some((option) => option.value === value);
 }
 
 function isMetricFilter(value: unknown): value is MetricFilter {
@@ -322,6 +336,7 @@ function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJourn
       calendarColorMode: isTaskCalendarColorMode(parsed.calendarColorMode) ? parsed.calendarColorMode : defaults.calendarColorMode,
       calendarConflictPolicy: isTaskCalendarConflictPolicy(parsed.calendarConflictPolicy) ? parsed.calendarConflictPolicy : defaults.calendarConflictPolicy,
       calendarLoadWarningMode: isTaskCalendarLoadWarningMode(parsed.calendarLoadWarningMode) ? parsed.calendarLoadWarningMode : defaults.calendarLoadWarningMode,
+      icsReminderPreset: isIcsReminderPreset(parsed.icsReminderPreset) ? parsed.icsReminderPreset : defaults.icsReminderPreset,
       quickFilter: isQuickFilter(parsed.quickFilter) ? parsed.quickFilter : defaults.quickFilter,
       metricFilter: isMetricFilter(parsed.metricFilter) ? parsed.metricFilter : defaults.metricFilter,
       search: typeof parsed.search === 'string' ? parsed.search : defaults.search,
@@ -1391,6 +1406,7 @@ export function TaskJournal({
   const [calendarColorMode, setCalendarColorMode] = useState<TaskCalendarColorMode>(initialPreferences.calendarColorMode);
   const [calendarConflictPolicy, setCalendarConflictPolicy] = useState<TaskCalendarConflictPolicy>(initialPreferences.calendarConflictPolicy);
   const [calendarLoadWarningMode, setCalendarLoadWarningMode] = useState<TaskCalendarLoadWarningMode>(initialPreferences.calendarLoadWarningMode);
+  const [icsReminderPreset, setIcsReminderPreset] = useState<IcsReminderPreset>(initialPreferences.icsReminderPreset);
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
   const [statusFilter, setStatusFilter] = useState<TaskJournalStatus | 'active' | 'all'>(initialPreferences.statusFilter);
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
@@ -1413,6 +1429,10 @@ export function TaskJournal({
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
   const skipNextFilterSaveRef = useRef(false);
   const previousInitialViewRef = useRef(initialView);
+  const icsReminderMinutes = useMemo(
+    () => ICS_REMINDER_PRESET_OPTIONS.find((option) => option.value === icsReminderPreset)?.minutes ?? ICS_REMINDER_PRESET_OPTIONS[0].minutes,
+    [icsReminderPreset],
+  );
 
   useEffect(() => {
     if (previousInitialViewRef.current === initialView) {
@@ -1436,6 +1456,7 @@ export function TaskJournal({
     setCalendarColorMode(nextPreferences.calendarColorMode);
     setCalendarConflictPolicy(nextPreferences.calendarConflictPolicy);
     setCalendarLoadWarningMode(nextPreferences.calendarLoadWarningMode);
+    setIcsReminderPreset(nextPreferences.icsReminderPreset);
     setQuickFilter(nextPreferences.quickFilter);
     setMetricFilter(nextPreferences.metricFilter);
     setSearch(nextPreferences.search);
@@ -1459,6 +1480,7 @@ export function TaskJournal({
       calendarColorMode,
       calendarConflictPolicy,
       calendarLoadWarningMode,
+      icsReminderPreset,
       quickFilter,
       metricFilter,
       search,
@@ -1470,7 +1492,7 @@ export function TaskJournal({
       priorityFilter,
       periodMode,
     }, mode);
-  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, currentUserId, dateFromFilter, dateToFilter, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
+  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
@@ -2374,7 +2396,7 @@ export function TaskJournal({
     }
 
     try {
-      const response = await apiService.downloadTaskJournalCalendar();
+      const response = await apiService.downloadTaskJournalCalendar({ reminderMinutes: icsReminderMinutes });
       downloadBlob(response.fileName, response.blob);
       toast.success('Календарь задач выгружен в ICS.', 'Календарь задач');
     } catch (error) {
@@ -2390,7 +2412,10 @@ export function TaskJournal({
 
     setCaseCalendarExporting(true);
     try {
-      const response = await apiService.downloadCaseCalendarIcs(buildCaseCalendarParams());
+      const response = await apiService.downloadCaseCalendarIcs({
+        ...buildCaseCalendarParams(),
+        reminderMinutes: icsReminderMinutes,
+      });
       downloadBlob(response.fileName, response.blob);
       toast.success('Календарь дел выгружен в ICS.', 'Календарь дел');
     } catch (error) {
@@ -2563,6 +2588,19 @@ export function TaskJournal({
                     <CalendarDays className="h-4 w-4" />
                     ICS
                   </button>
+                  <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700">
+                    <Bell className="h-4 w-4 text-slate-500" />
+                    <select
+                      value={icsReminderPreset}
+                      onChange={(event) => setIcsReminderPreset(event.target.value as IcsReminderPreset)}
+                      data-testid="task-ics-reminder-preset"
+                      className="bg-transparent text-sm font-semibold text-slate-700 outline-none"
+                    >
+                      {ICS_REMINDER_PRESET_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
                 </>
               ) : null}
               {!isApprovalsMode ? (
@@ -2936,6 +2974,8 @@ export function TaskJournal({
               loading={caseCalendarLoading}
               canExport={canExportCases}
               exporting={caseCalendarExporting}
+              reminderPreset={icsReminderPreset}
+              onReminderPresetChange={setIcsReminderPreset}
               onExport={() => void handleCaseCalendarExport()}
             />
             <TaskCalendar
@@ -2972,6 +3012,8 @@ export function TaskJournal({
               loading={caseCalendarLoading}
               canExport={canExportCases}
               exporting={caseCalendarExporting}
+              reminderPreset={icsReminderPreset}
+              onReminderPresetChange={setIcsReminderPreset}
               onExport={() => void handleCaseCalendarExport()}
             />
             <TaskTimelineCalendar
@@ -3592,6 +3634,8 @@ function CaseCalendarEventsPanel({
   loading,
   canExport,
   exporting,
+  reminderPreset,
+  onReminderPresetChange,
   onExport,
 }: {
   events: CaseCalendarEvent[];
@@ -3599,6 +3643,8 @@ function CaseCalendarEventsPanel({
   loading: boolean;
   canExport: boolean;
   exporting: boolean;
+  reminderPreset: IcsReminderPreset;
+  onReminderPresetChange: (value: IcsReminderPreset) => void;
   onExport: () => void;
 }) {
   const visibleEvents = events.slice(0, 12);
@@ -3620,15 +3666,30 @@ function CaseCalendarEventsPanel({
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
           {canExport ? (
-            <button
-              type="button"
-              onClick={onExport}
-              disabled={exporting || loading}
-              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
-              {exporting ? 'ICS...' : 'ICS'}
-            </button>
+            <>
+              <label className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-700">
+                <Bell className="h-3.5 w-3.5 text-slate-500" />
+                <select
+                  value={reminderPreset}
+                  onChange={(event) => onReminderPresetChange(event.target.value as IcsReminderPreset)}
+                  data-testid="case-calendar-ics-reminder-preset"
+                  className="bg-transparent text-xs font-semibold text-slate-700 outline-none"
+                >
+                  {ICS_REMINDER_PRESET_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={onExport}
+                disabled={exporting || loading}
+                className="inline-flex items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
+                {exporting ? 'ICS...' : 'ICS'}
+              </button>
+            </>
           ) : null}
           <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">{totalEventCount} событий</span>
           {proceduralDeadlineCount > 0 ? <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-sky-700">Сроков: {proceduralDeadlineCount}</span> : null}

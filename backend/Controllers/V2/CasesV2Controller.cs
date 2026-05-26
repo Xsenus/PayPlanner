@@ -1757,6 +1757,7 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] int? clientCaseId,
         [FromQuery] int? responsibleUserId,
         [FromQuery] bool includeTasks = true,
+        [FromQuery] string? reminderMinutes = null,
         CancellationToken ct = default)
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } viewForbidden)
@@ -1782,9 +1783,10 @@ public class CasesV2Controller : ControllerBase
             return BadRequest(new { message = "Дата окончания периода не может быть раньше даты начала." });
         }
 
+        var reminders = IcsReminderOptions.Normalize(reminderMinutes);
         var events = await QueryCaseCalendarEventsAsync(visibility, fromDate, toDate, clientCaseId, responsibleUserId, includeTasks, ct);
         return File(
-            Encoding.UTF8.GetBytes(BuildCaseCalendarIcs(events)),
+            Encoding.UTF8.GetBytes(BuildCaseCalendarIcs(events, reminders)),
             "text/calendar; charset=utf-8",
             $"case-calendar-{fromDate:yyyyMMdd}-{toDate:yyyyMMdd}.ics");
     }
@@ -4267,9 +4269,10 @@ public class CasesV2Controller : ControllerBase
         };
     }
 
-    private static string BuildCaseCalendarIcs(IEnumerable<CaseCalendarEventDto> events)
+    private static string BuildCaseCalendarIcs(IEnumerable<CaseCalendarEventDto> events, IReadOnlyList<int>? reminderMinutes = null)
     {
         var now = DateTime.UtcNow;
+        var reminders = reminderMinutes is { Count: > 0 } ? reminderMinutes : IcsReminderOptions.DefaultReminderMinutes;
         var builder = new StringBuilder();
         builder.AppendLine("BEGIN:VCALENDAR");
         builder.AppendLine("VERSION:2.0");
@@ -4314,8 +4317,10 @@ public class CasesV2Controller : ControllerBase
             builder.AppendLine("STATUS:CONFIRMED");
             if (!item.AllDay)
             {
-                AppendCaseCalendarIcsAlarm(builder, item, "PT1H");
-                AppendCaseCalendarIcsAlarm(builder, item, "PT15M");
+                foreach (var minutes in reminders)
+                {
+                    AppendCaseCalendarIcsAlarm(builder, item, IcsReminderOptions.ToTriggerDuration(minutes));
+                }
             }
 
             builder.AppendLine("END:VEVENT");
