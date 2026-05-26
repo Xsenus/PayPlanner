@@ -52,6 +52,8 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditFieldLabel('task-journal-item', 'Assignee Name')).toBe('Исполнитель');
     expect(getObjectAuditFieldLabel('task-journal-item', 'Channels Json')).toBe('Каналы уведомлений');
     expect(getObjectAuditFieldLabel('task-journal-item', 'Result')).toBe('Результат задачи');
+    expect(getObjectAuditFieldLabel('calendar-sync', 'SyncMode')).toBe('Главный источник событий');
+    expect(getObjectAuditFieldLabel('calendar-sync', 'DryRunConfirmed')).toBe('Dry-run на копии базы');
   });
 
   it('builds readable change summary', () => {
@@ -91,6 +93,8 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue('ApprovalRejected')).toBe('Отказ в согласовании');
     expect(formatAuditValue('NeedsCorrection')).toBe('Требует исправления');
     expect(formatAuditValue('PartiallyPaid')).toBe('Частично оплачен');
+    expect(formatAuditValue('crmMaster')).toBe('CRM главная');
+    expect(formatAuditValue('manualConfirmation')).toBe('Ручное подтверждение');
     expect(formatAuditValue('2026-04-27 00:00:00', 'payment', 'Date')).toBe('27.04.2026');
     expect(formatAuditValue('1500.00', 'payment', 'Amount')).toMatch(/1\s*500\s*₽/u);
     expect(formatAuditValue('42', 'payment', 'Payment Status Id')).toBe('ID 42');

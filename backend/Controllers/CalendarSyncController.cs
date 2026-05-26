@@ -49,6 +49,7 @@ public sealed class CalendarSyncController : ControllerBase
         [FromBody] UpdateCalendarSyncSettingsRequest request,
         CancellationToken ct)
     {
+        var previousSettings = await GetSettingsAsync(ct);
         var normalized = CalendarSyncProviderRegistry.NormalizeSettings(new CalendarSyncSettingsDto
         {
             SyncMode = request.SyncMode ?? string.Empty,
@@ -73,6 +74,7 @@ public sealed class CalendarSyncController : ControllerBase
 
         setting.Value = JsonSerializer.Serialize(normalized, JsonOptions);
         setting.UpdatedAt = normalized.UpdatedAt.Value;
+        _db.ObjectAuditEvents.Add(CalendarExportAudit.CreateSettingsUpdatedEvent(User, previousSettings, normalized));
         await _db.SaveChangesAsync(ct);
 
         return Ok(normalized);

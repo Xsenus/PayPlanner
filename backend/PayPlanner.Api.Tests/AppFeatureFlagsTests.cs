@@ -213,6 +213,13 @@ public class AppFeatureFlagsTests
         Assert.True(updated.RequireManualConfirmation);
         Assert.True(updated.DryRunConfirmed);
 
+        var auditEvent = Assert.Single(scope.Db.ObjectAuditEvents);
+        Assert.Equal("calendar-sync", auditEvent.ObjectType);
+        Assert.Equal("Updated", auditEvent.Action);
+        Assert.Contains("гибридная модель", auditEvent.Description);
+        Assert.Contains("SyncMode", auditEvent.MetadataJson);
+        Assert.Contains("DryRunConfirmed", auditEvent.MetadataJson);
+
         var readinessResult = await controller.GetReadiness(CancellationToken.None);
         var readiness = Assert.IsType<CalendarSyncReadinessDto>(Assert.IsType<OkObjectResult>(readinessResult.Result).Value);
 

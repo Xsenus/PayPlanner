@@ -252,6 +252,13 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     AuthorUserId: 'Автор',
     ChannelsJson: 'Каналы уведомлений',
   },
+  'calendar-sync': {
+    SyncMode: 'Главный источник событий',
+    ConflictResolutionMode: 'Правило спорных изменений',
+    RequireManualConfirmation: 'Ручное подтверждение конфликтов',
+    DryRunConfirmed: 'Dry-run на копии базы',
+    Notes: 'Комментарий к решению',
+  },
 };
 
 const OBJECT_TYPE_LABELS: Record<string, string> = {
@@ -322,6 +329,14 @@ const VALUE_LABELS: Record<string, string> = {
   closed: 'Закрыто',
   active: 'Активен',
   inactive: 'Неактивен',
+  notconfigured: 'Не выбрано',
+  crmmaster: 'CRM главная',
+  externalmaster: 'Внешний календарь главный',
+  hybrid: 'Гибридная модель',
+  manualconfirmation: 'Ручное подтверждение',
+  crmwins: 'Оставлять версию CRM',
+  externalwins: 'Принимать внешний календарь',
+  latestwins: 'Брать последнее изменение',
 };
 
 export interface ParsedAuditFieldChange {
