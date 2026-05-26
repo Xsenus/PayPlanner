@@ -2,10 +2,16 @@ export const USER_NOTIFICATION_TYPE_PREFERENCES_SETTING_KEY = 'notifications.typ
 
 export type UserNotificationTypePreferences = {
   disabledTypes: string[];
+  disabledChannels: Record<string, UserNotificationPreferenceChannel[]>;
 };
+
+export type UserNotificationPreferenceChannel = 'inApp' | 'email' | 'telegram';
+
+const KNOWN_CHANNELS: UserNotificationPreferenceChannel[] = ['inApp', 'email', 'telegram'];
 
 export const DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES: UserNotificationTypePreferences = {
   disabledTypes: [],
+  disabledChannels: {},
 };
 
 function normalizeDisabledTypes(values: unknown, knownTypes?: string[]) {
@@ -22,12 +28,42 @@ function normalizeDisabledTypes(values: unknown, knownTypes?: string[]) {
   return Array.from(new Set(normalized));
 }
 
+function normalizeDisabledChannels(values: unknown, knownTypes?: string[]) {
+  if (!values || typeof values !== 'object' || Array.isArray(values)) {
+    return {};
+  }
+
+  const allowedTypes = knownTypes ? new Set(knownTypes) : null;
+  const allowedChannels = new Set<string>(KNOWN_CHANNELS);
+
+  return Object.entries(values).reduce<Record<string, UserNotificationPreferenceChannel[]>>((acc, [type, channels]) => {
+    const normalizedType = type.trim();
+    if (!normalizedType || (allowedTypes && !allowedTypes.has(normalizedType)) || !Array.isArray(channels)) {
+      return acc;
+    }
+
+    const normalizedChannels = Array.from(new Set(
+      channels
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter((value): value is UserNotificationPreferenceChannel => allowedChannels.has(value)),
+    ));
+
+    if (normalizedChannels.length > 0) {
+      acc[normalizedType] = normalizedChannels;
+    }
+
+    return acc;
+  }, {});
+}
+
 export function normalizeUserNotificationTypePreferences(
   value: Partial<UserNotificationTypePreferences> | null | undefined,
   knownTypes?: string[],
 ): UserNotificationTypePreferences {
   return {
     disabledTypes: normalizeDisabledTypes(value?.disabledTypes, knownTypes),
+    disabledChannels: normalizeDisabledChannels(value?.disabledChannels, knownTypes),
   };
 }
 
@@ -61,6 +97,15 @@ export function isUserNotificationTypeEnabled(
   return !preferences.disabledTypes.includes(type);
 }
 
+export function isUserNotificationChannelEnabled(
+  preferences: UserNotificationTypePreferences,
+  type: string,
+  channel: UserNotificationPreferenceChannel,
+) {
+  return isUserNotificationTypeEnabled(preferences, type)
+    && !(preferences.disabledChannels[type] ?? []).includes(channel);
+}
+
 export function toggleUserNotificationTypePreference(
   preferences: UserNotificationTypePreferences,
   type: string,
@@ -74,6 +119,33 @@ export function toggleUserNotificationTypePreference(
   }
 
   return {
+    ...preferences,
     disabledTypes: Array.from(disabledTypes),
+  };
+}
+
+export function toggleUserNotificationChannelPreference(
+  preferences: UserNotificationTypePreferences,
+  type: string,
+  channel: UserNotificationPreferenceChannel,
+  isEnabled: boolean,
+): UserNotificationTypePreferences {
+  const disabledChannels = { ...preferences.disabledChannels };
+  const channels = new Set(disabledChannels[type] ?? []);
+  if (isEnabled) {
+    channels.delete(channel);
+  } else {
+    channels.add(channel);
+  }
+
+  if (channels.size > 0) {
+    disabledChannels[type] = Array.from(channels);
+  } else {
+    delete disabledChannels[type];
+  }
+
+  return {
+    ...preferences,
+    disabledChannels,
   };
 }

@@ -481,12 +481,17 @@ public sealed class NotificationService : INotificationService
                 cancellationToken);
         }
 
-        if (channels.Count == 0)
+        var enabledChannels = await ResolveUserNotificationChannelsAsync(
+            task.AssigneeUserId.Value,
+            UserNotificationTypes.TaskReminder,
+            channels,
+            cancellationToken);
+        if (enabledChannels.Count == 0)
         {
             return Array.Empty<NotificationDelivery>();
         }
 
-        return await SendToUserAsync(task.AssigneeUserId.Value, message, channels, eventKey, cancellationToken);
+        return await SendToUserAsync(task.AssigneeUserId.Value, message, enabledChannels, eventKey, cancellationToken);
     }
 
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskAssignedAsync(
@@ -529,9 +534,14 @@ public sealed class NotificationService : INotificationService
                     cancellationToken);
             }
 
-            if (channels.Count > 0)
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskAssigned,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
             {
-                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
             }
         }
 
@@ -571,12 +581,19 @@ public sealed class NotificationService : INotificationService
                 cancellationToken);
         }
 
-        return await SendToUserAsync(
+        var enabledChannels = await ResolveUserNotificationChannelsAsync(
             task.AuthorUserId.Value,
-            message,
+            UserNotificationTypes.TaskCompleted,
             [NotificationChannels.Email, NotificationChannels.Telegram],
-            $"task:{task.Id}:completed",
             cancellationToken);
+        return enabledChannels.Count == 0
+            ? Array.Empty<NotificationDelivery>()
+            : await SendToUserAsync(
+                task.AuthorUserId.Value,
+                message,
+                enabledChannels,
+                $"task:{task.Id}:completed",
+                cancellationToken);
     }
 
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
@@ -634,15 +651,18 @@ public sealed class NotificationService : INotificationService
             }
         }
 
-        if (channels.Count == 0)
-        {
-            return Array.Empty<NotificationDelivery>();
-        }
-
         var deliveries = new List<NotificationDelivery>();
         foreach (var recipientUserId in recipientUserIds)
         {
-            deliveries.AddRange(await SendToUserAsync(recipientUserId, message, channels, eventKey, cancellationToken));
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                recipientUserId,
+                UserNotificationTypes.CaseInactivityControl,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(recipientUserId, message, enabledChannels, eventKey, cancellationToken));
+            }
         }
 
         return deliveries;
@@ -709,9 +729,14 @@ public sealed class NotificationService : INotificationService
                     cancellationToken);
             }
 
-            if (channels.Count > 0)
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskScheduleConflict,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
             {
-                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
             }
         }
 
@@ -761,9 +786,14 @@ public sealed class NotificationService : INotificationService
                     cancellationToken);
             }
 
-            if (channels.Count > 0)
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskApprovalRequested,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
             {
-                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
             }
         }
 
@@ -826,9 +856,14 @@ public sealed class NotificationService : INotificationService
                     cancellationToken);
             }
 
-            if (channels.Count > 0)
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                type,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
             {
-                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
             }
         }
 
@@ -883,9 +918,14 @@ public sealed class NotificationService : INotificationService
                     cancellationToken);
             }
 
-            if (channels.Count > 0)
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskChanged,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
             {
-                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
             }
         }
 
@@ -938,9 +978,14 @@ public sealed class NotificationService : INotificationService
                     cancellationToken);
             }
 
-            if (channels.Count > 0)
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskComment,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
             {
-                deliveries.AddRange(await SendToUserAsync(userId, message, channels, eventKey, cancellationToken));
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
             }
         }
 
@@ -1203,7 +1248,7 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
-        if (!await IsUserNotificationTypeEnabledAsync(recipientUserId, type, cancellationToken))
+        if (!await IsUserNotificationChannelEnabledAsync(recipientUserId, type, NotificationChannels.InApp, cancellationToken))
         {
             return;
         }
@@ -1251,15 +1296,49 @@ public sealed class NotificationService : INotificationService
         string type,
         CancellationToken cancellationToken)
     {
-        var setting = await _context.UserSettings
+        var setting = await GetUserNotificationPreferenceSettingAsync(recipientUserId, cancellationToken);
+        return UserNotificationPreferenceSettings.IsTypeEnabled(setting, type);
+    }
+
+    private async Task<bool> IsUserNotificationChannelEnabledAsync(
+        int recipientUserId,
+        string type,
+        string channel,
+        CancellationToken cancellationToken)
+    {
+        var setting = await GetUserNotificationPreferenceSettingAsync(recipientUserId, cancellationToken);
+        return UserNotificationPreferenceSettings.IsChannelEnabled(setting, type, channel);
+    }
+
+    private async Task<IReadOnlyList<string>> ResolveUserNotificationChannelsAsync(
+        int recipientUserId,
+        string type,
+        IEnumerable<string> channels,
+        CancellationToken cancellationToken)
+    {
+        var normalizedChannels = NormalizeChannels(channels);
+        if (normalizedChannels.Count == 0)
+        {
+            return [];
+        }
+
+        var setting = await GetUserNotificationPreferenceSettingAsync(recipientUserId, cancellationToken);
+        return normalizedChannels
+            .Where(channel => UserNotificationPreferenceSettings.IsChannelEnabled(setting, type, channel))
+            .ToList();
+    }
+
+    private async Task<string?> GetUserNotificationPreferenceSettingAsync(
+        int recipientUserId,
+        CancellationToken cancellationToken)
+    {
+        return await _context.UserSettings
             .AsNoTracking()
             .Where(item =>
                 item.UserId == recipientUserId
                 && item.Key == UserNotificationPreferenceSettings.SettingKey)
             .Select(item => item.Value)
             .FirstOrDefaultAsync(cancellationToken);
-
-        return UserNotificationPreferenceSettings.IsTypeEnabled(setting, type);
     }
 
     private async Task<IReadOnlyList<NotificationSenderTarget>> ResolveSenderTargetsAsync(

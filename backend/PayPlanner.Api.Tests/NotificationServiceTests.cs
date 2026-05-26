@@ -223,6 +223,87 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public void UserNotificationPreferenceSettings_IsChannelEnabled_UsesPerTypeChannelPreferences()
+    {
+        var rawValue = JsonSerializer.Serialize(new
+        {
+            disabledTypes = new[] { UserNotificationTypes.TaskComment },
+            disabledChannels = new Dictionary<string, string[]>
+            {
+                [UserNotificationTypes.TaskAssigned] =
+                [
+                    NotificationChannels.Email,
+                    "unknown",
+                    NotificationChannels.Email
+                ]
+            }
+        });
+
+        Assert.False(UserNotificationPreferenceSettings.IsChannelEnabled(rawValue, UserNotificationTypes.TaskAssigned, NotificationChannels.Email));
+        Assert.True(UserNotificationPreferenceSettings.IsChannelEnabled(rawValue, UserNotificationTypes.TaskAssigned, NotificationChannels.Telegram));
+        Assert.False(UserNotificationPreferenceSettings.IsChannelEnabled(rawValue, UserNotificationTypes.TaskComment, NotificationChannels.InApp));
+    }
+
+    [Fact]
+    public async Task NotifyTaskAssignedAsync_RespectsPerTypeChannelPreferences()
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        var author = await CreateUserAsync(db, "task-author-channel-preferences@example.com");
+        var assignee = new User
+        {
+            Email = "task-assignee-channel-preferences@example.com",
+            FullName = "Channel Preferences Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = assignee.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = JsonSerializer.Serialize(new
+            {
+                disabledChannels = new Dictionary<string, string[]>
+                {
+                    [UserNotificationTypes.TaskAssigned] = [NotificationChannels.Email]
+                }
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Prepare channel preferences test",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\",\"email\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        Assert.Empty(deliveries);
+        Assert.Empty(emailService.Messages);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, (await db.UserNotifications.SingleAsync()).Type);
+    }
+
+    [Fact]
     public async Task NotifyTaskAssignedAsync_CreatesInAppNotificationForAssignee()
     {
         await using var db = await CreateContextAsync();

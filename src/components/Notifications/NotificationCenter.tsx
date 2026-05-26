@@ -7,9 +7,12 @@ import {
   ExternalLink,
   Filter,
   Inbox,
+  Mail,
+  Monitor,
   RefreshCw,
   RotateCcw,
   Search,
+  Send,
   Settings2,
   Save,
   Trash2,
@@ -28,10 +31,13 @@ import { emitUserNotificationsChanged } from '../../utils/userNotifications';
 import {
   DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES,
   USER_NOTIFICATION_TYPE_PREFERENCES_SETTING_KEY,
+  isUserNotificationChannelEnabled,
   isUserNotificationTypeEnabled,
   parseUserNotificationTypePreferences,
   serializeUserNotificationTypePreferences,
+  toggleUserNotificationChannelPreference,
   toggleUserNotificationTypePreference,
+  type UserNotificationPreferenceChannel,
   type UserNotificationTypePreferences,
 } from '../../utils/userNotificationPreferences';
 
@@ -57,6 +63,12 @@ const TASK_ROLE_FILTERS: Array<{ value: NotificationTaskRoleFilter; label: strin
   { value: 'author', label: 'Постановщик' },
   { value: 'observer', label: 'Наблюдатель' },
   { value: 'approver', label: 'Согласующий' },
+];
+
+const CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; label: string; Icon: typeof Monitor }> = [
+  { value: 'inApp', label: 'Центр', Icon: Monitor },
+  { value: 'email', label: 'Email', Icon: Mail },
+  { value: 'telegram', label: 'Telegram', Icon: Send },
 ];
 
 const EMPTY_PAGE: PagedResult<UserNotificationDto> = {
@@ -655,7 +667,7 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
             <div>
               <h2 className="text-base font-semibold text-slate-950">Типы уведомлений</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Включено {enabledTypesCount} из {types.length}. Отключенные типы не попадают в центр уведомлений и счетчик.
+                Включено {enabledTypesCount} из {types.length}. Отключенные типы не создаются и не отправляются, а каналы можно настроить отдельно.
               </p>
             </div>
             <button
@@ -678,31 +690,64 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
             <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {types.map((item) => {
                 const isEnabled = isUserNotificationTypeEnabled(preferences, item.key);
+                const availableChannels = CHANNEL_OPTIONS.filter((channel) => item.channels.includes(channel.value));
                 return (
-                  <label
+                  <div
                     key={item.key}
-                    className={`flex min-h-28 cursor-pointer gap-3 rounded-lg border p-3 transition ${
+                    className={`min-h-32 rounded-lg border p-3 transition ${
                       isEnabled
                         ? 'border-blue-200 bg-blue-50/60 hover:bg-blue-50'
                         : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100'
                     }`}
                   >
-                    <input
-                      type="checkbox"
-                      checked={isEnabled}
-                      onChange={(event) => {
-                        setPreferences((previous) => toggleUserNotificationTypePreference(previous, item.key, event.target.checked));
-                      }}
-                      className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span>
-                      <span className="block text-sm font-semibold text-slate-900">{item.label}</span>
-                      <span className="mt-1 block text-xs leading-5 text-slate-500">{item.description}</span>
-                      <span className="mt-2 inline-flex rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-500">
-                        {item.priority === 'high' ? 'Высокий приоритет' : 'Обычный приоритет'}
+                    <label className="flex cursor-pointer gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isEnabled}
+                        onChange={(event) => {
+                          setPreferences((previous) => toggleUserNotificationTypePreference(previous, item.key, event.target.checked));
+                        }}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-slate-900">{item.label}</span>
+                        <span className="mt-1 block text-xs leading-5 text-slate-500">{item.description}</span>
+                        <span className="mt-2 inline-flex rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-500">
+                          {item.priority === 'high' ? 'Высокий приоритет' : 'Обычный приоритет'}
+                        </span>
                       </span>
-                    </span>
-                  </label>
+                    </label>
+                    {availableChannels.length > 0 ? (
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        {availableChannels.map(({ value, label, Icon }) => {
+                          const channelEnabled = isUserNotificationChannelEnabled(preferences, item.key, value);
+                          return (
+                            <label
+                              key={value}
+                              className={`flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${
+                                channelEnabled
+                                  ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                                  : 'border-slate-200 bg-slate-100 text-slate-400'
+                              } ${isEnabled ? '' : 'cursor-not-allowed opacity-60'}`}
+                              title={`Канал: ${label}`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={channelEnabled}
+                                disabled={!isEnabled}
+                                onChange={(event) => {
+                                  setPreferences((previous) => toggleUserNotificationChannelPreference(previous, item.key, value, event.target.checked));
+                                }}
+                                className="sr-only"
+                              />
+                              <Icon className="h-3.5 w-3.5" />
+                              <span className="truncate">{label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>

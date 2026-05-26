@@ -134,11 +134,47 @@ public static class UserNotificationPreferenceSettings
         }
     }
 
+    public static IReadOnlyDictionary<string, IReadOnlyList<string>> ParseDisabledChannels(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            var storage = JsonSerializer.Deserialize<UserNotificationPreferenceStorage>(rawValue, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return NormalizeDisabledChannels(storage?.DisabledChannels);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
     public static bool IsTypeEnabled(string? rawValue, string? type)
     {
         var normalizedType = NormalizeType(type);
         return string.IsNullOrWhiteSpace(normalizedType)
                || !ParseDisabledTypes(rawValue).Contains(normalizedType, StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static bool IsChannelEnabled(string? rawValue, string? type, string? channel)
+    {
+        var normalizedType = NormalizeType(type);
+        var normalizedChannel = NormalizeChannel(channel);
+        if (string.IsNullOrWhiteSpace(normalizedType) || string.IsNullOrWhiteSpace(normalizedChannel))
+        {
+            return true;
+        }
+
+        if (!IsTypeEnabled(rawValue, normalizedType))
+        {
+            return false;
+        }
+
+        return !ParseDisabledChannels(rawValue).TryGetValue(normalizedType, out var disabledChannels)
+               || !disabledChannels.Contains(normalizedChannel, StringComparer.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyList<string> NormalizeTypes(IEnumerable<string>? values)
@@ -149,12 +185,48 @@ public static class UserNotificationPreferenceSettings
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> NormalizeDisabledChannels(Dictionary<string, List<string>>? values)
+    {
+        var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (type, channels) in values ?? [])
+        {
+            var normalizedType = NormalizeType(type);
+            if (string.IsNullOrWhiteSpace(normalizedType))
+            {
+                continue;
+            }
+
+            var normalizedChannels = NormalizeChannels(channels);
+            if (normalizedChannels.Count > 0)
+            {
+                result[normalizedType] = normalizedChannels;
+            }
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<string> NormalizeChannels(IEnumerable<string>? values)
+        => (values ?? [])
+            .Select(NormalizeChannel)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
     private static string? NormalizeType(string? value)
         => UserNotificationTypes.Find(value)?.Key;
+
+    private static string? NormalizeChannel(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim();
+        return NotificationChannels.All.FirstOrDefault(channel => string.Equals(channel, normalized, StringComparison.OrdinalIgnoreCase));
+    }
 
     private sealed class UserNotificationPreferenceStorage
     {
         public List<string> DisabledTypes { get; set; } = [];
+        public Dictionary<string, List<string>> DisabledChannels { get; set; } = [];
     }
 }
 
