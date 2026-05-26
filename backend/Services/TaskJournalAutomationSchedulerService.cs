@@ -130,13 +130,25 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                         .IgnoreQueryFilters()
                         .Where(task => task.ClientCaseId == clientCase.Id)
                         .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+                    LastTaskCommentAt = context.TaskJournalComments
+                        .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+                        .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                    LastDocumentAt = context.ClientCaseDocuments
+                        .Where(document => document.ClientCaseId == clientCase.Id)
+                        .Max(document => (DateTime?)document.UploadedAt),
+                    LastCourtEventAt = context.ClientCaseCourtEvents
+                        .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+                        .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
                 })
                 .Where(item => item.ActiveTaskCount == 0
                     && (item.LastTaskAt ?? item.Case.CreatedAt) <= cutoff
+                    && (item.LastTaskCommentAt ?? item.Case.CreatedAt) <= cutoff
+                    && (item.LastDocumentAt ?? item.Case.CreatedAt) <= cutoff
+                    && (item.LastCourtEventAt ?? item.Case.CreatedAt) <= cutoff
                     && (item.Case.LastViewedAt ?? item.Case.CreatedAt) <= cutoff
                     && (item.Case.ActivityConfirmedAt ?? item.Case.CreatedAt) <= cutoff
                     && item.Case.InactivityRemindersEnabled)
-                .OrderBy(item => item.LastTaskAt ?? item.Case.CreatedAt)
+                .OrderBy(item => item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.Case.CreatedAt)
                 .ThenBy(item => item.Case.Client != null
                     ? item.Case.Client.Name
                     : item.Case.LegalEntity != null
@@ -173,8 +185,24 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     continue;
                 }
 
-                var daysWithoutActiveTask = ResolveDaysWithoutActiveTask(candidate.Case, candidate.LastTaskAt, now);
-                var task = BuildAutomationTask(candidate.Case, owner, assignee, candidate.LastTaskAt, now, settings, escalationUser);
+                var daysWithoutActiveTask = ResolveDaysWithoutActiveTask(
+                    candidate.Case,
+                    now,
+                    candidate.LastTaskAt,
+                    candidate.LastTaskCommentAt,
+                    candidate.LastDocumentAt,
+                    candidate.LastCourtEventAt);
+                var task = BuildAutomationTask(
+                    candidate.Case,
+                    owner,
+                    assignee,
+                    now,
+                    settings,
+                    escalationUser,
+                    candidate.LastTaskAt,
+                    candidate.LastTaskCommentAt,
+                    candidate.LastDocumentAt,
+                    candidate.LastCourtEventAt);
                 context.TaskJournalItems.Add(task);
                 createdTasks.Add(new CreatedAutomationTask(task, daysWithoutActiveTask, daysWithoutActiveTask >= settings.EscalationDays));
                 created += 1;
@@ -346,13 +374,13 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         ClientCase clientCase,
         CaseOwnerBinding owner,
         User assignee,
-        DateTime? lastTaskAt,
         DateTime now,
         TaskJournalAutomationSettings settings,
-        User? escalationUser)
+        User? escalationUser,
+        params DateTime?[] activitySignals)
     {
         var assigneeName = DisplayName(assignee);
-        var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt);
+        var lastActivity = ResolveLastCaseActivity(clientCase, activitySignals);
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity).TotalDays));
         var isEscalated = daysWithoutActiveTask >= settings.EscalationDays;
         var task = new TaskJournalItem
@@ -512,7 +540,22 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     !other.TagsJson.Contains(AutomationTag))
                 .MaxAsync(other => (DateTime?)(other.UpdatedAt ?? other.CreatedAt), cancellationToken);
 
-            var lastActivity = ResolveLastCaseActivity(task.ClientCase, lastNonAutomationTaskAt);
+            var lastTaskCommentAt = await context.TaskJournalComments
+                .AsNoTracking()
+                .Where(comment =>
+                    comment.TaskJournalItem.ClientCaseId == task.ClientCaseId &&
+                    comment.TaskJournalItemId != task.Id)
+                .MaxAsync(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt), cancellationToken);
+            var lastDocumentAt = await context.ClientCaseDocuments
+                .AsNoTracking()
+                .Where(document => document.ClientCaseId == task.ClientCaseId)
+                .MaxAsync(document => (DateTime?)document.UploadedAt, cancellationToken);
+            var lastCourtEventAt = await context.ClientCaseCourtEvents
+                .AsNoTracking()
+                .Where(courtEvent => courtEvent.ClientCaseId == task.ClientCaseId)
+                .MaxAsync(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt), cancellationToken);
+
+            var lastActivity = ResolveLastCaseActivity(task.ClientCase, lastNonAutomationTaskAt, lastTaskCommentAt, lastDocumentAt, lastCourtEventAt);
             if (lastActivity > task.CreatedAt)
             {
                 continue;
@@ -527,7 +570,13 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 continue;
             }
 
-            var daysWithoutActiveTask = ResolveDaysWithoutActiveTask(task.ClientCase, lastNonAutomationTaskAt, now);
+            var daysWithoutActiveTask = ResolveDaysWithoutActiveTask(
+                task.ClientCase,
+                now,
+                lastNonAutomationTaskAt,
+                lastTaskCommentAt,
+                lastDocumentAt,
+                lastCourtEventAt);
             var level = Array.IndexOf(RepeatEscalationOffsets, dueOffset) + 1;
             var shouldEscalateToObserver = level >= RepeatEscalationOffsets.Length || daysWithoutActiveTask >= settings.EscalationDays;
             if (shouldEscalateToObserver)
@@ -659,12 +708,15 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     private static string BuildObjectName(string clientName, string? caseTitle)
         => string.IsNullOrWhiteSpace(caseTitle) ? clientName.Trim() : $"{clientName.Trim()} - {caseTitle.Trim()}";
 
-    private static DateTime ResolveLastCaseActivity(ClientCase clientCase, DateTime? lastTaskAt)
+    private static DateTime ResolveLastCaseActivity(ClientCase clientCase, params DateTime?[] activitySignals)
     {
         var lastActivity = clientCase.CreatedAt;
-        if (lastTaskAt.HasValue && lastTaskAt.Value > lastActivity)
+        foreach (var signal in activitySignals)
         {
-            lastActivity = lastTaskAt.Value;
+            if (signal.HasValue && signal.Value > lastActivity)
+            {
+                lastActivity = signal.Value;
+            }
         }
 
         if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
@@ -680,8 +732,8 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         return lastActivity;
     }
 
-    private static int ResolveDaysWithoutActiveTask(ClientCase clientCase, DateTime? lastTaskAt, DateTime now)
-        => Math.Max(0, (int)Math.Floor((now - ResolveLastCaseActivity(clientCase, lastTaskAt)).TotalDays));
+    private static int ResolveDaysWithoutActiveTask(ClientCase clientCase, DateTime now, params DateTime?[] activitySignals)
+        => Math.Max(0, (int)Math.Floor((now - ResolveLastCaseActivity(clientCase, activitySignals)).TotalDays));
 
     private async Task NotifyCreatedAutomationTasksAsync(
         INotificationService? notificationService,

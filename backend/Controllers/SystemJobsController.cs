@@ -545,6 +545,15 @@ public sealed class SystemJobsController : ControllerBase
                     clientCase.InactivityRemindersEnabled &&
                     (clientCase.LastViewedAt ?? clientCase.CreatedAt) <= cutoff &&
                     (clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) <= cutoff &&
+                    (_db.TaskJournalComments
+                        .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+                        .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)) ?? clientCase.CreatedAt) <= cutoff &&
+                    (_db.ClientCaseDocuments
+                        .Where(document => document.ClientCaseId == clientCase.Id)
+                        .Max(document => (DateTime?)document.UploadedAt) ?? clientCase.CreatedAt) <= cutoff &&
+                    (_db.ClientCaseCourtEvents
+                        .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+                        .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)) ?? clientCase.CreatedAt) <= cutoff &&
                     !_db.TaskJournalItems.Any(task =>
                         task.ClientCaseId == clientCase.Id &&
                         CaseControlActiveTaskStatuses.Contains(task.Status)),

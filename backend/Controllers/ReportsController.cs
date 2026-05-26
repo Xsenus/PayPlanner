@@ -2609,10 +2609,42 @@ public class ReportsController : ControllerBase
                     item.Status,
                     item.UpdatedAt ?? item.CreatedAt))
                 .ToListAsync(ct);
+        var commentRows = caseIds.Length == 0
+            ? new List<CaseActivitySignalRow>()
+            : await _db.TaskJournalComments
+                .AsNoTracking()
+                .Where(item => item.TaskJournalItem.ClientCaseId.HasValue && caseIds.Contains(item.TaskJournalItem.ClientCaseId.Value))
+                .Select(item => new CaseActivitySignalRow(
+                    item.TaskJournalItem.ClientCaseId!.Value,
+                    item.UpdatedAt ?? item.CreatedAt))
+                .ToListAsync(ct);
+        var documentRows = caseIds.Length == 0
+            ? new List<CaseActivitySignalRow>()
+            : await _db.ClientCaseDocuments
+                .AsNoTracking()
+                .Where(item => caseIds.Contains(item.ClientCaseId))
+                .Select(item => new CaseActivitySignalRow(item.ClientCaseId, item.UploadedAt))
+                .ToListAsync(ct);
+        var courtEventRows = caseIds.Length == 0
+            ? new List<CaseActivitySignalRow>()
+            : await _db.ClientCaseCourtEvents
+                .AsNoTracking()
+                .Where(item => caseIds.Contains(item.ClientCaseId))
+                .Select(item => new CaseActivitySignalRow(item.ClientCaseId, item.UpdatedAt ?? item.CreatedAt))
+                .ToListAsync(ct);
 
         var tasksByCase = taskRows
             .GroupBy(item => item.ClientCaseId)
             .ToDictionary(group => group.Key, group => group.ToList());
+        var commentsByCase = commentRows
+            .GroupBy(item => item.ClientCaseId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.LastActivityAt).Max());
+        var documentsByCase = documentRows
+            .GroupBy(item => item.ClientCaseId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.LastActivityAt).Max());
+        var courtEventsByCase = courtEventRows
+            .GroupBy(item => item.ClientCaseId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.LastActivityAt).Max());
 
         var rows = activeCases
             .Select(clientCase =>
@@ -2623,11 +2655,17 @@ public class ReportsController : ControllerBase
                 var lastTaskAt = tasks.Count > 0
                     ? tasks.Max(item => item.LastActivityAt)
                     : (DateTime?)null;
-                var lastActivityAt = ResolveCaseLastActivityAt(clientCase, lastTaskAt);
+                commentsByCase.TryGetValue(clientCase.Id, out var lastTaskCommentAt);
+                documentsByCase.TryGetValue(clientCase.Id, out var lastDocumentAt);
+                courtEventsByCase.TryGetValue(clientCase.Id, out var lastCourtEventAt);
+                var lastActivityAt = ResolveCaseLastActivityAt(clientCase, lastTaskAt, lastTaskCommentAt, lastDocumentAt, lastCourtEventAt);
                 var daysWithoutActivity = Math.Max(0, (now.Date - lastActivityAt.Date).Days);
                 var isInactive =
                     activeTaskCount == 0
                     && lastActivityAt <= cutoff
+                    && (lastTaskCommentAt == default || lastTaskCommentAt <= cutoff)
+                    && (lastDocumentAt == default || lastDocumentAt <= cutoff)
+                    && (lastCourtEventAt == default || lastCourtEventAt <= cutoff)
                     && (clientCase.LastViewedAt ?? clientCase.CreatedAt) <= cutoff
                     && (clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) <= cutoff
                     && clientCase.InactivityRemindersEnabled;
@@ -2956,7 +2994,7 @@ public class ReportsController : ControllerBase
             .Where(item => item.DueAt.Date >= asOf.Date)
             .OrderBy(item => item.DueAt)
             .FirstOrDefault();
-        var lastActivityAt = ResolveCaseLastActivityAt(clientCase, null);
+        var lastActivityAt = ResolveCaseLastActivityAt(clientCase);
 
         return new CurrentCaseReportItemDto
         {
@@ -3363,12 +3401,15 @@ public class ReportsController : ControllerBase
     private static int ParseIntSetting(string? value, int fallback)
         => int.TryParse(value, out var parsed) ? parsed : fallback;
 
-    private static DateTime ResolveCaseLastActivityAt(ClientCase clientCase, DateTime? lastTaskAt)
+    private static DateTime ResolveCaseLastActivityAt(ClientCase clientCase, params DateTime?[] activitySignals)
     {
         var lastActivity = clientCase.CreatedAt;
-        if (lastTaskAt.HasValue && lastTaskAt.Value > lastActivity)
+        foreach (var signal in activitySignals)
         {
-            lastActivity = lastTaskAt.Value;
+            if (signal.HasValue && signal.Value > lastActivity)
+            {
+                lastActivity = signal.Value;
+            }
         }
 
         if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
@@ -5759,6 +5800,10 @@ public class ReportsController : ControllerBase
     private sealed record CaseActivityTaskRow(
         int ClientCaseId,
         string Status,
+        DateTime LastActivityAt);
+
+    private sealed record CaseActivitySignalRow(
+        int ClientCaseId,
         DateTime LastActivityAt);
 
     private sealed record CaseActivityOwner(

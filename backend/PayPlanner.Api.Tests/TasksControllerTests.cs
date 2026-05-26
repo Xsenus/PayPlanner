@@ -1247,6 +1247,92 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_TreatsDocumentsCourtEventsAndCommentsAsCaseActivity()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "activity-signals-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = author.Id;
+        var documentCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С ДОКУМЕНТОМ");
+        var courtEventCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С ЗАСЕДАНИЕМ");
+        var commentCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С КОММЕНТАРИЕМ");
+        var staleCase = await CreateCaseAsync(db, client.Id, "ДЕЛО БЕЗ ДВИЖЕНИЯ");
+        var now = DateTime.UtcNow;
+        documentCase.CreatedAt = now.AddDays(-30);
+        courtEventCase.CreatedAt = now.AddDays(-30);
+        commentCase.CreatedAt = now.AddDays(-30);
+        staleCase.CreatedAt = now.AddDays(-30);
+        db.ClientCaseDocuments.Add(new ClientCaseDocument
+        {
+            ClientCaseId = documentCase.Id,
+            DocumentKey = "doc-activity",
+            Version = 1,
+            DocumentType = "other",
+            Status = "draft",
+            OriginalFileName = "activity.pdf",
+            StoredFileName = "activity.pdf",
+            StoragePath = "activity.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 12,
+            UploadedByUserId = author.Id,
+            UploadedByName = author.FullName,
+            UploadedAt = now.AddDays(-1),
+        });
+        db.ClientCaseCourtEvents.Add(new ClientCaseCourtEvent
+        {
+            ClientCaseId = courtEventCase.Id,
+            EventType = "hearing",
+            Title = "Судебное заседание",
+            ScheduledAt = now.AddDays(7),
+            CourtInstance = "first",
+            MovementStatus = "scheduled",
+            SourceType = "manual",
+            CreatedAt = now.AddDays(-1),
+            CreatedByUserId = author.Id,
+            CreatedByUserName = author.FullName,
+        });
+        var completedTask = await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: commentCase.Id,
+            status: "done",
+            createdAt: now.AddDays(-20));
+        db.TaskJournalComments.Add(new TaskJournalComment
+        {
+            TaskJournalItemId = completedTask.Id,
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            Kind = "comment",
+            Text = "Уточнили позицию по делу.",
+            MetadataJson = "{}",
+            CreatedAt = now.AddDays(-1),
+            UpdatedAt = now.AddDays(-1),
+        });
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.True(result.Enabled);
+            Assert.Null(result.Error);
+            Assert.Equal(1, result.CreatedCount);
+        }
+
+        Assert.Equal(0, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == documentCase.Id));
+        Assert.Equal(0, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == courtEventCase.Id));
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == commentCase.Id));
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == staleCase.Id));
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_NotifiesAssigneeAboutInactiveCaseControlTask()
     {
         await using var db = await CreateContextAsync();

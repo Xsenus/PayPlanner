@@ -354,11 +354,23 @@ public class TasksController : ControllerBase
                     .IgnoreQueryFilters()
                     .Where(task => task.ClientCaseId == clientCase.Id)
                     .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+                LastTaskCommentAt = _db.TaskJournalComments
+                    .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                LastDocumentAt = _db.ClientCaseDocuments
+                    .Where(document => document.ClientCaseId == clientCase.Id)
+                    .Max(document => (DateTime?)document.UploadedAt),
+                LastCourtEventAt = _db.ClientCaseCourtEvents
+                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
             });
 
         var candidateQuery = visibleCases.Where(item =>
             item.ActiveTaskCount == 0 &&
             (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
+            (item.LastTaskCommentAt ?? item.CreatedAt) <= inactivityCutoff &&
+            (item.LastDocumentAt ?? item.CreatedAt) <= inactivityCutoff &&
+            (item.LastCourtEventAt ?? item.CreatedAt) <= inactivityCutoff &&
             (item.LastViewedAt ?? item.CreatedAt) <= inactivityCutoff &&
             (item.ActivityConfirmedAt ?? item.CreatedAt) <= inactivityCutoff &&
             item.InactivityRemindersEnabled);
@@ -366,6 +378,9 @@ public class TasksController : ControllerBase
         var escalationCandidateQuery = visibleCases.Where(item =>
             item.ActiveTaskCount == 0 &&
             (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
+            (item.LastTaskCommentAt ?? item.CreatedAt) <= escalationCutoff &&
+            (item.LastDocumentAt ?? item.CreatedAt) <= escalationCutoff &&
+            (item.LastCourtEventAt ?? item.CreatedAt) <= escalationCutoff &&
             (item.LastViewedAt ?? item.CreatedAt) <= escalationCutoff &&
             (item.ActivityConfirmedAt ?? item.CreatedAt) <= escalationCutoff &&
             item.InactivityRemindersEnabled);
@@ -610,13 +625,25 @@ public class TasksController : ControllerBase
                     .IgnoreQueryFilters()
                     .Where(task => task.ClientCaseId == clientCase.Id)
                     .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+                LastTaskCommentAt = _db.TaskJournalComments
+                    .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                LastDocumentAt = _db.ClientCaseDocuments
+                    .Where(document => document.ClientCaseId == clientCase.Id)
+                    .Max(document => (DateTime?)document.UploadedAt),
+                LastCourtEventAt = _db.ClientCaseCourtEvents
+                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
             })
             .Where(item => item.ActiveTaskCount == 0
                 && (item.LastTaskAt ?? item.CreatedAt) <= cutoff
+                && (item.LastTaskCommentAt ?? item.CreatedAt) <= cutoff
+                && (item.LastDocumentAt ?? item.CreatedAt) <= cutoff
+                && (item.LastCourtEventAt ?? item.CreatedAt) <= cutoff
                 && (item.LastViewedAt ?? item.CreatedAt) <= cutoff
                 && (item.ActivityConfirmedAt ?? item.CreatedAt) <= cutoff
                 && item.InactivityRemindersEnabled)
-            .OrderBy(item => item.LastTaskAt ?? item.CreatedAt)
+            .OrderBy(item => item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.CreatedAt)
             .ThenBy(item => item.ClientName != string.Empty ? item.ClientName : item.LegalEntityName)
             .ThenBy(item => item.Title)
             .Take(effectiveLimit)
@@ -624,21 +651,14 @@ public class TasksController : ControllerBase
 
         return Ok(candidates.Select(item =>
         {
-            var lastActivity = item.CreatedAt;
-            if (item.LastTaskAt.HasValue && item.LastTaskAt.Value > lastActivity)
-            {
-                lastActivity = item.LastTaskAt.Value;
-            }
-
-            if (item.LastViewedAt.HasValue && item.LastViewedAt.Value > lastActivity)
-            {
-                lastActivity = item.LastViewedAt.Value;
-            }
-
-            if (item.ActivityConfirmedAt.HasValue && item.ActivityConfirmedAt.Value > lastActivity)
-            {
-                lastActivity = item.ActivityConfirmedAt.Value;
-            }
+            var lastActivity = ResolveLastCaseActivity(
+                item.CreatedAt,
+                item.LastViewedAt,
+                item.ActivityConfirmedAt,
+                item.LastTaskAt,
+                item.LastTaskCommentAt,
+                item.LastDocumentAt,
+                item.LastCourtEventAt);
 
             var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((now - lastActivity).TotalDays));
             var isEscalated = daysWithoutActiveTask >= effectiveEscalationDays;
@@ -719,13 +739,22 @@ public class TasksController : ControllerBase
             .IgnoreQueryFilters()
             .Where(task => task.ClientCaseId == clientCase.Id)
             .MaxAsync(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt), ct);
+        var lastTaskCommentAt = await _db.TaskJournalComments
+            .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+            .MaxAsync(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt), ct);
+        var lastDocumentAt = await _db.ClientCaseDocuments
+            .Where(document => document.ClientCaseId == clientCase.Id)
+            .MaxAsync(document => (DateTime?)document.UploadedAt, ct);
+        var lastCourtEventAt = await _db.ClientCaseCourtEvents
+            .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+            .MaxAsync(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt), ct);
         var settings = await GetTaskJournalSettingsAsync(ct);
         if (!settings.CaseInactivityAutomationEnabled || !clientCase.InactivityRemindersEnabled)
         {
             return BadRequest(new { message = "Автоконтроль для этого дела отключен." });
         }
 
-        var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt);
+        var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt, lastTaskCommentAt, lastDocumentAt, lastCourtEventAt);
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
         if (daysWithoutActiveTask < settings.CaseInactivityDays)
         {
@@ -828,13 +857,25 @@ public class TasksController : ControllerBase
                     .IgnoreQueryFilters()
                     .Where(task => task.ClientCaseId == clientCase.Id)
                     .Max(task => (DateTime?)(task.UpdatedAt ?? task.CreatedAt)),
+                LastTaskCommentAt = _db.TaskJournalComments
+                    .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)),
+                LastDocumentAt = _db.ClientCaseDocuments
+                    .Where(document => document.ClientCaseId == clientCase.Id)
+                    .Max(document => (DateTime?)document.UploadedAt),
+                LastCourtEventAt = _db.ClientCaseCourtEvents
+                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
             })
             .Where(item => item.ActiveTaskCount == 0
                 && (item.LastTaskAt ?? item.Case.CreatedAt) <= cutoff
+                && (item.LastTaskCommentAt ?? item.Case.CreatedAt) <= cutoff
+                && (item.LastDocumentAt ?? item.Case.CreatedAt) <= cutoff
+                && (item.LastCourtEventAt ?? item.Case.CreatedAt) <= cutoff
                 && (item.Case.LastViewedAt ?? item.Case.CreatedAt) <= cutoff
                 && (item.Case.ActivityConfirmedAt ?? item.Case.CreatedAt) <= cutoff
                 && item.Case.InactivityRemindersEnabled)
-            .OrderBy(item => item.LastTaskAt ?? item.Case.CreatedAt)
+            .OrderBy(item => item.LastTaskAt ?? item.LastTaskCommentAt ?? item.LastDocumentAt ?? item.LastCourtEventAt ?? item.Case.CreatedAt)
             .ThenBy(item => item.Case.Client != null
                 ? item.Case.Client.Name
                 : item.Case.LegalEntity != null
@@ -854,7 +895,17 @@ public class TasksController : ControllerBase
             }
 
             var assignee = await ResolveAutomationAssigneeAsync(item.Case, access, ct);
-            var entity = BuildAutomationTaskEntity(item.Case, binding, access, assignee, item.LastTaskAt, settings, escalationUser);
+            var entity = BuildAutomationTaskEntity(
+                item.Case,
+                binding,
+                access,
+                assignee,
+                settings,
+                escalationUser,
+                item.LastTaskAt,
+                item.LastTaskCommentAt,
+                item.LastDocumentAt,
+                item.LastCourtEventAt);
             AddTaskHistory(entity, access, "Задача создана автоматически из массового автоконтроля дел.");
             _db.TaskJournalItems.Add(entity);
             created.Add((entity, binding));
@@ -2762,22 +2813,36 @@ public class TasksController : ControllerBase
                 ? clientName.Trim()
                 : $"{clientName.Trim()} - {caseTitle.Trim()}";
 
-    private static DateTime ResolveLastCaseActivity(ClientCase clientCase, DateTime? lastTaskAt)
+    private static DateTime ResolveLastCaseActivity(ClientCase clientCase, params DateTime?[] activitySignals)
+        => ResolveLastCaseActivity(
+            clientCase.CreatedAt,
+            clientCase.LastViewedAt,
+            clientCase.ActivityConfirmedAt,
+            activitySignals);
+
+    private static DateTime ResolveLastCaseActivity(
+        DateTime createdAt,
+        DateTime? lastViewedAt,
+        DateTime? activityConfirmedAt,
+        params DateTime?[] activitySignals)
     {
-        var lastActivity = clientCase.CreatedAt;
-        if (lastTaskAt.HasValue && lastTaskAt.Value > lastActivity)
+        var lastActivity = createdAt;
+        foreach (var signal in activitySignals)
         {
-            lastActivity = lastTaskAt.Value;
+            if (signal.HasValue && signal.Value > lastActivity)
+            {
+                lastActivity = signal.Value;
+            }
         }
 
-        if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
+        if (lastViewedAt.HasValue && lastViewedAt.Value > lastActivity)
         {
-            lastActivity = clientCase.LastViewedAt.Value;
+            lastActivity = lastViewedAt.Value;
         }
 
-        if (clientCase.ActivityConfirmedAt.HasValue && clientCase.ActivityConfirmedAt.Value > lastActivity)
+        if (activityConfirmedAt.HasValue && activityConfirmedAt.Value > lastActivity)
         {
-            lastActivity = clientCase.ActivityConfirmedAt.Value;
+            lastActivity = activityConfirmedAt.Value;
         }
 
         return lastActivity;
@@ -3451,11 +3516,11 @@ public class TasksController : ControllerBase
         TaskClientBinding binding,
         TaskAccess access,
         TaskParticipantDraft assignee,
-        DateTime? lastTaskAt,
         TaskJournalSettingsDto settings,
-        User? escalationUser)
+        User? escalationUser,
+        params DateTime?[] activitySignals)
     {
-        var lastActivity = ResolveLastCaseActivity(clientCase, lastTaskAt);
+        var lastActivity = ResolveLastCaseActivity(clientCase, activitySignals);
         var daysWithoutActiveTask = Math.Max(0, (int)Math.Floor((DateTime.UtcNow - lastActivity).TotalDays));
         var isEscalated = daysWithoutActiveTask >= settings.CaseInactivityEscalationDays;
 
