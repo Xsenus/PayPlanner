@@ -304,6 +304,66 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskAssignedAsync_UsesRolePreferencesWhenUserHasNoPersonalPreferences()
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        var author = await CreateUserAsync(db, "task-author-role-preferences@example.com");
+        var assignee = new User
+        {
+            Email = "task-assignee-role-preferences@example.com",
+            FullName = "Role Preferences Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = RoleNotificationPreferenceSettings.SettingKey,
+            Value = RoleNotificationPreferenceSettings.Serialize(new Dictionary<int, UserNotificationPreferenceSnapshot>
+            {
+                [assignee.RoleId] = new(
+                    [],
+                    new Dictionary<string, IReadOnlyList<string>>
+                    {
+                        [UserNotificationTypes.TaskAssigned] = [NotificationChannels.Email]
+                    })
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Prepare role preferences test",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\",\"email\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        Assert.Empty(deliveries);
+        Assert.Empty(emailService.Messages);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, (await db.UserNotifications.SingleAsync()).Type);
+    }
+
+    [Fact]
     public async Task NotifyTaskAssignedAsync_CreatesInAppNotificationForAssignee()
     {
         await using var db = await CreateContextAsync();

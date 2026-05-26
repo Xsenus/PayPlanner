@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using PayPlanner.Api.Models;
@@ -115,51 +116,57 @@ public sealed record UserNotificationTypeDefinition(
 public static class UserNotificationPreferenceSettings
 {
     public const string SettingKey = "notifications.typePreferences.v1";
+    public static readonly UserNotificationPreferenceSnapshot Empty = new([], new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase));
 
     public static IReadOnlyList<string> ParseDisabledTypes(string? rawValue)
-    {
-        if (string.IsNullOrWhiteSpace(rawValue))
-        {
-            return [];
-        }
-
-        try
-        {
-            var storage = JsonSerializer.Deserialize<UserNotificationPreferenceStorage>(rawValue, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            return NormalizeTypes(storage?.DisabledTypes);
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-    }
+        => Parse(rawValue).DisabledTypes;
 
     public static IReadOnlyDictionary<string, IReadOnlyList<string>> ParseDisabledChannels(string? rawValue)
+        => Parse(rawValue).DisabledChannels;
+
+    public static UserNotificationPreferenceSnapshot Parse(string? rawValue)
     {
         if (string.IsNullOrWhiteSpace(rawValue))
         {
-            return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+            return Empty;
         }
 
         try
         {
             var storage = JsonSerializer.Deserialize<UserNotificationPreferenceStorage>(rawValue, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            return NormalizeDisabledChannels(storage?.DisabledChannels);
+            return Normalize(storage);
         }
         catch (JsonException)
         {
-            return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+            return Empty;
         }
     }
 
+    public static string Serialize(UserNotificationPreferenceSnapshot preferences)
+        => JsonSerializer.Serialize(new UserNotificationPreferenceStorage
+        {
+            DisabledTypes = NormalizeTypes(preferences.DisabledTypes).ToList(),
+            DisabledChannels = NormalizeDisabledChannels(preferences.DisabledChannels)
+                .ToDictionary(
+                    item => item.Key,
+                    item => item.Value.ToList(),
+                    StringComparer.OrdinalIgnoreCase)
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
     public static bool IsTypeEnabled(string? rawValue, string? type)
+        => IsTypeEnabled(Parse(rawValue), type);
+
+    public static bool IsTypeEnabled(UserNotificationPreferenceSnapshot preferences, string? type)
     {
         var normalizedType = NormalizeType(type);
         return string.IsNullOrWhiteSpace(normalizedType)
-               || !ParseDisabledTypes(rawValue).Contains(normalizedType, StringComparer.OrdinalIgnoreCase);
+               || !preferences.DisabledTypes.Contains(normalizedType, StringComparer.OrdinalIgnoreCase);
     }
 
     public static bool IsChannelEnabled(string? rawValue, string? type, string? channel)
+        => IsChannelEnabled(Parse(rawValue), type, channel);
+
+    public static bool IsChannelEnabled(UserNotificationPreferenceSnapshot preferences, string? type, string? channel)
     {
         var normalizedType = NormalizeType(type);
         var normalizedChannel = NormalizeChannel(channel);
@@ -168,14 +175,19 @@ public static class UserNotificationPreferenceSettings
             return true;
         }
 
-        if (!IsTypeEnabled(rawValue, normalizedType))
+        if (!IsTypeEnabled(preferences, normalizedType))
         {
             return false;
         }
 
-        return !ParseDisabledChannels(rawValue).TryGetValue(normalizedType, out var disabledChannels)
+        return !preferences.DisabledChannels.TryGetValue(normalizedType, out var disabledChannels)
                || !disabledChannels.Contains(normalizedChannel, StringComparer.OrdinalIgnoreCase);
     }
+
+    private static UserNotificationPreferenceSnapshot Normalize(UserNotificationPreferenceStorage? storage)
+        => new(
+            NormalizeTypes(storage?.DisabledTypes),
+            NormalizeDisabledChannels(storage?.DisabledChannels));
 
     private static IReadOnlyList<string> NormalizeTypes(IEnumerable<string>? values)
         => (values ?? [])
@@ -186,6 +198,12 @@ public static class UserNotificationPreferenceSettings
             .ToList();
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> NormalizeDisabledChannels(Dictionary<string, List<string>>? values)
+        => NormalizeDisabledChannelsCore(values?.Select(item => new KeyValuePair<string, IEnumerable<string>>(item.Key, item.Value)));
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> NormalizeDisabledChannels(IReadOnlyDictionary<string, IReadOnlyList<string>>? values)
+        => NormalizeDisabledChannelsCore(values?.Select(item => new KeyValuePair<string, IEnumerable<string>>(item.Key, item.Value)));
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> NormalizeDisabledChannelsCore(IEnumerable<KeyValuePair<string, IEnumerable<string>>>? values)
     {
         var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (type, channels) in values ?? [])
@@ -224,6 +242,79 @@ public static class UserNotificationPreferenceSettings
     }
 
     private sealed class UserNotificationPreferenceStorage
+    {
+        public List<string> DisabledTypes { get; set; } = [];
+        public Dictionary<string, List<string>> DisabledChannels { get; set; } = [];
+    }
+}
+
+public sealed record UserNotificationPreferenceSnapshot(
+    IReadOnlyList<string> DisabledTypes,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> DisabledChannels);
+
+public static class RoleNotificationPreferenceSettings
+{
+    public const string SettingKey = "notifications.roleTypePreferences.v1";
+
+    public static IReadOnlyDictionary<int, UserNotificationPreferenceSnapshot> Parse(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return new Dictionary<int, UserNotificationPreferenceSnapshot>();
+        }
+
+        try
+        {
+            var storage = JsonSerializer.Deserialize<RoleNotificationPreferenceStorage>(rawValue, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return Normalize(storage?.Roles);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<int, UserNotificationPreferenceSnapshot>();
+        }
+    }
+
+    public static UserNotificationPreferenceSnapshot? ParseForRole(string? rawValue, int roleId)
+        => Parse(rawValue).TryGetValue(roleId, out var preferences) ? preferences : null;
+
+    public static string Serialize(IReadOnlyDictionary<int, UserNotificationPreferenceSnapshot> preferencesByRole)
+    {
+        var roles = preferencesByRole
+            .Where(item => item.Key > 0)
+            .OrderBy(item => item.Key)
+            .ToDictionary(
+                item => item.Key.ToString(CultureInfo.InvariantCulture),
+                item => JsonSerializer.Deserialize<RoleNotificationPreferenceItem>(
+                    UserNotificationPreferenceSettings.Serialize(item.Value),
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? new RoleNotificationPreferenceItem(),
+                StringComparer.OrdinalIgnoreCase);
+
+        return JsonSerializer.Serialize(new RoleNotificationPreferenceStorage { Roles = roles }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
+    private static IReadOnlyDictionary<int, UserNotificationPreferenceSnapshot> Normalize(Dictionary<string, RoleNotificationPreferenceItem>? values)
+    {
+        var result = new Dictionary<int, UserNotificationPreferenceSnapshot>();
+        foreach (var (roleIdValue, preferences) in values ?? [])
+        {
+            if (!int.TryParse(roleIdValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var roleId) || roleId <= 0)
+            {
+                continue;
+            }
+
+            result[roleId] = UserNotificationPreferenceSettings.Parse(
+                JsonSerializer.Serialize(preferences, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        }
+
+        return result;
+    }
+
+    private sealed class RoleNotificationPreferenceStorage
+    {
+        public Dictionary<string, RoleNotificationPreferenceItem> Roles { get; set; } = [];
+    }
+
+    private sealed class RoleNotificationPreferenceItem
     {
         public List<string> DisabledTypes { get; set; } = [];
         public Dictionary<string, List<string>> DisabledChannels { get; set; } = [];

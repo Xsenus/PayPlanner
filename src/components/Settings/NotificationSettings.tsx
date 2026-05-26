@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
-import { ArrowLeft, Bot, CheckCircle2, Link2, Mail, Pencil, Plus, RefreshCw, Save, Send, Trash2, Unlink } from 'lucide-react';
+import { ArrowLeft, Bot, CheckCircle2, Link2, Mail, Monitor, Pencil, Plus, RefreshCw, Save, Send, Trash2, Unlink } from 'lucide-react';
 import {
   apiService,
+  type NotificationRolePreferenceDto,
   type NotificationChannel,
   type NotificationDeliveryDto,
   type TelegramBotCommandDto,
@@ -10,10 +11,21 @@ import {
   type NotificationSettingsDto,
   type NotificationTemplateDto,
   type UpsertNotificationSenderRequest,
+  type UserNotificationPreferenceDto,
+  type UserNotificationTypeDto,
 } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import {
+  isUserNotificationChannelEnabled,
+  isUserNotificationTypeEnabled,
+  normalizeUserNotificationTypePreferences,
+  toggleUserNotificationChannelPreference,
+  toggleUserNotificationTypePreference,
+  type UserNotificationPreferenceChannel,
+  type UserNotificationTypePreferences,
+} from '../../utils/userNotificationPreferences';
 
 type SenderForm = {
   id?: number;
@@ -47,6 +59,11 @@ type SenderForm = {
 };
 
 const DEFAULT_PURPOSES = ['manualTest'];
+const ROLE_CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; label: string; Icon: typeof Monitor }> = [
+  { value: 'inApp', label: 'Центр', Icon: Monitor },
+  { value: 'email', label: 'Email', Icon: Mail },
+  { value: 'telegram', label: 'Telegram', Icon: Send },
+];
 
 type SenderRoute =
   | { mode: 'list' }
@@ -194,6 +211,13 @@ function statusClass(ready: boolean, enabled: boolean) {
   return ready ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200';
 }
 
+function toApiNotificationPreference(preferences: UserNotificationTypePreferences): UserNotificationPreferenceDto {
+  return {
+    disabledTypes: preferences.disabledTypes,
+    disabledChannels: preferences.disabledChannels,
+  };
+}
+
 export function NotificationSettings({ canEdit = true }: NotificationSettingsProps) {
   const toast = useToast();
   const { confirm } = useDialog();
@@ -216,6 +240,11 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
   const [deliveriesLoading, setDeliveriesLoading] = useState(false);
   const [deliveryStatus, setDeliveryStatus] = useState('failed');
   const [retryingDeliveryId, setRetryingDeliveryId] = useState<number | null>(null);
+  const [notificationTypes, setNotificationTypes] = useState<UserNotificationTypeDto[]>([]);
+  const [rolePreferences, setRolePreferences] = useState<NotificationRolePreferenceDto[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
+  const [rolePreferencesLoading, setRolePreferencesLoading] = useState(false);
+  const [rolePreferencesSaving, setRolePreferencesSaving] = useState(false);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -235,6 +264,37 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  const loadRolePreferences = useCallback(async () => {
+    setRolePreferencesLoading(true);
+    try {
+      const [types, response] = await Promise.all([
+        apiService.getUserNotificationTypes(),
+        apiService.getNotificationRolePreferences(),
+      ]);
+      setNotificationTypes(types);
+      setRolePreferences(response.roles);
+      setSelectedRoleId((current) => {
+        if (current && response.roles.some((item) => item.roleId === current)) {
+          return current;
+        }
+
+        return response.roles[0]?.roleId ?? null;
+      });
+    } catch (error) {
+      const text = extractDisplayErrorMessage(error, 'Не удалось загрузить ролевые настройки уведомлений');
+      toast.error(text, 'Уведомления');
+      setNotificationTypes([]);
+      setRolePreferences([]);
+      setSelectedRoleId(null);
+    } finally {
+      setRolePreferencesLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    void loadRolePreferences();
+  }, [loadRolePreferences]);
 
   const loadDeliveries = useCallback(async () => {
     setDeliveriesLoading(true);
@@ -278,6 +338,18 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
     () => templates.find((item) => item.key === selectedTemplateKey) ?? templates[0] ?? null,
     [selectedTemplateKey, templates],
   );
+  const knownNotificationTypeKeys = useMemo(() => notificationTypes.map((item) => item.key), [notificationTypes]);
+  const selectedRolePreference = useMemo(
+    () => rolePreferences.find((item) => item.roleId === selectedRoleId) ?? rolePreferences[0] ?? null,
+    [rolePreferences, selectedRoleId],
+  );
+  const selectedRolePreferences = useMemo<UserNotificationTypePreferences>(
+    () => normalizeUserNotificationTypePreferences(
+      selectedRolePreference?.preferences as Partial<UserNotificationTypePreferences> | null,
+      knownNotificationTypeKeys,
+    ),
+    [knownNotificationTypeKeys, selectedRolePreference?.preferences],
+  );
 
   useEffect(() => {
     if (!templates.length) return;
@@ -299,6 +371,39 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
       body: selectedTemplate.body,
     });
   }, [selectedTemplate]);
+
+  const updateSelectedRolePreferences = (updater: (current: UserNotificationTypePreferences) => UserNotificationTypePreferences) => {
+    if (!selectedRolePreference) return;
+
+    const nextPreferences = updater(selectedRolePreferences);
+    setRolePreferences((current) => current.map((item) => (
+      item.roleId === selectedRolePreference.roleId
+        ? {
+          ...item,
+          preferences: toApiNotificationPreference(nextPreferences),
+        }
+        : item
+    )));
+  };
+
+  const saveRolePreferences = async () => {
+    if (!selectedRolePreference || !canEdit) return;
+
+    setRolePreferencesSaving(true);
+    try {
+      const updated = await apiService.updateNotificationRolePreferences(
+        selectedRolePreference.roleId,
+        toApiNotificationPreference(selectedRolePreferences),
+      );
+      setRolePreferences((current) => current.map((item) => (item.roleId === updated.roleId ? updated : item)));
+      toast.success('Ролевые настройки уведомлений сохранены.', 'Уведомления');
+    } catch (error) {
+      const text = extractDisplayErrorMessage(error, 'Не удалось сохранить ролевые настройки уведомлений');
+      toast.error(text, 'Уведомления');
+    } finally {
+      setRolePreferencesSaving(false);
+    }
+  };
 
   const updateContractTerminationClientEmails = async (enabled: boolean) => {
     if (!settings || !canEdit) return;
@@ -742,6 +847,118 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
               Пока настройка выключена, расторжение договора только сохранит статус и условия. Письмо не уйдёт, даже если у клиента указан email.
               Для фактической отправки также должен быть включён и настроен Email-отправитель.
             </p>
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h4 className="text-base font-semibold text-gray-900">Ролевые правила уведомлений</h4>
+                <p className="mt-1 max-w-3xl text-sm text-gray-500">
+                  Базовые настройки типов и каналов для пользователей выбранной роли. Личные настройки пользователя в центре уведомлений имеют приоритет над правилом роли.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void saveRolePreferences()}
+                disabled={!canEdit || rolePreferencesLoading || rolePreferencesSaving || !selectedRolePreference}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                <Save className={`h-4 w-4 ${rolePreferencesSaving ? 'animate-pulse' : ''}`} />
+                Сохранить правила
+              </button>
+            </div>
+
+            {rolePreferencesLoading ? (
+              <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Загружаем ролевые правила...
+              </div>
+            ) : rolePreferences.length === 0 ? (
+              <div className="mt-4 rounded-xl border border-dashed border-gray-200 px-4 py-6 text-sm text-gray-500">
+                Роли пока не найдены.
+              </div>
+            ) : (
+              <div className="mt-5 grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
+                <div className="space-y-2">
+                  {rolePreferences.map((role) => (
+                    <button
+                      key={role.roleId}
+                      type="button"
+                      onClick={() => setSelectedRoleId(role.roleId)}
+                      className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                        selectedRolePreference?.roleId === role.roleId
+                          ? 'border-blue-200 bg-blue-50 text-blue-900'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">{role.roleName}</span>
+                      <span className="mt-1 block text-xs text-gray-500">
+                        {role.isSystemRole ? 'Системная роль' : 'Настраиваемая роль'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  {notificationTypes.map((item) => {
+                    const isEnabled = isUserNotificationTypeEnabled(selectedRolePreferences, item.key);
+                    const availableChannels = ROLE_CHANNEL_OPTIONS.filter((channel) => item.channels.includes(channel.value));
+                    return (
+                      <div
+                        key={item.key}
+                        className={`rounded-xl border p-3 transition ${
+                          isEnabled ? 'border-blue-200 bg-blue-50/60' : 'border-gray-200 bg-gray-50 text-gray-500'
+                        }`}
+                      >
+                        <label className="flex cursor-pointer gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            disabled={!canEdit || !selectedRolePreference}
+                            onChange={(event) => {
+                              updateSelectedRolePreferences((current) => toggleUserNotificationTypePreference(current, item.key, event.target.checked));
+                            }}
+                            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span>
+                            <span className="block text-sm font-semibold text-gray-900">{item.label}</span>
+                            <span className="mt-1 block text-xs leading-5 text-gray-500">{item.description}</span>
+                          </span>
+                        </label>
+                        <div className="mt-3 grid grid-cols-3 gap-2">
+                          {availableChannels.map(({ value, label, Icon }) => {
+                            const channelEnabled = isUserNotificationChannelEnabled(selectedRolePreferences, item.key, value);
+                            return (
+                              <label
+                                key={value}
+                                className={`flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-semibold transition ${
+                                  channelEnabled
+                                    ? 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                                    : 'border-gray-200 bg-gray-100 text-gray-400'
+                                } ${isEnabled && canEdit ? '' : 'cursor-not-allowed opacity-60'}`}
+                                title={`Канал: ${label}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={channelEnabled}
+                                  disabled={!canEdit || !isEnabled || !selectedRolePreference}
+                                  onChange={(event) => {
+                                    updateSelectedRolePreferences((current) => toggleUserNotificationChannelPreference(current, item.key, value, event.target.checked));
+                                  }}
+                                  className="sr-only"
+                                />
+                                <Icon className="h-3.5 w-3.5" />
+                                <span className="truncate">{label}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">

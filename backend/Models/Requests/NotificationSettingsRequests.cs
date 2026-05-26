@@ -45,6 +45,12 @@ public class IssuePasswordRequest
     public bool IncludePasswordInResponse { get; set; }
 }
 
+public class UpdateNotificationRolePreferencesRequest
+{
+    public List<string>? DisabledTypes { get; set; }
+    public Dictionary<string, List<string>>? DisabledChannels { get; set; }
+}
+
 public class UpsertNotificationSenderRequest
 {
     public string Channel { get; set; } = "email";

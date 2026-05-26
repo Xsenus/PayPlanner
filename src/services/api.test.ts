@@ -432,6 +432,49 @@ describe('apiService auth handling', () => {
     expect(init?.method).toBe('POST');
   });
 
+  it('loads and updates notification role preferences', async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify(
+      init?.method === 'PUT'
+        ? {
+          roleId: 2,
+          roleName: 'lawyer',
+          isSystemRole: false,
+          preferences: { disabledTypes: ['taskComment'], disabledChannels: { taskAssigned: ['email'] } },
+        }
+        : {
+          roles: [
+            {
+              roleId: 2,
+              roleName: 'lawyer',
+              isSystemRole: false,
+              preferences: { disabledTypes: [], disabledChannels: {} },
+            },
+          ],
+        },
+    ), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const loaded = await apiService.getNotificationRolePreferences();
+    const updated = await apiService.updateNotificationRolePreferences(2, {
+      disabledTypes: ['taskComment'],
+      disabledChannels: { taskAssigned: ['email'] },
+    });
+
+    expect(loaded.roles[0].roleName).toBe('lawyer');
+    expect(updated.preferences.disabledTypes).toEqual(['taskComment']);
+    const [getUrl] = fetchMock.mock.calls[0];
+    const [putUrl, putInit] = fetchMock.mock.calls[1];
+    expect(String(getUrl)).toContain('/notifications/role-preferences');
+    expect(String(putUrl)).toContain('/notifications/role-preferences/2');
+    expect(putInit?.method).toBe('PUT');
+    expect(putInit?.body).toBe(JSON.stringify({
+      disabledTypes: ['taskComment'],
+      disabledChannels: { taskAssigned: ['email'] },
+    }));
+  });
+
   it('emits a session-expired event when the API returns 401', async () => {
     const listener = vi.fn();
     window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);

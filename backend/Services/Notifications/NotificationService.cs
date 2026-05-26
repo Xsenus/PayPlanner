@@ -1296,8 +1296,8 @@ public sealed class NotificationService : INotificationService
         string type,
         CancellationToken cancellationToken)
     {
-        var setting = await GetUserNotificationPreferenceSettingAsync(recipientUserId, cancellationToken);
-        return UserNotificationPreferenceSettings.IsTypeEnabled(setting, type);
+        var preferences = await GetUserNotificationPreferencesAsync(recipientUserId, cancellationToken);
+        return UserNotificationPreferenceSettings.IsTypeEnabled(preferences, type);
     }
 
     private async Task<bool> IsUserNotificationChannelEnabledAsync(
@@ -1306,8 +1306,8 @@ public sealed class NotificationService : INotificationService
         string channel,
         CancellationToken cancellationToken)
     {
-        var setting = await GetUserNotificationPreferenceSettingAsync(recipientUserId, cancellationToken);
-        return UserNotificationPreferenceSettings.IsChannelEnabled(setting, type, channel);
+        var preferences = await GetUserNotificationPreferencesAsync(recipientUserId, cancellationToken);
+        return UserNotificationPreferenceSettings.IsChannelEnabled(preferences, type, channel);
     }
 
     private async Task<IReadOnlyList<string>> ResolveUserNotificationChannelsAsync(
@@ -1322,23 +1322,46 @@ public sealed class NotificationService : INotificationService
             return [];
         }
 
-        var setting = await GetUserNotificationPreferenceSettingAsync(recipientUserId, cancellationToken);
+        var preferences = await GetUserNotificationPreferencesAsync(recipientUserId, cancellationToken);
         return normalizedChannels
-            .Where(channel => UserNotificationPreferenceSettings.IsChannelEnabled(setting, type, channel))
+            .Where(channel => UserNotificationPreferenceSettings.IsChannelEnabled(preferences, type, channel))
             .ToList();
     }
 
-    private async Task<string?> GetUserNotificationPreferenceSettingAsync(
+    private async Task<UserNotificationPreferenceSnapshot> GetUserNotificationPreferencesAsync(
         int recipientUserId,
         CancellationToken cancellationToken)
     {
-        return await _context.UserSettings
+        var userSetting = await _context.UserSettings
             .AsNoTracking()
             .Where(item =>
                 item.UserId == recipientUserId
                 && item.Key == UserNotificationPreferenceSettings.SettingKey)
             .Select(item => item.Value)
             .FirstOrDefaultAsync(cancellationToken);
+        if (userSetting is not null)
+        {
+            return UserNotificationPreferenceSettings.Parse(userSetting);
+        }
+
+        var roleId = await _context.Users
+            .AsNoTracking()
+            .Where(user => user.Id == recipientUserId)
+            .Select(user => user.RoleId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (roleId <= 0)
+        {
+            return UserNotificationPreferenceSettings.Empty;
+        }
+
+        var roleSetting = await _context.SystemSettings
+            .AsNoTracking()
+            .Where(item => item.Key == RoleNotificationPreferenceSettings.SettingKey)
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return RoleNotificationPreferenceSettings.ParseForRole(roleSetting, roleId)
+               ?? UserNotificationPreferenceSettings.Empty;
     }
 
     private async Task<IReadOnlyList<NotificationSenderTarget>> ResolveSenderTargetsAsync(

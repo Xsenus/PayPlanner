@@ -398,6 +398,22 @@ export interface UserNotificationBulkActionResultDto {
   updatedCount: number;
 }
 
+export interface UserNotificationPreferenceDto {
+  disabledTypes: string[];
+  disabledChannels: Record<string, string[]>;
+}
+
+export interface NotificationRolePreferenceDto {
+  roleId: number;
+  roleName: string;
+  isSystemRole: boolean;
+  preferences: UserNotificationPreferenceDto;
+}
+
+export interface NotificationRolePreferencesDto {
+  roles: NotificationRolePreferenceDto[];
+}
+
 export interface UserNotificationsQuery {
   status?: 'active' | 'unread' | 'read' | 'archived' | 'all' | string;
   type?: string;
@@ -1671,6 +1687,17 @@ export class ApiService {
   async resetNotificationTemplate(key: string) {
     return this.request<NotificationTemplateDto>(`/notifications/templates/${encodeURIComponent(key)}/reset`, {
       method: 'POST',
+    });
+  }
+
+  async getNotificationRolePreferences() {
+    return this.request<NotificationRolePreferencesDto>('/notifications/role-preferences');
+  }
+
+  async updateNotificationRolePreferences(roleId: number, payload: UserNotificationPreferenceDto) {
+    return this.request<NotificationRolePreferenceDto>(`/notifications/role-preferences/${roleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     });
   }
 

@@ -18,6 +18,9 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class NotificationsController : ControllerBase
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string SystemAdministratorRoleName = "admin";
+
     private readonly PaymentContext _context;
     private readonly INotificationService _notificationService;
     private readonly ITelegramBotUpdateService _telegramBotUpdateService;
@@ -96,6 +99,112 @@ public class NotificationsController : ControllerBase
         {
             return NotFound();
         }
+    }
+
+    [HttpGet("role-preferences")]
+    public async Task<ActionResult<NotificationRolePreferencesDto>> GetRolePreferences(CancellationToken ct)
+    {
+        if (!await CanViewNotificationSettingsAsync(ct)) return Forbid();
+
+        var rawValue = await _context.SystemSettings
+            .AsNoTracking()
+            .Where(item => item.Key == RoleNotificationPreferenceSettings.SettingKey)
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(ct);
+        var preferencesByRole = RoleNotificationPreferenceSettings.Parse(rawValue);
+
+        var roles = await _context.Roles
+            .AsNoTracking()
+            .OrderBy(item => item.Name)
+            .Select(item => new
+            {
+                item.Id,
+                item.Name,
+                IsSystemRole = item.Name == SystemAdministratorRoleName
+            })
+            .ToListAsync(ct);
+
+        return Ok(new NotificationRolePreferencesDto
+        {
+            Roles = roles
+                .Select(role => new NotificationRolePreferenceDto
+                {
+                    RoleId = role.Id,
+                    RoleName = role.Name,
+                    IsSystemRole = role.IsSystemRole,
+                    Preferences = MapPreferences(
+                        preferencesByRole.TryGetValue(role.Id, out var preferences)
+                            ? preferences
+                            : UserNotificationPreferenceSettings.Empty)
+                })
+                .ToList()
+        });
+    }
+
+    [HttpPut("role-preferences/{roleId:int}")]
+    public async Task<ActionResult<NotificationRolePreferenceDto>> UpdateRolePreferences(
+        int roleId,
+        [FromBody] UpdateNotificationRolePreferencesRequest request,
+        CancellationToken ct)
+    {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
+
+        var role = await _context.Roles
+            .AsNoTracking()
+            .Where(item => item.Id == roleId)
+            .Select(item => new
+            {
+                item.Id,
+                item.Name,
+                IsSystemRole = item.Name == SystemAdministratorRoleName
+            })
+            .FirstOrDefaultAsync(ct);
+        if (role is null)
+        {
+            return NotFound();
+        }
+
+        var setting = await _context.SystemSettings
+            .FirstOrDefaultAsync(item => item.Key == RoleNotificationPreferenceSettings.SettingKey, ct);
+        var preferencesByRole = RoleNotificationPreferenceSettings.Parse(setting?.Value)
+            .ToDictionary(item => item.Key, item => item.Value);
+        var nextPreferences = NormalizePreferences(request);
+        if (nextPreferences.DisabledTypes.Count == 0 && nextPreferences.DisabledChannels.Count == 0)
+        {
+            preferencesByRole.Remove(role.Id);
+        }
+        else
+        {
+            preferencesByRole[role.Id] = nextPreferences;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        var nextValue = RoleNotificationPreferenceSettings.Serialize(preferencesByRole);
+        if (setting is null)
+        {
+            _context.SystemSettings.Add(new SystemSetting
+            {
+                Key = RoleNotificationPreferenceSettings.SettingKey,
+                Value = nextValue,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc
+            });
+        }
+        else
+        {
+            setting.Value = nextValue;
+            setting.UpdatedAt = nowUtc;
+        }
+
+        await _context.SaveChangesAsync(ct);
+
+        return Ok(new NotificationRolePreferenceDto
+        {
+            RoleId = role.Id,
+            RoleName = role.Name,
+            IsSystemRole = role.IsSystemRole,
+            Preferences = MapPreferences(nextPreferences)
+        });
     }
 
     [HttpPost("senders")]
@@ -492,6 +601,28 @@ public class NotificationsController : ControllerBase
             ? new NotificationRecipient(null, request.TelegramChatId.Value.ToString(), null, request.TelegramChatId.Value)
             : null;
     }
+
+    private static UserNotificationPreferenceSnapshot NormalizePreferences(UpdateNotificationRolePreferencesRequest request)
+    {
+        var rawValue = JsonSerializer.Serialize(new
+        {
+            disabledTypes = request.DisabledTypes ?? [],
+            disabledChannels = request.DisabledChannels ?? new Dictionary<string, List<string>>()
+        }, JsonOptions);
+
+        return UserNotificationPreferenceSettings.Parse(rawValue);
+    }
+
+    private static UserNotificationPreferenceDto MapPreferences(UserNotificationPreferenceSnapshot preferences)
+        => new()
+        {
+            DisabledTypes = preferences.DisabledTypes.ToList(),
+            DisabledChannels = preferences.DisabledChannels
+                .ToDictionary(
+                    item => item.Key,
+                    item => (IReadOnlyList<string>)item.Value.ToList(),
+                    StringComparer.OrdinalIgnoreCase)
+        };
 
     private static List<string> NormalizeChannels(IEnumerable<string>? channels)
         => (channels ?? [])

@@ -84,6 +84,25 @@ public class UserNotificationBulkActionResultDto
     public int UpdatedCount { get; set; }
 }
 
+public class NotificationRolePreferencesDto
+{
+    public IReadOnlyList<NotificationRolePreferenceDto> Roles { get; set; } = Array.Empty<NotificationRolePreferenceDto>();
+}
+
+public class NotificationRolePreferenceDto
+{
+    public int RoleId { get; set; }
+    public string RoleName { get; set; } = string.Empty;
+    public bool IsSystemRole { get; set; }
+    public UserNotificationPreferenceDto Preferences { get; set; } = new();
+}
+
+public class UserNotificationPreferenceDto
+{
+    public IReadOnlyList<string> DisabledTypes { get; set; } = Array.Empty<string>();
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> DisabledChannels { get; set; } = new Dictionary<string, IReadOnlyList<string>>();
+}
+
 public class SendNotificationTestResponseDto
 {
     public bool Success { get; set; }
