@@ -34,7 +34,24 @@ type FormState = {
 };
 
 function todayInputDate() {
-  return new Date().toISOString().slice(0, 10);
+  return toDateTimeLocalInput(new Date());
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function toDateTimeLocalInput(date: Date) {
+  return [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate()),
+  ].join('-')
+    + `T${[
+      padDatePart(date.getHours()),
+      padDatePart(date.getMinutes()),
+      padDatePart(date.getSeconds()),
+    ].join(':')}`;
 }
 
 function emptyForm(): FormState {
@@ -50,12 +67,12 @@ function emptyForm(): FormState {
   };
 }
 
-function toInputDate(value: string) {
+function toInputDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return value.slice(0, 10);
+    return value.slice(0, 19);
   }
-  return date.toISOString().slice(0, 10);
+  return toDateTimeLocalInput(date);
 }
 
 function toForm(release: AppReleaseAdminDto): FormState {
@@ -69,7 +86,7 @@ function toForm(release: AppReleaseAdminDto): FormState {
     id: release.id,
     releaseId: release.releaseId,
     version: release.version,
-    releasedAt: toInputDate(release.releasedAt),
+    releasedAt: toInputDateTime(release.releasedAt),
     title: release.title,
     summary: release.summary,
     isActive: release.isActive,
@@ -88,10 +105,14 @@ function splitItems(items: ItemDrafts): AppReleaseItemDto[] {
 }
 
 function toPayload(form: FormState): SaveAppReleaseRequest {
+  const releasedAt = form.releasedAt.includes('T')
+    ? form.releasedAt
+    : `${form.releasedAt}T00:00:00`;
+
   return {
     releaseId: form.releaseId.trim(),
     version: form.version.trim(),
-    releasedAt: `${form.releasedAt}T00:00:00`,
+    releasedAt,
     title: form.title.trim(),
     summary: form.summary.trim(),
     isActive: form.isActive,
@@ -321,9 +342,10 @@ export function AppVersionSettings() {
             />
           </label>
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Дата релиза</span>
+            <span className="text-sm font-medium text-slate-700">Дата и время релиза</span>
             <input
-              type="date"
+              type="datetime-local"
+              step={1}
               value={form.releasedAt}
               onChange={(event) => setForm((current) => ({ ...current, releasedAt: event.target.value }))}
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"

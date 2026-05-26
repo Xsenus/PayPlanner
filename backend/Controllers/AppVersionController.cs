@@ -22,8 +22,13 @@ public sealed class AppVersionController : ControllerBase
     };
 
     private readonly PaymentContext _db;
+    private readonly TimeProvider _timeProvider;
 
-    public AppVersionController(PaymentContext db) => _db = db;
+    public AppVersionController(PaymentContext db, TimeProvider? timeProvider = null)
+    {
+        _db = db;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
 
     [HttpGet("latest")]
     public async Task<ActionResult<AppVersionLatestResponse>> GetLatest(CancellationToken ct)
@@ -31,7 +36,7 @@ public sealed class AppVersionController : ControllerBase
         var userId = User.GetUserId();
         if (userId is null) return Unauthorized();
 
-        var release = await GetActiveReleaseQuery()
+        var release = await GetPublishedActiveReleaseQuery()
             .FirstOrDefaultAsync(ct);
 
         if (release is null)
@@ -61,7 +66,7 @@ public sealed class AppVersionController : ControllerBase
     [HttpGet("history")]
     public async Task<ActionResult<IReadOnlyCollection<AppReleaseDto>>> GetHistory(CancellationToken ct)
     {
-        var releases = await GetActiveReleaseQuery().ToArrayAsync(ct);
+        var releases = await GetPublishedActiveReleaseQuery().ToArrayAsync(ct);
         return Ok(releases.Select(MapRelease).ToArray());
     }
 
@@ -196,13 +201,17 @@ public sealed class AppVersionController : ControllerBase
         return NoContent();
     }
 
-    private IQueryable<AppRelease> GetActiveReleaseQuery()
-        => _db.AppReleases
+    private IQueryable<AppRelease> GetPublishedActiveReleaseQuery()
+    {
+        var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
+
+        return _db.AppReleases
             .AsNoTracking()
             .Include(release => release.Items)
-            .Where(release => release.IsActive)
+            .Where(release => release.IsActive && release.ReleasedAt <= nowUtc)
             .OrderByDescending(release => release.ReleasedAt)
             .ThenByDescending(release => release.Id);
+    }
 
     private static string? ValidateRequest(SaveAppReleaseRequest request)
     {

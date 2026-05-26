@@ -72,6 +72,45 @@ public sealed class AppVersionControllerTests
     }
 
     [Fact]
+    public async Task GetLatest_IgnoresActiveReleaseScheduledForFuture()
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "future-release@example.test");
+        var controller = CreateController(
+            scope.Db,
+            user.Id,
+            new FixedTimeProvider(new DateTimeOffset(2026, 5, 26, 12, 0, 0, TimeSpan.Zero)),
+            Release("2026-05-26-published", releasedAt: new DateTime(2026, 5, 26, 10, 0, 0)),
+            Release("2026-05-27-future", releasedAt: new DateTime(2026, 5, 27, 10, 0, 0)));
+
+        var result = await controller.GetLatest(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AppVersionLatestResponse>(ok.Value);
+        Assert.Equal("2026-05-26-published", payload.LatestRelease?.ReleaseId);
+    }
+
+    [Fact]
+    public async Task GetHistory_IgnoresActiveReleaseScheduledForFuture()
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "future-history@example.test");
+        var controller = CreateController(
+            scope.Db,
+            user.Id,
+            new FixedTimeProvider(new DateTimeOffset(2026, 5, 26, 12, 0, 0, TimeSpan.Zero)),
+            Release("2026-05-26-published", releasedAt: new DateTime(2026, 5, 26, 10, 0, 0)),
+            Release("2026-05-27-future", releasedAt: new DateTime(2026, 5, 27, 10, 0, 0)));
+
+        var result = await controller.GetHistory(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsAssignableFrom<IReadOnlyCollection<AppReleaseDto>>(ok.Value);
+        var release = Assert.Single(payload);
+        Assert.Equal("2026-05-26-published", release.ReleaseId);
+    }
+
+    [Fact]
     public async Task MarkSeen_IsStoredPerUser()
     {
         await using var scope = await CreateScopeAsync();
@@ -220,6 +259,9 @@ public sealed class AppVersionControllerTests
     }
 
     private static AppVersionController CreateController(PaymentContext db, int userId, params AppRelease[] releases)
+        => CreateController(db, userId, TimeProvider.System, releases);
+
+    private static AppVersionController CreateController(PaymentContext db, int userId, TimeProvider timeProvider, params AppRelease[] releases)
     {
         foreach (var release in releases)
         {
@@ -230,7 +272,7 @@ public sealed class AppVersionControllerTests
         }
         db.SaveChanges();
 
-        var controller = new AppVersionController(db);
+        var controller = new AppVersionController(db, timeProvider);
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -297,5 +339,10 @@ public sealed class AppVersionControllerTests
             await Db.DisposeAsync();
             await connection.DisposeAsync();
         }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now.ToUniversalTime();
     }
 }
