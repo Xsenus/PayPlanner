@@ -30,6 +30,13 @@ public class NotificationInboxControllerTests
         Assert.Contains(NotificationChannels.InApp, approval.Channels);
         Assert.True(approval.Deduplicate);
         Assert.False(approval.Digestible);
+
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtHearing && item.Priority == "high");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtStatusChanged && item.Priority == "high");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtDecisionPublished && item.Priority == "high");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtSyncFailed && item.Tone == "rose");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CaseInactivityReminder && item.Priority == "high");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.SystemAdminWarning && item.Tone == "rose");
     }
 
     [Fact]

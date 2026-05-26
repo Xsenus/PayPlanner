@@ -100,8 +100,14 @@ public static class UserNotificationTypes
     public const string CaseAccessRequested = "caseAccessRequested";
     public const string CaseAccessResolved = "caseAccessResolved";
     public const string CaseCourtEvent = "caseCourtEvent";
+    public const string CourtHearing = "courtHearing";
+    public const string CourtStatusChanged = "courtStatusChanged";
+    public const string CourtDecisionPublished = "courtDecisionPublished";
+    public const string CourtSyncFailed = "courtSyncFailed";
     public const string CaseProceduralDeadline = "caseProceduralDeadline";
     public const string CaseDocument = "caseDocument";
+    public const string CaseInactivityReminder = "caseInactivityReminder";
+    public const string SystemAdminWarning = "systemAdminWarning";
 
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
     [
@@ -118,8 +124,14 @@ public static class UserNotificationTypes
         new(CaseAccessRequested, "Запрос доступа к делу", "Исполнитель запросил доступ к скрытому делу.", "violet", "high", NotificationChannels.All, false, false),
         new(CaseAccessResolved, "Решение по доступу к делу", "Руководитель разрешил или отклонил доступ к скрытому делу.", "emerald", "normal", NotificationChannels.All, false, false),
         new(CaseCourtEvent, "Судебное событие", "По делу добавлено или обновлено судебное заседание, движение или судебный акт.", "cyan", "high", NotificationChannels.All, false, false),
+        new(CourtHearing, "Судебное заседание", "Назначено, перенесено или обновлено судебное заседание по делу.", "cyan", "high", NotificationChannels.All, true, false),
+        new(CourtStatusChanged, "Изменение судебного статуса", "Изменился статус судебного производства или движение дела в суде.", "blue", "high", NotificationChannels.All, true, false),
+        new(CourtDecisionPublished, "Публикация решения", "По делу опубликовано решение, определение или другой судебный акт.", "emerald", "high", NotificationChannels.All, true, false),
+        new(CourtSyncFailed, "Ошибка судебной синхронизации", "Судебный источник не удалось проверить или обновить автоматически.", "rose", "high", NotificationChannels.All, true, false),
         new(CaseProceduralDeadline, "Процессуальный срок", "По делу добавлен, перенесен, закрыт или приближается процессуальный срок.", "amber", "high", NotificationChannels.All, false, false),
-        new(CaseDocument, "Документы дела", "По делу загружен, сформирован, обновлен или удален документ.", "emerald", "normal", NotificationChannels.All, false, false)
+        new(CaseDocument, "Документы дела", "По делу загружен, сформирован, обновлен или удален документ.", "emerald", "normal", NotificationChannels.All, false, false),
+        new(CaseInactivityReminder, "Напоминание о неактивности", "По делу давно не было значимой активности, требуется проверка ответственного.", "amber", "high", NotificationChannels.All, true, false),
+        new(SystemAdminWarning, "Системное предупреждение", "Администраторам требуется обратить внимание на фоновый процесс, интеграцию или настройку.", "rose", "high", NotificationChannels.All, true, false)
     ];
 
     public static bool IsKnown(string? value)
