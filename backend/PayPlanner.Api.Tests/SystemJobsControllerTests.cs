@@ -401,6 +401,65 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
+    public async Task TaskReminderService_BackfillsUpcomingCaseDeadlineTasks()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        var role = new Role { Name = $"deadline-role-{Guid.NewGuid():N}", Description = "Deadline role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var responsible = new User
+        {
+            Email = $"deadline-user-{Guid.NewGuid():N}@example.com",
+            FullName = "Deadline Owner",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        var client = new Client { Name = "Deadline client" };
+        scope.Db.Users.Add(responsible);
+        scope.Db.Clients.Add(client);
+        await scope.Db.SaveChangesAsync();
+        scope.Db.ClientCases.Add(new ClientCase
+        {
+            ClientId = client.Id,
+            ResponsibleUserId = responsible.Id,
+            CaseNumber = "CASE-DEADLINE-1",
+            Title = "Case with deadline",
+            Status = ClientCaseStatus.Open,
+            DueDate = now.AddDays(8),
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new TaskJournalReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Notifications:TaskReminders:DeadlineSyncLookAheadDays"] = "14",
+                    ["Notifications:TaskReminders:DeadlineSyncBatchSize"] = "10",
+                })
+                .Build(),
+            NullLogger<TaskJournalReminderNotificationService>.Instance);
+
+        var sent = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(0, sent);
+        scope.Db.ChangeTracker.Clear();
+        var deadlineTask = await scope.Db.TaskJournalItems
+            .AsNoTracking()
+            .SingleAsync(task => task.TagsJson.Contains("case-deadline:due"));
+        Assert.Equal(responsible.Id, deadlineTask.AssigneeUserId);
+        Assert.Contains("before7d", deadlineTask.RemindersJson);
+        Assert.Contains("dailyOverdue", deadlineTask.RemindersJson);
+        Assert.Contains("inApp", deadlineTask.ChannelsJson);
+    }
+
+    [Fact]
     public async Task SystemJobRunStateService_RoundTripsLastRunState()
     {
         await using var scope = await CreateDbScopeAsync();

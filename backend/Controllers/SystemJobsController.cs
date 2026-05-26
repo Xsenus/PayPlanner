@@ -354,7 +354,7 @@ public sealed class SystemJobsController : ControllerBase
             PendingCount = pendingCount,
             LastActivityAt = lastReminder?.CreatedAt,
             LastActivityDescription = lastReminder?.Subject,
-            NextRunHint = enabled ? "Сервис проверяет задачи с напоминаниями на ближайшие 7 дней." : "Отправка напоминаний выключена в конфигурации.",
+            NextRunHint = enabled ? "Сервис проверяет задачи с напоминаниями на ближайшие 7 дней и подтягивает ближайшие сроки дел в контрольные задачи." : "Отправка напоминаний выключена в конфигурации.",
             ManualRunEnabled = enabled,
             ManualRunHint = enabled ? "Можно вручную проверить и отправить наступившие напоминания." : "Ручной запуск недоступен, пока напоминания по задачам выключены.",
         };

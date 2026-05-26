@@ -15,6 +15,8 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
         NotificationChannels.Email,
         NotificationChannels.Telegram
     };
+    private const int DefaultDeadlineSyncLookAheadDays = 7;
+    private const int DefaultDeadlineSyncBatchSize = 100;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
@@ -86,8 +88,8 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
         {
             using var scope = _scopeFactory.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-            var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
             var nowUtc = DateTime.UtcNow;
+            await SyncUpcomingCaseDeadlineTasksAsync(context, nowUtc, cancellationToken);
 
             var tasks = await context.TaskJournalItems
                 .AsNoTracking()
@@ -99,7 +101,12 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                 .OrderBy(task => task.DueAt)
                 .Take(500)
                 .ToListAsync(cancellationToken);
+            if (tasks.Count == 0)
+            {
+                return 0;
+            }
 
+            var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
             foreach (var task in tasks)
             {
                 var channels = DeserializeList(task.ChannelsJson);
@@ -137,6 +144,56 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
         }
 
         return -1;
+    }
+
+    private async Task<int> SyncUpcomingCaseDeadlineTasksAsync(
+        PaymentContext context,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var lookAheadDays = Math.Clamp(
+            _configuration.GetValue("Notifications:TaskReminders:DeadlineSyncLookAheadDays", DefaultDeadlineSyncLookAheadDays),
+            1,
+            90);
+        var batchSize = Math.Clamp(
+            _configuration.GetValue("Notifications:TaskReminders:DeadlineSyncBatchSize", DefaultDeadlineSyncBatchSize),
+            1,
+            500);
+        var fromUtc = nowUtc.AddDays(-1);
+        var toUtc = nowUtc.AddDays(lookAheadDays);
+        var caseIds = await context.ClientCases
+            .AsNoTracking()
+            .Where(clientCase =>
+                clientCase.Status != ClientCaseStatus.Closed &&
+                clientCase.Status != ClientCaseStatus.Lost &&
+                ((clientCase.DueDate.HasValue && clientCase.DueDate.Value >= fromUtc && clientCase.DueDate.Value <= toUtc) ||
+                 (clientCase.NextHearingAt.HasValue && clientCase.NextHearingAt.Value >= fromUtc && clientCase.NextHearingAt.Value <= toUtc) ||
+                 (clientCase.AppealDeadlineAt.HasValue && clientCase.AppealDeadlineAt.Value >= fromUtc && clientCase.AppealDeadlineAt.Value <= toUtc) ||
+                 (clientCase.CassationDeadlineAt.HasValue && clientCase.CassationDeadlineAt.Value >= fromUtc && clientCase.CassationDeadlineAt.Value <= toUtc) ||
+                 (clientCase.MotionDeadlineAt.HasValue && clientCase.MotionDeadlineAt.Value >= fromUtc && clientCase.MotionDeadlineAt.Value <= toUtc) ||
+                 (clientCase.ObjectionDeadlineAt.HasValue && clientCase.ObjectionDeadlineAt.Value >= fromUtc && clientCase.ObjectionDeadlineAt.Value <= toUtc) ||
+                 clientCase.ProceduralDeadlines.Any(deadline =>
+                     deadline.Status != "closed" &&
+                     deadline.Status != "cancelled" &&
+                     deadline.DueAt >= fromUtc &&
+                     deadline.DueAt <= toUtc)))
+            .OrderBy(clientCase => clientCase.Id)
+            .Select(clientCase => clientCase.Id)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+
+        foreach (var caseId in caseIds)
+        {
+            await ClientCaseDeadlineTaskSyncService.SyncAsync(
+                context,
+                caseId,
+                actorUserId: null,
+                actorName: "Система",
+                cancellationToken);
+            context.ChangeTracker.Clear();
+        }
+
+        return caseIds.Count;
     }
 
     private static bool IsReminderDue(TaskJournalItem task, string reminderKey, DateTime nowUtc)
