@@ -26,6 +26,7 @@ const OBJECT_TYPE_OPTIONS = [
   'client',
   'client-case',
   'client-case-document',
+  'calendar-sync',
   'payment',
   'invoice',
   'invoice-line-item',
@@ -44,7 +45,7 @@ const OBJECT_TYPE_OPTIONS = [
   'task-journal-item',
 ] as const;
 
-const ACTION_OPTIONS = ['all', 'created', 'updated', 'deleted', 'restored', 'datarepair'] as const;
+const ACTION_OPTIONS = ['all', 'created', 'updated', 'deleted', 'restored', 'downloaded', 'exported', 'datarepair'] as const;
 
 function formatDateTime(value?: string | null) {
   if (!value) {

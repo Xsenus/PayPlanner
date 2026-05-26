@@ -1548,6 +1548,16 @@ public class CasesV2ControllerTests
         Assert.DoesNotContain("TRIGGER:-PT1H", ics, StringComparison.Ordinal);
         Assert.DoesNotContain("TRIGGER:-PT15M", ics, StringComparison.Ordinal);
         Assert.Contains("DESCRIPTION:Напоминание: Подготовить позицию", ics, StringComparison.Ordinal);
+        var auditEvent = await db.ObjectAuditEvents.SingleAsync(item => item.ObjectType == CalendarExportAudit.ObjectType);
+        Assert.Equal(CalendarExportAudit.ExportedAction, auditEvent.Action);
+        Assert.Equal(owner.Id, auditEvent.ActorUserId);
+        Assert.Contains("ICS-календарь дел", auditEvent.Description);
+        using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        Assert.Equal("cases", metadata.RootElement.GetProperty("calendarKind").GetString());
+        Assert.Equal(3, metadata.RootElement.GetProperty("exportedEventCount").GetInt32());
+        Assert.Equal(120, metadata.RootElement.GetProperty("reminderMinutes")[0].GetInt32());
+        Assert.Equal(30, metadata.RootElement.GetProperty("reminderMinutes")[1].GetInt32());
+        Assert.True(metadata.RootElement.GetProperty("filters").GetProperty("includeTasks").GetBoolean());
     }
 
     [Fact]

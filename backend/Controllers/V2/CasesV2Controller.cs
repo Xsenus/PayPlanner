@@ -1785,6 +1785,22 @@ public class CasesV2Controller : ControllerBase
 
         var reminders = IcsReminderOptions.Normalize(reminderMinutes);
         var events = await QueryCaseCalendarEventsAsync(visibility, fromDate, toDate, clientCaseId, responsibleUserId, includeTasks, ct);
+        _db.ObjectAuditEvents.Add(CalendarExportAudit.CreateExportEvent(
+            User,
+            "cases",
+            $"Выгружен ICS-календарь дел: {events.Count} событий.",
+            events.Count,
+            reminders,
+            new
+            {
+                from = fromDate,
+                to = toDate,
+                clientCaseId,
+                responsibleUserId,
+                includeTasks,
+            }));
+        await _db.SaveChangesAsync(ct);
+
         return File(
             Encoding.UTF8.GetBytes(BuildCaseCalendarIcs(events, reminders)),
             "text/calendar; charset=utf-8",

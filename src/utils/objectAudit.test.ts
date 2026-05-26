@@ -100,7 +100,9 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditActionLabel('DataRepair')).toBe('Исправление данных');
     expect(getObjectAuditActionLabel('Automation')).toBe('Автоконтроль');
     expect(getObjectAuditActionLabel('Downloaded')).toBe('Скачивание');
+    expect(getObjectAuditActionLabel('Exported')).toBe('Экспорт');
     expect(getObjectAuditTypeLabel('task-journal-item')).toBe('Задача');
+    expect(getObjectAuditTypeLabel('calendar-sync')).toBe('Синхронизация календаря');
     expect(getObjectAuditTypeLabel('invoice-line-item')).toBe('Позиция счета');
     expect(getObjectAuditTypeLabel('client-case-document')).toBe('Документ дела');
     expect(getObjectAuditTypeLabel('client-case-work-order')).toBe('Заказ-наряд');

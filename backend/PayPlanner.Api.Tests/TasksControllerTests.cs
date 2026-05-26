@@ -1339,6 +1339,16 @@ public class TasksControllerTests
         Assert.Contains("DESCRIPTION:Напоминание: Проверить документы", content);
         Assert.Contains("TRIGGER:-PT1H", content);
         Assert.Contains("TRIGGER:-PT15M", content);
+
+        var auditEvent = await db.ObjectAuditEvents.SingleAsync(item => item.ObjectType == CalendarExportAudit.ObjectType);
+        Assert.Equal(CalendarExportAudit.ExportedAction, auditEvent.Action);
+        Assert.Equal(author.Id, auditEvent.ActorUserId);
+        Assert.Contains("ICS-календарь задач", auditEvent.Description);
+        using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        Assert.Equal("tasks", metadata.RootElement.GetProperty("calendarKind").GetString());
+        Assert.Equal(1, metadata.RootElement.GetProperty("exportedEventCount").GetInt32());
+        Assert.Equal(60, metadata.RootElement.GetProperty("reminderMinutes")[0].GetInt32());
+        Assert.Equal(15, metadata.RootElement.GetProperty("reminderMinutes")[1].GetInt32());
     }
 
     [Fact]

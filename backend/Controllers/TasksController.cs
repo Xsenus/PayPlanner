@@ -446,6 +446,19 @@ public class TasksController : ControllerBase
 
         var reminders = IcsReminderOptions.Normalize(reminderMinutes);
         var calendar = BuildIcsCalendar(tasks, reminders);
+        _db.ObjectAuditEvents.Add(CalendarExportAudit.CreateExportEvent(
+            User,
+            "tasks",
+            $"Выгружен ICS-календарь задач: {tasks.Count} событий.",
+            tasks.Count,
+            reminders,
+            new
+            {
+                from,
+                to,
+            }));
+        await _db.SaveChangesAsync(ct);
+
         return File(
             Encoding.UTF8.GetBytes(calendar),
             "text/calendar; charset=utf-8",

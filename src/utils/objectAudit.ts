@@ -258,6 +258,7 @@ const OBJECT_TYPE_LABELS: Record<string, string> = {
   client: 'Клиент',
   'client-case': 'Дело',
   'client-case-document': 'Документ дела',
+  'calendar-sync': 'Синхронизация календаря',
   'client-case-work-order': 'Заказ-наряд',
   'client-case-work-order-item': 'Услуга заказ-наряда',
   'client-case-related-party': 'Связанное лицо дела',
@@ -467,6 +468,8 @@ export function getObjectAuditActionLabel(action?: string | null): string {
       return 'Удаление';
     case 'downloaded':
       return 'Скачивание';
+    case 'exported':
+      return 'Экспорт';
     case 'restored':
       return 'Восстановление';
     case 'automation':
@@ -489,6 +492,8 @@ export function getObjectAuditActionTone(action?: string | null): string {
       return 'border-rose-200 bg-rose-50 text-rose-700';
     case 'downloaded':
       return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+    case 'exported':
+      return 'border-indigo-200 bg-indigo-50 text-indigo-700';
     case 'restored':
       return 'border-teal-200 bg-teal-50 text-teal-700';
     case 'automation':
