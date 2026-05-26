@@ -63,6 +63,7 @@ public class TasksController : ControllerBase
     ];
     private static readonly ClientCaseStatus[] FinishedCaseStatuses =
     [
+        ClientCaseStatus.OnHold,
         ClientCaseStatus.Closed,
         ClientCaseStatus.Lost,
     ];

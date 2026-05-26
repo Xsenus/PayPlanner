@@ -23,6 +23,10 @@ public sealed class SystemJobsController : ControllerBase
     private const string CaseControlInactiveDaysKey = "tasks.automation.caseControl.inactiveDays";
     private const string CaseControlLimitKey = "tasks.automation.caseControl.limit";
     private const string UserActivityRetentionDaysKey = "user-activity.retention-days";
+    private static readonly HashSet<string> CaseControlActiveTaskStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
+    };
 
     private readonly PaymentContext _db;
     private readonly IConfiguration _configuration;
@@ -206,7 +210,7 @@ public sealed class SystemJobsController : ControllerBase
                 case SystemJobKeys.CaseInactivityControl:
                     EnsureRunner(_caseControlRunner);
                     var caseControlResult = await _caseControlRunner!.RunOnceAsync(ct);
-                    processedCount = caseControlResult.CreatedCount;
+                    processedCount = caseControlResult.CreatedCount + caseControlResult.EscalatedCount;
                     skippedCount = caseControlResult.SkippedCount;
                     if (!string.IsNullOrWhiteSpace(caseControlResult.Error))
                     {
@@ -215,7 +219,7 @@ public sealed class SystemJobsController : ControllerBase
 
                     summary = caseControlResult.Enabled
                         ? processedCount > 0
-                            ? $"Создано контрольных задач по неактивным делам: {processedCount}."
+                            ? $"Автоконтроль неактивных дел обработал записей: {processedCount}. Новых задач: {caseControlResult.CreatedCount}, повторных эскалаций: {caseControlResult.EscalatedCount}."
                             : "Проверка неактивных дел выполнена, новые контрольные задачи не требовались."
                         : "Автоконтроль неактивных дел выключен в настройках.";
                     break;
@@ -540,7 +544,10 @@ public sealed class SystemJobsController : ControllerBase
                     clientCase.Status == ClientCaseStatus.Open &&
                     clientCase.InactivityRemindersEnabled &&
                     (clientCase.LastViewedAt ?? clientCase.CreatedAt) <= cutoff &&
-                    (clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) <= cutoff,
+                    (clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) <= cutoff &&
+                    !_db.TaskJournalItems.Any(task =>
+                        task.ClientCaseId == clientCase.Id &&
+                        CaseControlActiveTaskStatuses.Contains(task.Status)),
                     ct)
             : 0;
 

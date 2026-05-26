@@ -1142,6 +1142,111 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_RepeatsEscalationForOpenControlTask()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "repeat-escalation-assignee@example.com", "Ответственный дела");
+        var escalationUser = await CreateAdminUserAsync(db, "repeat-escalation-manager@example.com", "Руководитель");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = assignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "БАНКРОТСТВО");
+        var now = DateTime.UtcNow;
+        clientCase.CreatedAt = now.AddDays(-40);
+        var task = await CreateTaskAsync(
+            db,
+            assignee.Id,
+            client.Id,
+            assigneeUserId: assignee.Id,
+            clientCaseId: clientCase.Id,
+            status: "new",
+            createdAt: now.AddDays(-3));
+        task.Type = "control";
+        task.Title = "Проверить движение по делу";
+        task.Priority = "normal";
+        task.TagsJson = "[\"автоконтроль\"]";
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = assignee.Id,
+            Role = "assignee",
+            DisplayName = assignee.FullName,
+            Email = assignee.Email,
+            ApprovalStatus = "pending",
+            CreatedAt = now.AddDays(-3),
+            UpdatedAt = now.AddDays(-3),
+        });
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:EscalationDays"] = "30",
+            ["TaskJournal:Automation:EscalationUserId"] = escalationUser.Id.ToString(),
+            ["TaskJournal:Automation:Limit"] = "10",
+        }, notifications);
+
+        using (provider)
+        {
+            var firstRun = await scheduler.RunOnceAsync(CancellationToken.None);
+            var secondRun = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Equal(0, firstRun.CreatedCount);
+            Assert.Equal(1, firstRun.EscalatedCount);
+            Assert.Equal(0, secondRun.CreatedCount);
+            Assert.Equal(0, secondRun.EscalatedCount);
+            Assert.Null(firstRun.Error);
+            Assert.Null(secondRun.Error);
+        }
+
+        var updatedTask = await db.TaskJournalItems
+            .Include(item => item.Participants)
+            .Include(item => item.Comments)
+            .SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("urgent", updatedTask.Priority);
+        Assert.Contains(updatedTask.Participants, item => item.Role == "observer" && item.UserId == escalationUser.Id);
+        Assert.Single(updatedTask.Comments, item =>
+            item.Kind == "system" &&
+            item.MetadataJson.Contains("caseInactivityControlEscalation") &&
+            item.MetadataJson.Contains("\"offsetDays\":2"));
+        var changedTask = Assert.Single(notifications.ChangedTasks);
+        Assert.Equal(task.Id, changedTask.TaskId);
+        Assert.Contains("Повторная эскалация автоконтроля", changedTask.ChangeLabels.Single());
+    }
+
+    [Fact]
+    public async Task TaskJournalAutomationScheduler_SkipsPausedAndApprovedTaskCases()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "paused-approved-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        client.ResponsibleUserId = author.Id;
+        var pausedCase = await CreateCaseAsync(db, client.Id, "ПРИОСТАНОВЛЕННОЕ ДЕЛО", ClientCaseStatus.OnHold);
+        var approvedTaskCase = await CreateCaseAsync(db, client.Id, "ДЕЛО С СОГЛАСОВАННОЙ ЗАДАЧЕЙ");
+        pausedCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        approvedTaskCase.CreatedAt = DateTime.UtcNow.AddDays(-30);
+        await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: approvedTaskCase.Id, status: "approved", createdAt: DateTime.UtcNow.AddDays(-5));
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.True(result.Enabled);
+            Assert.Null(result.Error);
+            Assert.Equal(0, result.CreatedCount);
+        }
+
+        Assert.Equal(0, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == pausedCase.Id));
+        Assert.Equal(1, await db.TaskJournalItems.CountAsync(item => item.ClientCaseId == approvedTaskCase.Id));
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_NotifiesAssigneeAboutInactiveCaseControlTask()
     {
         await using var db = await CreateContextAsync();
