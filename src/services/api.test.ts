@@ -163,6 +163,33 @@ describe('apiService auth handling', () => {
     expect(JSON.parse(String(init?.body))).toEqual(payload);
   });
 
+  it('loads system job diagnostics from the backend', async () => {
+    const payload = {
+      generatedAt: '2026-05-26T12:00:00Z',
+      items: [
+        {
+          key: 'database-backup',
+          name: 'Резервное копирование базы данных',
+          description: 'Проверяет расписание.',
+          enabled: true,
+          status: 'active',
+          statusText: 'Включено',
+          intervalText: 'Расписание: 02:00,14:00',
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getSystemJobDiagnostics();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/system/jobs/diagnostics');
+  });
+
   it('loads latest app version from the backend', async () => {
     const payload = {
       currentVersion: '1.12.0',

@@ -533,6 +533,26 @@ export interface DatabaseBackupOverviewDto {
   items: DatabaseBackupFileDto[];
 }
 
+export interface SystemJobDiagnosticsItemDto {
+  key: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  status: string;
+  statusText: string;
+  intervalText: string;
+  pendingCount?: number | null;
+  lastProcessedCount?: number | null;
+  lastActivityAt?: string | null;
+  lastActivityDescription?: string | null;
+  nextRunHint?: string | null;
+}
+
+export interface SystemJobDiagnosticsDto {
+  generatedAt: string;
+  items: SystemJobDiagnosticsItemDto[];
+}
+
 export interface DatabaseBackupCreateResultDto {
   backup: DatabaseBackupFileDto;
   downloadPath: string;
@@ -1747,6 +1767,10 @@ export class ApiService {
 
   async getDatabaseBackupOverview() {
     return this.request<DatabaseBackupOverviewDto>('/database/backups');
+  }
+
+  async getSystemJobDiagnostics() {
+    return this.request<SystemJobDiagnosticsDto>('/system/jobs/diagnostics');
   }
 
   async updateDatabaseBackupSettings(payload: {

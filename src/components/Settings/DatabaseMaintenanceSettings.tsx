@@ -16,14 +16,16 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { ObjectAuditDeletedObjectsSettings } from './ObjectAuditDeletedObjectsSettings';
+import { SystemJobDiagnosticsSettings } from './SystemJobDiagnosticsSettings';
 
-type MaintenanceTab = 'overview' | 'activity' | 'operations' | 'backups' | 'deleted';
+type MaintenanceTab = 'overview' | 'activity' | 'operations' | 'backups' | 'jobs' | 'deleted';
 
 const TABS: Array<{ id: MaintenanceTab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
   { id: 'activity', label: 'Журнал действий' },
   { id: 'operations', label: 'Сервисные операции' },
   { id: 'backups', label: 'Резервные копии' },
+  { id: 'jobs', label: 'Фоновые сервисы' },
   { id: 'deleted', label: 'Удалённые объекты' },
 ];
 
@@ -1015,6 +1017,10 @@ export function DatabaseMaintenanceSettings() {
               )}
             </div>
           </div>
+        )}
+
+        {activeTab === 'jobs' && (
+          <SystemJobDiagnosticsSettings />
         )}
 
         {activeTab === 'deleted' && canViewDeletedObjects && (

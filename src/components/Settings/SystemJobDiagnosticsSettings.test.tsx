@@ -1,0 +1,80 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { SystemJobDiagnosticsSettings } from './SystemJobDiagnosticsSettings';
+
+const apiMock = vi.hoisted(() => ({
+  getSystemJobDiagnostics: vi.fn(),
+}));
+
+vi.mock('../../services/api', () => ({
+  apiService: apiMock,
+}));
+
+describe('SystemJobDiagnosticsSettings', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMock.getSystemJobDiagnostics.mockResolvedValue({
+      generatedAt: '2026-05-26T12:00:00Z',
+      items: [
+        {
+          key: 'database-backup',
+          name: 'Резервное копирование базы данных',
+          description: 'Проверяет расписание.',
+          enabled: true,
+          status: 'active',
+          statusText: 'Включено',
+          intervalText: 'Расписание: 02:00,14:00',
+          pendingCount: null,
+          lastProcessedCount: null,
+          lastActivityAt: '2026-05-26T10:00:00Z',
+          lastActivityDescription: 'Создана автоматическая копия.',
+          nextRunHint: 'Следующая проверка расписания выполняется фоновым сервисом.',
+        },
+        {
+          key: 'court-sync',
+          name: 'Синхронизация судебных источников',
+          description: 'Проверяет дела с привязкой.',
+          enabled: false,
+          status: 'blocked',
+          statusText: 'Ожидает feature flag',
+          intervalText: 'Каждые 90 мин.',
+          pendingCount: 0,
+          lastProcessedCount: 12,
+          lastActivityAt: null,
+          lastActivityDescription: null,
+          nextRunHint: 'Фоновая судебная синхронизация не запускается автоматически.',
+        },
+      ],
+    });
+  });
+
+  it('shows background job diagnostics and summary', async () => {
+    render(<SystemJobDiagnosticsSettings />);
+
+    expect(await screen.findByText('Фоновые сервисы')).toBeTruthy();
+    expect(screen.getByText('Резервное копирование базы данных')).toBeTruthy();
+    expect(screen.getByText('Синхронизация судебных источников')).toBeTruthy();
+    expect(screen.getByText('Расписание: 02:00,14:00')).toBeTruthy();
+    expect(screen.getByText('Ожидает feature flag')).toBeTruthy();
+    expect(screen.getByText('Всего сервисов')).toBeTruthy();
+    expect(screen.getByText('Ожидает условий')).toBeTruthy();
+  });
+
+  it('refreshes diagnostics by button', async () => {
+    render(<SystemJobDiagnosticsSettings />);
+
+    await screen.findByText('Резервное копирование базы данных');
+    fireEvent.click(screen.getByRole('button', { name: /Обновить/i }));
+
+    await waitFor(() => expect(apiMock.getSystemJobDiagnostics).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows readable loading error', async () => {
+    apiMock.getSystemJobDiagnostics.mockRejectedValue(new Error('diagnostics unavailable'));
+
+    render(<SystemJobDiagnosticsSettings />);
+
+    expect(await screen.findByText(/diagnostics unavailable/i)).toBeTruthy();
+  });
+});
