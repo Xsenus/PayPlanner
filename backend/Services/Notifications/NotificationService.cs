@@ -127,6 +127,27 @@ public sealed class NotificationService : INotificationService
         };
     }
 
+    public Task<IReadOnlyList<NotificationChannelDto>> GetChannelsAsync(CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<NotificationChannelDto> channels = NotificationChannels.Definitions
+            .Select(item => new NotificationChannelDto
+            {
+                Key = item.Key,
+                Label = item.Label,
+                Description = item.Description,
+                Status = item.Status,
+                IsEnabled = item.IsEnabled,
+                IsSendable = item.IsSendable,
+                SupportsUserPreferences = item.SupportsUserPreferences,
+                SupportsDeliveryLog = item.SupportsDeliveryLog,
+                RequiresProvider = item.RequiresProvider,
+                IsFuture = item.IsFuture
+            })
+            .ToList();
+
+        return Task.FromResult(channels);
+    }
+
     public async Task<NotificationSettingsDto> UpdateEmailSettingsAsync(
         UpdateEmailNotificationSettingsRequest request,
         CancellationToken cancellationToken = default)

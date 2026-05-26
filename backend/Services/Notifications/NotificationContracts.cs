@@ -6,13 +6,39 @@ using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Services.Notifications;
 
+public sealed record NotificationChannelDefinition(
+    string Key,
+    string Label,
+    string Description,
+    string Status,
+    bool IsEnabled,
+    bool IsSendable,
+    bool SupportsUserPreferences,
+    bool SupportsDeliveryLog,
+    bool RequiresProvider,
+    bool IsFuture);
+
 public static class NotificationChannels
 {
     public const string InApp = "inApp";
     public const string Email = "email";
     public const string Telegram = "telegram";
+    public const string WebPush = "webPush";
+    public const string Sms = "sms";
+    public const string Max = "max";
     public static readonly IReadOnlyList<string> All = [InApp, Email, Telegram];
     public static readonly IReadOnlyList<string> External = [Email, Telegram];
+    public static readonly IReadOnlyList<string> Future = [WebPush, Sms, Max];
+    public static readonly IReadOnlyList<string> Known = [InApp, Email, Telegram, WebPush, Sms, Max];
+    public static readonly IReadOnlyList<NotificationChannelDefinition> Definitions =
+    [
+        new(InApp, "Центр уведомлений", "Внутренние уведомления в CRM, счетчик и центр уведомлений.", "active", true, true, true, false, false, false),
+        new(Email, "Email", "Письма через настроенных SMTP-отправителей.", "active", true, true, true, true, true, false),
+        new(Telegram, "Telegram", "Сообщения через подключенных Telegram-ботов и привязанные чаты пользователей.", "active", true, true, true, true, true, false),
+        new(WebPush, "Web push", "Браузерные push-уведомления. Канал зарезервирован для будущего подключения service worker и подписок браузера.", "planned", false, false, false, true, true, true),
+        new(Sms, "SMS", "SMS-уведомления. Адаптер подготовлен в модели каналов, провайдер будет выбран отдельно.", "planned", false, false, false, true, true, true),
+        new(Max, "MAX", "Уведомления в мессенджер MAX. Канал зарезервирован как будущая интеграция без привязки к конкретному API.", "planned", false, false, false, true, true, true)
+    ];
 }
 
 public static class NotificationDeliveryStatus
@@ -407,6 +433,7 @@ public interface ITelegramBotUpdateService
 public interface INotificationService
 {
     Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationChannelDto>> GetChannelsAsync(CancellationToken cancellationToken = default);
     Task<NotificationSettingsDto> UpdateEmailSettingsAsync(
         PayPlanner.Api.Models.Requests.UpdateEmailNotificationSettingsRequest request,
         CancellationToken cancellationToken = default);

@@ -2779,6 +2779,9 @@ public class TasksControllerTests
         public Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
+        public Task<IReadOnlyList<NotificationChannelDto>> GetChannelsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationChannelDto>>(Array.Empty<NotificationChannelDto>());
+
         public Task<NotificationSettingsDto> UpdateEmailSettingsAsync(UpdateEmailNotificationSettingsRequest request, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 

@@ -240,6 +240,19 @@ export interface RolePermissionAuditReportDto {
 
 export type NotificationChannel = 'email' | 'telegram';
 
+export interface NotificationChannelDto {
+  key: string;
+  label: string;
+  description: string;
+  status: string;
+  isEnabled: boolean;
+  isSendable: boolean;
+  supportsUserPreferences: boolean;
+  supportsDeliveryLog: boolean;
+  requiresProvider: boolean;
+  isFuture: boolean;
+}
+
 export interface NotificationPurposeDto {
   key: string;
   label: string;
@@ -1664,6 +1677,10 @@ export class ApiService {
   // ===== Notifications =====
   async getNotificationSettings() {
     return this.request<NotificationSettingsDto>('/notifications/settings');
+  }
+
+  async getNotificationChannels() {
+    return this.request<NotificationChannelDto[]>('/notifications/channels');
   }
 
   async updateEmailNotificationSettings(payload: UpdateEmailNotificationSettingsRequest) {

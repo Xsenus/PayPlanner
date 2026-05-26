@@ -9,6 +9,20 @@ public class NotificationSettingsDto
     public IReadOnlyList<NotificationTemplateDto> Templates { get; set; } = Array.Empty<NotificationTemplateDto>();
 }
 
+public class NotificationChannelDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; }
+    public bool IsSendable { get; set; }
+    public bool SupportsUserPreferences { get; set; }
+    public bool SupportsDeliveryLog { get; set; }
+    public bool RequiresProvider { get; set; }
+    public bool IsFuture { get; set; }
+}
+
 public class EmailNotificationSettingsDto
 {
     public bool Enabled { get; set; }

@@ -20,6 +20,24 @@ namespace PayPlanner.Api.Tests;
 public class NotificationServiceTests
 {
     [Fact]
+    public async Task GetChannelsAsync_ReturnsActiveChannelsAndFutureAdapters()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var channels = await service.GetChannelsAsync();
+
+        Assert.Contains(channels, item => item.Key == NotificationChannels.InApp && item.IsEnabled && item.IsSendable && !item.IsFuture);
+        Assert.Contains(channels, item => item.Key == NotificationChannels.Email && item.IsEnabled && item.IsSendable && item.RequiresProvider);
+        Assert.Contains(channels, item => item.Key == NotificationChannels.Telegram && item.IsEnabled && item.IsSendable && item.RequiresProvider);
+        Assert.Contains(channels, item => item.Key == NotificationChannels.WebPush && !item.IsEnabled && !item.IsSendable && item.IsFuture);
+        Assert.Contains(channels, item => item.Key == NotificationChannels.Sms && !item.IsEnabled && !item.IsSendable && item.IsFuture);
+        Assert.Contains(channels, item => item.Key == NotificationChannels.Max && !item.IsEnabled && !item.IsSendable && item.IsFuture);
+        Assert.Equal(new[] { NotificationChannels.InApp, NotificationChannels.Email, NotificationChannels.Telegram }, NotificationChannels.All);
+        Assert.Equal(new[] { NotificationChannels.WebPush, NotificationChannels.Sms, NotificationChannels.Max }, NotificationChannels.Future);
+    }
+
+    [Fact]
     public async Task NotifyPasswordIssuedAsync_SendsEmailAndTelegram_AndHidesPasswordInDeliveryLog()
     {
         await using var db = await CreateContextAsync();

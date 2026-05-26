@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
-import { ArrowLeft, Bot, CheckCircle2, Link2, Mail, Monitor, Pencil, Plus, RefreshCw, Save, Send, Trash2, Unlink } from 'lucide-react';
+import { ArrowLeft, Bell, Bot, CheckCircle2, Link2, Mail, MessageSquare, Monitor, Pencil, Plus, RefreshCw, Save, Send, Smartphone, Trash2, Unlink } from 'lucide-react';
 import {
   apiService,
   type NotificationRolePreferenceDto,
   type NotificationChannel,
+  type NotificationChannelDto,
   type NotificationDeliveryDto,
   type TelegramBotCommandDto,
   type NotificationPurposeDto,
@@ -206,6 +207,25 @@ function channelLabel(channel: NotificationChannel) {
   return channel === 'telegram' ? 'Telegram' : 'Email';
 }
 
+function channelCatalogIcon(key: string): typeof Monitor {
+  if (key === 'email') return Mail;
+  if (key === 'telegram') return Send;
+  if (key === 'webPush') return Bell;
+  if (key === 'sms') return Smartphone;
+  if (key === 'max') return MessageSquare;
+  return Monitor;
+}
+
+function channelCatalogStatusLabel(channel: NotificationChannelDto) {
+  if (channel.isEnabled && channel.isSendable) return channel.key === 'inApp' ? 'Работает в CRM' : 'Подключаемый';
+  return channel.isFuture ? 'Запланирован' : 'Отключен';
+}
+
+function channelCatalogStatusClass(channel: NotificationChannelDto) {
+  if (channel.isEnabled && channel.isSendable) return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  return channel.isFuture ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-gray-200 bg-gray-50 text-gray-600';
+}
+
 function statusClass(ready: boolean, enabled: boolean) {
   if (!enabled) return 'bg-slate-100 text-slate-700 border-slate-200';
   return ready ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200';
@@ -222,6 +242,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
   const toast = useToast();
   const { confirm } = useDialog();
   const [settings, setSettings] = useState<NotificationSettingsDto | null>(null);
+  const [channelCatalog, setChannelCatalog] = useState<NotificationChannelDto[]>([]);
   const [form, setForm] = useState<SenderForm>(() => createBlankForm());
   const [route, setRoute] = useState<SenderRoute>(() => readNotificationRoute());
   const [loading, setLoading] = useState(false);
@@ -250,8 +271,12 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
     setLoading(true);
     setMessage(null);
     try {
-      const next = await apiService.getNotificationSettings();
+      const [next, channels] = await Promise.all([
+        apiService.getNotificationSettings(),
+        apiService.getNotificationChannels(),
+      ]);
       setSettings(next);
+      setChannelCatalog(channels);
     } catch (error) {
       const text = extractDisplayErrorMessage(error, 'Не удалось загрузить настройки уведомлений');
       setMessage(text);
@@ -822,6 +847,62 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
               {message}
             </div>
           )}
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h4 className="text-base font-semibold text-gray-900">Каналы уведомлений</h4>
+                <p className="mt-1 max-w-3xl text-sm text-gray-500">
+                  Здесь видно, какие способы доставки уже работают, а какие зарезервированы для следующих интеграций. Запланированные каналы не участвуют в отправке, пока не выбран и не подключен провайдер.
+                </p>
+              </div>
+              <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                {channelCatalog.filter((item) => item.isEnabled).length} из {channelCatalog.length || 0} активны
+              </span>
+            </div>
+
+            {loading && channelCatalog.length === 0 ? (
+              <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Загружаем каналы уведомлений...
+              </div>
+            ) : (
+              <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {channelCatalog.map((channel) => {
+                  const Icon = channelCatalogIcon(channel.key);
+                  return (
+                    <div key={channel.key} className="rounded-xl border border-gray-200 p-4">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-600">
+                          <Icon className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h5 className="text-sm font-semibold text-gray-900">{channel.label}</h5>
+                            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${channelCatalogStatusClass(channel)}`}>
+                              {channelCatalogStatusLabel(channel)}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-xs leading-5 text-gray-500">{channel.description}</p>
+                          <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] font-semibold">
+                            {channel.supportsUserPreferences && (
+                              <span className="rounded-full bg-blue-50 px-2 py-1 text-blue-700">Личные настройки</span>
+                            )}
+                            {channel.supportsDeliveryLog && (
+                              <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">Журнал доставки</span>
+                            )}
+                            {channel.requiresProvider && (
+                              <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700">Нужен провайдер</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">

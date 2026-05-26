@@ -475,6 +475,45 @@ describe('apiService auth handling', () => {
     }));
   });
 
+  it('loads notification channel catalog from the backend', async () => {
+    const payload = [
+      {
+        key: 'email',
+        label: 'Email',
+        description: 'SMTP',
+        status: 'active',
+        isEnabled: true,
+        isSendable: true,
+        supportsUserPreferences: true,
+        supportsDeliveryLog: true,
+        requiresProvider: true,
+        isFuture: false,
+      },
+      {
+        key: 'sms',
+        label: 'SMS',
+        description: 'Future adapter',
+        status: 'planned',
+        isEnabled: false,
+        isSendable: false,
+        supportsUserPreferences: false,
+        supportsDeliveryLog: true,
+        requiresProvider: true,
+        isFuture: true,
+      },
+    ];
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getNotificationChannels();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/notifications/channels');
+  });
+
   it('emits a session-expired event when the API returns 401', async () => {
     const listener = vi.fn();
     window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);

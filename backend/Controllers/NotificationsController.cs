@@ -45,6 +45,13 @@ public class NotificationsController : ControllerBase
         return Ok(await _notificationService.GetSettingsAsync(ct));
     }
 
+    [HttpGet("channels")]
+    public async Task<ActionResult<IReadOnlyList<NotificationChannelDto>>> GetChannels(CancellationToken ct)
+    {
+        if (!await CanViewNotificationSettingsAsync(ct)) return Forbid();
+        return Ok(await _notificationService.GetChannelsAsync(ct));
+    }
+
     [HttpPut("settings/email")]
     public async Task<ActionResult<NotificationSettingsDto>> UpdateEmailSettings(
         [FromBody] UpdateEmailNotificationSettingsRequest request,
