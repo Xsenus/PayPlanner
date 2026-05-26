@@ -1,10 +1,11 @@
-import { CalendarDays, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { apiService, type CalendarSyncProviderDto } from '../../services/api';
+import { apiService, type CalendarSyncProviderDto, type CalendarSyncReadinessDto } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 export function CalendarSyncProviderSettings() {
   const [providers, setProviders] = useState<CalendarSyncProviderDto[]>([]);
+  const [readiness, setReadiness] = useState<CalendarSyncReadinessDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -13,11 +14,26 @@ export function CalendarSyncProviderSettings() {
     [providers],
   );
 
-  const loadProviders = async () => {
+  const requiredReadyCount = useMemo(
+    () => readiness?.items.filter((item) => item.isRequired && item.isReady).length ?? 0,
+    [readiness],
+  );
+
+  const requiredTotalCount = useMemo(
+    () => readiness?.items.filter((item) => item.isRequired).length ?? 0,
+    [readiness],
+  );
+
+  const loadCalendarSyncState = async () => {
     setLoading(true);
     setError(null);
     try {
-      setProviders(await apiService.getCalendarSyncProviders());
+      const [loadedProviders, loadedReadiness] = await Promise.all([
+        apiService.getCalendarSyncProviders(),
+        apiService.getCalendarSyncReadiness(),
+      ]);
+      setProviders(loadedProviders);
+      setReadiness(loadedReadiness);
     } catch (loadError) {
       setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить состояние внешних календарей.'));
     } finally {
@@ -26,7 +42,7 @@ export function CalendarSyncProviderSettings() {
   };
 
   useEffect(() => {
-    void loadProviders();
+    void loadCalendarSyncState();
   }, []);
 
   return (
@@ -44,7 +60,7 @@ export function CalendarSyncProviderSettings() {
         </div>
         <button
           type="button"
-          onClick={() => void loadProviders()}
+          onClick={() => void loadCalendarSyncState()}
           disabled={loading}
           className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -85,6 +101,45 @@ export function CalendarSyncProviderSettings() {
       <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
         Доступно сейчас: {availableCount} из {providers.length || 0}. Google и Яндекс не запускаются автоматически, пока внешний календарный feature flag и OAuth-настройки не будут приняты отдельно.
       </div>
+
+      {readiness ? (
+        <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h5 className="text-sm font-semibold text-gray-900">Готовность к подключению Google/Яндекс</h5>
+              <p className="mt-1 text-xs text-gray-600">
+                Выполнено обязательных шагов: {requiredReadyCount} из {requiredTotalCount}. Пока все обязательные пункты не закрыты, внешняя синхронизация остается подготовительным контуром.
+              </p>
+            </div>
+            <span className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${readiness.readyToConnect ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-white text-amber-700'}`}>
+              {readiness.readyToConnect ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+              {readiness.readyToConnect ? 'Можно подключать' : 'Нужна подготовка'}
+            </span>
+          </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-2">
+            {readiness.items.map((item) => (
+              <div key={item.key} className="rounded-xl border border-white/80 bg-white px-3 py-3 shadow-sm">
+                <div className="flex items-start gap-2">
+                  {item.isReady ? (
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  ) : (
+                    <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${getReadinessIconClass(item.severity)}`} />
+                  )}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold text-gray-900">{item.label}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${getReadinessBadgeClass(item.severity, item.isReady)}`}>
+                        {getReadinessStatusLabel(item.status, item.isReady)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-gray-600">{item.message}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -109,4 +164,24 @@ function getProviderStatusClass(status: string) {
   if (status === 'requires-setup') return 'border-amber-200 bg-amber-50 text-amber-700';
   if (status === 'disabled') return 'border-slate-200 bg-white text-slate-600';
   return 'border-slate-200 bg-white text-slate-700';
+}
+
+function getReadinessStatusLabel(status: string, isReady: boolean) {
+  if (isReady) return 'Готово';
+  if (status === 'disabled') return 'Выключено';
+  if (status === 'pending') return 'Ожидает';
+  return status;
+}
+
+function getReadinessIconClass(severity: string) {
+  if (severity === 'warning') return 'text-amber-600';
+  if (severity === 'error') return 'text-rose-600';
+  return 'text-slate-500';
+}
+
+function getReadinessBadgeClass(severity: string, isReady: boolean) {
+  if (isReady) return 'bg-emerald-50 text-emerald-700';
+  if (severity === 'warning') return 'bg-amber-100 text-amber-800';
+  if (severity === 'error') return 'bg-rose-50 text-rose-700';
+  return 'bg-slate-100 text-slate-600';
 }

@@ -176,6 +176,23 @@ export interface CalendarSyncProviderDto {
   message: string;
 }
 
+export interface CalendarSyncReadinessDto {
+  generatedAt: string;
+  externalCalendarSyncEnabled: boolean;
+  readyToConnect: boolean;
+  items: CalendarSyncReadinessItemDto[];
+}
+
+export interface CalendarSyncReadinessItemDto {
+  key: string;
+  label: string;
+  status: string;
+  isReady: boolean;
+  isRequired: boolean;
+  severity: string;
+  message: string;
+}
+
 export interface RolePermissionAuditRoleDto {
   roleId: number;
   roleName: string;
@@ -1267,6 +1284,10 @@ export class ApiService {
 
   async getCalendarSyncProviders() {
     return this.request<CalendarSyncProviderDto[]>('/calendar-sync/providers');
+  }
+
+  async getCalendarSyncReadiness() {
+    return this.request<CalendarSyncReadinessDto>('/calendar-sync/readiness');
   }
 
   // ===== Acts =====

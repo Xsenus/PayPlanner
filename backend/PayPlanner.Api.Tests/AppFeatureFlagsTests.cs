@@ -141,6 +141,45 @@ public class AppFeatureFlagsTests
         Assert.Contains(providers, item => item.Key == "yandex-calendar" && item.FeatureFlagEnabled && item.Status == "requires-setup");
     }
 
+    [Fact]
+    public void CalendarSyncReadiness_KeepsExternalCalendarsBlockedUntilRequiredStepsAreReady()
+    {
+        var readiness = CalendarSyncProviderRegistry.BuildReadiness(externalCalendarSyncEnabled: true);
+
+        Assert.True(readiness.ExternalCalendarSyncEnabled);
+        Assert.False(readiness.ReadyToConnect);
+        Assert.Contains(readiness.Items, item => item.Key == "ics-fallback" && item.IsReady && !item.IsRequired);
+        Assert.Contains(readiness.Items, item => item.Key == "feature-flag" && item.IsReady && item.IsRequired);
+        Assert.Contains(readiness.Items, item => item.Key == "google-oauth" && !item.IsReady && item.IsRequired);
+        Assert.Contains(readiness.Items, item => item.Key == "conflict-policy" && !item.IsReady && item.IsRequired);
+        Assert.All(readiness.Items, item =>
+        {
+            Assert.DoesNotContain("secret", item.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("password", item.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("token", item.Message, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public void CalendarSyncController_ReturnsReadinessFromFeatureFlag()
+    {
+        var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions
+        {
+            Legal = new LegalFeatureFlagsOptions
+            {
+                ExternalCalendarSync = false,
+            },
+        }));
+
+        var result = controller.GetReadiness();
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var readiness = Assert.IsType<CalendarSyncReadinessDto>(ok.Value);
+
+        Assert.False(readiness.ExternalCalendarSyncEnabled);
+        Assert.False(readiness.ReadyToConnect);
+        Assert.Contains(readiness.Items, item => item.Key == "feature-flag" && item.Status == "disabled");
+    }
+
     private sealed class TestOptionsSnapshot<T> : IOptionsSnapshot<T>
         where T : class
     {

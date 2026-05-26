@@ -91,6 +91,35 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('/calendar-sync/providers');
   });
 
+  it('loads calendar sync readiness checklist from the backend', async () => {
+    const payload = {
+      generatedAt: '2026-05-26T16:00:00Z',
+      externalCalendarSyncEnabled: true,
+      readyToConnect: false,
+      items: [
+        {
+          key: 'conflict-policy',
+          label: 'Правила конфликтов',
+          status: 'pending',
+          isReady: false,
+          isRequired: true,
+          severity: 'warning',
+          message: 'Нужно утвердить модель конфликтов.',
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getCalendarSyncReadiness();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/calendar-sync/readiness');
+  });
+
   it('loads latest app version from the backend', async () => {
     const payload = {
       currentVersion: '1.12.0',

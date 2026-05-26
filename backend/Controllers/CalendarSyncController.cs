@@ -22,4 +22,8 @@ public sealed class CalendarSyncController : ControllerBase
     [HttpGet("providers")]
     public ActionResult<IReadOnlyList<CalendarSyncProviderDto>> GetProviders()
         => Ok(CalendarSyncProviderRegistry.BuildProviders(_featureFlags.Value.Legal.ExternalCalendarSync));
+
+    [HttpGet("readiness")]
+    public ActionResult<CalendarSyncReadinessDto> GetReadiness()
+        => Ok(CalendarSyncProviderRegistry.BuildReadiness(_featureFlags.Value.Legal.ExternalCalendarSync));
 }
