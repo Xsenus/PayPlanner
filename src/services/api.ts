@@ -161,6 +161,21 @@ export interface LegalIntegrationDiagnosticItemDto {
   message: string;
 }
 
+export interface CalendarSyncProviderDto {
+  key: string;
+  label: string;
+  kind: string;
+  status: string;
+  isAvailable: boolean;
+  featureFlagEnabled: boolean;
+  requiresOAuth: boolean;
+  supportsManualExport: boolean;
+  supportsBackgroundSync: boolean;
+  supportsTwoWaySync: boolean;
+  supportedTargets: string[];
+  message: string;
+}
+
 export interface RolePermissionAuditRoleDto {
   roleId: number;
   roleName: string;
@@ -1248,6 +1263,10 @@ export class ApiService {
 
   async getLegalIntegrationDiagnostics() {
     return this.request<LegalIntegrationDiagnosticsDto>('/features/legal-integrations/diagnostics');
+  }
+
+  async getCalendarSyncProviders() {
+    return this.request<CalendarSyncProviderDto[]>('/calendar-sync/providers');
   }
 
   // ===== Acts =====

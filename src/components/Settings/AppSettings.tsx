@@ -11,6 +11,7 @@ import { AuthProviderSettings } from './AuthProviderSettings';
 import { BankDirectorySettings } from './BankDirectorySettings';
 import { DatabaseMaintenanceSettings } from './DatabaseMaintenanceSettings';
 import { CaseDocumentTemplateSettings } from './CaseDocumentTemplateSettings';
+import { CalendarSyncProviderSettings } from './CalendarSyncProviderSettings';
 import { ContractDocumentTemplateSettings } from './ContractDocumentTemplateSettings';
 import { CourtSyncJournalSettings } from './CourtSyncJournalSettings';
 import { CourtSyncSchedulerSettings } from './CourtSyncSchedulerSettings';
@@ -1527,6 +1528,8 @@ export function AppSettings() {
                 </div>
 
                 <FeatureFlagSettings />
+
+                <CalendarSyncProviderSettings />
 
                 <CourtSyncSchedulerSettings />
 

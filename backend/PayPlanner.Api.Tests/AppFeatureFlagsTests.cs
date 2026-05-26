@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalIntegrations;
 using Xunit;
 
@@ -100,6 +101,44 @@ public class AppFeatureFlagsTests
         Assert.True(courtSync.Enabled);
         Assert.False(courtSync.SafeToRun);
         Assert.Equal("requiresApproval", courtSync.Status);
+    }
+
+    [Fact]
+    public void CalendarSyncProviders_KeepIcsAvailableWhenExternalCalendarsAreDisabled()
+    {
+        var providers = CalendarSyncProviderRegistry.BuildProviders(externalCalendarSyncEnabled: false);
+
+        var ics = Assert.Single(providers, item => item.Key == "ics-export");
+        Assert.True(ics.IsAvailable);
+        Assert.True(ics.SupportsManualExport);
+        Assert.False(ics.SupportsTwoWaySync);
+        Assert.Equal("active", ics.Status);
+
+        var google = Assert.Single(providers, item => item.Key == "google-calendar");
+        Assert.False(google.IsAvailable);
+        Assert.False(google.FeatureFlagEnabled);
+        Assert.True(google.RequiresOAuth);
+        Assert.Equal("disabled", google.Status);
+    }
+
+    [Fact]
+    public void CalendarSyncController_ReturnsProviderDiagnosticsFromFeatureFlag()
+    {
+        var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions
+        {
+            Legal = new LegalFeatureFlagsOptions
+            {
+                ExternalCalendarSync = true,
+            },
+        }));
+
+        var result = controller.GetProviders();
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var providers = Assert.IsAssignableFrom<IReadOnlyList<CalendarSyncProviderDto>>(ok.Value);
+
+        Assert.Equal(3, providers.Count);
+        Assert.Contains(providers, item => item.Key == "google-calendar" && item.FeatureFlagEnabled && item.Status == "requires-setup");
+        Assert.Contains(providers, item => item.Key == "yandex-calendar" && item.FeatureFlagEnabled && item.Status == "requires-setup");
     }
 
     private sealed class TestOptionsSnapshot<T> : IOptionsSnapshot<T>

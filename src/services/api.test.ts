@@ -62,6 +62,35 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('/features');
   });
 
+  it('loads calendar sync provider diagnostics from the backend', async () => {
+    const payload = [
+      {
+        key: 'ics-export',
+        label: 'ICS-файлы',
+        kind: 'ics',
+        status: 'active',
+        isAvailable: true,
+        featureFlagEnabled: true,
+        requiresOAuth: false,
+        supportsManualExport: true,
+        supportsBackgroundSync: false,
+        supportsTwoWaySync: false,
+        supportedTargets: ['Календарь задач'],
+        message: 'ICS доступен',
+      },
+    ];
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getCalendarSyncProviders();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/calendar-sync/providers');
+  });
+
   it('loads latest app version from the backend', async () => {
     const payload = {
       currentVersion: '1.12.0',
