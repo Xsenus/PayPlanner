@@ -902,7 +902,7 @@ describe('TaskJournal', () => {
     expect(dateAndViewRow.className).toContain('flex-col');
   });
 
-  it('applies day, week and month period buttons to the list view', async () => {
+  it('applies day, week, month and full period buttons to the list view', async () => {
     const now = new Date();
     const sameWeekDate = getSameWeekDateOutsideTodayForTest(now);
     const sameMonthDate = getSameMonthDateOutsideCurrentWeekForTest(now);
@@ -931,6 +931,63 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(screen.getByText('Same month task')).toBeTruthy());
     expect(screen.queryByText('Next month task')).toBeNull();
     expect(screen.getByTestId('task-period-month').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('task-period-all'));
+
+    await waitFor(() => expect(screen.getByText('Next month task')).toBeTruthy());
+    expect(screen.getByTestId('task-period-all').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('shows open unresolved tasks across all assignees for the full period', async () => {
+    const oldDate = new Date();
+    oldDate.setFullYear(oldDate.getFullYear() - 1);
+    oldDate.setHours(11, 0, 0, 0);
+
+    await renderJournal([
+      createTask({
+        id: 101,
+        title: 'Старая открытая задача',
+        dueAt: oldDate.toISOString(),
+        assigneeUserId: 7,
+        assigneeName: 'Администратор',
+      }),
+      createTask({
+        id: 102,
+        title: 'Ожидает другого исполнителя',
+        dueAt: oldDate.toISOString(),
+        status: 'waiting',
+        assigneeUserId: 8,
+        assigneeName: 'Другой исполнитель',
+        participants: [
+          { userId: 8, role: 'assignee', displayName: 'Другой исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+      createTask({
+        id: 103,
+        title: 'Закрытая старая задача',
+        dueAt: oldDate.toISOString(),
+        status: 'done',
+        result: 'Готово',
+        assigneeUserId: 7,
+        assigneeName: 'Администратор',
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Другой исполнитель', email: 'executor@example.com' },
+      ],
+      waitForTitle: null,
+    });
+
+    fireEvent.click(screen.getByTestId('task-quick-filter-all'));
+    fireEvent.click(screen.getByTestId('task-period-all'));
+
+    await waitFor(() => expect(screen.getByText('Старая открытая задача')).toBeTruthy());
+    expect(screen.getByText('Ожидает другого исполнителя')).toBeTruthy();
+    expect(screen.queryByText('Закрытая старая задача')).toBeNull();
+    expect((screen.getByLabelText('Статус') as HTMLSelectElement).value).toBe('active');
+    expect((screen.getByLabelText('Исполнитель') as HTMLSelectElement).value).toBe('all');
+    expect(screen.getByTestId('task-period-all').getAttribute('aria-pressed')).toBe('true');
   });
 
   it('switches journal presentation modes from the view controls', async () => {
@@ -1056,6 +1113,31 @@ describe('TaskJournal', () => {
 
     expect(screen.getByText('Overdue task')).toBeTruthy();
     await waitFor(() => expect(screen.queryByText('Future task')).toBeNull());
+  });
+
+  it('recalculates metric counters when the status filter changes', async () => {
+    await renderJournal([
+      createTask({ id: 101, title: 'Открытая задача', status: 'new', dueAt: todayAt(11) }),
+      createTask({
+        id: 102,
+        title: 'Закрытая задача',
+        status: 'done',
+        result: 'Готово',
+        dueAt: todayAt(12),
+      }),
+    ]);
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId('task-metric-Активные')).getByText('1')).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'done' } });
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId('task-metric-Активные')).getByText('0')).toBeTruthy();
+    });
+    expect(screen.getByText('Закрытая задача')).toBeTruthy();
+    expect(screen.queryByText('Открытая задача')).toBeNull();
   });
 
   it('does not save a new task without a required counterparty', async () => {

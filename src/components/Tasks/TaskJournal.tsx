@@ -71,7 +71,7 @@ import {
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
-type PeriodMode = 'day' | 'week' | 'month';
+type PeriodMode = 'day' | 'week' | 'month' | 'all';
 type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
 type TaskCalendarColorMode = 'smart' | 'priority' | 'status';
@@ -283,7 +283,7 @@ function isPriorityFilter(value: unknown): value is TaskJournalPriority | 'all' 
 }
 
 function isPeriodMode(value: unknown): value is PeriodMode {
-  return value === 'day' || value === 'week' || value === 'month';
+  return value === 'day' || value === 'week' || value === 'month' || value === 'all';
 }
 
 function isDateFilterValue(value: unknown): value is string {
@@ -600,6 +600,10 @@ function formatDateOnly(value: Date) {
 }
 
 function formatPeriodTitle(date: Date, mode: PeriodMode) {
+  if (mode === 'all') {
+    return 'Весь период';
+  }
+
   if (mode === 'day') {
     return formatDateOnly(date);
   }
@@ -620,6 +624,13 @@ function endOfDay(date: Date) {
 }
 
 function getTaskPeriodBounds(date: Date, mode: PeriodMode) {
+  if (mode === 'all') {
+    return {
+      periodStart: new Date(0),
+      periodEnd: new Date(8640000000000000),
+    };
+  }
+
   const periodStart = mode === 'day'
     ? startOfDay(date)
     : mode === 'week'
@@ -635,6 +646,11 @@ function getTaskPeriodBounds(date: Date, mode: PeriodMode) {
 }
 
 function getCaseCalendarRange(anchorDate: Date, mode: PeriodMode) {
+  if (mode === 'all') {
+    const from = startOfMonth(anchorDate);
+    return { from, to: endOfDay(addDays(addMonths(from, 1), -1)) };
+  }
+
   if (mode === 'day') {
     return { from: startOfDay(anchorDate), to: endOfDay(anchorDate) };
   }
@@ -832,6 +848,18 @@ function matchesMetricFilter(task: TaskJournalItem, metricFilter: MetricFilter, 
     default:
       return true;
   }
+}
+
+function matchesStatusFilter(task: TaskJournalItem, statusFilter: TaskJournalStatus | 'active' | 'all') {
+  if (statusFilter === 'all') {
+    return true;
+  }
+
+  if (statusFilter === 'active') {
+    return isTaskJournalActive(task.status);
+  }
+
+  return task.status === statusFilter;
 }
 
 function isTaskReadOnlyForCurrentUser(
@@ -1788,22 +1816,16 @@ export function TaskJournal({
     });
   }, [assigneeFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, quickFilter, search, tasks, typeFilter]);
 
-  const filteredTasks = useMemo(() => {
+  const statusAndPeriodFilteredTasks = useMemo(() => {
     const nowDate = new Date();
     const { periodStart, periodEnd } = getTaskPeriodBounds(nowDate, periodMode);
     const hasManualDateRange = Boolean(dateFromFilter || dateToFilter);
-    const shouldApplyPeriodFilter = metricFilter === 'none' && !hasManualDateRange;
+    const shouldApplyPeriodFilter = metricFilter === 'none' && !hasManualDateRange && periodMode !== 'all';
 
     return scopeFilteredTasks
       .filter((task) => {
         const due = new Date(task.dueAt);
-        const statusOk =
-          statusFilter === 'all'
-            ? true
-            : statusFilter === 'active'
-              ? isTaskJournalActive(task.status)
-              : task.status === statusFilter;
-        const metricOk = matchesMetricFilter(task, metricFilter, nowDate);
+        const statusOk = matchesStatusFilter(task, statusFilter);
         const periodOk = !shouldApplyPeriodFilter
           ? true
           : viewMode === 'list'
@@ -1812,10 +1834,15 @@ export function TaskJournal({
               ? due < periodStart || (due >= periodStart && due <= periodEnd)
               : true;
 
-        return statusOk && metricOk && periodOk;
+        return statusOk && periodOk;
       })
       .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
   }, [dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
+
+  const filteredTasks = useMemo(() => {
+    const nowDate = new Date();
+    return statusAndPeriodFilteredTasks.filter((task) => matchesMetricFilter(task, metricFilter, nowDate));
+  }, [metricFilter, statusAndPeriodFilteredTasks]);
 
   useEffect(() => {
     setSelectedTaskIds((previous) => {
@@ -1867,12 +1894,12 @@ export function TaskJournal({
   };
 
   const stats = useMemo(() => {
-    const active = scopeFilteredTasks.filter((task) => isTaskJournalActive(task.status));
+    const active = statusAndPeriodFilteredTasks.filter((task) => isTaskJournalActive(task.status));
     const overdue = active.filter((task) => new Date(task.dueAt).getTime() < Date.now());
     const today = active.filter((task) => isSameDay(new Date(task.dueAt), new Date()));
     const high = active.filter((task) => task.priority === 'high' || task.priority === 'urgent');
     return { active: active.length, overdue: overdue.length, today: today.length, high: high.length };
-  }, [scopeFilteredTasks]);
+  }, [statusAndPeriodFilteredTasks]);
 
   const boardColumns = useMemo(() => {
     const nowDate = new Date();
@@ -2432,7 +2459,7 @@ export function TaskJournal({
     let reportStatus: TaskJournalStatus | 'active' | undefined = statusFilter === 'all' ? undefined : statusFilter;
     let reportPriority: TaskJournalPriority | 'highPriority' | undefined = priorityFilter === 'all' ? undefined : priorityFilter;
 
-    if (!from && !to && metricFilter === 'none' && (viewMode === 'list' || viewMode === 'board')) {
+    if (!from && !to && metricFilter === 'none' && periodMode !== 'all' && (viewMode === 'list' || viewMode === 'board')) {
       const { periodStart, periodEnd } = getTaskPeriodBounds(nowDate, periodMode);
       from = periodStart.toISOString();
       to = periodEnd.toISOString();
@@ -2706,7 +2733,7 @@ export function TaskJournal({
               className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               aria-label="Статус"
             >
-              <option value="active">Активные</option>
+              <option value="active">Активные без закрытых</option>
               <option value="all">Все статусы</option>
               {STATUS_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -2781,7 +2808,7 @@ export function TaskJournal({
             <div className="flex min-w-0 flex-wrap justify-start gap-2 xl:justify-end" data-testid="task-view-controls">
             {viewMode !== 'timeline' ? (
               <div className="flex rounded-xl bg-slate-100 p-1">
-                {(['day', 'week', 'month'] as PeriodMode[]).map((mode) => (
+                {(['day', 'week', 'month', 'all'] as PeriodMode[]).map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -2790,7 +2817,7 @@ export function TaskJournal({
                     data-testid={`task-period-${mode}`}
                     className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${periodMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                   >
-                    {mode === 'day' ? 'День' : mode === 'week' ? 'Неделя' : 'Месяц'}
+                    {mode === 'day' ? 'День' : mode === 'week' ? 'Неделя' : mode === 'month' ? 'Месяц' : 'Весь период'}
                   </button>
                 ))}
               </div>
