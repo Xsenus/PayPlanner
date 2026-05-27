@@ -148,7 +148,7 @@ describe('AppVersionGate', () => {
     expect(screen.getByText('Описание прошлого релиза')).toBeTruthy();
     expect(screen.getByText('Исправлена старая ошибка.')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Текущее обновление' }));
+    fireEvent.click(screen.getByRole('button', { name: /Показать текущее/ }));
 
     expect(screen.getByText(release.summary)).toBeTruthy();
   });
