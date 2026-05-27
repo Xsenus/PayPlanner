@@ -3943,7 +3943,6 @@ function WorkOrderPanel({
 }) {
   const [auditItemId, setAuditItemId] = useState<number | null>(null);
   const items = workOrder?.items ?? [];
-  const auditItem = items.find((item) => item.id === auditItemId) ?? null;
   const hasWorkOrder = Boolean(workOrder?.id);
   const status = workOrder?.status ?? draft.status;
   const isWorkOrderLocked = status === 'pending_approval' || status === 'approved' || status === 'invoice_created';

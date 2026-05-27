@@ -203,12 +203,12 @@ public sealed class AppVersionController : ControllerBase
 
     private IQueryable<AppRelease> GetPublishedActiveReleaseQuery()
     {
-        var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
+        var nowLocal = _timeProvider.GetLocalNow().DateTime;
 
         return _db.AppReleases
             .AsNoTracking()
             .Include(release => release.Items)
-            .Where(release => release.IsActive && release.ReleasedAt <= nowUtc)
+            .Where(release => release.IsActive && release.ReleasedAt <= nowLocal)
             .OrderByDescending(release => release.ReleasedAt)
             .ThenByDescending(release => release.Id);
     }

@@ -87,10 +87,6 @@ export function RolePermissionAuditPanel() {
     }
   }, []);
 
-  const rolesWithWarnings = useMemo(
-    () => report?.roles.filter((role) => countRoleWarnings(role) > 0) ?? [],
-    [report],
-  );
   const rolesWithBroadDataScope = countRolesWithBroadDataScope(report);
 
   const visibleRoles = useMemo(

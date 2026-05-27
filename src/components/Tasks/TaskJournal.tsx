@@ -2993,10 +2993,6 @@ export function TaskJournal({
           <TaskBoard
             columns={boardColumns}
             highlightedTaskId={highlightedTaskId}
-            currentUserId={currentUserId}
-            isAdminUser={isAdminUser}
-            taskSettings={taskSettings}
-            taskPermissions={permissions.tasks}
             onEdit={openTaskEditor}
             onDone={(task) => setTaskStatus(task, 'done')}
           />
@@ -3577,19 +3573,11 @@ function TaskTable({
 function TaskBoard({
   columns,
   highlightedTaskId,
-  currentUserId,
-  isAdminUser,
-  taskSettings,
-  taskPermissions,
   onEdit,
   onDone,
 }: {
   columns: Array<{ key: string; title: string; tone: string; items: TaskJournalItem[] }>;
   highlightedTaskId: number | null;
-  currentUserId: number | null;
-  isAdminUser: boolean;
-  taskSettings: TaskJournalSettingsDto;
-  taskPermissions: MenuSectionPermissions;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
 }) {
@@ -3611,7 +3599,6 @@ function TaskBoard({
             ) : column.items.map((task) => {
               const TypeIcon = getTypeMeta(task.type).icon;
               const isHighlighted = highlightedTaskId === task.id;
-              const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
               return (
                 <article
                   key={task.id}

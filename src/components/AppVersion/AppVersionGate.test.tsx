@@ -49,6 +49,8 @@ function latest(overrides?: Partial<AppVersionLatestDto>): AppVersionLatestDto {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
+  window.sessionStorage.clear();
   vi.mocked(apiService.getLatestAppVersion).mockResolvedValue(latest());
   vi.mocked(apiService.getAppVersionHistory).mockResolvedValue([release, previousRelease]);
   vi.mocked(apiService.markAppVersionSeen).mockResolvedValue(undefined);
@@ -64,8 +66,11 @@ describe('AppVersionGate', () => {
     render(<AppVersionGate userId={7} manualOpenSignal={0} onManualOpenHandled={vi.fn()} />);
 
     expect(await screen.findByRole('dialog')).toBeTruthy();
-    expect(screen.getByTestId('app-version-dialog').className).toContain('max-w-[1000px]');
+    expect(screen.getByTestId('app-version-dialog').className).toContain('max-w-[1080px]');
     expect(await screen.findByTestId('app-version-history')).toBeTruthy();
+    expect(screen.getByTestId('app-version-mobile-history-toggle')).toBeTruthy();
+    expect(screen.getByTestId('app-version-current-badge').className).toContain('absolute');
+    expect(screen.getByLabelText('Текущее обновление')).toBeTruthy();
     expect(screen.getAllByText(/Версия 1.12.0/).length).toBeGreaterThan(0);
     expect(screen.getByText('Добавлен новый блок.')).toBeTruthy();
   });
@@ -79,6 +84,20 @@ describe('AppVersionGate', () => {
     render(<AppVersionGate userId={7} manualOpenSignal={0} onManualOpenHandled={vi.fn()} />);
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('does not show dismissed release again after a page refresh while server still reports it unseen', async () => {
+    const { unmount } = render(<AppVersionGate userId={7} manualOpenSignal={0} onManualOpenHandled={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Понятно' }));
+
+    await waitFor(() => expect(apiService.markAppVersionSeen).toHaveBeenCalledWith(release.releaseId));
+    unmount();
+    resetAppVersionSessionDismissalsForTests();
+
+    render(<AppVersionGate userId={7} manualOpenSignal={0} onManualOpenHandled={vi.fn()} />);
+
+    await waitFor(() => expect(apiService.getLatestAppVersion).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('shows automatically again when a new releaseId appears', async () => {

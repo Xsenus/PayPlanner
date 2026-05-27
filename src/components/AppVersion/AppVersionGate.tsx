@@ -22,6 +22,35 @@ type AppVersionGateProps = {
 };
 
 const sessionDismissed = new Set<string>();
+const localDismissedPrefix = 'payplanner.appVersion.dismissed';
+
+function getDismissedStorageKey(userId: number, releaseId: string) {
+  return `${localDismissedPrefix}.${userId}.${releaseId}`;
+}
+
+function hasLocalDismissal(userId: number, releaseId: string) {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(getDismissedStorageKey(userId, releaseId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function rememberLocalDismissal(userId: number, releaseId: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(getDismissedStorageKey(userId, releaseId), '1');
+  } catch {
+    // Local storage can be unavailable in private mode; server-side seen mark still works.
+  }
+}
 
 export function resetAppVersionSessionDismissalsForTests() {
   sessionDismissed.clear();
@@ -67,6 +96,7 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
           releaseId
           && !data.seenByCurrentUser
           && !sessionDismissed.has(releaseId)
+          && !hasLocalDismissal(userId, releaseId)
           && autoOpenedReleaseRef.current !== releaseId
         ) {
           autoOpenedReleaseRef.current = releaseId;
@@ -115,6 +145,9 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
     }
 
     sessionDismissed.add(releaseId);
+    if (userId) {
+      rememberLocalDismissal(userId, releaseId);
+    }
     apiService.markAppVersionSeen(releaseId)
       .then(() => {
         setLatest((current) => current?.latestRelease?.releaseId === releaseId
@@ -124,7 +157,7 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
       .catch(() => {
         sessionDismissed.add(releaseId);
       });
-  }, [modalState]);
+  }, [modalState, userId]);
 
   const handleShowHistory = useCallback(() => {
     if (modalState?.status !== 'ready') {

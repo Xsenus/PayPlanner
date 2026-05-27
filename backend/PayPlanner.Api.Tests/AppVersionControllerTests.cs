@@ -111,6 +111,26 @@ public sealed class AppVersionControllerTests
     }
 
     [Fact]
+    public async Task GetLatest_UsesLocalApplicationTimeForPublishedReleases()
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "local-release-time@example.test");
+        var localZone = TimeZoneInfo.CreateCustomTimeZone("PayPlanner Test +07", TimeSpan.FromHours(7), "PayPlanner Test +07", "PayPlanner Test +07");
+        var controller = CreateController(
+            scope.Db,
+            user.Id,
+            new FixedTimeProvider(new DateTimeOffset(2026, 5, 27, 5, 0, 0, TimeSpan.Zero), localZone),
+            Release("2026-05-27-local-published", releasedAt: new DateTime(2026, 5, 27, 11, 30, 0)),
+            Release("2026-05-27-local-future", releasedAt: new DateTime(2026, 5, 27, 12, 30, 0)));
+
+        var result = await controller.GetLatest(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AppVersionLatestResponse>(ok.Value);
+        Assert.Equal("2026-05-27-local-published", payload.LatestRelease?.ReleaseId);
+    }
+
+    [Fact]
     public async Task MarkSeen_IsStoredPerUser()
     {
         await using var scope = await CreateScopeAsync();
@@ -341,8 +361,10 @@ public sealed class AppVersionControllerTests
         }
     }
 
-    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    private sealed class FixedTimeProvider(DateTimeOffset now, TimeZoneInfo? localTimeZone = null) : TimeProvider
     {
+        public override TimeZoneInfo LocalTimeZone { get; } = localTimeZone ?? TimeZoneInfo.Utc;
+
         public override DateTimeOffset GetUtcNow() => now.ToUniversalTime();
     }
 }
