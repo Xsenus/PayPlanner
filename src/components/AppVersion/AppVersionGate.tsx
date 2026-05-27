@@ -150,6 +150,12 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
       });
   }, [modalState]);
 
+  useEffect(() => {
+    if (modalState?.status === 'ready' && !modalState.history && !modalState.historyLoading) {
+      handleShowHistory();
+    }
+  }, [handleShowHistory, modalState]);
+
   const handleSelectRelease = useCallback((release: AppReleaseDto) => {
     setModalState((current) => current?.status === 'ready'
       ? { ...current, selectedRelease: release }

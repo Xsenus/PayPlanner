@@ -64,7 +64,9 @@ describe('AppVersionGate', () => {
     render(<AppVersionGate userId={7} manualOpenSignal={0} onManualOpenHandled={vi.fn()} />);
 
     expect(await screen.findByRole('dialog')).toBeTruthy();
-    expect(screen.getByText(/Версия 1.12.0/)).toBeTruthy();
+    expect(screen.getByTestId('app-version-dialog').className).toContain('max-w-[1000px]');
+    expect(await screen.findByTestId('app-version-history')).toBeTruthy();
+    expect(screen.getAllByText(/Версия 1.12.0/).length).toBeGreaterThan(0);
     expect(screen.getByText('Добавлен новый блок.')).toBeTruthy();
   });
 
@@ -121,8 +123,6 @@ describe('AppVersionGate', () => {
     render(<AppVersionGate userId={7} manualOpenSignal={0} onManualOpenHandled={vi.fn()} />);
 
     expect(await screen.findByRole('dialog')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /История обновлений/ }));
-
     expect(await screen.findByText('Предыдущее обновление')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Версия 1.11.0/ }));
 
