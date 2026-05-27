@@ -1596,7 +1596,8 @@ public class TasksControllerTests
         var task = await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: clientCase.Id, result: "На контроль");
         task.Title = "Проверить движение по делу";
         task.Description = "Сверить карточку суда и зафиксировать результат.";
-        task.DueAt = new DateTime(2026, 5, 11, 13, 0, 0, DateTimeKind.Utc);
+        task.DueAt = DateTime.UtcNow.AddDays(-1);
+        task.Status = "waiting";
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
@@ -1621,6 +1622,8 @@ public class TasksControllerTests
         Assert.Contains("КЛИЕНТ | Кирпита Наталья Андреевна", content);
         Assert.Contains("ДЕЛО | Взыскание долга", content);
         Assert.Contains("Проверить движение по делу", content);
+        Assert.Contains("Ожидает", content);
+        Assert.Contains("Просрочена", content);
         Assert.Contains("На контроль", content);
     }
 

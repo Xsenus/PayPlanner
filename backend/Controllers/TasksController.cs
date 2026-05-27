@@ -2356,6 +2356,7 @@ public class TasksController : ControllerBase
         html.AppendLine(".case-row td { background: #f1f5f9; font-weight: 700; }");
         html.AppendLine(".empty-row td { text-align: center; color: #64748b; padding: 18px; }");
         html.AppendLine(".small { color: #64748b; font-size: 10px; margin-top: 3px; }");
+        html.AppendLine(".overdue-note { color: #dc2626; font-size: 10px; font-weight: 700; margin-top: 3px; }");
         html.AppendLine(".num { width: 5%; text-align: center; }");
         html.AppendLine(".kind { width: 10%; }");
         html.AppendLine(".task { width: 28%; }");
@@ -2404,7 +2405,13 @@ public class TasksController : ControllerBase
                         html.AppendLine($"<td class=\"kind\">{Html(TaskTypeLabel(task.Type))}</td>");
                         html.AppendLine($"<td class=\"task\">{description}</td>");
                         html.AppendLine($"<td class=\"due\">{Html(FormatPlanningDate(task.DueAt))}</td>");
-                        html.AppendLine($"<td class=\"status\">{Html(TaskStatusLabel(ResolveTaskStatus(task)))}</td>");
+                        var statusHtml = Html(TaskStatusLabel(ResolveTaskStatus(task)));
+                        if (IsTaskDueOverdue(task, generatedAtUtc))
+                        {
+                            statusHtml += "<div class=\"overdue-note\">Просрочена</div>";
+                        }
+
+                        html.AppendLine($"<td class=\"status\">{statusHtml}</td>");
                         html.AppendLine($"<td class=\"assignee\">{Html(GetPlanningAssigneeName(task))}</td>");
                         html.AppendLine($"<td class=\"comment\">{Html(task.Result)}</td>");
                         html.AppendLine("</tr>");
@@ -3042,6 +3049,13 @@ public class TasksController : ControllerBase
         }
 
         return entity.Status;
+    }
+
+    private static bool IsTaskDueOverdue(TaskJournalItem entity, DateTime asOfUtc)
+    {
+        var status = ResolveTaskStatus(entity);
+        return ActiveTaskStatuses.Contains(status)
+            && entity.DueAt < asOfUtc;
     }
 
     private static DateTime GetApprovalDueAt(TaskJournalItem entity)

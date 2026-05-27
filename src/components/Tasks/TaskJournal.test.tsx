@@ -1140,6 +1140,28 @@ describe('TaskJournal', () => {
     expect(screen.queryByText('Открытая задача')).toBeNull();
   });
 
+  it('shows overdue note under the current task status', async () => {
+    const overdue = new Date();
+    overdue.setDate(overdue.getDate() - 1);
+    overdue.setHours(10, 0, 0, 0);
+
+    await renderJournal([
+      createTask({
+        id: 101,
+        title: 'Ожидающая просроченная задача',
+        status: 'waiting',
+        dueAt: overdue.toISOString(),
+      }),
+    ], { waitForTitle: null });
+
+    fireEvent.click(screen.getByTestId('task-period-all'));
+
+    const row = (await screen.findByText('Ожидающая просроченная задача')).closest('tr');
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLTableRowElement).getByText('Ожидает')).toBeTruthy();
+    expect(within(row as HTMLTableRowElement).getByText('Просрочена')).toBeTruthy();
+  });
+
   it('does not save a new task without a required counterparty', async () => {
     await renderJournal();
 

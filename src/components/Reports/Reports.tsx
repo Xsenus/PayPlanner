@@ -2530,6 +2530,7 @@ function TaskReportSection({
                       ].join(' ')}>
                         {row.statusLabel}
                       </span>
+                      {row.isOverdue ? <div className="mt-1 text-xs font-semibold text-rose-600">Просрочена</div> : null}
                     </td>
                   </tr>
                 )) : (

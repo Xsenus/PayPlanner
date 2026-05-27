@@ -672,6 +672,15 @@ function getStatusLabel(status: TaskJournalStatus) {
   return STATUS_OPTIONS.find((item) => item.value === status)?.label ?? status;
 }
 
+function isTaskOverdue(task: Pick<TaskJournalItem, 'status' | 'dueAt'>, nowDate = new Date()) {
+  if (!isTaskJournalActive(task.status)) {
+    return false;
+  }
+
+  const dueTime = new Date(task.dueAt).getTime();
+  return Number.isFinite(dueTime) && dueTime < nowDate.getTime();
+}
+
 function getPriorityLabel(priority: TaskJournalPriority) {
   return PRIORITY_OPTIONS.find((item) => item.value === priority)?.label ?? priority;
 }
@@ -833,16 +842,15 @@ function matchesQuickFilter(task: TaskJournalItem, quickFilter: QuickFilter, use
 }
 
 function matchesMetricFilter(task: TaskJournalItem, metricFilter: MetricFilter, nowDate: Date) {
-  const due = new Date(task.dueAt);
   const active = isTaskJournalActive(task.status);
 
   switch (metricFilter) {
     case 'active':
       return active;
     case 'overdue':
-      return active && due.getTime() < nowDate.getTime();
+      return isTaskOverdue(task, nowDate);
     case 'today':
-      return active && isSameDay(due, nowDate);
+      return active && isSameDay(new Date(task.dueAt), nowDate);
     case 'highPriority':
       return active && (task.priority === 'high' || task.priority === 'urgent');
     default:
@@ -1138,8 +1146,7 @@ function getTimelineTaskTone(
   assigneeFilter: string,
   colorMode: TaskCalendarColorMode,
 ) {
-  const dueTime = new Date(task.dueAt).getTime();
-  const isOverdue = isTaskJournalActive(task.status) && Number.isFinite(dueTime) && dueTime < Date.now();
+  const isOverdue = isTaskOverdue(task);
   const isSelectedAssignee =
     assigneeFilter !== 'all' &&
     (String(task.assigneeUserId ?? '') === assigneeFilter || hasAssigneeParticipant(task, assigneeFilter));
@@ -3419,7 +3426,7 @@ function TaskTable({
               </tr>
             ) : tasks.map((task) => {
               const TypeIcon = getTypeMeta(task.type).icon;
-              const isOverdue = isTaskJournalActive(task.status) && new Date(task.dueAt).getTime() < Date.now();
+              const isOverdue = isTaskOverdue(task);
               const isHighlighted = highlightedTaskId === task.id;
               const taskAssignees = getTaskParticipants(task, 'assignee');
               const approvalSummary = getApprovalSummary(task);
@@ -3519,19 +3526,25 @@ function TaskTable({
                   <td className="max-w-[260px] px-4 py-4 text-sm text-slate-600">{task.result || '—'}</td>
                   <td className="px-4 py-4">
                     {isReadOnly ? (
-                      <span className={`inline-flex rounded-xl px-3 py-2 text-sm font-semibold ${statusClass(task.status)}`}>
-                        {getStatusLabel(task.status)}
-                      </span>
+                      <div>
+                        <span className={`inline-flex rounded-xl px-3 py-2 text-sm font-semibold ${statusClass(task.status)}`}>
+                          {getStatusLabel(task.status)}
+                        </span>
+                        {isOverdue ? <div className="mt-1 text-xs font-semibold text-rose-600">Просрочена</div> : null}
+                      </div>
                     ) : (
-                      <select
-                        value={task.status}
-                        onChange={(event) => onStatusChange(task, event.target.value as TaskJournalStatus)}
-                        className={`rounded-xl border-0 px-3 py-2 text-sm font-semibold outline-none ${statusClass(task.status)}`}
-                      >
-                        {STATUS_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
+                      <div>
+                        <select
+                          value={task.status}
+                          onChange={(event) => onStatusChange(task, event.target.value as TaskJournalStatus)}
+                          className={`rounded-xl border-0 px-3 py-2 text-sm font-semibold outline-none ${statusClass(task.status)}`}
+                        >
+                          {STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                        {isOverdue ? <div className="mt-1 text-xs font-semibold text-rose-600">Просрочена</div> : null}
+                      </div>
                     )}
                   </td>
                   <td className="px-4 py-4">
@@ -4671,6 +4684,7 @@ function TaskCalendar({
               ) : selectedTasks.map((task) => {
                 const TypeIcon = getTypeMeta(task.type).icon;
                 const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
+                const isOverdue = isTaskOverdue(task);
                 return (
                   <article key={task.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
@@ -4679,9 +4693,12 @@ function TaskCalendar({
                         <div className="mt-1 truncate text-xs text-slate-500">{getTaskClientName(task)}</div>
                         {getTaskCaseTitle(task) ? <div className="mt-0.5 truncate text-xs text-slate-500">{getTaskCaseTitle(task)}</div> : null}
                       </button>
-                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${statusClass(task.status)}`}>
-                        {getStatusLabel(task.status)}
-                      </span>
+                      <div className="shrink-0 text-right">
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusClass(task.status)}`}>
+                          {getStatusLabel(task.status)}
+                        </span>
+                        {isOverdue ? <div className="mt-1 text-[11px] font-semibold text-rose-600">Просрочена</div> : null}
+                      </div>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                       <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
@@ -4843,6 +4860,7 @@ function TaskDaySchedulePanel({
             const sameAssignee = taskMatchesAssignee(task, assigneeUserId, assigneeName);
             const isConflict = conflicts.some((item) => item.id === task.id);
             const assigneeNames = getTaskAssigneeNames(task).join(', ');
+            const isOverdue = isTaskOverdue(task);
 
             return (
               <article
@@ -4862,6 +4880,11 @@ function TaskDaySchedulePanel({
                       <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusClass(task.status)}`}>
                         {getStatusLabel(task.status)}
                       </span>
+                      {isOverdue ? (
+                        <span className="rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700">
+                          Просрочена
+                        </span>
+                      ) : null}
                       {isCurrent ? (
                         <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
                           Текущая
