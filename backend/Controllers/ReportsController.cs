@@ -615,6 +615,43 @@ public class ReportsController : ControllerBase
         return Ok(report);
     }
 
+    [HttpGet("tasks")]
+    public async Task<ActionResult<TaskReportDto>> Tasks(
+        [FromQuery] DateTime? asOf,
+        [FromQuery] string? scope,
+        [FromQuery] int? assigneeUserId,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        if (tasksVisibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var effectiveAsOf = asOf?.Date ?? DateTime.UtcNow.Date;
+        var effectiveScope = NormalizeTaskReportScope(scope);
+        var effectiveLimit = Math.Clamp(limit ?? 150, 1, 500);
+
+        var report = await SqliteRetryHelper.ExecuteAsync(
+            cancellationToken => BuildTaskReportAsync(
+                effectiveAsOf,
+                effectiveScope,
+                assigneeUserId,
+                effectiveLimit,
+                tasksVisibility,
+                cancellationToken),
+            _logger,
+            ct);
+
+        return Ok(report);
+    }
+
     [HttpGet("lawyer-workload")]
     public async Task<ActionResult<LawyerWorkloadReportDto>> LawyerWorkload(
         [FromQuery] DateTime? asOf,
@@ -3029,6 +3066,146 @@ public class ReportsController : ControllerBase
         };
     }
 
+    private async Task<TaskReportDto> BuildTaskReportAsync(
+        DateTime asOf,
+        string scope,
+        int? assigneeUserId,
+        int limit,
+        DataVisibilityAccess tasksVisibility,
+        CancellationToken ct)
+    {
+        var query = _db.TaskJournalItems
+            .AsNoTracking()
+            .Include(task => task.Client)
+            .Include(task => task.LegalEntity)
+            .Include(task => task.ClientCase)
+            .Include(task => task.Participants)
+            .ApplyTaskVisibility(tasksVisibility);
+
+        if (assigneeUserId.HasValue)
+        {
+            query = query.Where(task =>
+                task.AssigneeUserId == assigneeUserId.Value ||
+                task.Participants.Any(participant =>
+                    participant.Role == "assignee" &&
+                    participant.UserId == assigneeUserId.Value));
+        }
+
+        var rows = (await query.ToListAsync(ct))
+            .Select(task => MapTaskReportItem(task, asOf))
+            .ToList();
+
+        var openRows = rows.Where(item => !item.IsClosed).ToList();
+        var closedRows = rows.Where(item => item.IsClosed).ToList();
+        var filteredRows = scope switch
+        {
+            "closed" => closedRows,
+            "all" => rows,
+            _ => openRows,
+        };
+
+        var orderedRows = filteredRows
+            .OrderBy(item => item.IsClosed)
+            .ThenByDescending(item => item.IsOverdue)
+            .ThenBy(item => item.DueAt)
+            .ThenBy(item => item.Title)
+            .Take(limit)
+            .ToList();
+
+        return new TaskReportDto
+        {
+            GeneratedAt = DateTime.UtcNow,
+            AsOf = asOf,
+            Scope = scope,
+            AssigneeUserIdFilter = assigneeUserId,
+            Limit = limit,
+            TotalTaskCount = rows.Count,
+            OpenTaskCount = openRows.Count,
+            ClosedTaskCount = closedRows.Count,
+            OverdueTaskCount = openRows.Count(item => item.IsOverdue),
+            DueTodayTaskCount = openRows.Count(item => item.DueAt.Date == asOf.Date),
+            WithoutAssigneeCount = rows.Count(item => !item.AssigneeUserId.HasValue && string.IsNullOrWhiteSpace(item.AssigneeName)),
+            ByStatus = rows
+                .GroupBy(item => new { item.Status, item.StatusLabel })
+                .OrderBy(group => TaskStatusSortOrder(group.Key.Status))
+                .ThenBy(group => group.Key.StatusLabel)
+                .Select(group => new TaskReportStatusItemDto
+                {
+                    Status = group.Key.Status,
+                    StatusLabel = group.Key.StatusLabel,
+                    Count = group.Count(),
+                    OverdueCount = group.Count(item => item.IsOverdue),
+                    Share = rows.Count > 0
+                        ? (int)Math.Round((decimal)group.Count() / rows.Count * 100m, MidpointRounding.AwayFromZero)
+                        : 0,
+                })
+                .ToList(),
+            ByResponsible = rows
+                .GroupBy(item => new
+                {
+                    item.AssigneeUserId,
+                    AssigneeName = NormalizeReportText(item.AssigneeName, "Без исполнителя"),
+                })
+                .OrderByDescending(group => group.Count(item => !item.IsClosed))
+                .ThenBy(group => group.Key.AssigneeName)
+                .Select(group => new TaskReportResponsibleItemDto
+                {
+                    AssigneeUserId = group.Key.AssigneeUserId,
+                    AssigneeName = group.Key.AssigneeName,
+                    TotalTasks = group.Count(),
+                    OpenTasks = group.Count(item => !item.IsClosed),
+                    ClosedTasks = group.Count(item => item.IsClosed),
+                    OverdueTasks = group.Count(item => item.IsOverdue),
+                    NearestDueAt = group
+                        .Where(item => !item.IsClosed)
+                        .OrderBy(item => item.DueAt)
+                        .Select(item => (DateTime?)item.DueAt)
+                        .FirstOrDefault(),
+                })
+                .ToList(),
+            Items = orderedRows,
+        };
+    }
+
+    private static TaskReportItemDto MapTaskReportItem(TaskJournalItem task, DateTime asOf)
+    {
+        var status = NormalizeReportText(task.Status, "new");
+        var isClosed = IsClosedTaskStatus(status);
+        var isOverdue = !isClosed && task.DueAt.Date < asOf.Date;
+
+        return new TaskReportItemDto
+        {
+            TaskId = task.Id,
+            ClientId = task.ClientId,
+            ClientName = task.Client?.Name ?? string.Empty,
+            LegalEntityId = task.LegalEntityId,
+            LegalEntityName = task.LegalEntity is null
+                ? string.Empty
+                : NormalizeReportText(task.LegalEntity.ShortName, task.LegalEntity.FullName ?? string.Empty),
+            ClientCaseId = task.ClientCaseId,
+            ClientCaseTitle = task.ClientCase?.Title ?? string.Empty,
+            ObjectName = NormalizeReportText(task.ObjectName, "Без объекта"),
+            Title = NormalizeReportText(task.Title, "Без названия"),
+            AssigneeUserId = task.AssigneeUserId,
+            AssigneeName = NormalizeReportText(ResolveTaskAssigneeName(task), "Без исполнителя"),
+            AuthorName = task.AuthorName ?? string.Empty,
+            DueAt = task.DueAt,
+            PlannedDurationMinutes = task.PlannedDurationMinutes,
+            Type = task.Type,
+            TypeLabel = FormatTaskType(task.Type),
+            Priority = task.Priority,
+            PriorityLabel = FormatTaskPriority(task.Priority),
+            Status = status,
+            StatusLabel = FormatTaskStatus(status),
+            Result = task.Result ?? string.Empty,
+            IsClosed = isClosed,
+            IsOverdue = isOverdue,
+            DaysOverdue = isOverdue ? Math.Max(0, (asOf.Date - task.DueAt.Date).Days) : null,
+            CreatedAt = task.CreatedAt,
+            UpdatedAt = task.UpdatedAt,
+        };
+    }
+
     private async Task<LawyerWorkloadReportDto> BuildLawyerWorkloadReportAsync(
         DateTime asOf,
         int horizonDays,
@@ -3377,6 +3554,83 @@ public class ReportsController : ControllerBase
     private static bool IsOpenTaskStatus(string? status)
         => !string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsClosedTaskStatus(string? status)
+        => string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeTaskReportScope(string? scope)
+    {
+        var normalized = scope?.Trim().ToLowerInvariant();
+        return normalized is "open" or "closed" or "all" ? normalized : "open";
+    }
+
+    private static string ResolveTaskAssigneeName(TaskJournalItem task)
+    {
+        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
+        {
+            return task.AssigneeName.Trim();
+        }
+
+        return task.Participants
+            .Where(participant => string.Equals(participant.Role, "assignee", StringComparison.OrdinalIgnoreCase))
+            .Select(participant => participant.DisplayName)
+            .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty;
+    }
+
+    private static int TaskStatusSortOrder(string? status)
+        => status switch
+        {
+            "new" => 0,
+            "inProgress" => 1,
+            "waiting" => 2,
+            "onApproval" => 3,
+            "overdueApproval" => 4,
+            "approved" => 5,
+            "revision" => 6,
+            "done" => 7,
+            "cancelled" => 8,
+            _ => 9,
+        };
+
+    private static string FormatTaskStatus(string? status)
+        => status switch
+        {
+            "new" => "Новая",
+            "inProgress" => "В работе",
+            "waiting" => "Ожидает",
+            "onApproval" => "На согласовании",
+            "approved" => "Согласовано",
+            "revision" => "На доработке",
+            "overdueApproval" => "Просрочено на согласовании",
+            "done" => "Готово",
+            "cancelled" => "Отменена",
+            _ => status ?? "—",
+        };
+
+    private static string FormatTaskType(string? type)
+        => type switch
+        {
+            "task" => "Задача",
+            "budget" => "Бюджет",
+            "contact" => "Связаться",
+            "document" => "Документ",
+            "reminder" => "Не забыть",
+            "control" => "Контроль",
+            "courtHearing" => "Суд. заседание",
+            "meeting" => "Встреча",
+            _ => type ?? "—",
+        };
+
+    private static string FormatTaskPriority(string? priority)
+        => priority switch
+        {
+            "low" => "Низкий",
+            "normal" => "Обычный",
+            "high" => "Высокий",
+            "urgent" => "Срочно",
+            _ => priority ?? "—",
+        };
 
     private static IEnumerable<CaseActivityReportItemDto> FilterCaseActivityRows(
         IReadOnlyCollection<CaseActivityReportItemDto> rows,

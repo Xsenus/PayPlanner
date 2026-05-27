@@ -717,6 +717,125 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task TasksReport_ReturnsOpenClosedAndAllVisibleTasks()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "task-report-role", Description = "Task reporter" };
+        var visibleUser = new User
+        {
+            Email = "visible-task-report@example.test",
+            FullName = "Visible Task User",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = "hidden-task-report@example.test",
+            FullName = "Hidden Task User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var asOf = new DateTime(2026, 5, 26);
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                ObjectName = "Visible object",
+                Title = "Open overdue task",
+                AssigneeUserId = visibleUser.Id,
+                AssigneeName = visibleUser.FullName,
+                DueAt = asOf.AddDays(-2).AddHours(9),
+                Status = "new",
+                Priority = "high",
+                Type = "task",
+                CreatedAt = asOf.AddDays(-5),
+            },
+            new TaskJournalItem
+            {
+                ObjectName = "Visible object",
+                Title = "Closed done task",
+                AssigneeUserId = visibleUser.Id,
+                AssigneeName = visibleUser.FullName,
+                DueAt = asOf.AddDays(-1).AddHours(9),
+                Status = "done",
+                Priority = "normal",
+                Type = "document",
+                CreatedAt = asOf.AddDays(-4),
+            },
+            new TaskJournalItem
+            {
+                ObjectName = "Visible object",
+                Title = "Cancelled task",
+                AssigneeUserId = visibleUser.Id,
+                AssigneeName = visibleUser.FullName,
+                DueAt = asOf.AddDays(1).AddHours(9),
+                Status = "cancelled",
+                Priority = "low",
+                Type = "meeting",
+                CreatedAt = asOf.AddDays(-3),
+            },
+            new TaskJournalItem
+            {
+                ObjectName = "Hidden object",
+                Title = "Hidden task",
+                AssigneeUserId = hiddenUser.Id,
+                AssigneeName = hiddenUser.FullName,
+                DueAt = asOf.AddDays(-1).AddHours(9),
+                Status = "new",
+                Priority = "urgent",
+                Type = "task",
+                CreatedAt = asOf.AddDays(-2),
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var openAction = await controller.Tasks(asOf, "open", null, 50, CancellationToken.None);
+        var openReport = Assert.IsType<TaskReportDto>(Assert.IsType<OkObjectResult>(openAction.Result).Value);
+
+        Assert.Equal(3, openReport.TotalTaskCount);
+        Assert.Equal(1, openReport.OpenTaskCount);
+        Assert.Equal(2, openReport.ClosedTaskCount);
+        Assert.Equal(1, openReport.OverdueTaskCount);
+        Assert.Equal("open", openReport.Scope);
+        Assert.Equal("Open overdue task", Assert.Single(openReport.Items).Title);
+        Assert.DoesNotContain(openReport.Items, item => item.Title == "Hidden task");
+        Assert.Contains(openReport.ByStatus, item => item.Status == "done" && item.Count == 1);
+        Assert.Contains(openReport.ByResponsible, item => item.AssigneeUserId == visibleUser.Id && item.TotalTasks == 3);
+
+        var closedAction = await controller.Tasks(asOf, "closed", null, 50, CancellationToken.None);
+        var closedReport = Assert.IsType<TaskReportDto>(Assert.IsType<OkObjectResult>(closedAction.Result).Value);
+        Assert.Equal("closed", closedReport.Scope);
+        Assert.Equal(2, closedReport.Items.Count);
+        Assert.All(closedReport.Items, item => Assert.True(item.IsClosed));
+
+        var allAction = await controller.Tasks(asOf, "all", null, 50, CancellationToken.None);
+        var allReport = Assert.IsType<TaskReportDto>(Assert.IsType<OkObjectResult>(allAction.Result).Value);
+        Assert.Equal("all", allReport.Scope);
+        Assert.Equal(3, allReport.Items.Count);
+    }
+
+    [Fact]
     public async Task LawyerWorkload_UsesVisibleCasesTasksAndDeadlines()
     {
         await using var db = await CreateContextAsync();

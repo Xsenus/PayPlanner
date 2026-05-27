@@ -79,6 +79,8 @@ out/
 
 # ---- Misc ----
 # /build/
+artifacts/
+backups/
 
 # Кеши инструментов
 .sass-cache/

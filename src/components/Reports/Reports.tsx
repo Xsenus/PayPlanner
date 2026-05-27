@@ -36,6 +36,7 @@ import { useCaseActivityReport } from '../../hooks/useCaseActivityReport';
 import { useCurrentCasesReport } from '../../hooks/useCurrentCasesReport';
 import { useLawyerWorkloadReport } from '../../hooks/useLawyerWorkloadReport';
 import { useOverdueProceduralDeadlinesReport } from '../../hooks/useOverdueProceduralDeadlinesReport';
+import { useTaskReport, type TaskReportScope } from '../../hooks/useTaskReport';
 import { useDirectionReport } from '../../hooks/useDirectionReport';
 import { useSalesPointReport } from '../../hooks/useSalesPointReport';
 import { useVatReport } from '../../hooks/useVatReport';
@@ -59,7 +60,7 @@ import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicke
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
   month: 'long',
@@ -102,6 +103,40 @@ type PieTooltipProps = {
   }>;
 };
 
+type ReportGroupId = 'payments' | 'tasks' | 'legal' | 'analytics';
+
+const reportGroups: Array<{
+  id: ReportGroupId;
+  title: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  {
+    id: 'payments',
+    title: 'Платежи',
+    description: 'Движение денег, статусы, контрагенты и счета',
+    icon: Wallet,
+  },
+  {
+    id: 'tasks',
+    title: 'Задачи',
+    description: 'Открытые, закрытые и полный список задач',
+    icon: Flag,
+  },
+  {
+    id: 'legal',
+    title: 'Дела',
+    description: 'Юридическая работа, сроки и нагрузка',
+    icon: FolderKanban,
+  },
+  {
+    id: 'analytics',
+    title: 'Аналитика',
+    description: 'Направления, точки продаж, НДС и план-факт',
+    icon: Target,
+  },
+];
+
 function formatCurrency(amount: number) {
   return formatCurrencySmart(amount).full;
 }
@@ -139,6 +174,16 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('ru-RU', {
     day: '2-digit',
     month: 'short',
+  }).format(new Date(value));
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(new Date(value));
 }
 
@@ -488,6 +533,49 @@ function StatusPanel({
           );
         })}
       </div>
+    </section>
+  );
+}
+
+function ReportGroupSelector({
+  activeGroup,
+  onChange,
+}: {
+  activeGroup: ReportGroupId;
+  onChange: (group: ReportGroupId) => void;
+}) {
+  return (
+    <section className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {reportGroups.map((group) => {
+        const Icon = group.icon;
+        const active = group.id === activeGroup;
+        return (
+          <button
+            key={group.id}
+            type="button"
+            onClick={() => onChange(group.id)}
+            className={[
+              'group flex min-h-[118px] flex-col items-start justify-between rounded-2xl border p-4 text-left shadow-[0_16px_36px_-26px_rgba(15,23,42,0.45)] transition',
+              active
+                ? 'border-slate-900 bg-slate-900 text-white'
+                : 'border-white/70 bg-white/90 text-slate-900 hover:border-slate-300 hover:bg-white',
+            ].join(' ')}
+          >
+            <span className={[
+              'inline-flex h-10 w-10 items-center justify-center rounded-xl transition',
+              active ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-700 group-hover:bg-slate-200',
+            ].join(' ')}>
+              <Icon className="h-5 w-5" />
+            </span>
+            <span>
+              <span className="block text-base font-semibold">{group.title}</span>
+              <span className={['mt-1 block text-sm leading-5', active ? 'text-slate-200' : 'text-slate-500'].join(' ')}>
+                {group.description}
+              </span>
+            </span>
+          </button>
+        );
+      })}
     </section>
   );
 }
@@ -2236,6 +2324,226 @@ function CaseSuccessReportSection({
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+function TaskReportSection({
+  report,
+  loading,
+  error,
+  scope,
+  onScopeChange,
+  onReload,
+  onOpenTask,
+}: {
+  report: TaskReport | null;
+  loading: boolean;
+  error: string | null;
+  scope: TaskReportScope;
+  onScopeChange: (scope: TaskReportScope) => void;
+  onReload: () => void;
+  onOpenTask?: (taskId: number) => void;
+}) {
+  const rows = report?.items ?? [];
+  const responsibleRows = report?.byResponsible ?? [];
+  const statusRows = report?.byStatus ?? [];
+  const scopeOptions: Array<{ value: TaskReportScope; label: string; count: number }> = [
+    { value: 'open', label: 'Открытые', count: report?.openTaskCount ?? 0 },
+    { value: 'closed', label: 'Закрытые', count: report?.closedTaskCount ?? 0 },
+    { value: 'all', label: 'Все', count: report?.totalTaskCount ?? 0 },
+  ];
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">
+            <Flag className="h-3.5 w-3.5" />
+            Отчет по задачам
+          </div>
+          <h2 className="mt-3 text-2xl font-semibold text-slate-950">Задачи по журналу</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+            Открытые задачи собираются по всем рабочим статусам, закрытые включают выполненные и отмененные задачи.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {scopeOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onScopeChange(option.value)}
+              className={[
+                'inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition',
+                scope === option.value
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+              ].join(' ')}
+            >
+              {option.label}
+              <span className={scope === option.value ? 'text-slate-300' : 'text-slate-400'}>{option.count}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загружаем отчет по задачам...
+        </div>
+      ) : error ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50 p-6 text-sm text-rose-700">
+          {error}
+        </div>
+      ) : report ? (
+        <>
+          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <div className="rounded-3xl bg-slate-50 p-5">
+              <div className="text-sm text-slate-500">Всего задач</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-950">{report.totalTaskCount}</div>
+            </div>
+            <div className="rounded-3xl bg-emerald-50 p-5">
+              <div className="text-sm text-emerald-700">Открытые</div>
+              <div className="mt-2 text-2xl font-semibold text-emerald-800">{report.openTaskCount}</div>
+            </div>
+            <div className="rounded-3xl bg-rose-50 p-5">
+              <div className="text-sm text-rose-700">Просроченные</div>
+              <div className="mt-2 text-2xl font-semibold text-rose-800">{report.overdueTaskCount}</div>
+            </div>
+            <div className="rounded-3xl bg-amber-50 p-5">
+              <div className="text-sm text-amber-700">На сегодня</div>
+              <div className="mt-2 text-2xl font-semibold text-amber-800">{report.dueTodayTaskCount}</div>
+            </div>
+            <div className="rounded-3xl bg-slate-100 p-5">
+              <div className="text-sm text-slate-600">Закрытые</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-950">{report.closedTaskCount}</div>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+            <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+              <h3 className="text-lg font-semibold text-slate-950">Статусы задач</h3>
+              <div className="mt-4 space-y-3">
+                {statusRows.length > 0 ? statusRows.map((item) => (
+                  <div key={item.status} className="flex items-center justify-between gap-4 rounded-2xl bg-white px-4 py-3 shadow-sm">
+                    <div>
+                      <div className="font-medium text-slate-900">{item.statusLabel}</div>
+                      <div className="mt-1 text-xs text-slate-500">{item.share}% от всех задач</div>
+                    </div>
+                    <div className="text-right text-sm">
+                      <div className="font-semibold text-slate-950">{item.count}</div>
+                      <div className="text-rose-600">{item.overdueCount > 0 ? `${item.overdueCount} проср.` : ''}</div>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-5 text-center text-sm text-slate-500">
+                    Статусы не найдены.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+              <h3 className="text-lg font-semibold text-slate-950">Исполнители</h3>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {responsibleRows.length > 0 ? responsibleRows.slice(0, 8).map((item) => (
+                  <div key={`${item.assigneeUserId ?? 'none'}-${item.assigneeName}`} className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-medium text-slate-900">{item.assigneeName}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          Открыто {item.openTasks} · закрыто {item.closedTasks}
+                        </div>
+                      </div>
+                      <div className="text-right text-sm">
+                        <div className="font-semibold text-slate-950">{item.totalTasks}</div>
+                        <div className="text-rose-600">{item.overdueTasks > 0 ? `${item.overdueTasks} проср.` : ''}</div>
+                      </div>
+                    </div>
+                    {item.nearestDueAt ? (
+                      <div className="mt-2 text-xs text-slate-500">Ближайший срок: {formatDateTime(item.nearestDueAt)}</div>
+                    ) : null}
+                  </div>
+                )) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 p-5 text-center text-sm text-slate-500 md:col-span-2">
+                    Исполнители не найдены.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 overflow-x-auto rounded-3xl border border-slate-100 bg-slate-50/70">
+            <table className="min-w-full text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Задача</th>
+                  <th className="px-4 py-3 font-semibold">Объект</th>
+                  <th className="px-4 py-3 font-semibold">Исполнитель</th>
+                  <th className="px-4 py-3 font-semibold">Срок</th>
+                  <th className="px-4 py-3 font-semibold">Статус</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white/80">
+                {rows.length > 0 ? rows.map((row) => (
+                  <tr key={row.taskId} className="align-top">
+                    <td className="px-4 py-3">
+                      {onOpenTask ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenTask(row.taskId)}
+                          className="inline-flex items-center gap-1 text-left font-semibold text-blue-700 transition hover:text-blue-900 hover:underline"
+                        >
+                          {row.title}
+                          <ArrowUpRight className="h-3.5 w-3.5" />
+                        </button>
+                      ) : (
+                        <div className="font-semibold text-slate-900">{row.title}</div>
+                      )}
+                      <div className="mt-1 text-xs text-slate-500">{row.typeLabel} · {row.priorityLabel}</div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      <div>{row.clientCaseTitle || row.objectName}</div>
+                      <div className="mt-1 text-xs text-slate-500">{row.clientName || row.legalEntityName || row.objectName}</div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{row.assigneeName || 'Без исполнителя'}</td>
+                    <td className="px-4 py-3">
+                      <div className={row.isOverdue ? 'font-semibold text-rose-700' : 'text-slate-600'}>{formatDateTime(row.dueAt)}</div>
+                      {row.daysOverdue ? <div className="mt-1 text-xs text-rose-600">{row.daysOverdue} дн. просрочки</div> : null}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={[
+                        'inline-flex rounded-full px-3 py-1 text-xs font-semibold',
+                        row.isClosed
+                          ? 'bg-slate-100 text-slate-700'
+                          : row.isOverdue
+                            ? 'bg-rose-50 text-rose-700'
+                            : 'bg-emerald-50 text-emerald-700',
+                      ].join(' ')}>
+                        {row.statusLabel}
+                      </span>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                      Задачи по выбранному режиму не найдены.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -5452,6 +5760,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
   const [range, setRange] = useState<MonthRange>({ from: ymNow, to: ymNow });
+  const [activeGroup, setActiveGroup] = useState<ReportGroupId>('payments');
+  const [taskReportScope, setTaskReportScope] = useState<TaskReportScope>('open');
 
   const normalizedRange = useMemo(
     () => normalizeYmRange((range.from ?? ymNow) as `${number}-${string}`, (range.to ?? range.from ?? ymNow) as `${number}-${string}`),
@@ -5482,6 +5792,10 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const overdueDeadlinesReportFilters = useMemo(
     () => ({ limit: 100 }),
     [],
+  );
+  const taskReportFilters = useMemo(
+    () => ({ asOf: cashFlowDates.to, scope: taskReportScope, limit: 200 }),
+    [cashFlowDates.to, taskReportScope],
   );
   const {
     report: cashFlowReport,
@@ -5576,6 +5890,14 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadOverdueDeadlinesReport,
   } = useOverdueProceduralDeadlinesReport({
     ...overdueDeadlinesReportFilters,
+  });
+  const {
+    report: taskReport,
+    loading: taskReportLoading,
+    error: taskReportError,
+    reload: reloadTaskReport,
+  } = useTaskReport({
+    ...taskReportFilters,
   });
   const {
     report: directionReport,
@@ -5850,6 +6172,10 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
           </div>
         ) : (
           <>
+            <ReportGroupSelector activeGroup={activeGroup} onChange={setActiveGroup} />
+
+            {activeGroup === 'payments' ? (
+              <>
             <section className="mt-8 grid grid-cols-1 gap-4 xl:grid-cols-4">
               <MetricCard
                 title="Поступило"
@@ -6046,6 +6372,23 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               error={projectReportError}
               onReload={reloadProjectReport}
             />
+              </>
+            ) : null}
+
+            {activeGroup === 'tasks' ? (
+              <TaskReportSection
+                report={taskReport}
+                loading={taskReportLoading}
+                error={taskReportError}
+                scope={taskReportScope}
+                onScopeChange={setTaskReportScope}
+                onReload={reloadTaskReport}
+                onOpenTask={onOpenTask}
+              />
+            ) : null}
+
+            {activeGroup === 'legal' ? (
+              <>
 
             <LegalWorkReportSection
               report={legalWorkReport}
@@ -6113,6 +6456,11 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               onOpenCase={onOpenCase}
               onOpenCaseSection={onOpenCaseSection}
             />
+              </>
+            ) : null}
+
+            {activeGroup === 'analytics' ? (
+              <>
 
             <DirectionReportSection
               report={directionReport}
@@ -6246,6 +6594,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               error={spreadsheetImportReportError}
               onReload={reloadSpreadsheetImportReport}
             />
+              </>
+            ) : null}
           </>
         )}
       </div>

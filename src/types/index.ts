@@ -2077,6 +2077,70 @@ export interface OverdueProceduralDeadlinesReport {
   items: OverdueProceduralDeadlineItem[];
 }
 
+export interface TaskReportStatusItem {
+  status: string;
+  statusLabel: string;
+  count: number;
+  overdueCount: number;
+  share: number;
+}
+
+export interface TaskReportResponsibleItem {
+  assigneeUserId?: number | null;
+  assigneeName: string;
+  totalTasks: number;
+  openTasks: number;
+  closedTasks: number;
+  overdueTasks: number;
+  nearestDueAt?: string | null;
+}
+
+export interface TaskReportItem {
+  taskId: number;
+  clientId?: number | null;
+  clientName: string;
+  legalEntityId?: number | null;
+  legalEntityName: string;
+  clientCaseId?: number | null;
+  clientCaseTitle: string;
+  objectName: string;
+  title: string;
+  assigneeUserId?: number | null;
+  assigneeName: string;
+  authorName: string;
+  dueAt: string;
+  plannedDurationMinutes: number;
+  type: string;
+  typeLabel: string;
+  priority: string;
+  priorityLabel: string;
+  status: string;
+  statusLabel: string;
+  result: string;
+  isClosed: boolean;
+  isOverdue: boolean;
+  daysOverdue?: number | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface TaskReport {
+  generatedAt: string;
+  asOf: string;
+  scope: 'open' | 'closed' | 'all' | string;
+  assigneeUserIdFilter?: number | null;
+  limit: number;
+  totalTaskCount: number;
+  openTaskCount: number;
+  closedTaskCount: number;
+  overdueTaskCount: number;
+  dueTodayTaskCount: number;
+  withoutAssigneeCount: number;
+  byStatus: TaskReportStatusItem[];
+  byResponsible: TaskReportResponsibleItem[];
+  items: TaskReportItem[];
+}
+
 export interface DirectionReportItem {
   directionName: string;
   income: number;
