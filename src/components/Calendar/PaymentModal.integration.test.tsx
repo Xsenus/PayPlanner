@@ -417,6 +417,101 @@ describe('PaymentModal integration', () => {
     expect(screen.getByDisplayValue('Existing payment description')).toBeTruthy();
   });
 
+  it('shows delete action for legacy invoice-marked payment without invoice link', async () => {
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onDelete={vi.fn().mockResolvedValue(undefined)}
+        payment={{
+          id: 339,
+          date: '2026-01-30',
+          plannedDate: '2026-01-30',
+          amount: 15_000,
+          paidAmount: 0,
+          status: 'Overdue',
+          description: 'БЕЗНЯКОВ - ОПЛАТА ФИН.УПРАВЛЯЮЩЕМУ',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Expense',
+          documentKind: 'Invoice',
+          invoiceId: null,
+          createdAt: '2026-01-30T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Case 501',
+            status: 'Open',
+            clientId: 69,
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    expect(await screen.findByRole('button', { name: 'delete' })).toBeTruthy();
+  });
+
+  it('submits inferred expense client for legacy case-linked expense payment', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 340,
+          date: '2026-01-23',
+          plannedDate: '2025-12-01',
+          amount: 15_000,
+          paidAmount: 0,
+          status: 'Overdue',
+          description: 'БЕЗНЯКОВ - ОПЛАТА ФИНАНСОВОМУ УПРАВЛЯЮЩЕМУ',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Expense',
+          documentKind: 'Invoice',
+          invoiceId: null,
+          createdAt: '2026-01-23T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Case 501',
+            status: 'Open',
+            clientId: 69,
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      id: 340,
+      type: 'Expense',
+      expenseClientId: 69,
+      clientCaseId: 501,
+    }));
+  });
+
   it('creates an invoice from the payment, applies the canonical link, and saves the payment with invoiceId only', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     getContractsMock.mockResolvedValue({ items: [{ id: 321 }] });

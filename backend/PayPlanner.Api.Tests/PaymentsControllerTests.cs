@@ -858,6 +858,28 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task Delete_RemovesLegacyInvoiceDocument_WhenPaymentHasNoInvoiceLink()
+    {
+        await using var db = await CreateContextAsync();
+
+        var legacyPayment = CreatePayment(new DateTime(2026, 1, 30), 15_000m, "Legacy invoice-marked expense");
+        legacyPayment.Type = PaymentType.Expense;
+        legacyPayment.DocumentKind = DocumentKind.Invoice;
+        legacyPayment.InvoiceId = null;
+
+        db.Payments.Add(legacyPayment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Delete(legacyPayment.Id, CancellationToken.None);
+        db.ChangeTracker.Clear();
+
+        Assert.IsType<NoContentResult>(actionResult);
+        Assert.Null(await db.Payments.FindAsync(legacyPayment.Id));
+    }
+
+    [Fact]
     public async Task Delete_RemovesGeneratedInstallmentPayment_AndKeepsInvoiceAggregate()
     {
         await using var db = await CreateContextAsync();
@@ -894,6 +916,57 @@ public class PaymentsControllerTests
 
         var conflict = Assert.IsType<ConflictObjectResult>(actionResult);
         Assert.Contains(InvoiceManagedPaymentRules.UpdateBlockedMessage, conflict.Value?.ToString());
+    }
+
+    [Fact]
+    public async Task Update_AllowsLegacyInvoiceDocumentWithoutInvoiceLink_AndInfersExpenseClient()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Безняков", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Банкротство",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 1, 30), 15_000m, "Legacy expense");
+        payment.Type = PaymentType.Expense;
+        payment.DocumentKind = DocumentKind.Invoice;
+        payment.ClientId = client.Id;
+        payment.ClientCaseId = clientCase.Id;
+        payment.ExpenseClientId = null;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var model = CreatePayment(payment.Date, payment.Amount, payment.Description);
+        model.Type = PaymentType.Expense;
+        model.Status = PaymentStatus.Cancelled;
+        model.DocumentKind = DocumentKind.Invoice;
+        model.ClientId = client.Id;
+        model.ClientCaseId = clientCase.Id;
+        model.ExpenseClientId = null;
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Update(payment.Id, model, CancellationToken.None);
+        db.ChangeTracker.Clear();
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(PaymentStatus.Cancelled, updated.Status);
+        Assert.Equal(client.Id, updated.ExpenseClientId);
+
+        var stored = await db.Payments.FindAsync(payment.Id);
+        Assert.NotNull(stored);
+        Assert.Equal(client.Id, stored!.ExpenseClientId);
     }
 
     [Fact]
@@ -1984,7 +2057,7 @@ public class PaymentsControllerTests
     }
 
     [Fact]
-    public async Task Create_RejectsExpenseClientCaseWithoutExpenseClientId()
+    public async Task Create_InfersExpenseClientFromCaseWhenExpenseClientIsMissing()
     {
         await using var db = await CreateContextAsync();
 
@@ -2012,10 +2085,10 @@ public class PaymentsControllerTests
 
         var actionResult = await controller.Create(model, CancellationToken.None);
 
-        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
-        Assert.Equal(
-            "ExpenseClientId or expenseLegalEntityId is required when clientCaseId is specified for expense payments.",
-            badRequest.Value);
+        var created = Assert.IsType<CreatedResult>(actionResult);
+        var payment = Assert.IsType<Payment>(created.Value);
+        Assert.Equal(expenseClient.Id, payment.ExpenseClientId);
+        Assert.Equal(clientCase.Id, payment.ClientCaseId);
     }
 
     [Fact]

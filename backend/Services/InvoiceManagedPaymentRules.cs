@@ -46,10 +46,15 @@ public static class InvoiceManagedPaymentRules
 
     public static bool IsInvoiceManagedPayment(Payment payment)
     {
-        return payment.DocumentKind == DocumentKind.Invoice
+        return IsLinkedRepresentativeInvoicePayment(payment)
                || IsGeneratedInstallmentPayment(payment)
                || IsGeneratedInvoiceRemainderPayment(payment);
     }
+
+    private static bool IsLinkedRepresentativeInvoicePayment(Payment payment)
+        => payment.DocumentKind == DocumentKind.Invoice
+           && payment.InvoiceId.HasValue
+           && payment.InvoiceId.Value > 0;
 
     public static bool ShouldHideRepresentativeInvoice(IEnumerable<Payment> payments)
     {

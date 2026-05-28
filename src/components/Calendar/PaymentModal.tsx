@@ -130,6 +130,16 @@ function parseDecimal(value: string): number {
   return Number.isFinite(num) ? num : 0;
 }
 
+function optionalPositiveId(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function parseOptionalId(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const id = parseInt(value, 10);
+  return Number.isFinite(id) && id > 0 ? id : undefined;
+}
+
 function formatMoneyDisplayValue(value: number | string | null | undefined): string {
   const num =
     typeof value === 'number'
@@ -737,8 +747,17 @@ export function PaymentModal({
         const appliedBalanceAmount = getAppliedClientBalanceAmount(p.systemNotes);
         const resolvedLegalEntityId = linkedInvoice?.legalEntityId ?? p.legalEntityId ?? defaultLegalEntityId ?? null;
         const resolvedClientId = linkedInvoice?.clientId ?? p.clientId ?? defaultClientId ?? null;
-        const resolvedExpenseLegalEntityId = linkedInvoice?.expenseLegalEntityId ?? p.expenseLegalEntityId ?? defaultExpenseLegalEntityId ?? null;
-        const resolvedExpenseClientId = linkedInvoice?.expenseClientId ?? p.expenseClientId ?? defaultExpenseClientId ?? null;
+        let resolvedExpenseLegalEntityId = linkedInvoice?.expenseLegalEntityId ?? p.expenseLegalEntityId ?? defaultExpenseLegalEntityId ?? null;
+        let resolvedExpenseClientId = linkedInvoice?.expenseClientId ?? p.expenseClientId ?? defaultExpenseClientId ?? null;
+        if (
+          p.type === 'Expense'
+          && p.clientCaseId
+          && !resolvedExpenseClientId
+          && !resolvedExpenseLegalEntityId
+        ) {
+          resolvedExpenseClientId = p.clientId ?? null;
+          resolvedExpenseLegalEntityId = resolvedExpenseClientId ? null : p.legalEntityId ?? null;
+        }
         setAppliedClientBalanceAmount(appliedBalanceAmount);
         setFormData({
           date: toDateInputValue(p.date) || todayYMD(),
@@ -839,6 +858,42 @@ export function PaymentModal({
       prevOpenRef.current = true;
     }
   }, [defaultClientCaseId, defaultClientId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultLegalEntityId, isOpen, linkedInvoice, type]);
+
+  const getSelectedClientCase = () => (
+    formData.clientCaseId
+      ? cases.find((item) => String(item.id) === formData.clientCaseId) ?? fallbackCase
+      : null
+  );
+
+  const resolveExpenseClientIdForSubmit = () => {
+    if (formData.type !== 'Expense' || formData.expenseLegalEntityId) return undefined;
+
+    const selectedCase = getSelectedClientCase();
+    if (selectedCase?.legalEntityId) return undefined;
+
+    return parseOptionalId(formData.expenseClientId)
+      ?? optionalPositiveId(selectedCase?.clientId)
+      ?? (
+        payment?.type === 'Expense' && String(payment.clientCaseId ?? '') === formData.clientCaseId
+          ? optionalPositiveId(payment.clientId)
+          : undefined
+      );
+  };
+
+  const resolveExpenseLegalEntityIdForSubmit = () => {
+    if (formData.type !== 'Expense' || formData.expenseClientId) return undefined;
+
+    const selectedCase = getSelectedClientCase();
+    if (selectedCase?.clientId) return undefined;
+
+    return parseOptionalId(formData.expenseLegalEntityId)
+      ?? optionalPositiveId(selectedCase?.legalEntityId)
+      ?? (
+        payment?.type === 'Expense' && String(payment.clientCaseId ?? '') === formData.clientCaseId
+          ? optionalPositiveId(payment.legalEntityId)
+          : undefined
+      );
+  };
 
   useEffect(() => {
     if (!isOpen || availableClientBalance !== undefined) return;
@@ -1295,14 +1350,8 @@ export function PaymentModal({
         rescheduleCount: formData.rescheduleCount ?? 0,
         clientId: formData.clientId ? parseInt(formData.clientId, 10) : undefined,
         legalEntityId: formData.legalEntityId ? parseInt(formData.legalEntityId, 10) : undefined,
-        expenseClientId:
-          formData.type === 'Expense' && formData.expenseClientId
-            ? parseInt(formData.expenseClientId, 10)
-            : undefined,
-        expenseLegalEntityId:
-          formData.type === 'Expense' && formData.expenseLegalEntityId
-            ? parseInt(formData.expenseLegalEntityId, 10)
-            : undefined,
+        expenseClientId: resolveExpenseClientIdForSubmit(),
+        expenseLegalEntityId: resolveExpenseLegalEntityIdForSubmit(),
         clientCaseId: formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined,
         dealTypeId: formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined,
         incomeTypeId: formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined,
@@ -1762,7 +1811,7 @@ export function PaymentModal({
     && (isProtectedTransferredRemainder || isProtectedRemainderSource)
     && (onRollbackRemainderTransfer || onAdjustRemainderTransfer),
   );
-  const isRepresentativeInvoicePayment = payment?.documentKind === 'Invoice';
+  const isRepresentativeInvoicePayment = payment?.documentKind === 'Invoice' && Boolean(payment.invoiceId && payment.invoiceId > 0);
   const canDelete = !!payment && !!onDelete && !isRepresentativeInvoicePayment && !isProtectedTransferredRemainder && !isProtectedRemainderSource;
   const canCancelPayment = !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
   const canMovePayment = !!payment && !isProtectedTransferredRemainder && !isProtectedRemainderSource && payment.status !== 'Cancelled';
@@ -1917,14 +1966,8 @@ export function PaymentModal({
       rescheduleCount: formData.rescheduleCount ?? 0,
       clientId: formData.clientId ? parseInt(formData.clientId, 10) : undefined,
       legalEntityId: formData.legalEntityId ? parseInt(formData.legalEntityId, 10) : undefined,
-      expenseClientId:
-        formData.type === 'Expense' && formData.expenseClientId
-          ? parseInt(formData.expenseClientId, 10)
-          : undefined,
-      expenseLegalEntityId:
-        formData.type === 'Expense' && formData.expenseLegalEntityId
-          ? parseInt(formData.expenseLegalEntityId, 10)
-          : undefined,
+      expenseClientId: resolveExpenseClientIdForSubmit(),
+      expenseLegalEntityId: resolveExpenseLegalEntityIdForSubmit(),
       clientCaseId: formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined,
       dealTypeId: formData.dealTypeId ? parseInt(formData.dealTypeId, 10) : undefined,
       incomeTypeId: formData.incomeTypeId ? parseInt(formData.incomeTypeId, 10) : undefined,

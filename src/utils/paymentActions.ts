@@ -9,6 +9,21 @@ function optionalString(value: string | null | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function resolveCancelledExpenseClientId(payment: Payment): number | undefined {
+  if (payment.type !== 'Expense') return undefined;
+  if (payment.expenseLegalEntityId) return undefined;
+
+  return optionalNumber(payment.expenseClientId) ?? optionalNumber(payment.clientId);
+}
+
+function resolveCancelledExpenseLegalEntityId(payment: Payment): number | undefined {
+  if (payment.type !== 'Expense' || payment.expenseClientId) return undefined;
+  if (payment.expenseLegalEntityId) return optionalNumber(payment.expenseLegalEntityId);
+  if (payment.clientId) return undefined;
+
+  return optionalNumber(payment.legalEntityId);
+}
+
 export function buildCancelledPaymentPayload(payment: Payment): PaymentPayload {
   const baseDate = payment.date || payment.plannedDate;
 
@@ -27,7 +42,9 @@ export function buildCancelledPaymentPayload(payment: Payment): PaymentPayload {
     systemNotes: payment.systemNotes ?? '',
     rescheduleCount: payment.rescheduleCount ?? 0,
     clientId: optionalNumber(payment.clientId),
-    expenseClientId: payment.type === 'Expense' ? optionalNumber(payment.expenseClientId) : undefined,
+    legalEntityId: optionalNumber(payment.legalEntityId),
+    expenseClientId: resolveCancelledExpenseClientId(payment),
+    expenseLegalEntityId: resolveCancelledExpenseLegalEntityId(payment),
     clientCaseId: optionalNumber(payment.clientCaseId),
     contractId: optionalNumber(payment.contractId),
     dealTypeId: optionalNumber(payment.dealTypeId),

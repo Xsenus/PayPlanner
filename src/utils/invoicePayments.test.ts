@@ -132,7 +132,7 @@ describe('invoicePayments utilities', () => {
   });
 
   it('treats representative invoice, generated installment and transferred remainder payments as invoice-managed', () => {
-    const invoicePayment = createPayment({ documentKind: 'Invoice' });
+    const invoicePayment = createPayment({ documentKind: 'Invoice', invoiceId: 30 });
     const installmentPayment = createPayment({
       systemNotes: `${INSTALLMENT_PAYMENT_MARKER} {"sequence":1}`,
     });
@@ -146,6 +146,12 @@ describe('invoicePayments utilities', () => {
     expect(isInvoiceManagedPayment(installmentPayment)).toBe(true);
     expect(isInvoiceManagedPayment(remainderPayment)).toBe(true);
     expect(isInvoiceManagedPayment(standalonePayment)).toBe(false);
+  });
+
+  it('does not treat legacy invoice-marked payments without invoice link as invoice-managed', () => {
+    const legacyInvoicePayment = createPayment({ documentKind: 'Invoice', invoiceId: null });
+
+    expect(isInvoiceManagedPayment(legacyInvoicePayment)).toBe(false);
   });
 
   it('detects transferred remainder payments even without an invoice link', () => {

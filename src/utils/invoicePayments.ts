@@ -183,7 +183,7 @@ export function isInvoiceManagedPayment(
   payment: Pick<Payment, 'documentKind' | 'systemNotes'> & { invoiceId?: number | null },
 ): boolean {
   return (
-    payment.documentKind === 'Invoice'
+    (payment.documentKind === 'Invoice' && Boolean(payment.invoiceId && payment.invoiceId > 0))
     || isGeneratedInstallmentPayment(payment)
     || isGeneratedInvoiceRemainderPayment(payment)
   );

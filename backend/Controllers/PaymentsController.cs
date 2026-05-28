@@ -122,6 +122,7 @@ public class PaymentsController : ControllerBase
         }
 
         await SyncInvoiceLinkAsync(model, ct);
+        await PopulateMissingExpenseAttributionFromCaseAsync(model, ct);
         var createValidationError = await ValidatePaymentAttributionAsync(model, ct);
         if (createValidationError is not null) return createValidationError;
         var rawPaidAmount = model.PaidAmount;
@@ -234,6 +235,7 @@ public class PaymentsController : ControllerBase
         e.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
 
         await SyncInvoiceLinkAsync(e, ct);
+        await PopulateMissingExpenseAttributionFromCaseAsync(e, ct);
         var updateValidationError = await ValidatePaymentAttributionAsync(e, ct);
         if (updateValidationError is not null) return updateValidationError;
         PaymentDomainService.Normalize(e);
@@ -507,6 +509,7 @@ public class PaymentsController : ControllerBase
         e.Type = immutableType;
 
         await SyncInvoiceManagedPaymentBindingsAsync(e, ct);
+        await PopulateMissingExpenseAttributionFromCaseAsync(e, ct);
         var invoiceManagedValidationError = await ValidatePaymentAttributionAsync(e, ct);
         if (invoiceManagedValidationError is not null) return invoiceManagedValidationError;
         PaymentDomainService.Normalize(e);
@@ -2625,6 +2628,40 @@ public class PaymentsController : ControllerBase
             .Include(x => x.Invoice)
             .Include(x => x.InvoiceClientCases)
             .FirstOrDefaultAsync(x => x.InvoiceId == invoiceId && x.DocumentKind == DocumentKind.Invoice, ct);
+    }
+
+    private async Task PopulateMissingExpenseAttributionFromCaseAsync(Payment payment, CancellationToken ct)
+    {
+        if (payment.Type != PaymentType.Expense
+            || !payment.ClientCaseId.HasValue
+            || payment.ClientCaseId.Value <= 0
+            || (payment.ExpenseClientId.HasValue && payment.ExpenseClientId.Value > 0)
+            || (payment.ExpenseLegalEntityId.HasValue && payment.ExpenseLegalEntityId.Value > 0))
+        {
+            return;
+        }
+
+        var owner = await _db.ClientCases
+            .AsNoTracking()
+            .Where(item => item.Id == payment.ClientCaseId.Value)
+            .Select(item => new { item.ClientId, item.LegalEntityId })
+            .FirstOrDefaultAsync(ct);
+
+        if (owner is null)
+        {
+            return;
+        }
+
+        if (owner.ClientId.HasValue && owner.ClientId.Value > 0)
+        {
+            payment.ExpenseClientId = owner.ClientId.Value;
+            payment.ExpenseLegalEntityId = null;
+        }
+        else if (owner.LegalEntityId.HasValue && owner.LegalEntityId.Value > 0)
+        {
+            payment.ExpenseClientId = null;
+            payment.ExpenseLegalEntityId = owner.LegalEntityId.Value;
+        }
     }
 
     private async Task<ActionResult?> ValidatePaymentAttributionAsync(Payment payment, CancellationToken ct)
