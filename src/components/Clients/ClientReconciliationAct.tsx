@@ -26,6 +26,7 @@ import { todayYMD, toRuDate } from "../../utils/dateUtils";
 import { formatCurrencySmart } from "../../utils/formatters";
 import {
   buildReconciliationRows,
+  type ReconciliationRow,
   roundMoney,
 } from "./clientReconciliationActUtils";
 
@@ -66,6 +67,14 @@ type DraftPatch<K extends keyof ReconciliationDraft> = Pick<
   ReconciliationDraft,
   K
 >;
+
+type ReconciliationParty = {
+  name: string;
+  nameWithInn: string;
+  details: string[];
+  signerName: string;
+  signerPosition: string;
+};
 
 const STORAGE_PREFIX = "pp.client_reconciliation_act";
 
@@ -135,12 +144,237 @@ function getPartyDetails(
   ].filter((value): value is string => Boolean(value));
 }
 
-function toCsvValue(value: string | number) {
-  return `"${String(value).replace(/"/g, '""')}"`;
+function getPartySignerName(
+  entity: LegalEntitySummary | LegalEntityDetail | null | undefined,
+  fallbackName: string,
+) {
+  return entity?.director?.trim() || getPartyName(entity, fallbackName);
 }
 
-function downloadText(filename: string, content: string) {
-  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+function getPartySignerPosition(
+  entity: LegalEntitySummary | LegalEntityDetail | null | undefined,
+  fallback: string,
+) {
+  if (entity?.organizationForm?.toLowerCase().includes("ип")) {
+    return "Предприниматель";
+  }
+
+  return fallback;
+}
+
+function createParty(
+  entity: LegalEntitySummary | LegalEntityDetail | null | undefined,
+  fallbackName: string,
+  signerPosition: string,
+): ReconciliationParty {
+  const name = getPartyName(entity, fallbackName);
+
+  return {
+    name,
+    nameWithInn: entity?.inn ? `${name} (ИНН ${entity.inn})` : name,
+    details: getPartyDetails(entity, fallbackName),
+    signerName: getPartySignerName(entity, fallbackName),
+    signerPosition: getPartySignerPosition(entity, signerPosition),
+  };
+}
+
+function formatAccountingMoney(value: number) {
+  if (!value) return "";
+  return value.toFixed(2).replace(".", ",");
+}
+
+function formatAccountingMoneyText(value: number) {
+  return `${value.toLocaleString("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} руб.`;
+}
+
+function escapeHtml(value: string | number | null | undefined) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function getCleanDocumentNumber(row: ReconciliationRow) {
+  const documentNumber = row.documentNumber.trim();
+  if (row.sourceKind === "payment" && documentNumber.startsWith("ID ")) {
+    return "";
+  }
+
+  return documentNumber;
+}
+
+function getOperationName(row: ReconciliationRow, side: "executor" | "client") {
+  if (row.sourceKind === "payment") return "Оплата";
+
+  const isExecutorSale = row.debit >= row.credit;
+  if (side === "executor") {
+    return isExecutorSale ? "Продажа" : "Покупка";
+  }
+
+  return isExecutorSale ? "Покупка" : "Продажа";
+}
+
+function getAccountingDocumentTitle(row: ReconciliationRow, side: "executor" | "client") {
+  const number = getCleanDocumentNumber(row);
+  const numberPart = number ? `${number} ` : "";
+  return `${getOperationName(row, side)} (${numberPart}от ${toRuDate(row.date)})`;
+}
+
+function getBalanceSummary(
+  balance: number,
+  periodTo: string,
+  executorName: string,
+  clientName: string,
+) {
+  if (balance > 0) {
+    return `на ${toRuDate(periodTo)} задолженность ${clientName} перед ${executorName} составляет ${formatAccountingMoneyText(balance)}`;
+  }
+
+  if (balance < 0) {
+    return `на ${toRuDate(periodTo)} задолженность ${executorName} перед ${clientName} составляет ${formatAccountingMoneyText(Math.abs(balance))}`;
+  }
+
+  return `на ${toRuDate(periodTo)} задолженности нет`;
+}
+
+function buildReconciliationExcelHtml({
+  draft,
+  rows,
+  totals,
+  executor,
+  client,
+}: {
+  draft: ReconciliationDraft;
+  rows: ReconciliationRow[];
+  totals: { debit: number; credit: number; balance: number };
+  executor: ReconciliationParty;
+  client: ReconciliationParty;
+}) {
+  const rowsHtml = rows
+    .map(
+      (row) => `
+        <tr>
+          <td>${escapeHtml(toRuDate(row.date))}</td>
+          <td>${escapeHtml(getAccountingDocumentTitle(row, "executor"))}</td>
+          <td class="amount">${escapeHtml(formatAccountingMoney(row.debit))}</td>
+          <td class="amount">${escapeHtml(formatAccountingMoney(row.credit))}</td>
+          <td>${escapeHtml(toRuDate(row.date))}</td>
+          <td>${escapeHtml(getAccountingDocumentTitle(row, "client"))}</td>
+          <td class="amount"></td>
+          <td class="amount"></td>
+        </tr>`,
+    )
+    .join("");
+
+  const balanceDebit = totals.balance > 0 ? totals.balance : 0;
+  const balanceCredit = totals.balance < 0 ? Math.abs(totals.balance) : 0;
+
+  return `\uFEFF<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 10pt; color: #111827; }
+    h1 { margin: 0 0 8px; text-align: center; font-size: 16pt; }
+    .subtitle, .intro { white-space: pre-line; margin: 8px 0 14px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #111827; padding: 5px; vertical-align: top; }
+    th { text-align: center; font-weight: 700; background: #f3f4f6; }
+    .party { text-align: center; font-weight: 700; }
+    .amount { text-align: right; white-space: nowrap; }
+    .total td { font-weight: 700; }
+    .summary { margin-top: 18px; width: 100%; }
+    .summary td { border: 0; padding: 4px 0; }
+    .sign td { border: 0; padding-top: 18px; }
+    .line { border-bottom: 1px solid #111827; height: 22px; }
+  </style>
+</head>
+<body>
+  <h1>Акт сверки</h1>
+  <div class="subtitle">взаимных расчетов за период: ${escapeHtml(toRuDate(draft.periodFrom))} - ${escapeHtml(toRuDate(draft.periodTo))}
+между ${escapeHtml(executor.nameWithInn)}
+и ${escapeHtml(client.nameWithInn)}</div>
+  <div class="intro">Мы, нижеподписавшиеся, ${escapeHtml(executor.signerPosition)} ${escapeHtml(executor.name)}, с одной стороны, и ${escapeHtml(client.name)}, с другой стороны, составили настоящий акт сверки в том, что состояние взаимных расчетов по данным учета следующее:</div>
+  <table>
+    <thead>
+      <tr>
+        <th class="party" colspan="4">По данным ${escapeHtml(executor.name)}</th>
+        <th class="party" colspan="4">По данным ${escapeHtml(client.name)}</th>
+      </tr>
+      <tr>
+        <th>Дата</th>
+        <th>Документ</th>
+        <th>Дебет</th>
+        <th>Кредит</th>
+        <th>Дата</th>
+        <th>Документ</th>
+        <th>Дебет</th>
+        <th>Кредит</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="4">Сальдо начальное</td><td colspan="4">Сальдо начальное</td></tr>
+      ${rowsHtml || `<tr><td colspan="8" style="text-align:center">За выбранный период операций нет.</td></tr>`}
+      <tr class="total">
+        <td colspan="2">Обороты за период</td>
+        <td class="amount">${escapeHtml(formatAccountingMoney(totals.debit))}</td>
+        <td class="amount">${escapeHtml(formatAccountingMoney(totals.credit))}</td>
+        <td colspan="2">Обороты за период</td>
+        <td class="amount"></td>
+        <td class="amount"></td>
+      </tr>
+      <tr class="total">
+        <td colspan="2">Сальдо конечное</td>
+        <td class="amount">${escapeHtml(formatAccountingMoney(balanceDebit))}</td>
+        <td class="amount">${escapeHtml(formatAccountingMoney(balanceCredit))}</td>
+        <td colspan="2">Сальдо конечное</td>
+        <td class="amount"></td>
+        <td class="amount"></td>
+      </tr>
+    </tbody>
+  </table>
+  <table class="summary">
+    <tr>
+      <td>По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}</td>
+      <td>По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}</td>
+    </tr>
+    <tr>
+      <td>${escapeHtml(getBalanceSummary(totals.balance, draft.periodTo, executor.name, client.name))}</td>
+      <td>на ${escapeHtml(toRuDate(draft.periodTo))}</td>
+    </tr>
+  </table>
+  <table class="sign">
+    <tr>
+      <td>От ${escapeHtml(executor.name)}</td>
+      <td>От ${escapeHtml(client.name)}</td>
+    </tr>
+    <tr>
+      <td>${escapeHtml(executor.signerPosition)}</td>
+      <td>&nbsp;</td>
+    </tr>
+    <tr>
+      <td class="line"></td>
+      <td class="line"></td>
+    </tr>
+    <tr>
+      <td>(${escapeHtml(executor.signerName)})</td>
+      <td>(${escapeHtml(client.signerName)})</td>
+    </tr>
+    <tr>
+      <td>М.П. ${escapeHtml(toRuDate(draft.createdAt))}г.</td>
+      <td>М.П. ${escapeHtml(toRuDate(draft.createdAt))}г.</td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+function downloadText(filename: string, content: string, type = "text/plain;charset=utf-8") {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -307,8 +541,8 @@ export function ClientReconciliationAct({
     () => contracts.find((item) => String(item.id) === draft.contractId) ?? null,
     [contracts, draft.contractId],
   );
-  const clientPartyDetails = getPartyDetails(client?.legalEntity, client?.name || clientName);
-  const executorPartyDetails = getPartyDetails(companyProfile, "Организация CRM");
+  const clientParty = createParty(client?.legalEntity, client?.name || clientName, "Клиент");
+  const executorParty = createParty(companyProfile, "Организация CRM", "Руководитель");
   const statusLabel =
     STATUS_OPTIONS.find((item) => item.value === draft.status)?.label ?? draft.status;
   const balanceDirection =
@@ -317,46 +551,58 @@ export function ClientReconciliationAct({
       : totals.balance < 0
       ? "в пользу клиента"
       : "расчёты закрыты";
+  const finalBalanceDebit = totals.balance > 0 ? totals.balance : 0;
+  const finalBalanceCredit = totals.balance < 0 ? Math.abs(totals.balance) : 0;
+  const balanceSummary = getBalanceSummary(
+    totals.balance,
+    draft.periodTo,
+    executorParty.name,
+    clientParty.name,
+  );
 
   const saveDraft = () => {
     window.localStorage.setItem(storageKey(clientId), JSON.stringify(draft));
     setSavedLabel(`Черновик сохранён ${new Date().toLocaleTimeString("ru-RU")}`);
   };
 
-  const exportCsv = () => {
-    const lines = [
-      [`Акт сверки № ${draft.number}`, `от ${toRuDate(draft.createdAt)}`],
-      [`Период`, `${toRuDate(draft.periodFrom)} - ${toRuDate(draft.periodTo)}`],
-      [`Клиент`, clientPartyDetails.join(", ")],
-      [
-        "№ п/п",
-        "Дата операции",
-        "Номер документа",
-        "Вид документа",
-        "Содержание операции",
-        "Дебет (руб.)",
-        "Кредит (руб.)",
-        "Сальдо (руб.)",
-        "Примечание",
-      ],
-      ...rows.map((row) => [
-        row.index,
-        toRuDate(row.date),
-        row.documentNumber,
-        row.documentType,
-        row.description,
-        row.debit.toFixed(2),
-        row.credit.toFixed(2),
-        row.balance.toFixed(2),
-        row.note,
-      ]),
-      ["", "", "", "", "Итого", totals.debit.toFixed(2), totals.credit.toFixed(2), totals.balance.toFixed(2), balanceDirection],
-    ];
+  const exportExcel = () => {
+    const html = buildReconciliationExcelHtml({
+      draft,
+      rows,
+      totals,
+      executor: executorParty,
+      client: clientParty,
+    });
 
-    const csv = `\uFEFF${lines
-      .map((line) => line.map((value) => toCsvValue(value)).join(";"))
-      .join("\r\n")}`;
-    downloadText(`akt-sverki-${draft.number || clientId}.csv`, csv);
+    downloadText(
+      `akt-sverki-${draft.number || clientId}.xls`,
+      html,
+      "application/vnd.ms-excel;charset=utf-8",
+    );
+  };
+
+  const printReconciliationAct = () => {
+    const html = buildReconciliationExcelHtml({
+      draft,
+      rows,
+      totals,
+      executor: executorParty,
+      client: clientParty,
+    });
+    const printWindow = window.open("", "_blank", "width=1100,height=900");
+
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+    }, 100);
   };
 
   const addDisagreement = () => {
@@ -551,7 +797,7 @@ export function ClientReconciliationAct({
             </button>
             <button
               type="button"
-              onClick={exportCsv}
+              onClick={exportExcel}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               <Download className="h-4 w-4" />
@@ -559,7 +805,7 @@ export function ClientReconciliationAct({
             </button>
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={printReconciliationAct}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               <Printer className="h-4 w-4" />
@@ -583,16 +829,17 @@ export function ClientReconciliationAct({
       ) : null}
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 p-5">
+        <div className="p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-slate-950">
-                Акт сверки взаиморасчётов № {draft.number || "—"} от{" "}
-                {toRuDate(draft.createdAt)}
+            <div className="min-w-0">
+              <h3 className="text-center text-xl font-semibold text-slate-950">
+                Акт сверки
               </h3>
-              <p className="mt-1 text-sm text-slate-500">
-                Период: {toRuDate(draft.periodFrom) || "—"} -{" "}
+              <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">
+                взаимных расчетов за период: {toRuDate(draft.periodFrom) || "—"} -{" "}
                 {toRuDate(draft.periodTo) || "—"}
+                {"\n"}между {executorParty.nameWithInn}
+                {"\n"}и {clientParty.nameWithInn}
               </p>
             </div>
             <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
@@ -600,28 +847,12 @@ export function ClientReconciliationAct({
             </span>
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <div className="rounded-lg bg-slate-50 p-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Исполнитель
-              </div>
-              <div className="mt-2 space-y-1 text-sm text-slate-700">
-                {executorPartyDetails.map((line) => (
-                  <div key={line}>{line}</div>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-lg bg-slate-50 p-3">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Клиент
-              </div>
-              <div className="mt-2 space-y-1 text-sm text-slate-700">
-                {clientPartyDetails.map((line) => (
-                  <div key={line}>{line}</div>
-                ))}
-              </div>
-            </div>
-          </div>
+          <p className="mt-4 text-sm leading-6 text-slate-700">
+            Мы, нижеподписавшиеся, {executorParty.signerPosition}{" "}
+            {executorParty.name}, с одной стороны, и {clientParty.name}, с другой
+            стороны, составили настоящий акт сверки в том, что состояние взаимных
+            расчетов по данным учета следующее:
+          </p>
 
           <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
             <div>
@@ -641,78 +872,133 @@ export function ClientReconciliationAct({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-[1120px] w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-3 py-3 text-left">№ п/п</th>
-                <th className="px-3 py-3 text-left">Дата операции</th>
-                <th className="px-3 py-3 text-left">Номер документа</th>
-                <th className="px-3 py-3 text-left">Вид документа</th>
-                <th className="px-3 py-3 text-left">Содержание операции</th>
-                <th className="px-3 py-3 text-right">Дебет (руб.)</th>
-                <th className="px-3 py-3 text-right">Кредит (руб.)</th>
-                <th className="px-3 py-3 text-right">Сальдо (руб.)</th>
-                <th className="px-3 py-3 text-left">Примечание</th>
+        <div className="overflow-x-auto px-5 pb-5">
+          <table
+            data-testid="reconciliation-accounting-table"
+            className="min-w-[1080px] w-full border-collapse text-sm"
+          >
+            <thead className="text-slate-700">
+              <tr className="bg-slate-50">
+                <th
+                  className="border border-slate-300 px-3 py-2 text-center font-semibold"
+                  colSpan={4}
+                >
+                  По данным {executorParty.name}
+                </th>
+                <th
+                  className="border border-slate-300 px-3 py-2 text-center font-semibold"
+                  colSpan={4}
+                >
+                  По данным {clientParty.name}
+                </th>
+              </tr>
+              <tr className="bg-slate-50 text-xs uppercase tracking-wide">
+                <th className="border border-slate-300 px-3 py-2 text-left">Дата</th>
+                <th className="border border-slate-300 px-3 py-2 text-left">Документ</th>
+                <th className="border border-slate-300 px-3 py-2 text-right">Дебет</th>
+                <th className="border border-slate-300 px-3 py-2 text-right">Кредит</th>
+                <th className="border border-slate-300 px-3 py-2 text-left">Дата</th>
+                <th className="border border-slate-300 px-3 py-2 text-left">Документ</th>
+                <th className="border border-slate-300 px-3 py-2 text-right">Дебет</th>
+                <th className="border border-slate-300 px-3 py-2 text-right">Кредит</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+            <tbody className="bg-white text-slate-800">
+              <tr>
+                <td className="border border-slate-300 px-3 py-2" colSpan={4}>
+                  Сальдо начальное
+                </td>
+                <td className="border border-slate-300 px-3 py-2" colSpan={4}>
+                  Сальдо начальное
+                </td>
+              </tr>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-10 text-center text-slate-500">
+                  <td colSpan={8} className="border border-slate-300 px-3 py-10 text-center text-slate-500">
                     Формируем акт сверки...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-10 text-center text-slate-500">
+                  <td colSpan={8} className="border border-slate-300 px-3 py-10 text-center text-slate-500">
                     За выбранный период операций нет.
                   </td>
                 </tr>
               ) : (
                 rows.map((row) => (
                   <tr key={`${row.sourceKind}-${row.sourceId}`}>
-                    <td className="whitespace-nowrap px-3 py-3">{row.index}</td>
-                    <td className="whitespace-nowrap px-3 py-3">{toRuDate(row.date)}</td>
-                    <td className="whitespace-nowrap px-3 py-3 font-medium text-blue-700">
-                      {row.documentNumber}
+                    <td className="whitespace-nowrap border border-slate-300 px-3 py-2">
+                      {toRuDate(row.date)}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3">{row.documentType}</td>
-                    <td className="min-w-[260px] px-3 py-3">{row.description || "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-3 text-right">
-                      {row.debit ? formatMoney(row.debit) : "—"}
+                    <td className="min-w-[230px] border border-slate-300 px-3 py-2">
+                      {getAccountingDocumentTitle(row, "executor")}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-right">
-                      {row.credit ? formatMoney(row.credit) : "—"}
+                    <td className="whitespace-nowrap border border-slate-300 px-3 py-2 text-right">
+                      {formatAccountingMoney(row.debit)}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-right font-semibold">
-                      {formatMoney(row.balance)}
+                    <td className="whitespace-nowrap border border-slate-300 px-3 py-2 text-right">
+                      {formatAccountingMoney(row.credit)}
                     </td>
-                    <td className="min-w-[160px] px-3 py-3 text-slate-500">
-                      {row.note || "—"}
+                    <td className="whitespace-nowrap border border-slate-300 px-3 py-2">
+                      {toRuDate(row.date)}
                     </td>
+                    <td className="min-w-[230px] border border-slate-300 px-3 py-2">
+                      {getAccountingDocumentTitle(row, "client")}
+                    </td>
+                    <td className="whitespace-nowrap border border-slate-300 px-3 py-2 text-right" />
+                    <td className="whitespace-nowrap border border-slate-300 px-3 py-2 text-right" />
                   </tr>
                 ))
               )}
-            </tbody>
-            <tfoot className="border-t border-slate-200 bg-slate-50 text-sm font-semibold text-slate-900">
-              <tr>
-                <td colSpan={5} className="px-3 py-3 text-right">
-                  Итого
+              <tr className="bg-slate-50 font-semibold text-slate-950">
+                <td className="border border-slate-300 px-3 py-2" colSpan={2}>
+                  Обороты за период
                 </td>
-                <td className="whitespace-nowrap px-3 py-3 text-right">
-                  {formatMoney(totals.debit)}
+                <td className="whitespace-nowrap border border-slate-300 px-3 py-2 text-right">
+                  {formatAccountingMoney(totals.debit)}
                 </td>
-                <td className="whitespace-nowrap px-3 py-3 text-right">
-                  {formatMoney(totals.credit)}
+                <td className="whitespace-nowrap border border-slate-300 px-3 py-2 text-right">
+                  {formatAccountingMoney(totals.credit)}
                 </td>
-                <td className="whitespace-nowrap px-3 py-3 text-right">
-                  {formatMoney(totals.balance)}
+                <td className="border border-slate-300 px-3 py-2" colSpan={2}>
+                  Обороты за период
                 </td>
-                <td className="px-3 py-3">{balanceDirection}</td>
+                <td className="border border-slate-300 px-3 py-2" />
+                <td className="border border-slate-300 px-3 py-2" />
               </tr>
-            </tfoot>
+              <tr className="bg-slate-50 font-semibold text-slate-950">
+                <td className="border border-slate-300 px-3 py-2" colSpan={2}>
+                  Сальдо конечное
+                </td>
+                <td className="whitespace-nowrap border border-slate-300 px-3 py-2 text-right">
+                  {formatAccountingMoney(finalBalanceDebit)}
+                </td>
+                <td className="whitespace-nowrap border border-slate-300 px-3 py-2 text-right">
+                  {formatAccountingMoney(finalBalanceCredit)}
+                </td>
+                <td className="border border-slate-300 px-3 py-2" colSpan={2}>
+                  Сальдо конечное
+                </td>
+                <td className="border border-slate-300 px-3 py-2" />
+                <td className="border border-slate-300 px-3 py-2" />
+              </tr>
+            </tbody>
           </table>
+        </div>
+
+        <div className="grid gap-6 border-t border-slate-200 px-5 py-4 text-sm text-slate-700 md:grid-cols-2">
+          <div>
+            <div className="font-medium text-slate-900">
+              По данным {executorParty.name} и {clientParty.name}
+            </div>
+            <div className="mt-1">{balanceSummary}</div>
+          </div>
+          <div>
+            <div className="font-medium text-slate-900">
+              По данным {executorParty.name} и {clientParty.name}
+            </div>
+            <div className="mt-1">на {toRuDate(draft.periodTo)}</div>
+          </div>
         </div>
 
         <div className="space-y-4 border-t border-slate-200 p-5">
@@ -847,15 +1133,25 @@ export function ClientReconciliationAct({
             </div>
           ) : null}
 
-          <div className="grid gap-6 pt-4 text-sm text-slate-700 md:grid-cols-2">
+          <div className="grid gap-10 pt-4 text-sm text-slate-700 md:grid-cols-2">
             <div>
-              <div className="mb-8 h-px bg-slate-200" />
-              Исполнитель / подпись / дата
+              <div className="font-medium text-slate-900">От {executorParty.name}</div>
+              <div className="mt-6">{executorParty.signerPosition}</div>
+              <div className="mt-8 h-px bg-slate-300" />
+              <div className="mt-2">({executorParty.signerName})</div>
+              <div className="mt-4 text-slate-500">М.П. {toRuDate(draft.createdAt)}г.</div>
             </div>
             <div>
-              <div className="mb-8 h-px bg-slate-200" />
-              Клиент / подпись / дата
+              <div className="font-medium text-slate-900">От {clientParty.name}</div>
+              <div className="mt-6">&nbsp;</div>
+              <div className="mt-8 h-px bg-slate-300" />
+              <div className="mt-2">({clientParty.signerName})</div>
+              <div className="mt-4 text-slate-500">М.П. {toRuDate(draft.createdAt)}г.</div>
             </div>
+          </div>
+
+          <div className="sr-only">
+            {executorParty.details.join("; ")} {clientParty.details.join("; ")}
           </div>
         </div>
       </section>

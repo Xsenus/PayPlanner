@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ClientReconciliationAct } from "./ClientReconciliationAct";
@@ -221,10 +221,61 @@ describe("ClientReconciliationAct", () => {
     await waitFor(() => expect(apiMock.getInvoices).toHaveBeenCalled());
 
     expect(screen.getByTestId("client-reconciliation-act")).toBeTruthy();
-    expect(screen.getByText(/Акт сверки взаиморасчётов/)).toBeTruthy();
-    expect(screen.getByText("ООО Ромашка")).toBeTruthy();
-    expect(screen.getAllByText("Счёт").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Платёж").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Акт").length).toBeGreaterThan(0);
+    expect(screen.getByText("Акт сверки")).toBeTruthy();
+    expect(screen.getByTestId("reconciliation-accounting-table")).toBeTruthy();
+    expect(screen.getAllByText("По данным ООО ЭлитПраво").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/ООО Ромашка/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Сальдо начальное").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Обороты за период").length).toBeGreaterThan(0);
+    expect(screen.getByText("Продажа (№15 от 10.01.2026)")).toBeTruthy();
+    expect(screen.getAllByText("Оплата (от 12.01.2026)").length).toBeGreaterThan(0);
+    expect(screen.getByText("Продажа (№4 от 20.01.2026)")).toBeTruthy();
+    expect(screen.getByText(/задолженность ООО Ромашка перед ООО ЭлитПраво/)).toBeTruthy();
+  });
+
+  it("exports the accounting reconciliation act as Excel HTML", async () => {
+    const createObjectUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:act");
+    const revokeObjectUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    let downloadedFileName = "";
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function click(this: HTMLAnchorElement) {
+        downloadedFileName = this.download;
+      });
+
+    render(
+      <ClientReconciliationAct
+        clientId={1}
+        clientName="ООО Ромашка"
+        client={
+          {
+            id: 1,
+            name: "ООО Ромашка",
+            legalEntity: {
+              id: 2,
+              shortName: "ООО Ромашка",
+              inn: "9876543210",
+              clientsCount: 1,
+            },
+          } as Client
+        }
+      />,
+    );
+
+    await waitFor(() => expect(apiMock.getInvoices).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: /Excel/i }));
+
+    expect(createObjectUrl).toHaveBeenCalled();
+    const blob = createObjectUrl.mock.calls[0][0] as Blob;
+    expect(blob.type).toBe("application/vnd.ms-excel;charset=utf-8");
+    const html = await blob.text();
+    expect(html).toContain("По данным ООО ЭлитПраво");
+    expect(html).toContain("Продажа (№15 от 10.01.2026)");
+    expect(downloadedFileName).toMatch(/akt-sverki-.+\.xls/);
+
+    clickSpy.mockRestore();
+    createObjectUrl.mockRestore();
+    revokeObjectUrl.mockRestore();
   });
 });
