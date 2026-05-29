@@ -2492,18 +2492,24 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Приходный кассовый ордер", content.Content);
         Assert.Contains("Унифицированная форма № КО-1", content.Content);
         Assert.Contains("0310001", content.Content);
-        Assert.Contains("Квитанция к приходному кассовому ордеру", content.Content);
-        Assert.Contains("Двадцать пять тысяч один рубль 25 копеек", content.Content);
+        Assert.DoesNotContain("0310002", content.Content);
+        Assert.Contains("Квитанция", content.Content);
+        Assert.Contains("Линия отреза", content.Content);
+        Assert.Contains("Форма по ОКУД", content.Content);
+        Assert.Contains("25 001-25", content.Content);
+        Assert.Contains("25 001", content.Content);
+        Assert.Contains("25</div><span>коп.", content.Content);
+        Assert.Contains("двадцать пять тысяч один", content.Content);
+        Assert.Contains("апреля", content.Content);
         Assert.Contains("Принято от", content.Content);
         Assert.Contains("Ахмедова Айтан Рафик Кызы", content.Content);
         Assert.Contains("Основная касса", content.Content);
         Assert.Contains("Договор и счёт", content.Content);
-        Assert.Contains("Без замечаний", content.Content);
-        Assert.Contains("Руководитель", content.Content);
         Assert.Contains("Главный бухгалтер", content.Content);
-        Assert.Contains("подпись, расшифровка", content.Content);
+        Assert.Contains("Получил кассир", content.Content);
+        Assert.Contains("(подпись)", content.Content);
+        Assert.Contains("(расшифровка подписи)", content.Content);
         AssertPrintHtmlHasNoGeneratedTimestamp(content.Content);
-        AssertPrintHtmlUsesSharedDocumentStyle(content.Content);
     }
 
     [Fact]

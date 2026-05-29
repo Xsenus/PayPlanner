@@ -930,8 +930,188 @@ public class CashOrdersController : ControllerBase
             UpdatedAt = inventory.UpdatedAt,
         };
 
+    private static string BuildIncomingCashOrderPrintHtml(CashOrder order)
+    {
+        var number = Html(order.Number);
+        var organization = Html(order.Account ?? order.ReceiverName ?? "-");
+        var payer = Html(order.PayerName ?? order.Client?.Name ?? "-");
+        var basis = Html(order.Basis ?? "-");
+        var appendix = Html(order.Appendix ?? string.Empty);
+        var signer = Html(order.ReceiverName ?? order.Account ?? string.Empty);
+        var amountRubKop = Html(FormatCashOrderRubKop(order.Amount));
+        var rubles = Html(FormatWholeRubles(order.Amount));
+        var kopecks = Html(FormatKopecks(order.Amount));
+        var amountWords = Html(AmountRublesToWordsRu(order.Amount));
+        var month = GetRussianMonthGenitive(order.Date.Month);
+        var cancelNotice = order.Status == CashOrderStatus.Cancelled
+            ? $"""<div class="cancelled">Документ отменён{(order.CancelledAt.HasValue ? $" {order.CancelledAt:dd.MM.yyyy HH:mm}" : string.Empty)}{(string.IsNullOrWhiteSpace(order.CancelledReason) ? string.Empty : $": {Html(order.CancelledReason)}")}</div>"""
+            : string.Empty;
+
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Приходный кассовый ордер {{number}}</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #111;
+      font-family: Arial, "DejaVu Sans", sans-serif;
+      font-size: 10px;
+      line-height: 1.15;
+      background: #fff;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .ko1 { display: grid; grid-template-columns: minmax(0, 1fr) 28px 36%; gap: 14px; max-width: 1040px; margin: 0 auto; }
+    .order, .receipt { min-width: 0; }
+    .cut { position: relative; min-height: 520px; border-left: 1px dashed #111; border-right: 3px solid #111; }
+    .cut span { position: absolute; top: 165px; left: 50%; transform: translateX(-50%); writing-mode: vertical-rl; letter-spacing: 9px; font-weight: 700; }
+    .top-note { margin-left: 58%; margin-bottom: 18px; font-size: 10px; line-height: 1.35; }
+    .org-line { border-bottom: 2px solid #111; min-height: 18px; padding: 0 6px 2px; }
+    .hint { color: #333; font-size: 9px; text-align: center; }
+    .header-row { display: grid; grid-template-columns: 1fr 90px; gap: 10px; align-items: end; margin-top: 10px; }
+    .code-box, .doc-meta, .ledger { border-collapse: collapse; width: 100%; table-layout: fixed; }
+    .code-box td, .doc-meta td, .ledger th, .ledger td { border: 1px solid #111; padding: 5px 4px; text-align: center; vertical-align: middle; }
+    .code-box td:first-child { border-left: 0; text-align: right; padding-right: 8px; }
+    .code-box td:last-child { font-weight: 700; }
+    .title { margin: 34px 0 22px; text-align: center; font-size: 19px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+    .doc-meta { width: 190px; margin-left: auto; margin-bottom: 12px; font-size: 10px; }
+    .doc-meta .value { font-size: 15px; font-weight: 700; }
+    .ledger { font-size: 9px; }
+    .ledger th { font-weight: 400; }
+    .ledger .sum { font-size: 10px; white-space: nowrap; }
+    .line-field { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: end; margin-top: 7px; font-size: 11px; }
+    .line { min-height: 17px; border-bottom: 1px solid #111; padding: 0 5px 2px; }
+    .long-line { margin-top: 7px; min-height: 19px; border-bottom: 1px solid #111; }
+    .amount-words { display: grid; grid-template-columns: auto 1fr auto 70px auto 54px auto; gap: 7px; align-items: end; margin-top: 9px; font-size: 11px; }
+    .amount-words .line { text-align: left; }
+    .amount-words .kopecks, .receipt .kopecks { text-align: center; }
+    .sign-row { display: grid; grid-template-columns: 145px 1fr 1fr; gap: 22px; align-items: end; margin-top: 12px; }
+    .sign-line { border-bottom: 1px solid #111; min-height: 20px; text-align: center; padding-bottom: 2px; }
+    .sign-label { font-size: 9px; text-align: center; color: #333; margin-top: 2px; }
+    .receipt .org-line { margin: 42px 0 0; text-align: center; }
+    .receipt-title { text-align: center; font-size: 19px; font-weight: 800; margin: 10px 0 28px; text-transform: uppercase; }
+    .receipt-subtitle { margin-bottom: 9px; font-size: 11px; }
+    .receipt-number { display: grid; grid-template-columns: 1fr 54px; gap: 10px; align-items: end; }
+    .receipt-date { display: grid; grid-template-columns: auto 34px auto 82px 54px auto; gap: 8px; align-items: end; margin-top: 6px; font-size: 11px; }
+    .receipt .line-field { grid-template-columns: auto 1fr; margin-top: 8px; }
+    .receipt .amount-digits { display: grid; grid-template-columns: auto 1fr auto 45px auto; gap: 9px; align-items: end; margin-top: 18px; font-size: 11px; }
+    .receipt .amount-digits .line { text-align: center; }
+    .receipt .amount-words { grid-template-columns: 1fr auto 45px auto; margin-top: 8px; }
+    .receipt .amount-words .line { grid-column: 1 / 5; }
+    .receipt .small-hint { text-align: center; font-size: 9px; color: #333; margin-top: 2px; }
+    .receipt .stamp-row { display: grid; grid-template-columns: 1fr auto 82px auto 54px auto; gap: 8px; align-items: end; margin-top: 18px; }
+    .receipt .sign-row { grid-template-columns: 118px 1fr 1fr; gap: 16px; margin-top: 22px; }
+    .cancelled { margin: 0 0 10px; border: 1px solid #111; padding: 6px 8px; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main class="ko1">
+    <section class="order">
+      <div class="top-note">
+        <div>Унифицированная форма № КО-1</div>
+        <div>Утверждена постановлением Госкомстата</div>
+        <div>России от 18.08.98 № 88</div>
+      </div>
+      <div class="header-row">
+        <div>
+          <div class="org-line">{{organization}}</div>
+          <div class="hint">(организация)</div>
+          <div class="org-line" style="margin-top:10px;"></div>
+          <div class="hint">(структурное подразделение)</div>
+        </div>
+        <table class="code-box">
+          <tr><td>Код</td><td></td></tr>
+          <tr><td>Форма по ОКУД</td><td>0310001</td></tr>
+          <tr><td>по ОКПО</td><td></td></tr>
+        </table>
+      </div>
+      <table class="doc-meta">
+        <tr><td>Номер<br>документа</td><td>Дата<br>составления</td></tr>
+        <tr><td class="value">{{number}}</td><td class="value">{{order.Date:dd.MM.yyyy}}</td></tr>
+      </table>
+      <h1 class="title">Приходный кассовый ордер</h1>
+      {{cancelNotice}}
+      <table class="ledger">
+        <tr>
+          <th rowspan="2" style="width:58px;">Дебет</th>
+          <th colspan="3">Кредит</th>
+          <th rowspan="2" style="width:78px;">Сумма<br>руб. коп.</th>
+          <th rowspan="2" style="width:104px;">Код целевого<br>назначения</th>
+        </tr>
+        <tr>
+          <th>код струк-<br>турного<br>подразде-<br>ления</th>
+          <th>корреспон-<br>дирующий счет,<br>субсчет</th>
+          <th>код аналити-<br>ческого учета</th>
+        </tr>
+        <tr>
+          <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td class="sum">{{amountRubKop}}</td><td>&nbsp;</td>
+        </tr>
+      </table>
+      <div class="line-field"><span>Принято от</span><div class="line">{{payer}}</div></div>
+      <div class="line-field"><span>Основание:</span><div class="line">{{basis}}</div></div>
+      <div class="long-line"></div>
+      <div class="amount-words">
+        <span>Сумма</span><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span>
+      </div>
+      <div class="line-field" style="grid-template-columns:auto 1fr; margin-top:8px;"><span>В том числе</span><div class="line">Без налога (НДС) 0,00 руб.</div></div>
+      <div class="line-field"><span>Приложение</span><div class="line">{{appendix}}</div></div>
+      <div class="sign-row">
+        <div>Главный бухгалтер</div>
+        <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
+        <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+      </div>
+      <div class="sign-row">
+        <div>Получил кассир</div>
+        <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
+        <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+      </div>
+    </section>
+    <div class="cut"><span>Линия отреза</span></div>
+    <section class="receipt">
+      <div class="org-line">{{organization}}</div>
+      <div class="hint">(организация)</div>
+      <div class="receipt-title">Квитанция</div>
+      <div class="receipt-subtitle receipt-number"><span>к приходному кассовому ордеру №</span><div class="line">{{number}}</div></div>
+      <div class="receipt-date"><span>от</span><span>"</span><div class="line">{{order.Date.Day}}</div><span>" {{month}}</span><div class="line">{{order.Date:yyyy}}</div><span>г.</span></div>
+      <div class="line-field"><span>Принято от</span><div class="line">{{payer}}</div></div>
+      <div class="line-field"><span>Основание:</span><div class="line">{{basis}}</div></div>
+      <div class="long-line"></div>
+      <div class="amount-digits"><span>Сумма</span><div class="line">{{rubles}}</div><span>руб.</span><div class="line">{{kopecks}}</div><span>коп.</span></div>
+      <div class="small-hint">(цифрами)</div>
+      <div class="amount-words"><div class="line">{{amountWords}}</div><span>руб.</span><div class="line kopecks">{{kopecks}}</div><span>коп.</span></div>
+      <div class="small-hint">(прописью)</div>
+      <div class="line-field" style="grid-template-columns:auto 1fr; margin-top:10px;"><span>В том числе</span><div class="line">Без налога (НДС) 0,00 руб.</div></div>
+      <div class="stamp-row"><span>"</span><div class="line">{{order.Date.Day}}</div><span>" {{month}}</span><div class="line">{{order.Date:yyyy}}</div><span>г.</span></div>
+      <div style="margin-top:12px;">М.П. (штампа)</div>
+      <div class="sign-row">
+        <div>Главный бухгалтер</div>
+        <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
+        <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+      </div>
+      <div class="sign-row">
+        <div>Кассир</div>
+        <div><div class="sign-line"></div><div class="sign-label">(подпись)</div></div>
+        <div><div class="sign-line">{{signer}}</div><div class="sign-label">(расшифровка подписи)</div></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+""";
+    }
+
     private static string BuildPrintHtml(CashOrder order)
     {
+        if (order.Type == CashOrderType.Incoming)
+        {
+            return BuildIncomingCashOrderPrintHtml(order);
+        }
+
         var isIncoming = order.Type == CashOrderType.Incoming;
         var title = isIncoming ? "Приходный кассовый ордер" : "Расходный кассовый ордер";
         var formName = isIncoming ? "Унифицированная форма № КО-1" : "Унифицированная форма № КО-2";
@@ -1246,6 +1426,46 @@ public class CashOrdersController : ControllerBase
 
     private static string FormatRub(decimal value)
         => $"{value.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))} руб.";
+
+    private static string FormatCashOrderRubKop(decimal value)
+        => $"{FormatWholeRubles(value)}-{FormatKopecks(value)}";
+
+    private static string FormatWholeRubles(decimal value)
+        => Math.Truncate(Math.Round(Math.Abs(value), 2, MidpointRounding.AwayFromZero))
+            .ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))
+            .Replace('\u00A0', ' ');
+
+    private static string FormatKopecks(decimal value)
+    {
+        var rounded = Math.Round(Math.Abs(value), 2, MidpointRounding.AwayFromZero);
+        var rubles = Math.Truncate(rounded);
+        return ((int)((rounded - rubles) * 100m)).ToString("00");
+    }
+
+    private static string AmountRublesToWordsRu(decimal value)
+    {
+        var rounded = Math.Round(Math.Abs(value), 2, MidpointRounding.AwayFromZero);
+        var rubles = (long)Math.Truncate(rounded);
+        return NumberToWordsRu(rubles, feminine: false);
+    }
+
+    private static string GetRussianMonthGenitive(int month)
+        => month switch
+        {
+            1 => "января",
+            2 => "февраля",
+            3 => "марта",
+            4 => "апреля",
+            5 => "мая",
+            6 => "июня",
+            7 => "июля",
+            8 => "августа",
+            9 => "сентября",
+            10 => "октября",
+            11 => "ноября",
+            12 => "декабря",
+            _ => string.Empty,
+        };
 
     private static string AmountToWordsRu(decimal value)
     {
