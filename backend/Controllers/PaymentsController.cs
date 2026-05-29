@@ -18,6 +18,9 @@ namespace PayPlanner.Api.Controllers;
 public class PaymentsController : ControllerBase
 {
     private const decimal AmountTolerance = 0.009m;
+    private static readonly Regex LegacyInstallmentDescriptionRegex = new(
+        @"Рассрочка\s+\d+\s*/\s*\d+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private const string LegacyPartialPaymentNoteText = "Частичная оплата";
 
     private static readonly Regex RemainderDateHintRegex = new(
@@ -1469,19 +1472,18 @@ public class PaymentsController : ControllerBase
 
         var query = _db.Payments
             .Where(item =>
-                item.Id == targetPaymentId &&
                 item.InvoiceId == payment.InvoiceId.Value &&
                 item.Type == PaymentType.Income &&
-                item.Status != PaymentStatus.Cancelled &&
-                item.DocumentKind != DocumentKind.Invoice);
+                item.Status != PaymentStatus.Cancelled);
         if (!track)
         {
             query = query.AsNoTracking();
         }
 
-        var target = await query.FirstOrDefaultAsync(ct);
+        var candidates = await query.ToListAsync(ct);
+        var target = candidates.FirstOrDefault(item => item.Id == targetPaymentId);
         if (target is null
-            || !InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(target)
+            || !IsOverpaymentInstallmentCandidate(target, candidates)
             || InvoicePaymentStateService.ResolveOutstandingAmount(target) <= AmountTolerance)
         {
             return null;
@@ -1504,8 +1506,7 @@ public class PaymentsController : ControllerBase
             .Where(item =>
                 item.InvoiceId == payment.InvoiceId.Value &&
                 item.Type == PaymentType.Income &&
-                item.Status != PaymentStatus.Cancelled &&
-                item.DocumentKind != DocumentKind.Invoice);
+                item.Status != PaymentStatus.Cancelled);
         if (!track)
         {
             query = query.AsNoTracking();
@@ -1516,13 +1517,63 @@ public class PaymentsController : ControllerBase
 
         return candidates
             .Where(item => item.Id != payment.Id)
-            .Where(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment)
+            .Where(item => IsOverpaymentInstallmentCandidate(item, candidates))
             .Where(item => InvoicePaymentStateService.ResolveOutstandingAmount(item) > AmountTolerance)
             .OrderBy(InvoicePaymentStateService.EffectivePlannedDate)
             .ThenBy(item => item.Id)
             .FirstOrDefault(item =>
                 InvoicePaymentStateService.EffectivePlannedDate(item) > currentDate ||
                 (InvoicePaymentStateService.EffectivePlannedDate(item) == currentDate && item.Id > payment.Id));
+    }
+
+    private static bool IsOverpaymentInstallmentCandidate(
+        Payment payment,
+        IReadOnlyCollection<Payment>? invoicePayments = null)
+    {
+        if (InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(payment))
+        {
+            return true;
+        }
+
+        if (payment.InvoiceId.HasValue
+            && !string.IsNullOrWhiteSpace(payment.Description)
+            && LegacyInstallmentDescriptionRegex.IsMatch(payment.Description))
+        {
+            return true;
+        }
+
+        return IsLegacyInstallmentSibling(payment, invoicePayments);
+    }
+
+    private static bool IsLegacyInstallmentSibling(
+        Payment payment,
+        IReadOnlyCollection<Payment>? invoicePayments)
+    {
+        if (invoicePayments is null
+            || invoicePayments.Count < 3
+            || invoicePayments.Any(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment))
+        {
+            return false;
+        }
+
+        var representativeInvoice = invoicePayments
+            .Where(item => item.DocumentKind == DocumentKind.Invoice)
+            .OrderByDescending(item => item.Amount)
+            .ThenBy(item => item.Id)
+            .FirstOrDefault();
+        if (representativeInvoice is null || representativeInvoice.Id == payment.Id)
+        {
+            return false;
+        }
+
+        var maxSiblingAmount = invoicePayments
+            .Where(item => item.Id != representativeInvoice.Id)
+            .Select(item => item.Amount)
+            .DefaultIfEmpty(0m)
+            .Max();
+
+        return representativeInvoice.Amount > maxSiblingAmount + AmountTolerance
+               && payment.Amount <= maxSiblingAmount + AmountTolerance;
     }
 
     private async Task UpsertPaymentOverpaymentRefundOperationAsync(

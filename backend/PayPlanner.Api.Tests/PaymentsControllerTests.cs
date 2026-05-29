@@ -2320,6 +2320,71 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task UpdateInvoiceManaged_WithLegacyInvoiceGroupInstallmentTarget_PaysSelectedInstallment()
+    {
+        await using var db = await CreateContextAsync();
+
+        var invoiceDate = DateTime.UtcNow.Date.AddDays(5);
+        var client = new Client { Name = "Client with invoice-kind installment target", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "OP-INVOICE-KIND", Date = invoiceDate };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var parentPayment = CreatePayment(invoice.Date, 30_000m, "Invoice OP-INVOICE-KIND");
+        parentPayment.ClientId = client.Id;
+        parentPayment.DocumentKind = DocumentKind.Invoice;
+        parentPayment.InvoiceId = invoice.Id;
+        parentPayment.Account = invoice.Number;
+        parentPayment.AccountDate = invoice.Date;
+
+        var firstInstallment = CreatePayment(invoice.Date.AddDays(1), 15_000m, "Invoice OP-INVOICE-KIND");
+        firstInstallment.ClientId = client.Id;
+        firstInstallment.DocumentKind = DocumentKind.Invoice;
+        firstInstallment.InvoiceId = invoice.Id;
+        firstInstallment.Account = invoice.Number;
+        firstInstallment.AccountDate = invoice.Date;
+
+        var secondInstallment = CreatePayment(invoice.Date.AddDays(31), 15_000m, "Invoice OP-INVOICE-KIND");
+        secondInstallment.ClientId = client.Id;
+        secondInstallment.DocumentKind = DocumentKind.Invoice;
+        secondInstallment.InvoiceId = invoice.Id;
+        secondInstallment.Account = invoice.Number;
+        secondInstallment.AccountDate = invoice.Date;
+
+        db.Payments.AddRange(parentPayment, firstInstallment, secondInstallment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(firstInstallment.Date, firstInstallment.Amount, firstInstallment.Description);
+        update.ClientId = client.Id;
+        update.DocumentKind = DocumentKind.Invoice;
+        update.InvoiceId = invoice.Id;
+        update.Account = invoice.Number;
+        update.AccountDate = invoice.Date;
+        update.PaidAmount = 30_000m;
+        update.Status = PaymentStatus.Completed;
+        update.PaidDate = firstInstallment.Date;
+        update.LastPaymentDate = firstInstallment.Date;
+        update.OverpaymentHandling = PaymentOverpaymentHandling.NextInstallment;
+        update.OverpaymentTargetPaymentId = secondInstallment.Id;
+
+        var actionResult = await controller.UpdateInvoiceManaged(firstInstallment.Id, update, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(actionResult);
+        db.ChangeTracker.Clear();
+
+        var storedFirst = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == firstInstallment.Id);
+        var storedSecond = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == secondInstallment.Id);
+
+        Assert.Equal(15_000m, storedFirst.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, storedFirst.Status);
+        Assert.Equal(15_000m, storedSecond.PaidAmount);
+        Assert.Equal(PaymentStatus.Completed, storedSecond.Status);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task UpdateInvoiceManaged_WithRefundOverpayment_CreatesRefundOperationAndCashOrder()
     {
         await using var db = await CreateContextAsync();

@@ -171,6 +171,49 @@ function resolvePaymentOutstandingAmount(payment: Pick<Payment, 'amount' | 'paid
   return Math.max(Number((amount - Math.min(paid, amount)).toFixed(2)), 0);
 }
 
+const LEGACY_INSTALLMENT_DESCRIPTION_RE = /Рассрочка\s+\d+\s*\/\s*\d+/i;
+
+function isInstallmentPaymentCandidate(
+  payment: Pick<Payment, 'id' | 'amount' | 'documentKind' | 'systemNotes' | 'description'>,
+  invoicePayments?: Array<Pick<Payment, 'id' | 'amount' | 'documentKind' | 'systemNotes'>>,
+): boolean {
+  if (parseInstallmentPaymentMetadata(payment.systemNotes) !== null || payment.systemNotes?.includes('[pp:installment-payment]')) {
+    return true;
+  }
+
+  if (payment.description && LEGACY_INSTALLMENT_DESCRIPTION_RE.test(payment.description)) {
+    return true;
+  }
+
+  return isLegacyInstallmentSibling(payment, invoicePayments);
+}
+
+function isLegacyInstallmentSibling(
+  payment: Pick<Payment, 'id' | 'amount' | 'documentKind' | 'systemNotes'>,
+  invoicePayments?: Array<Pick<Payment, 'id' | 'amount' | 'documentKind' | 'systemNotes'>>,
+): boolean {
+  if (!invoicePayments || invoicePayments.length < 3 || invoicePayments.some((item) => item.systemNotes?.includes('[pp:installment-payment]'))) {
+    return false;
+  }
+
+  const representativeInvoice = invoicePayments
+    .filter((item) => item.documentKind === 'Invoice')
+    .sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0) || a.id - b.id)[0];
+  if (!representativeInvoice || representativeInvoice.id === payment.id) {
+    return false;
+  }
+
+  const maxSiblingAmount = Math.max(
+    0,
+    ...invoicePayments
+      .filter((item) => item.id !== representativeInvoice.id)
+      .map((item) => (typeof item.amount === 'number' && Number.isFinite(item.amount) ? item.amount : 0)),
+  );
+
+  const amount = typeof payment.amount === 'number' && Number.isFinite(payment.amount) ? payment.amount : 0;
+  return (representativeInvoice.amount ?? 0) > maxSiblingAmount + 0.005 && amount <= maxSiblingAmount + 0.005;
+}
+
 function getLegalEntityDisplayName(entity: LegalEntitySummary): string {
   return entity.shortName?.trim() || entity.fullName?.trim() || `Юр. лицо #${entity.id}`;
 }
@@ -975,9 +1018,9 @@ export function PaymentModal({
       .then((result) => {
         if (cancelled) return;
 
-        const items = (result.items ?? [])
-          .filter((item) => item.status !== 'Cancelled')
-          .filter((item) => parseInstallmentPaymentMetadata(item.systemNotes) !== null || item.systemNotes?.includes('[pp:installment-payment]'))
+        const activeItems = (result.items ?? []).filter((item) => item.status !== 'Cancelled');
+        const items = activeItems
+          .filter((item) => isInstallmentPaymentCandidate(item, activeItems))
           .filter((item) => resolvePaymentOutstandingAmount(item) > 0.005)
           .sort((a, b) => {
             const metaA = parseInstallmentPaymentMetadata(a.systemNotes);

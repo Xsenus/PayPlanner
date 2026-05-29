@@ -1044,6 +1044,25 @@ describe('PaymentModal integration', () => {
     getPaymentsV2Mock.mockResolvedValue({
       items: [
         {
+          id: 994,
+          date: '2026-04-01',
+          plannedDate: '2026-04-01',
+          amount: 48_750,
+          paidAmount: 16_250,
+          outstandingAmount: 32_500,
+          hasPartialPayment: true,
+          status: 'Processing',
+          description: 'Счет № OP-TARGET',
+          isPaid: false,
+          notes: '',
+          type: 'Income',
+          invoiceId: 3,
+          documentKind: 'Invoice',
+          createdAt: '2026-04-01T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        },
+        {
           id: 995,
           date: '2026-04-25',
           plannedDate: '2026-04-25',
@@ -1052,14 +1071,14 @@ describe('PaymentModal integration', () => {
           outstandingAmount: 16_250,
           hasPartialPayment: false,
           status: 'Pending',
-          description: 'Installment OP-TARGET 1/3',
+          description: 'Счет № OP-TARGET',
           isPaid: false,
           notes: '',
           type: 'Income',
           invoiceId: 3,
-          documentKind: 'Payment',
+          documentKind: 'Invoice',
           createdAt: '2026-04-25T00:00:00Z',
-          systemNotes: '[pp:installment-payment] {"sequence":1,"months":3}',
+          systemNotes: '',
           rescheduleCount: 0,
         },
         {
@@ -1071,14 +1090,14 @@ describe('PaymentModal integration', () => {
           outstandingAmount: 16_250,
           hasPartialPayment: false,
           status: 'Pending',
-          description: 'Installment OP-TARGET 2/3',
+          description: 'Счет № OP-TARGET',
           isPaid: false,
           notes: '',
           type: 'Income',
           invoiceId: 3,
-          documentKind: 'Payment',
+          documentKind: 'Invoice',
           createdAt: '2026-05-25T00:00:00Z',
-          systemNotes: '[pp:installment-payment] {"sequence":2,"months":3}',
+          systemNotes: '',
           rescheduleCount: 0,
         },
         {
@@ -1090,14 +1109,14 @@ describe('PaymentModal integration', () => {
           outstandingAmount: 16_250,
           hasPartialPayment: false,
           status: 'Pending',
-          description: 'Installment OP-TARGET 3/3',
+          description: 'Счет № OP-TARGET',
           isPaid: false,
           notes: '',
           type: 'Income',
           invoiceId: 3,
-          documentKind: 'Payment',
+          documentKind: 'Invoice',
           createdAt: '2026-06-25T00:00:00Z',
-          systemNotes: '[pp:installment-payment] {"sequence":3,"months":3}',
+          systemNotes: '',
           rescheduleCount: 0,
         },
       ],
@@ -1121,7 +1140,7 @@ describe('PaymentModal integration', () => {
           outstandingAmount: 16_250,
           hasPartialPayment: false,
           status: 'Pending',
-          description: 'Installment OP-TARGET 1/3',
+          description: 'Счет № OP-TARGET',
           isPaid: false,
           paidDate: '',
           lastPaymentDate: null,
@@ -1132,9 +1151,9 @@ describe('PaymentModal integration', () => {
           invoiceId: 3,
           account: '3',
           accountDate: '2026-01-19',
-          documentKind: 'Payment',
+          documentKind: 'Invoice',
           createdAt: '2026-04-25T00:00:00Z',
-          systemNotes: '[pp:installment-payment] {"sequence":1,"months":3}',
+          systemNotes: '',
           rescheduleCount: 0,
         }}
         casesPrefetch={[{ id: 501, title: 'Case 501', status: 'Open', clientId: 69, createdAt: '2026-03-01T00:00:00Z' }]}
@@ -1153,8 +1172,8 @@ describe('PaymentModal integration', () => {
 
     expect((await screen.findAllByText(/Платеж для зачета/i)).length).toBeGreaterThan(0);
 
-    expect(await screen.findByText(/Installment OP-TARGET 3\/3/)).toBeTruthy();
-    fireEvent.click(screen.getByText(/Installment OP-TARGET 3\/3/));
+    expect(await screen.findByText('#997')).toBeTruthy();
+    fireEvent.click(screen.getByText('#997'));
     const selectButtons = screen.getAllByRole('button', { name: /Выбрать/i });
     fireEvent.click(selectButtons[selectButtons.length - 1]);
 
