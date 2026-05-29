@@ -58,9 +58,15 @@ export function StatusChangeModal<T extends string = string>({
   const missingRequiredReason = reasonRequired && !isSameStatus && reason.trim().length === 0;
 
   return createPortal(
-    <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-slate-900/45 p-4">
-      <div className="w-full max-w-2xl rounded-lg bg-white shadow-xl">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-4">
+    <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-slate-900/45 p-2 sm:p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        data-testid="status-change-dialog"
+        className="flex max-h-[calc(100vh-1rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-xl sm:max-h-[calc(100vh-2rem)]"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-4 py-3 sm:px-6 sm:py-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
             <p className="mt-1 text-sm text-slate-600">{subject}</p>
@@ -76,7 +82,7 @@ export function StatusChangeModal<T extends string = string>({
           </button>
         </div>
 
-        <div className="space-y-5 px-6 py-5">
+        <div data-testid="status-change-dialog-body" className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Сейчас</div>
@@ -90,7 +96,7 @@ export function StatusChangeModal<T extends string = string>({
 
           <div>
             <div className="mb-2 text-sm font-semibold text-slate-800">Выберите новый статус</div>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               {options.map((option) => {
                 const active = option.value === value;
                 return (
@@ -153,7 +159,7 @@ export function StatusChangeModal<T extends string = string>({
           ) : null}
         </div>
 
-        <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-6 py-4">
+        <div data-testid="status-change-dialog-actions" className="flex shrink-0 items-center justify-end gap-3 border-t border-slate-200 px-4 py-3 sm:px-6 sm:py-4">
           <button
             type="button"
             onClick={onCancel}
