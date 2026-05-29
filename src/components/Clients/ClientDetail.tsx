@@ -10637,6 +10637,12 @@ export function ClientDetail({
           onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}
           availableClientBalance={clientBalance?.balance ?? 0}
           onApplyClientBalance={applyClientBalanceToPayment}
+          onBalanceApplied={async () => {
+            await refreshPayments();
+            await refreshClientBalance();
+            if (clientBalanceExpanded) await refreshClientBalanceTransactions();
+            bumpStats();
+          }}
           onCreateRemainder={async (payload) => {
             try {
               await apiService.createPayment(toBody(payload));

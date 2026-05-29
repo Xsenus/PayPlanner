@@ -217,6 +217,9 @@ namespace PayPlanner.Api.Models
         public PaymentOverpaymentHandling? OverpaymentHandling { get; set; }
 
         [NotMapped]
+        public int? OverpaymentTargetPaymentId { get; set; }
+
+        [NotMapped]
         public string? OverpaymentComment { get; set; }
 
         /// <summary>

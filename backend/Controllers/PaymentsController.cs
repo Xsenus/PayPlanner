@@ -220,6 +220,7 @@ public class PaymentsController : ControllerBase
         e.PaymentOrderNumber = model.PaymentOrderNumber;
         e.PaymentDocumentDate = model.PaymentDocumentDate;
         e.OverpaymentHandling = model.OverpaymentHandling;
+        e.OverpaymentTargetPaymentId = model.OverpaymentTargetPaymentId;
         e.OverpaymentComment = model.OverpaymentComment;
         var rawPaidAmount = model.PaidAmount;
         var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, e.Id, ct);
@@ -486,6 +487,7 @@ public class PaymentsController : ControllerBase
         e.PaymentOrderNumber = model.PaymentOrderNumber;
         e.PaymentDocumentDate = model.PaymentDocumentDate;
         e.OverpaymentHandling = model.OverpaymentHandling;
+        e.OverpaymentTargetPaymentId = model.OverpaymentTargetPaymentId;
         e.OverpaymentComment = model.OverpaymentComment;
         var rawPaidAmount = model.PaidAmount;
         var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, e.Id, ct);
@@ -1342,8 +1344,8 @@ public class PaymentsController : ControllerBase
             return null;
         }
 
-        var nextInstallment = await FindNextInstallmentPaymentAsync(payment, track: false, ct);
-        if (nextInstallment is null)
+        var targetInstallment = await FindOverpaymentTargetInstallmentPaymentAsync(payment, track: false, ct);
+        if (targetInstallment is null)
         {
             return BadRequest(new
             {
@@ -1351,7 +1353,7 @@ public class PaymentsController : ControllerBase
             });
         }
 
-        var nextOutstanding = InvoicePaymentStateService.ResolveOutstandingAmount(nextInstallment);
+        var nextOutstanding = InvoicePaymentStateService.ResolveOutstandingAmount(targetInstallment);
         if (overpaymentAmount > nextOutstanding + AmountTolerance)
         {
             return BadRequest(new
@@ -1409,7 +1411,7 @@ public class PaymentsController : ControllerBase
         DateTime now,
         CancellationToken ct)
     {
-        var nextInstallment = await FindNextInstallmentPaymentAsync(payment, track: true, ct);
+        var nextInstallment = await FindOverpaymentTargetInstallmentPaymentAsync(payment, track: true, ct);
         if (nextInstallment is null)
         {
             return;
@@ -1439,6 +1441,53 @@ public class PaymentsController : ControllerBase
             nextInstallment,
             $"Зачтена переплата {FormatMoney(overpaymentAmount)} из платежа #{payment.Id}.",
             now);
+    }
+
+    private async Task<Payment?> FindOverpaymentTargetInstallmentPaymentAsync(
+        Payment payment,
+        bool track,
+        CancellationToken ct)
+    {
+        if (payment.OverpaymentTargetPaymentId.HasValue)
+        {
+            return await FindInstallmentPaymentByIdAsync(payment, payment.OverpaymentTargetPaymentId.Value, track, ct);
+        }
+
+        return await FindNextInstallmentPaymentAsync(payment, track, ct);
+    }
+
+    private async Task<Payment?> FindInstallmentPaymentByIdAsync(
+        Payment payment,
+        int targetPaymentId,
+        bool track,
+        CancellationToken ct)
+    {
+        if (!payment.InvoiceId.HasValue || targetPaymentId == payment.Id)
+        {
+            return null;
+        }
+
+        var query = _db.Payments
+            .Where(item =>
+                item.Id == targetPaymentId &&
+                item.InvoiceId == payment.InvoiceId.Value &&
+                item.Type == PaymentType.Income &&
+                item.Status != PaymentStatus.Cancelled &&
+                item.DocumentKind != DocumentKind.Invoice);
+        if (!track)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var target = await query.FirstOrDefaultAsync(ct);
+        if (target is null
+            || !InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(target)
+            || InvoicePaymentStateService.ResolveOutstandingAmount(target) <= AmountTolerance)
+        {
+            return null;
+        }
+
+        return target;
     }
 
     private async Task<Payment?> FindNextInstallmentPaymentAsync(

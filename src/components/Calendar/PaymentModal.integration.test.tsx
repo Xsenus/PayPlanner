@@ -17,6 +17,7 @@ const {
   getLegalEntitiesPagedMock,
   getClientBalanceMock,
   applyClientBalanceMock,
+  getPaymentsV2Mock,
   getNextCashOrderNumberMock,
   invoiceModalPropsSpy,
   toastErrorMock,
@@ -35,6 +36,7 @@ const {
   getLegalEntitiesPagedMock: vi.fn(),
   getClientBalanceMock: vi.fn(),
   applyClientBalanceMock: vi.fn(),
+  getPaymentsV2Mock: vi.fn(),
   getNextCashOrderNumberMock: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
   toastErrorMock: vi.fn(),
@@ -110,7 +112,7 @@ vi.mock('../../hooks/useFormRequirements', () => ({
 }));
 
 vi.mock('../../hooks/useToast', () => ({
-  useToast: () => ({ error: toastErrorMock, success: toastSuccessMock }),
+  useToast: () => ({ error: toastErrorMock, success: toastSuccessMock, info: vi.fn() }),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -127,6 +129,7 @@ vi.mock('../../services/api', () => ({
     getLegalEntitiesPaged: getLegalEntitiesPagedMock,
     getClientBalance: getClientBalanceMock,
     applyClientBalance: applyClientBalanceMock,
+    getPaymentsV2: getPaymentsV2Mock,
     getNextCashOrderNumber: getNextCashOrderNumberMock,
   },
 }));
@@ -255,6 +258,7 @@ describe('PaymentModal integration', () => {
     getLegalEntitiesPagedMock.mockReset();
     getClientBalanceMock.mockReset();
     applyClientBalanceMock.mockReset();
+    getPaymentsV2Mock.mockReset();
     getNextCashOrderNumberMock.mockReset();
     invoiceModalPropsSpy.mockReset();
     toastErrorMock.mockReset();
@@ -319,6 +323,7 @@ describe('PaymentModal integration', () => {
     });
     getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 0 });
     applyClientBalanceMock.mockResolvedValue({ appliedAmount: 0, balance: 0 });
+    getPaymentsV2Mock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 100, summary: {} });
     getNextCashOrderNumberMock.mockResolvedValue({
       number: 'ПКО-2026-0007',
       type: 'Incoming',
@@ -1030,6 +1035,137 @@ describe('PaymentModal integration', () => {
         paidAmount: 17_000,
         overpaymentHandling: 'Advance',
         overpaymentComment: 'Аванс по делу',
+      }),
+    );
+  });
+
+  it('sends selected installment target for overpayment distribution', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    getPaymentsV2Mock.mockResolvedValue({
+      items: [
+        {
+          id: 995,
+          date: '2026-04-25',
+          plannedDate: '2026-04-25',
+          amount: 16_250,
+          paidAmount: 0,
+          outstandingAmount: 16_250,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Installment OP-TARGET 1/3',
+          isPaid: false,
+          notes: '',
+          type: 'Income',
+          invoiceId: 3,
+          documentKind: 'Payment',
+          createdAt: '2026-04-25T00:00:00Z',
+          systemNotes: '[pp:installment-payment] {"sequence":1,"months":3}',
+          rescheduleCount: 0,
+        },
+        {
+          id: 996,
+          date: '2026-05-25',
+          plannedDate: '2026-05-25',
+          amount: 16_250,
+          paidAmount: 0,
+          outstandingAmount: 16_250,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Installment OP-TARGET 2/3',
+          isPaid: false,
+          notes: '',
+          type: 'Income',
+          invoiceId: 3,
+          documentKind: 'Payment',
+          createdAt: '2026-05-25T00:00:00Z',
+          systemNotes: '[pp:installment-payment] {"sequence":2,"months":3}',
+          rescheduleCount: 0,
+        },
+        {
+          id: 997,
+          date: '2026-06-25',
+          plannedDate: '2026-06-25',
+          amount: 16_250,
+          paidAmount: 0,
+          outstandingAmount: 16_250,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Installment OP-TARGET 3/3',
+          isPaid: false,
+          notes: '',
+          type: 'Income',
+          invoiceId: 3,
+          documentKind: 'Payment',
+          createdAt: '2026-06-25T00:00:00Z',
+          systemNotes: '[pp:installment-payment] {"sequence":3,"months":3}',
+          rescheduleCount: 0,
+        },
+      ],
+      total: 3,
+      page: 1,
+      pageSize: 100,
+      summary: {},
+    });
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 995,
+          date: '2026-04-25',
+          plannedDate: '2026-04-25',
+          amount: 16_250,
+          paidAmount: 0,
+          outstandingAmount: 16_250,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Installment OP-TARGET 1/3',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+          invoiceId: 3,
+          account: '3',
+          accountDate: '2026-01-19',
+          documentKind: 'Payment',
+          createdAt: '2026-04-25T00:00:00Z',
+          systemNotes: '[pp:installment-payment] {"sequence":1,"months":3}',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[{ id: 501, title: 'Case 501', status: 'Open', clientId: 69, createdAt: '2026-03-01T00:00:00Z' }]}
+      />,
+    );
+
+    const paidAmountInput = document.body.querySelector('input[name="paidAmount"]') as HTMLInputElement | null;
+    expect(paidAmountInput).not.toBeNull();
+    fireEvent.change(paidAmountInput!, { target: { value: '17000' } });
+    fireEvent.blur(paidAmountInput!);
+
+    const nextInstallmentRadio = document.body.querySelector('input[value="NextInstallment"]') as HTMLInputElement | null;
+    expect(nextInstallmentRadio).not.toBeNull();
+    await waitFor(() => expect(getPaymentsV2Mock).toHaveBeenCalled());
+    fireEvent.click(nextInstallmentRadio!);
+
+    expect((await screen.findAllByText(/Платеж для зачета/i)).length).toBeGreaterThan(0);
+
+    expect(await screen.findByText(/Installment OP-TARGET 3\/3/)).toBeTruthy();
+    fireEvent.click(screen.getByText(/Installment OP-TARGET 3\/3/));
+    const selectButtons = screen.getAllByRole('button', { name: /Выбрать/i });
+    fireEvent.click(selectButtons[selectButtons.length - 1]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 995,
+        overpaymentHandling: 'NextInstallment',
+        overpaymentTargetPaymentId: 997,
       }),
     );
   });

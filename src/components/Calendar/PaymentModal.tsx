@@ -36,6 +36,7 @@ import {
   isTransferredRemainderPayment,
   parsePartialRemainderTransferMetadata,
 } from '../../utils/invoicePayments';
+import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
 import { CounterpartyPickerModal } from '../ui/CounterpartyPickerModal';
 
@@ -160,6 +161,16 @@ function normalizeMoneyInputValue(value: string): string {
   return Number.isFinite(num) ? num.toFixed(2) : '';
 }
 
+function resolvePaymentOutstandingAmount(payment: Pick<Payment, 'amount' | 'paidAmount' | 'outstandingAmount'>): number {
+  if (typeof payment.outstandingAmount === 'number' && Number.isFinite(payment.outstandingAmount)) {
+    return Math.max(payment.outstandingAmount, 0);
+  }
+
+  const amount = typeof payment.amount === 'number' && Number.isFinite(payment.amount) ? payment.amount : 0;
+  const paid = typeof payment.paidAmount === 'number' && Number.isFinite(payment.paidAmount) ? payment.paidAmount : 0;
+  return Math.max(Number((amount - Math.min(paid, amount)).toFixed(2)), 0);
+}
+
 function getLegalEntityDisplayName(entity: LegalEntitySummary): string {
   return entity.shortName?.trim() || entity.fullName?.trim() || `Юр. лицо #${entity.id}`;
 }
@@ -242,7 +253,13 @@ export function PaymentModal({
   const [fetchedClientBalance, setFetchedClientBalance] = useState(0);
   const [clientBalanceLoading, setClientBalanceLoading] = useState(false);
   const [overpaymentHandling, setOverpaymentHandling] = useState<PaymentOverpaymentHandling | ''>('');
+  const [overpaymentTargetPaymentId, setOverpaymentTargetPaymentId] = useState<number | null>(null);
   const [overpaymentComment, setOverpaymentComment] = useState('');
+  const [installmentPayments, setInstallmentPayments] = useState<Payment[]>([]);
+  const [installmentPaymentsLoading, setInstallmentPaymentsLoading] = useState(false);
+  const [installmentPaymentsError, setInstallmentPaymentsError] = useState<string | null>(null);
+  const [installmentTargetDialogMode, setInstallmentTargetDialogMode] = useState<'overpayment' | 'balance' | null>(null);
+  const [installmentTargetDraftId, setInstallmentTargetDraftId] = useState<number | null>(null);
   const [cases, setCases] = useState<ClientCase[]>([]);
   const [fallbackCase, setFallbackCase] = useState<ClientCase | null>(null);
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -732,7 +749,12 @@ export function PaymentModal({
       setAppliedClientBalanceAmount(0);
       setLocalClientBalance(null);
       setOverpaymentHandling('');
+      setOverpaymentTargetPaymentId(null);
       setOverpaymentComment('');
+      setInstallmentPayments([]);
+      setInstallmentPaymentsError(null);
+      setInstallmentTargetDialogMode(null);
+      setInstallmentTargetDraftId(null);
       return;
     }
 
@@ -740,7 +762,11 @@ export function PaymentModal({
       setLocalClientBalance(null);
       setBalanceApplyAmount('');
       setOverpaymentHandling('');
+      setOverpaymentTargetPaymentId(null);
       setOverpaymentComment('');
+      setInstallmentPaymentsError(null);
+      setInstallmentTargetDialogMode(null);
+      setInstallmentTargetDraftId(null);
       const p = paymentRef.current;
 
       if (p) {
@@ -921,6 +947,67 @@ export function PaymentModal({
       cancelled = true;
     };
   }, [availableClientBalance, formData.clientId, formData.type, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !formData.invoiceId) {
+      setInstallmentPayments([]);
+      setInstallmentPaymentsError(null);
+      setInstallmentPaymentsLoading(false);
+      setOverpaymentTargetPaymentId(null);
+      return;
+    }
+
+    const invoiceId = Number(formData.invoiceId);
+    if (!Number.isFinite(invoiceId) || invoiceId <= 0) {
+      setInstallmentPayments([]);
+      setInstallmentPaymentsError(null);
+      setInstallmentPaymentsLoading(false);
+      setOverpaymentTargetPaymentId(null);
+      return;
+    }
+
+    let cancelled = false;
+    setInstallmentPaymentsLoading(true);
+    setInstallmentPaymentsError(null);
+
+    apiService
+      .getPaymentsV2({ invoiceId, type: 'Income', pageSize: 100, sortBy: 'date', sortDir: 'asc' })
+      .then((result) => {
+        if (cancelled) return;
+
+        const items = (result.items ?? [])
+          .filter((item) => item.status !== 'Cancelled')
+          .filter((item) => parseInstallmentPaymentMetadata(item.systemNotes) !== null || item.systemNotes?.includes('[pp:installment-payment]'))
+          .filter((item) => resolvePaymentOutstandingAmount(item) > 0.005)
+          .sort((a, b) => {
+            const metaA = parseInstallmentPaymentMetadata(a.systemNotes);
+            const metaB = parseInstallmentPaymentMetadata(b.systemNotes);
+            const sequenceCompare = (metaA?.sequence ?? Number.MAX_SAFE_INTEGER) - (metaB?.sequence ?? Number.MAX_SAFE_INTEGER);
+            if (sequenceCompare !== 0) return sequenceCompare;
+            const dateCompare = String(a.plannedDate || a.date).localeCompare(String(b.plannedDate || b.date));
+            return dateCompare !== 0 ? dateCompare : a.id - b.id;
+          });
+
+        setInstallmentPayments(items);
+        setOverpaymentTargetPaymentId((current) =>
+          current && items.some((item) => item.id === current && item.id !== payment?.id) ? current : null,
+        );
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setInstallmentPayments([]);
+          setInstallmentPaymentsError(error instanceof Error ? error.message : 'Не удалось загрузить платежи рассрочки.');
+          setOverpaymentTargetPaymentId(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setInstallmentPaymentsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.invoiceId, isOpen, payment?.id]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1264,6 +1351,17 @@ export function PaymentModal({
       return;
     }
 
+    if (
+      formData.type === 'Income' &&
+      submitOverpaymentAmount > 0.005 &&
+      overpaymentHandling === 'NextInstallment' &&
+      !overpaymentTargetPaymentId
+    ) {
+      openInstallmentTargetDialog('overpayment');
+      toast.error('Выберите платеж рассрочки для зачета переплаты.');
+      return;
+    }
+
     setLoading(true);
 
     const normalizedDate = fromInputToApiDate(formData.date)!;
@@ -1376,6 +1474,10 @@ export function PaymentModal({
         overpaymentHandling:
           formData.type === 'Income' && submitOverpaymentAmount > 0.005
             ? overpaymentHandling || undefined
+            : undefined,
+        overpaymentTargetPaymentId:
+          formData.type === 'Income' && submitOverpaymentAmount > 0.005 && overpaymentHandling === 'NextInstallment'
+            ? overpaymentTargetPaymentId ?? undefined
             : undefined,
         overpaymentComment:
           formData.type === 'Income' && submitOverpaymentAmount > 0.005
@@ -1989,6 +2091,10 @@ export function PaymentModal({
         formData.type === 'Income' && submitOverpaymentAmount > 0.005
           ? overpaymentHandling || undefined
           : undefined,
+      overpaymentTargetPaymentId:
+        formData.type === 'Income' && submitOverpaymentAmount > 0.005 && overpaymentHandling === 'NextInstallment'
+          ? overpaymentTargetPaymentId ?? undefined
+          : undefined,
       overpaymentComment:
         formData.type === 'Income' && submitOverpaymentAmount > 0.005
           ? overpaymentComment.trim() || undefined
@@ -2190,6 +2296,136 @@ export function PaymentModal({
       setBalanceApplyLoading(false);
     }
   };
+
+  const getInstallmentPaymentTitle = (item: Payment) => {
+    const meta = parseInstallmentPaymentMetadata(item.systemNotes);
+    const sequence = meta ? `Рассрочка ${meta.sequence}/${Math.max(meta.months, meta.sequence)}` : 'Платеж рассрочки';
+    return `${sequence} · ${item.description || `#${item.id}`}`;
+  };
+
+  const openInstallmentTargetDialog = (mode: 'overpayment' | 'balance') => {
+    const currentPaymentId = payment?.id ?? 0;
+    const candidates = mode === 'overpayment'
+      ? installmentPayments.filter((item) => item.id !== currentPaymentId)
+      : installmentPayments;
+
+    if (installmentPaymentsLoading) {
+      toast.info('Платежи рассрочки еще загружаются.');
+      return;
+    }
+
+    if (candidates.length === 0) {
+      toast.error('Нет открытых платежей рассрочки для выбора.');
+      return;
+    }
+
+    setInstallmentTargetDialogMode(mode);
+    setInstallmentTargetDraftId(
+      mode === 'overpayment'
+        ? overpaymentTargetPaymentId ?? candidates[0].id
+        : candidates.find((item) => item.id === currentPaymentId)?.id ?? candidates[0].id,
+    );
+  };
+
+  const handleOverpaymentHandlingChange = (value: PaymentOverpaymentHandling) => {
+    setOverpaymentHandling(value);
+    if (value === 'NextInstallment') {
+      openInstallmentTargetDialog('overpayment');
+    } else {
+      setOverpaymentTargetPaymentId(null);
+    }
+  };
+
+  const confirmInstallmentTargetDialog = async () => {
+    if (!installmentTargetDialogMode || !installmentTargetDraftId) return;
+
+    const selected = installmentPayments.find((item) => item.id === installmentTargetDraftId);
+    if (!selected) {
+      toast.error('Выбранный платеж рассрочки не найден.');
+      return;
+    }
+
+    if (installmentTargetDialogMode === 'overpayment') {
+      setOverpaymentTargetPaymentId(selected.id);
+      setInstallmentTargetDialogMode(null);
+      setInstallmentTargetDraftId(null);
+      return;
+    }
+
+    if (balanceApplyLoading) return;
+
+    const clientId = Number(formData.clientId || 0);
+    if (!clientId) {
+      toast.error('Клиент не выбран.');
+      return;
+    }
+
+    const currentBalance = Math.max(effectiveClientBalance, 0);
+    const selectedOutstanding = resolvePaymentOutstandingAmount(selected);
+    const requestedAmount = parseDecimal(balanceApplyAmount);
+    const amountToApply = Math.min(
+      Number.isFinite(requestedAmount) && requestedAmount > 0 ? requestedAmount : selectedOutstanding,
+      currentBalance,
+      selectedOutstanding,
+    );
+
+    if (amountToApply <= 0.005) {
+      toast.error('Нет суммы для зачета.');
+      return;
+    }
+
+    try {
+      setBalanceApplyLoading(true);
+      const result = await apiService.applyClientBalance(clientId, {
+        paymentId: selected.id,
+        amount: amountToApply,
+      });
+      const appliedAmount = Math.max(0, result.appliedAmount ?? amountToApply);
+      const nextBalance = result.balance ?? Math.max(Number((currentBalance - appliedAmount).toFixed(2)), 0);
+
+      setLocalClientBalance(nextBalance);
+      setFetchedClientBalance(nextBalance);
+      if (selected.id === payment?.id) {
+        const amount = parseDecimal(formData.amount);
+        const paid = parseDecimal(formData.paidAmount);
+        const nextPaid = Math.min(amount, paid + appliedAmount);
+        setFormData((prev) => ({
+          ...prev,
+          paidAmount: formatMoneyDisplayValue(nextPaid),
+          isPaid: nextPaid >= amount - 0.005,
+          status: nextPaid >= amount - 0.005 ? 'Completed' : prev.status,
+          lastPaymentDate: prev.lastPaymentDate || todayYMD(),
+          paidDate: nextPaid >= amount - 0.005 ? prev.paidDate || todayYMD() : prev.paidDate,
+        }));
+        setAppliedClientBalanceAmount((prev) => Number((prev + appliedAmount).toFixed(2)));
+      }
+
+      setInstallmentPayments((prev) =>
+        prev
+          .map((item) =>
+            item.id === selected.id
+              ? {
+                  ...item,
+                  paidAmount: Math.min(item.amount, (item.paidAmount ?? 0) + appliedAmount),
+                  outstandingAmount: Math.max(resolvePaymentOutstandingAmount(item) - appliedAmount, 0),
+                  status: resolvePaymentOutstandingAmount(item) - appliedAmount <= 0.005 ? 'Completed' : 'Processing',
+                }
+              : item,
+          )
+          .filter((item) => resolvePaymentOutstandingAmount(item) > 0.005),
+      );
+      await onBalanceApplied?.(selected.id);
+      toast.success('Баланс зачтен в выбранный платеж.');
+      setBalanceApplyAmount('');
+      setInstallmentTargetDialogMode(null);
+      setInstallmentTargetDraftId(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось зачесть баланс.');
+    } finally {
+      setBalanceApplyLoading(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   const amountNum = parseDecimal(formData.amount);
@@ -2200,7 +2436,16 @@ export function PaymentModal({
   const hasPartial = paidAmountNum > 0 && remainingAmount > 0;
   const effectiveClientBalance =
     localClientBalance ?? availableClientBalance ?? fetchedClientBalance;
-  const canApplyClientBalance = Boolean(payment && effectiveClientBalance > 0 && remainingAmount > 0 && formData.type === 'Income');
+  const canApplyClientBalanceToCurrent = Boolean(payment && effectiveClientBalance > 0 && remainingAmount > 0 && formData.type === 'Income');
+  const canApplyClientBalance = Boolean(
+    payment &&
+    effectiveClientBalance > 0 &&
+    formData.type === 'Income' &&
+    (remainingAmount > 0 || installmentPayments.length > 0),
+  );
+  const selectedOverpaymentTarget = overpaymentTargetPaymentId
+    ? installmentPayments.find((item) => item.id === overpaymentTargetPaymentId) ?? null
+    : null;
   const overpaymentOptions: Array<{
     value: PaymentOverpaymentHandling;
     title: string;
@@ -2254,6 +2499,104 @@ export function PaymentModal({
       title="История платежа"
       subtitle="Здесь собраны базовые audit-данные и все изменения по выбранному платежу."
     />
+  ) : null;
+
+  const installmentTargetCandidates = installmentTargetDialogMode === 'overpayment'
+    ? installmentPayments.filter((item) => item.id !== payment?.id)
+    : installmentPayments;
+  const installmentTargetDialog = installmentTargetDialogMode ? (
+    <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-black/45 p-4">
+      <div className="flex max-h-[86vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {installmentTargetDialogMode === 'overpayment'
+                ? 'Выберите платеж для зачета переплаты'
+                : 'Выберите платеж для зачета аванса'}
+            </h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Деньги будут распределены в выбранную строку рассрочки.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setInstallmentTargetDialogMode(null);
+              setInstallmentTargetDraftId(null);
+            }}
+            className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100"
+            aria-label="Закрыть выбор платежа"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {installmentPaymentsLoading ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              Загружаем платежи рассрочки...
+            </div>
+          ) : installmentTargetCandidates.length === 0 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Открытые платежи рассрочки для выбора не найдены.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {installmentTargetCandidates.map((item) => {
+                const outstanding = resolvePaymentOutstandingAmount(item);
+                return (
+                  <label
+                    key={item.id}
+                    className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 transition ${
+                      installmentTargetDraftId === item.id
+                        ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-100'
+                        : 'border-slate-200 bg-white hover:border-blue-200'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="installmentTarget"
+                      value={item.id}
+                      checked={installmentTargetDraftId === item.id}
+                      onChange={() => setInstallmentTargetDraftId(item.id)}
+                      className="mt-1 h-4 w-4 border-blue-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-slate-900">{getInstallmentPaymentTitle(item)}</span>
+                      <span className="mt-1 block text-xs text-slate-500">
+                        Дата: {toRuDate(item.plannedDate || item.date) || item.plannedDate || item.date} · Остаток: {formatMoneyDisplayValue(outstanding)}
+                      </span>
+                    </span>
+                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                      #{item.id}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-5 py-4">
+          <button
+            type="button"
+            onClick={() => {
+              setInstallmentTargetDialogMode(null);
+              setInstallmentTargetDraftId(null);
+            }}
+            className="inline-flex h-10 items-center rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            onClick={() => void confirmInstallmentTargetDialog()}
+            disabled={!installmentTargetDraftId || balanceApplyLoading}
+            className="inline-flex h-10 items-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {installmentTargetDialogMode === 'overpayment' ? 'Выбрать' : 'Зачесть'}
+          </button>
+        </div>
+      </div>
+    </div>
   ) : null;
 
   const modal = (
@@ -2582,7 +2925,7 @@ export function PaymentModal({
                                 name="overpaymentHandling"
                                 value={option.value}
                                 checked={overpaymentHandling === option.value}
-                                onChange={() => setOverpaymentHandling(option.value)}
+                                onChange={() => handleOverpaymentHandlingChange(option.value)}
                                 className="mt-1 h-4 w-4 border-emerald-300 text-emerald-600 focus:ring-emerald-500"
                               />
                               <span>
@@ -2600,7 +2943,35 @@ export function PaymentModal({
                         />
                       </div>
                     )}
-                    {canApplyClientBalance && (
+                    {overpaid && overpaymentHandling === 'NextInstallment' && (
+                      <div className="rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="min-w-0 text-sm">
+                            <div className="font-medium text-slate-900">Платеж для зачета</div>
+                            <div className="mt-0.5 truncate text-xs text-slate-600">
+                              {overpaymentTargetPaymentId
+                                ? selectedOverpaymentTarget
+                                  ? getInstallmentPaymentTitle(selectedOverpaymentTarget)
+                                  : 'Выбранный платеж больше не доступен'
+                                : installmentPaymentsLoading
+                                  ? 'Загрузка платежей рассрочки...'
+                                  : 'Выберите платеж рассрочки'}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => openInstallmentTargetDialog('overpayment')}
+                            className="inline-flex h-9 items-center rounded-lg border border-emerald-200 px-3 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+                          >
+                            Выбрать
+                          </button>
+                        </div>
+                        {installmentPaymentsError && (
+                          <div className="mt-2 text-xs text-rose-600">{installmentPaymentsError}</div>
+                        )}
+                      </div>
+                    )}
+                    {canApplyClientBalanceToCurrent && (
                       <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="min-w-[150px] flex-1 text-sm text-blue-900">
@@ -2628,6 +2999,21 @@ export function PaymentModal({
                           >
                             <WalletCards className="h-4 w-4" />
                             Зачесть
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {canApplyClientBalance && installmentPayments.length > 0 && (
+                      <div className="rounded-lg border border-blue-100 bg-white px-3 py-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                          <span className="text-slate-700">Зачесть аванс в другой платеж рассрочки</span>
+                          <button
+                            type="button"
+                            onClick={() => openInstallmentTargetDialog('balance')}
+                            disabled={balanceApplyLoading}
+                            className="inline-flex h-9 items-center rounded-lg border border-blue-200 px-3 font-medium text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            Выбрать платеж
                           </button>
                         </div>
                       </div>
@@ -3465,6 +3851,7 @@ export function PaymentModal({
     return (
       <>
         {modal}
+        {installmentTargetDialog}
         {createInvoiceModal}
       </>
     );
@@ -3473,6 +3860,7 @@ export function PaymentModal({
   return (
     <>
       {createPortal(modal, document.body)}
+      {createPortal(installmentTargetDialog, document.body)}
       {createPortal(createInvoiceModal, document.body)}
     </>
   );

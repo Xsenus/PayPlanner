@@ -2247,6 +2247,79 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task UpdateInvoiceManaged_WithOverpaymentTarget_PaysSelectedInstallment()
+    {
+        await using var db = await CreateContextAsync();
+
+        var invoiceDate = DateTime.UtcNow.Date.AddDays(5);
+        var client = new Client { Name = "Client with selected installment", CreatedAt = DateTime.UtcNow };
+        var invoice = new Invoice { Number = "OP-TARGET", Date = invoiceDate };
+        db.Clients.Add(client);
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var parentPayment = CreatePayment(invoice.Date, 30_000m, "Invoice OP-TARGET");
+        parentPayment.ClientId = client.Id;
+        parentPayment.DocumentKind = DocumentKind.Invoice;
+        parentPayment.InvoiceId = invoice.Id;
+        parentPayment.Account = invoice.Number;
+        parentPayment.AccountDate = invoice.Date;
+
+        var firstInstallment = CreatePayment(invoice.Date.AddDays(1), 10_000m, "Installment OP-TARGET 1/3");
+        firstInstallment.ClientId = client.Id;
+        firstInstallment.InvoiceId = invoice.Id;
+        firstInstallment.Account = invoice.Number;
+        firstInstallment.AccountDate = invoice.Date;
+        firstInstallment.SystemNotes = $"{InstallmentPaymentMarker} {{\"sequence\":1}}";
+
+        var secondInstallment = CreatePayment(invoice.Date.AddDays(31), 10_000m, "Installment OP-TARGET 2/3");
+        secondInstallment.ClientId = client.Id;
+        secondInstallment.InvoiceId = invoice.Id;
+        secondInstallment.Account = invoice.Number;
+        secondInstallment.AccountDate = invoice.Date;
+        secondInstallment.SystemNotes = $"{InstallmentPaymentMarker} {{\"sequence\":2}}";
+
+        var thirdInstallment = CreatePayment(invoice.Date.AddDays(61), 10_000m, "Installment OP-TARGET 3/3");
+        thirdInstallment.ClientId = client.Id;
+        thirdInstallment.InvoiceId = invoice.Id;
+        thirdInstallment.Account = invoice.Number;
+        thirdInstallment.AccountDate = invoice.Date;
+        thirdInstallment.SystemNotes = $"{InstallmentPaymentMarker} {{\"sequence\":3}}";
+
+        db.Payments.AddRange(parentPayment, firstInstallment, secondInstallment, thirdInstallment);
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(firstInstallment.Date, firstInstallment.Amount, firstInstallment.Description);
+        update.ClientId = client.Id;
+        update.InvoiceId = invoice.Id;
+        update.Account = invoice.Number;
+        update.AccountDate = invoice.Date;
+        update.PaidAmount = 12_500m;
+        update.Status = PaymentStatus.Completed;
+        update.PaidDate = firstInstallment.Date;
+        update.LastPaymentDate = firstInstallment.Date;
+        update.OverpaymentHandling = PaymentOverpaymentHandling.NextInstallment;
+        update.OverpaymentTargetPaymentId = thirdInstallment.Id;
+
+        var actionResult = await controller.UpdateInvoiceManaged(firstInstallment.Id, update, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(actionResult);
+        db.ChangeTracker.Clear();
+
+        var storedFirst = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == firstInstallment.Id);
+        var storedSecond = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == secondInstallment.Id);
+        var storedThird = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == thirdInstallment.Id);
+
+        Assert.Equal(10_000m, storedFirst.PaidAmount);
+        Assert.Equal(0m, storedSecond.PaidAmount);
+        Assert.Equal(PaymentStatus.Pending, storedSecond.Status);
+        Assert.Equal(2_500m, storedThird.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, storedThird.Status);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task UpdateInvoiceManaged_WithRefundOverpayment_CreatesRefundOperationAndCashOrder()
     {
         await using var db = await CreateContextAsync();

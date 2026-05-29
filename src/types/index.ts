@@ -3090,6 +3090,9 @@ export interface Payment {
   invoiceId?: number | null;
   account?: string | null;
   accountDate?: string | null;
+  overpaymentHandling?: PaymentOverpaymentHandling | null;
+  overpaymentTargetPaymentId?: number | null;
+  overpaymentComment?: string | null;
 }
 
 export type PaymentPayload = Omit<
