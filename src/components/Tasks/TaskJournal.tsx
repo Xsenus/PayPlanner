@@ -366,6 +366,7 @@ function writeTaskJournalFilterPreferences(userId: number | null, preferences: T
 }
 
 const INTERNAL_TASK_OBJECT_NAME = 'Внутренняя задача';
+const DEFAULT_TASK_COMPLETION_RESULT = 'Задача выполнена.';
 
 const emptyForm = (
   assigneeName: string,
@@ -5237,9 +5238,7 @@ function TaskModal({
     }
 
     if (status === 'done' && !nextForm.result.trim()) {
-      toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
-      setForm(nextForm);
-      return;
+      nextForm = { ...nextForm, result: DEFAULT_TASK_COMPLETION_RESULT };
     }
 
     setForm(nextForm);

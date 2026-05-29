@@ -1533,6 +1533,41 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('completes an approved task from the editor with a default result when executor left it empty', async () => {
+    await renderJournal([
+      createTask({
+        status: 'approved',
+        result: '',
+        assigneeUserId: 8,
+        assigneeName: 'Юрист',
+        participants: [
+          { userId: 8, role: 'assignee', displayName: 'Юрист', approvalStatus: 'pending' },
+          { userId: 7, role: 'approver', displayName: 'Администратор', approvalStatus: 'approved' },
+        ],
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Юрист', email: 'lawyer@example.com' },
+      ],
+      waitForTitle: null,
+    });
+    fireEvent.click(screen.getByTestId('task-quick-filter-all'));
+    fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'all' } });
+    await screen.findAllByText('Тестовая задача');
+
+    await openFirstTaskForEdit();
+
+    const completeButtons = screen.getAllByRole('button', { name: 'Завершить' });
+    fireEvent.click(completeButtons[completeButtons.length - 1]);
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      status: 'done',
+      result: 'Задача выполнена.',
+    }));
+  });
+
   it('shows and saves approval due date in the task editor', async () => {
     const approvalDueAt = todayAt(16, 30);
     await renderJournal([createTask({ approvalDueAt })]);
