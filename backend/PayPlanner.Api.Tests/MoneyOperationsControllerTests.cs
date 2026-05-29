@@ -2496,6 +2496,10 @@ public class MoneyOperationsControllerTests
         Assert.Contains("Квитанция", content.Content);
         Assert.Contains("Линия отреза", content.Content);
         Assert.Contains("Форма по ОКУД", content.Content);
+        Assert.Contains("@page { size: A4 portrait; margin: 0; }", content.Content);
+        Assert.Contains("grid-template-columns: 100mm 13mm 64mm", content.Content);
+        Assert.Contains("margin: 27mm 0 0 16mm", content.Content);
+        Assert.Contains("border-left: 1px dashed #111", content.Content);
         Assert.Contains("25 001-25", content.Content);
         Assert.Contains("25 001", content.Content);
         Assert.Contains("25</div><span>коп.", content.Content);

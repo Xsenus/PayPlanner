@@ -74,6 +74,8 @@ type ReconciliationParty = {
   details: string[];
   signerName: string;
   signerPosition: string;
+  signatureDataUrl?: string | null;
+  sealDataUrl?: string | null;
 };
 
 const STORAGE_PREFIX = "pp.client_reconciliation_act";
@@ -175,6 +177,8 @@ function createParty(
     details: getPartyDetails(entity, fallbackName),
     signerName: getPartySignerName(entity, fallbackName),
     signerPosition: getPartySignerPosition(entity, signerPosition),
+    signatureDataUrl: entity?.directorSignatureDataUrl ?? null,
+    sealDataUrl: entity?.sealDataUrl ?? null,
   };
 }
 
@@ -241,19 +245,33 @@ function getBalanceSummary(
   return `на ${toRuDate(periodTo)} задолженности нет`;
 }
 
+function renderAssetImage(
+  src: string | null | undefined,
+  className: string,
+  alt: string,
+) {
+  if (!src) return "";
+  return `<img class="${className}" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" />`;
+}
+
 function buildReconciliationExcelHtml({
   draft,
   rows,
   totals,
   executor,
   client,
+  counterpartyRows = "filled",
+  fixedPrintLayout = false,
 }: {
   draft: ReconciliationDraft;
   rows: ReconciliationRow[];
   totals: { debit: number; credit: number; balance: number };
   executor: ReconciliationParty;
   client: ReconciliationParty;
+  counterpartyRows?: "filled" | "blank";
+  fixedPrintLayout?: boolean;
 }) {
+  const showCounterpartyRows = counterpartyRows === "filled";
   const rowsHtml = rows
     .map(
       (row) => `
@@ -262,8 +280,8 @@ function buildReconciliationExcelHtml({
           <td>${escapeHtml(getAccountingDocumentTitle(row, "executor"))}</td>
           <td class="amount">${escapeHtml(formatAccountingMoney(row.debit))}</td>
           <td class="amount">${escapeHtml(formatAccountingMoney(row.credit))}</td>
-          <td>${escapeHtml(toRuDate(row.date))}</td>
-          <td>${escapeHtml(getAccountingDocumentTitle(row, "client"))}</td>
+          <td>${showCounterpartyRows ? escapeHtml(toRuDate(row.date)) : ""}</td>
+          <td>${showCounterpartyRows ? escapeHtml(getAccountingDocumentTitle(row, "client")) : ""}</td>
           <td class="amount"></td>
           <td class="amount"></td>
         </tr>`,
@@ -278,32 +296,163 @@ function buildReconciliationExcelHtml({
 <head>
   <meta charset="utf-8" />
   <style>
-    body { font-family: Arial, sans-serif; font-size: 10pt; color: #111827; }
-    h1 { margin: 0 0 8px; text-align: center; font-size: 16pt; }
-    .subtitle, .intro { white-space: pre-line; margin: 8px 0 14px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #111827; padding: 5px; vertical-align: top; }
-    th { text-align: center; font-weight: 700; background: #f3f4f6; }
-    .party { text-align: center; font-weight: 700; }
+    @page { size: A4 landscape; margin: 0; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #fff;
+      color: #333;
+      font-family: Arial, "DejaVu Sans", sans-serif;
+      font-size: ${fixedPrintLayout ? "10.5pt" : "10pt"};
+      line-height: 1.18;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .act-sheet {
+      position: relative;
+      width: ${fixedPrintLayout ? "265mm" : "100%"};
+      min-height: ${fixedPrintLayout ? "190mm" : "auto"};
+      margin: ${fixedPrintLayout ? "3.2mm auto 0" : "0"};
+      padding: 0;
+    }
+    h1 {
+      margin: 0 0 ${fixedPrintLayout ? "5.5mm" : "8px"};
+      text-align: center;
+      font-size: ${fixedPrintLayout ? "28pt" : "16pt"};
+      line-height: 1.05;
+      font-weight: 400;
+    }
+    .subtitle {
+      width: 100%;
+      margin: 0 auto ${fixedPrintLayout ? "7mm" : "14px"};
+      text-align: center;
+      white-space: pre-line;
+      font-size: ${fixedPrintLayout ? "12pt" : "10pt"};
+      line-height: 1.35;
+    }
+    .intro {
+      margin: 0 0 ${fixedPrintLayout ? "3.2mm" : "14px"};
+      white-space: normal;
+      font-size: ${fixedPrintLayout ? "12pt" : "10pt"};
+      line-height: 1.35;
+    }
+    .act-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .act-table col.date { width: 25mm; }
+    .act-table col.doc { width: 53mm; }
+    .act-table col.debit { width: 26mm; }
+    .act-table col.credit { width: 26mm; }
+    .act-table col.right-date { width: 27mm; }
+    .act-table col.right-doc { width: 53mm; }
+    .act-table col.right-debit { width: 26mm; }
+    .act-table col.right-credit { width: 29mm; }
+    .act-table th,
+    .act-table td {
+      border: 1px solid #c7c7c7;
+      padding: ${fixedPrintLayout ? "1.9mm 2.8mm" : "5px"};
+      height: ${fixedPrintLayout ? "6.75mm" : "auto"};
+      vertical-align: middle;
+      font-size: ${fixedPrintLayout ? "10.5pt" : "10pt"};
+    }
+    .act-table th {
+      text-align: center;
+      font-weight: 400;
+      background: #fff;
+    }
+    .act-table .party { text-align: left; font-weight: 400; }
     .amount { text-align: right; white-space: nowrap; }
-    .total td { font-weight: 700; }
-    .summary { margin-top: 18px; width: 100%; }
-    .summary td { border: 0; padding: 4px 0; }
-    .sign td { border: 0; padding-top: 18px; }
-    .line { border-bottom: 1px solid #111827; height: 22px; }
+    .total td, .balance-row td { font-weight: 700; }
+    .summary {
+      margin-top: ${fixedPrintLayout ? "8mm" : "18px"};
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    .summary td {
+      border: 0;
+      padding: 0 0 ${fixedPrintLayout ? "1.5mm" : "4px"};
+      width: 50%;
+      font-size: ${fixedPrintLayout ? "10.5pt" : "10pt"};
+      vertical-align: top;
+    }
+    .summary strong { font-weight: 700; }
+    .sign {
+      position: relative;
+      margin-top: ${fixedPrintLayout ? "7mm" : "18px"};
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    .sign td {
+      position: relative;
+      border: 0;
+      width: 50%;
+      height: ${fixedPrintLayout ? "30mm" : "76px"};
+      padding: 0 3mm 0 0;
+      vertical-align: top;
+      font-size: ${fixedPrintLayout ? "10.5pt" : "10pt"};
+    }
+    .sign-line {
+      position: absolute;
+      left: 1mm;
+      right: 9mm;
+      bottom: ${fixedPrintLayout ? "8mm" : "22px"};
+      border-bottom: 1px solid #777;
+      height: 0;
+    }
+    .sign-name {
+      position: absolute;
+      right: 10mm;
+      bottom: ${fixedPrintLayout ? "5.8mm" : "16px"};
+      background: #fff;
+      padding-left: 2mm;
+    }
+    .stamp-date {
+      position: absolute;
+      left: 1mm;
+      bottom: 0;
+    }
+    .signature-img {
+      position: absolute;
+      left: 0;
+      bottom: ${fixedPrintLayout ? "7mm" : "18px"};
+      width: 30mm;
+      max-height: 13mm;
+      object-fit: contain;
+      z-index: 2;
+    }
+    .seal-img {
+      position: absolute;
+      left: 46mm;
+      bottom: ${fixedPrintLayout ? "2mm" : "4px"};
+      width: 31mm;
+      height: 31mm;
+      object-fit: contain;
+      z-index: 1;
+    }
   </style>
 </head>
 <body>
+<div class="act-sheet">
   <h1>Акт сверки</h1>
   <div class="subtitle">взаимных расчетов за период: ${escapeHtml(toRuDate(draft.periodFrom))} - ${escapeHtml(toRuDate(draft.periodTo))}
 между ${escapeHtml(executor.nameWithInn)}
 и ${escapeHtml(client.nameWithInn)}</div>
   <div class="intro">Мы, нижеподписавшиеся, ${escapeHtml(executor.signerPosition)} ${escapeHtml(executor.name)}, с одной стороны, и ${escapeHtml(client.name)}, с другой стороны, составили настоящий акт сверки в том, что состояние взаимных расчетов по данным учета следующее:</div>
-  <table>
+  <table class="act-table">
+    <colgroup>
+      <col class="date" />
+      <col class="doc" />
+      <col class="debit" />
+      <col class="credit" />
+      <col class="right-date" />
+      <col class="right-doc" />
+      <col class="right-debit" />
+      <col class="right-credit" />
+    </colgroup>
     <thead>
       <tr>
-        <th class="party" colspan="4">По данным ${escapeHtml(executor.name)}</th>
-        <th class="party" colspan="4">По данным ${escapeHtml(client.name)}</th>
+        <th class="party" colspan="4">По данным ${escapeHtml(executor.name)}, руб.</th>
+        <th class="party" colspan="4">По данным ${escapeHtml(client.name)}, руб.</th>
       </tr>
       <tr>
         <th>Дата</th>
@@ -317,7 +466,7 @@ function buildReconciliationExcelHtml({
       </tr>
     </thead>
     <tbody>
-      <tr><td colspan="4">Сальдо начальное</td><td colspan="4">Сальдо начальное</td></tr>
+      <tr class="balance-row"><td colspan="2">Сальдо начальное</td><td></td><td></td><td colspan="2">Сальдо начальное</td><td></td><td></td></tr>
       ${rowsHtml || `<tr><td colspan="8" style="text-align:center">За выбранный период операций нет.</td></tr>`}
       <tr class="total">
         <td colspan="2">Обороты за период</td>
@@ -327,7 +476,7 @@ function buildReconciliationExcelHtml({
         <td class="amount"></td>
         <td class="amount"></td>
       </tr>
-      <tr class="total">
+      <tr class="balance-row">
         <td colspan="2">Сальдо конечное</td>
         <td class="amount">${escapeHtml(formatAccountingMoney(balanceDebit))}</td>
         <td class="amount">${escapeHtml(formatAccountingMoney(balanceCredit))}</td>
@@ -343,32 +492,30 @@ function buildReconciliationExcelHtml({
       <td>По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}</td>
     </tr>
     <tr>
-      <td>${escapeHtml(getBalanceSummary(totals.balance, draft.periodTo, executor.name, client.name))}</td>
-      <td>на ${escapeHtml(toRuDate(draft.periodTo))}</td>
+      <td>${escapeHtml(getBalanceSummary(totals.balance, draft.periodTo, executor.name, client.name)).replace(" составляет ", " составляет <strong>").replace(" руб.", " руб.</strong>")}</td>
+      <td>${fixedPrintLayout ? "" : `на ${escapeHtml(toRuDate(draft.periodTo))}`}</td>
     </tr>
   </table>
   <table class="sign">
     <tr>
-      <td>От ${escapeHtml(executor.name)}</td>
-      <td>От ${escapeHtml(client.name)}</td>
-    </tr>
-    <tr>
-      <td>${escapeHtml(executor.signerPosition)}</td>
-      <td>&nbsp;</td>
-    </tr>
-    <tr>
-      <td class="line"></td>
-      <td class="line"></td>
-    </tr>
-    <tr>
-      <td>(${escapeHtml(executor.signerName)})</td>
-      <td>(${escapeHtml(client.signerName)})</td>
-    </tr>
-    <tr>
-      <td>М.П. ${escapeHtml(toRuDate(draft.createdAt))}г.</td>
-      <td>М.П. ${escapeHtml(toRuDate(draft.createdAt))}г.</td>
+      <td>
+        <div>От ${escapeHtml(executor.name)}</div>
+        <div style="margin-top:2mm">${escapeHtml(executor.signerPosition)}</div>
+        ${renderAssetImage(executor.signatureDataUrl, "signature-img", "Подпись")}
+        ${renderAssetImage(executor.sealDataUrl, "seal-img", "Печать")}
+        <div class="sign-line"></div>
+        <div class="sign-name">(${escapeHtml(executor.signerName)})</div>
+        <div class="stamp-date">М.П. ${escapeHtml(toRuDate(draft.createdAt))}г.</div>
+      </td>
+      <td>
+        <div>От ${escapeHtml(client.name)}</div>
+        <div class="sign-line"></div>
+        <div class="sign-name">(${escapeHtml(client.signerName)})</div>
+        <div class="stamp-date">М.П. ${escapeHtml(toRuDate(draft.createdAt))}г.</div>
+      </td>
     </tr>
   </table>
+</div>
 </body>
 </html>`;
 }
@@ -572,6 +719,8 @@ export function ClientReconciliationAct({
       totals,
       executor: executorParty,
       client: clientParty,
+      counterpartyRows: "filled",
+      fixedPrintLayout: false,
     });
 
     downloadText(
@@ -588,6 +737,8 @@ export function ClientReconciliationAct({
       totals,
       executor: executorParty,
       client: clientParty,
+      counterpartyRows: "blank",
+      fixedPrintLayout: true,
     });
     const printWindow = window.open("", "_blank", "width=1100,height=900");
 

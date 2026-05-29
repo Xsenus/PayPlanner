@@ -278,4 +278,37 @@ describe("ClientReconciliationAct", () => {
     createObjectUrl.mockRestore();
     revokeObjectUrl.mockRestore();
   });
+
+  it("prints the reconciliation act with the fixed PDF layout", async () => {
+    render(
+      <ClientReconciliationAct
+        clientId={1}
+        clientName="ООО Ромашка"
+        client={
+          {
+            id: 1,
+            name: "ООО Ромашка",
+            legalEntity: {
+              id: 2,
+              shortName: "ООО Ромашка",
+              inn: "9876543210",
+              clientsCount: 1,
+            },
+          } as Client
+        }
+      />,
+    );
+
+    await waitFor(() => expect(apiMock.getInvoices).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: /PDF/i }));
+
+    const printWindow = vi.mocked(window.open).mock.results.at(-1)?.value as Window;
+    const writtenHtml = vi.mocked(printWindow.document.write).mock.calls[0][0] as string;
+    expect(writtenHtml).toContain("@page { size: A4 landscape; margin: 0; }");
+    expect(writtenHtml).toContain("width: 265mm");
+    expect(writtenHtml).toContain("По данным ООО ЭлитПраво, руб.");
+    expect(writtenHtml).toContain("Продажа (№15 от 10.01.2026)");
+    expect(writtenHtml).not.toContain("Покупка (№15 от 10.01.2026)");
+  });
 });

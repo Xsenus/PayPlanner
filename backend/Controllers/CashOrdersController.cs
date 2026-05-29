@@ -954,7 +954,7 @@ public class CashOrdersController : ControllerBase
   <meta charset="utf-8" />
   <title>Приходный кассовый ордер {{number}}</title>
   <style>
-    @page { size: A4 portrait; margin: 12mm; }
+    @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -966,46 +966,53 @@ public class CashOrdersController : ControllerBase
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
     }
-    .ko1 { display: grid; grid-template-columns: minmax(0, 1fr) 28px 36%; gap: 14px; max-width: 1040px; margin: 0 auto; }
+    .ko1 {
+      display: grid;
+      grid-template-columns: 100mm 13mm 64mm;
+      gap: 4mm;
+      width: 184mm;
+      margin: 27mm 0 0 16mm;
+    }
     .order, .receipt { min-width: 0; }
-    .cut { position: relative; min-height: 520px; border-left: 1px dashed #111; border-right: 3px solid #111; }
-    .cut span { position: absolute; top: 165px; left: 50%; transform: translateX(-50%); writing-mode: vertical-rl; letter-spacing: 9px; font-weight: 700; }
-    .top-note { margin-left: 58%; margin-bottom: 18px; font-size: 10px; line-height: 1.35; }
+    .cut { position: relative; min-height: 148mm; border-left: 1px solid #111; border-right: 2px solid #111; }
+    .cut::before { content: ""; position: absolute; top: 0; bottom: 0; left: 6mm; border-left: 1px dashed #111; }
+    .cut span { position: absolute; top: 42mm; left: 50%; transform: translateX(-50%); writing-mode: vertical-rl; letter-spacing: 5px; font-weight: 700; font-size: 8px; }
+    .top-note { margin-left: 56mm; margin-bottom: 9mm; font-size: 7px; line-height: 1.3; }
     .org-line { border-bottom: 2px solid #111; min-height: 18px; padding: 0 6px 2px; }
-    .hint { color: #333; font-size: 9px; text-align: center; }
-    .header-row { display: grid; grid-template-columns: 1fr 90px; gap: 10px; align-items: end; margin-top: 10px; }
+    .hint { color: #333; font-size: 6px; text-align: center; }
+    .header-row { display: grid; grid-template-columns: 1fr 21mm; gap: 3mm; align-items: end; margin-top: 0; }
     .code-box, .doc-meta, .ledger { border-collapse: collapse; width: 100%; table-layout: fixed; }
-    .code-box td, .doc-meta td, .ledger th, .ledger td { border: 1px solid #111; padding: 5px 4px; text-align: center; vertical-align: middle; }
+    .code-box td, .doc-meta td, .ledger th, .ledger td { border: 1px solid #111; padding: 1.5mm 1mm; text-align: center; vertical-align: middle; }
     .code-box td:first-child { border-left: 0; text-align: right; padding-right: 8px; }
     .code-box td:last-child { font-weight: 700; }
-    .title { margin: 34px 0 22px; text-align: center; font-size: 19px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
-    .doc-meta { width: 190px; margin-left: auto; margin-bottom: 12px; font-size: 10px; }
-    .doc-meta .value { font-size: 15px; font-weight: 700; }
-    .ledger { font-size: 9px; }
+    .title { margin: 7mm 0 7mm; text-align: center; font-size: 15px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+    .doc-meta { width: 36mm; margin-left: auto; margin-bottom: 5mm; font-size: 7px; }
+    .doc-meta .value { font-size: 10px; font-weight: 700; }
+    .ledger { font-size: 7px; }
     .ledger th { font-weight: 400; }
-    .ledger .sum { font-size: 10px; white-space: nowrap; }
-    .line-field { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: end; margin-top: 7px; font-size: 11px; }
-    .line { min-height: 17px; border-bottom: 1px solid #111; padding: 0 5px 2px; }
-    .long-line { margin-top: 7px; min-height: 19px; border-bottom: 1px solid #111; }
-    .amount-words { display: grid; grid-template-columns: auto 1fr auto 70px auto 54px auto; gap: 7px; align-items: end; margin-top: 9px; font-size: 11px; }
+    .ledger .sum { font-size: 7px; white-space: nowrap; }
+    .line-field { display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; margin-top: 2mm; font-size: 7px; }
+    .line { min-height: 4.5mm; border-bottom: 1px solid #111; padding: 0 1.5mm .5mm; }
+    .long-line { margin-top: 2mm; min-height: 5mm; border-bottom: 1px solid #111; }
+    .amount-words { display: grid; grid-template-columns: auto 1fr auto 18mm auto 12mm auto; gap: 2mm; align-items: end; margin-top: 2.5mm; font-size: 7px; }
     .amount-words .line { text-align: left; }
     .amount-words .kopecks, .receipt .kopecks { text-align: center; }
-    .sign-row { display: grid; grid-template-columns: 145px 1fr 1fr; gap: 22px; align-items: end; margin-top: 12px; }
-    .sign-line { border-bottom: 1px solid #111; min-height: 20px; text-align: center; padding-bottom: 2px; }
-    .sign-label { font-size: 9px; text-align: center; color: #333; margin-top: 2px; }
-    .receipt .org-line { margin: 42px 0 0; text-align: center; }
-    .receipt-title { text-align: center; font-size: 19px; font-weight: 800; margin: 10px 0 28px; text-transform: uppercase; }
-    .receipt-subtitle { margin-bottom: 9px; font-size: 11px; }
-    .receipt-number { display: grid; grid-template-columns: 1fr 54px; gap: 10px; align-items: end; }
-    .receipt-date { display: grid; grid-template-columns: auto 34px auto 82px 54px auto; gap: 8px; align-items: end; margin-top: 6px; font-size: 11px; }
-    .receipt .line-field { grid-template-columns: auto 1fr; margin-top: 8px; }
-    .receipt .amount-digits { display: grid; grid-template-columns: auto 1fr auto 45px auto; gap: 9px; align-items: end; margin-top: 18px; font-size: 11px; }
+    .sign-row { display: grid; grid-template-columns: 28mm 1fr 1fr; gap: 6mm; align-items: end; margin-top: 2.5mm; font-size: 7px; }
+    .sign-line { border-bottom: 1px solid #111; min-height: 5mm; text-align: center; padding-bottom: .5mm; }
+    .sign-label { font-size: 6px; text-align: center; color: #333; margin-top: .5mm; }
+    .receipt .org-line { margin: 0 0 0; text-align: center; }
+    .receipt-title { text-align: center; font-size: 15px; font-weight: 800; margin: 2mm 0 9mm; text-transform: uppercase; }
+    .receipt-subtitle { margin-bottom: 2mm; font-size: 7px; }
+    .receipt-number { display: grid; grid-template-columns: 1fr 12mm; gap: 3mm; align-items: end; }
+    .receipt-date { display: grid; grid-template-columns: auto 7mm auto 18mm 13mm auto; gap: 2mm; align-items: end; margin-top: 1.5mm; font-size: 7px; }
+    .receipt .line-field { grid-template-columns: auto 1fr; margin-top: 2mm; }
+    .receipt .amount-digits { display: grid; grid-template-columns: auto 1fr auto 10mm auto; gap: 2mm; align-items: end; margin-top: 8mm; font-size: 7px; }
     .receipt .amount-digits .line { text-align: center; }
     .receipt .amount-words { grid-template-columns: 1fr auto 45px auto; margin-top: 8px; }
     .receipt .amount-words .line { grid-column: 1 / 5; }
-    .receipt .small-hint { text-align: center; font-size: 9px; color: #333; margin-top: 2px; }
-    .receipt .stamp-row { display: grid; grid-template-columns: 1fr auto 82px auto 54px auto; gap: 8px; align-items: end; margin-top: 18px; }
-    .receipt .sign-row { grid-template-columns: 118px 1fr 1fr; gap: 16px; margin-top: 22px; }
+    .receipt .small-hint { text-align: center; font-size: 6px; color: #333; margin-top: .5mm; }
+    .receipt .stamp-row { display: grid; grid-template-columns: 1fr auto 18mm auto 13mm auto; gap: 2mm; align-items: end; margin-top: 4mm; font-size: 7px; }
+    .receipt .sign-row { grid-template-columns: 24mm 1fr 1fr; gap: 4mm; margin-top: 4mm; }
     .cancelled { margin: 0 0 10px; border: 1px solid #111; padding: 6px 8px; font-weight: 700; }
   </style>
 </head>
