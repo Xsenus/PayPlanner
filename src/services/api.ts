@@ -1,4 +1,5 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
+import { API_BASE_URL } from './apiBaseUrl';
+
 export const AUTH_SESSION_EXPIRED_EVENT = 'payplanner:auth-session-expired';
 const AUTH_SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Войдите снова.';
 const AUTH_TOKEN_STORAGE_KEYS = ['pp_token', 'auth_token', 'pp.jwt'];

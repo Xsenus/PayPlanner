@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AUTH_SESSION_EXPIRED_EVENT, apiService, extractResponseErrorMessage } from './api';
+import { resolveApiBaseUrl } from './apiBaseUrl';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -58,6 +59,24 @@ describe('extractResponseErrorMessage', () => {
     });
 
     await expect(extractResponseErrorMessage(response)).resolves.toBe('Короткая текстовая ошибка');
+  });
+});
+
+describe('resolveApiBaseUrl', () => {
+  it('uses secure production API on HTTPS pages when configured URL is insecure', () => {
+    expect(
+      resolveApiBaseUrl({
+        configuredUrl: 'http://95.81.124.34:5080/api',
+        isProduction: true,
+        pageProtocol: 'https:',
+      }),
+    ).toBe('https://api.elitpravo.com/api');
+  });
+
+  it('keeps local API fallback for development', () => {
+    expect(resolveApiBaseUrl({ isProduction: false, pageProtocol: 'http:' })).toBe(
+      'http://localhost:5080/api',
+    );
   });
 });
 

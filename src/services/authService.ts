@@ -1,8 +1,7 @@
 // src/services/authService.ts
 
 import type { PagedResult } from './api';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5080/api';
+import { API_BASE_URL } from './apiBaseUrl';
 
 // ==== storage helpers (bkwd-compat) ====
 const KEY_MAIN = 'pp_token';
