@@ -753,7 +753,7 @@ describe('TaskJournal', () => {
     expect(screen.getByDisplayValue('Согласовано')).toBeTruthy();
   });
 
-  it('opens with current user quick filter and remembers switching to all tasks', async () => {
+  it('opens with all tasks quick filter and remembers switching to current user tasks', async () => {
     await renderJournal([
       createTask(),
       createTask({
@@ -768,14 +768,15 @@ describe('TaskJournal', () => {
     ]);
 
     expect(screen.getByText('Тестовая задача')).toBeTruthy();
-    expect(screen.queryByText('Чужая задача')).toBeNull();
+    expect(screen.getByText('Чужая задача')).toBeTruthy();
+    expect(screen.getByTestId('task-quick-filter-all').getAttribute('aria-pressed')).toBe('true');
 
-    fireEvent.click(screen.getByTestId('task-quick-filter-all'));
+    fireEvent.click(screen.getByTestId('task-quick-filter-assignedToMe'));
 
-    expect(await screen.findByText('Чужая задача')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Чужая задача')).toBeNull());
     await waitFor(() => {
       expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
-        quickFilter: 'all',
+        quickFilter: 'assignedToMe',
       });
     });
   });
@@ -1087,11 +1088,17 @@ describe('TaskJournal', () => {
   });
 
   it('uses metric cards as task filters', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      periodMode: 'all',
+    }));
+
     const overdue = new Date();
     overdue.setDate(overdue.getDate() - 1);
     overdue.setHours(10, 0, 0, 0);
 
     const future = new Date();
+    future.setDate(future.getDate() + 1);
     future.setHours(23, 30, 0, 0);
 
     await renderJournal([

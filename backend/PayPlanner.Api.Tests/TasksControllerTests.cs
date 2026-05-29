@@ -1924,7 +1924,7 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task UpdateStatus_InProgressCreatesContractorPaymentFromResultDelay()
+    public async Task UpdateStatus_InProgressDoesNotCreateContractorPaymentFromResultDelay()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
@@ -1959,7 +1959,19 @@ public class TasksControllerTests
         Assert.Equal("inProgress", dto.Status);
         Assert.True(dto.ContractorPaymentOnResult);
         Assert.Equal(5, dto.ContractorPaymentResultDelayDays);
-        Assert.NotNull(dto.ContractorPaymentId);
+        Assert.Null(dto.ContractorPaymentId);
+        Assert.Empty(await db.Payments.ToListAsync());
+
+        var doneResult = await controller.UpdateStatus(createdDto.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Работа принята.",
+        }, CancellationToken.None);
+
+        var doneOk = Assert.IsType<OkObjectResult>(doneResult.Result);
+        var doneDto = Assert.IsType<TaskJournalItemDto>(doneOk.Value);
+        Assert.Equal("done", doneDto.Status);
+        Assert.NotNull(doneDto.ContractorPaymentId);
 
         var payment = await db.Payments.SingleAsync();
         Assert.Equal(PaymentStatus.Pending, payment.Status);

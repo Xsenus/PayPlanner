@@ -3310,8 +3310,7 @@ public class TasksController : ControllerBase
     }
 
     private static bool IsContractorPaymentResultTriggerStatus(string? status)
-        => string.Equals(status, "inProgress", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(status, "done", StringComparison.OrdinalIgnoreCase);
+        => string.Equals(status, "done", StringComparison.OrdinalIgnoreCase);
 
     private static DateTime? GetContractorPaymentResultBaseDate(string? oldStatus, string? nextStatus, DateTime? changedAt)
         => IsContractorPaymentResultTriggerStatus(nextStatus)

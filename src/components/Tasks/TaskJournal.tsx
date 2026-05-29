@@ -214,12 +214,12 @@ function getTaskJournalFilterStorageKey(userId: number | null, mode: TaskJournal
     : `${TASK_JOURNAL_FILTERS_STORAGE_PREFIX}.${mode}.${ownerKey}`;
 }
 
-function getDefaultQuickFilter(userId: number | null, mode: TaskJournalMode = 'journal'): QuickFilter {
+function getDefaultQuickFilter(_userId: number | null, mode: TaskJournalMode = 'journal'): QuickFilter {
   if (mode === 'approvals') {
     return 'all';
   }
 
-  return userId ? 'assignedToMe' : 'all';
+  return 'all';
 }
 
 function createDefaultFilterPreferences(userId: number | null, mode: TaskJournalMode = 'journal', viewMode: ViewMode = 'list'): TaskJournalFilterPreferences {
@@ -5826,7 +5826,7 @@ function TaskModal({
                   </div>
                 ) : form.contractorPaymentOnResult ? (
                   <div className="md:col-span-3 rounded-xl border border-emerald-100 bg-white px-3 py-2 text-sm text-slate-600">
-                    Если задача уже закрыта, платеж будет поставлен от даты закрытия. Если задача еще не закрыта, платеж появится после перевода в работу.
+                    Если задача уже закрыта, платеж будет поставлен от даты закрытия. Если задача еще не закрыта, платеж появится только после принятия работы и завершения задачи.
                   </div>
                 ) : null}
                 {form.contractorPaymentId ? (
