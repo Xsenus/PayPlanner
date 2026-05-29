@@ -1980,6 +1980,78 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateStatus_DoneKeepsExistingContractorPaymentResponsible()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Author");
+        var assignee = await CreateAdminUserAsync(db, "contractor-existing-payment@example.com", "Contractor", isExternalContractor: true);
+        var client = await CreateClientAsync(db, "Client");
+        var payment = new Payment
+        {
+            Type = PaymentType.Expense,
+            Status = PaymentStatus.Cancelled,
+            Amount = 500m,
+            PaidAmount = 0m,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+            Description = "Contractor payment",
+            CounterpartyName = assignee.FullName,
+            SystemNotes = "existing contractor payment",
+            DocumentKind = DocumentKind.Payment,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.Draft,
+            CreatedAt = DateTime.UtcNow,
+            IsPaid = false,
+        };
+        payment.Responsibles.Add(new PaymentResponsible { UserId = assignee.Id });
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ClientId = client.Id,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            ObjectName = client.Name,
+            Title = "Accept work",
+            DueAt = DateTime.UtcNow.AddHours(2),
+            Status = "approved",
+            ContractorPaymentEnabled = true,
+            ContractorPaymentAmount = 500m,
+            ContractorPaymentOnResult = true,
+            ContractorPaymentResultDelayDays = 5,
+            ContractorPaymentId = payment.Id,
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var doneResult = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Work accepted.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(doneResult.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("done", dto.Status);
+        Assert.Equal(payment.Id, dto.ContractorPaymentId);
+
+        var responsibles = await db.PaymentResponsibles
+            .Where(item => item.PaymentId == payment.Id)
+            .ToListAsync();
+        var responsible = Assert.Single(responsibles);
+        Assert.Equal(assignee.Id, responsible.UserId);
+
+        var updatedPayment = await db.Payments.SingleAsync(item => item.Id == payment.Id);
+        Assert.Equal(PaymentStatus.Pending, updatedPayment.Status);
+        Assert.Equal(DateTime.UtcNow.Date.AddDays(5), updatedPayment.Date);
+    }
+
+    [Fact]
     public async Task CreateTask_NotifiesWhenScheduleConflictsWithActiveTask()
     {
         await using var db = await CreateContextAsync();

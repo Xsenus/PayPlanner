@@ -3250,6 +3250,12 @@ public class TasksController : ControllerBase
     {
         if (entity.ContractorPayment is not null)
         {
+            var responsibles = _db.Entry(entity.ContractorPayment).Collection(payment => payment.Responsibles);
+            if (!responsibles.IsLoaded)
+            {
+                await responsibles.LoadAsync(ct);
+            }
+
             return entity.ContractorPayment;
         }
 
