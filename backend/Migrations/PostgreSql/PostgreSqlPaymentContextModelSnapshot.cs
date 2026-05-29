@@ -47,8 +47,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("integer");
 
                     b.Property<string>("Comment")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
+                        .HasColumnType("text");
 
                     b.Property<string>("CounterpartyInn")
                         .HasMaxLength(32)

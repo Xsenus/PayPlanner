@@ -40,7 +40,6 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Comment")
-                        .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CounterpartyInn")

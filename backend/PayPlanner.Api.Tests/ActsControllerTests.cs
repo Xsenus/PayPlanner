@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
@@ -18,6 +19,78 @@ namespace PayPlanner.Api.Tests;
 
 public class ActsControllerTests
 {
+    [Fact]
+    public void UpsertActRequest_AllowsLongCommentForLegalNotes()
+    {
+        var request = new UpsertActRequest
+        {
+            Number = "ACT-LONG-COMMENT",
+            Date = new DateTime(2026, 5, 29),
+            Amount = 18000m,
+            Status = ActStatus.Created,
+            Comment = new string('a', 1500),
+        };
+        var results = new List<ValidationResult>();
+
+        var isValid = Validator.TryValidateObject(request, new ValidationContext(request), results, validateAllProperties: true);
+
+        Assert.True(isValid, string.Join(Environment.NewLine, results.Select(item => item.ErrorMessage)));
+    }
+
+    [Fact]
+    public async Task Create_FullAct_WithLongComment_PersistsCommentAndInvoiceLineItems_InLocalSqliteFile()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"payplanner-act-{Guid.NewGuid():N}.db");
+        var db = await CreateFileContextAsync(dbPath);
+        try
+        {
+            var client = await CreateClientAsync(db);
+            var invoice = await CreateInvoiceAsync(
+                db,
+                "INV-LONG-COMMENT",
+                new DateTime(2026, 5, 29),
+                client.Id,
+                new[]
+                {
+                    new InvoiceLineItem { Name = "Service A", Quantity = 1m, Unit = "service", Price = 8000m, SortOrder = 0 },
+                    new InvoiceLineItem { Name = "Service B", Quantity = 1m, Unit = "service", Price = 10000m, SortOrder = 1 },
+                });
+            var longComment = string.Join(Environment.NewLine, Enumerable.Repeat("legal note", 180));
+            var controller = new ActsController(db, new NoopFormRequirementsService());
+
+            var result = await controller.Create(new UpsertActRequest
+            {
+                Number = "ACT-LONG-COMMENT",
+                Date = new DateTime(2026, 5, 29),
+                CreationMode = ActCreationMode.Full,
+                InvoiceId = invoice.Id,
+                InvoiceNumber = invoice.Account,
+                Status = ActStatus.Created,
+                ClientId = client.Id,
+                Comment = longComment,
+            }, CancellationToken.None);
+
+            var created = Assert.IsType<CreatedResult>(result.Result);
+            var dto = Assert.IsType<ActDto>(created.Value);
+            Assert.Equal(18000m, dto.Amount);
+            Assert.Equal(longComment, dto.Comment);
+            Assert.Equal(2, dto.LineItems.Count);
+
+            var stored = await db.Acts.Include(item => item.LineItems).SingleAsync(item => item.Id == dto.Id);
+            Assert.Equal(longComment, stored.Comment);
+            Assert.Equal(2, stored.LineItems.Count);
+        }
+        finally
+        {
+            await db.DisposeAsync();
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(dbPath))
+            {
+                File.Delete(dbPath);
+            }
+        }
+    }
+
     [Fact]
     public async Task Create_AssignsCurrentUserAsResponsible_WhenResponsibleNotProvided()
     {
@@ -2454,6 +2527,17 @@ public class ActsControllerTests
 
         var options = new DbContextOptionsBuilder<PaymentContext>()
             .UseSqlite(connection)
+            .Options;
+
+        var db = new PaymentContext(options);
+        await db.Database.EnsureCreatedAsync();
+        return db;
+    }
+
+    private static async Task<PaymentContext> CreateFileContextAsync(string dbPath)
+    {
+        var options = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite($"Data Source={dbPath}")
             .Options;
 
         var db = new PaymentContext(options);

@@ -250,7 +250,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.CreationMode).HasMaxLength(32).HasDefaultValue(ActCreationMode.Manual).IsRequired();
             entity.Property(e => e.InvoiceNumber).HasMaxLength(100);
             entity.Property(e => e.CounterpartyInn).HasMaxLength(32);
-            entity.Property(e => e.Comment).HasMaxLength(1000);
+            entity.Property(e => e.Comment);
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.WorkflowStatus).HasMaxLength(32).HasDefaultValue(ActWorkflowStatus.Draft).IsRequired();

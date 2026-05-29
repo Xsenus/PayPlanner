@@ -43,7 +43,6 @@ public class UpsertActRequest
 
     public int? ResponsibleId { get; set; }
 
-    [MaxLength(1000)]
     public string? Comment { get; set; }
 
     public List<ActLineItemRequest> LineItems { get; set; } = new();

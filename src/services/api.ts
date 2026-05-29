@@ -1253,11 +1253,6 @@ export async function extractResponseErrorMessage(response: Response): Promise<s
         return message;
       }
 
-      const title = payload?.title?.trim();
-      if (title) {
-        return title;
-      }
-
       const firstError = payload?.errors
         ? Object.values(payload.errors)
             .flatMap((value) => Array.isArray(value) ? value : [value])
@@ -1267,6 +1262,11 @@ export async function extractResponseErrorMessage(response: Response): Promise<s
 
       if (firstError) {
         return firstError;
+      }
+
+      const title = payload?.title?.trim();
+      if (title) {
+        return title;
       }
     } catch {
       // no-op, fall back to text

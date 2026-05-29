@@ -28,6 +28,27 @@ describe('extractResponseErrorMessage', () => {
     );
   });
 
+  it('prefers validation error details over generic problem title', async () => {
+    const response = new Response(
+      JSON.stringify({
+        title: 'One or more validation errors occurred.',
+        errors: {
+          Comment: ['The field Comment must be a string or array type with a maximum length of 1000.'],
+        },
+      }),
+      {
+        status: 400,
+        headers: {
+          'Content-Type': 'application/problem+json',
+        },
+      },
+    );
+
+    await expect(extractResponseErrorMessage(response)).resolves.toBe(
+      'The field Comment must be a string or array type with a maximum length of 1000.',
+    );
+  });
+
   it('falls back to plain text when response is not json', async () => {
     const response = new Response('Короткая текстовая ошибка', {
       status: 400,
