@@ -32,6 +32,7 @@ import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings
 import type {
   AccountRegistryRow,
   Act,
+  ActWorkflowStatus,
   ActStatus,
   ActInput,
   ActResponsible,
@@ -814,6 +815,42 @@ export function Accounts({
     Signed: 'border border-emerald-200 bg-emerald-100 text-emerald-700',
     Terminated: 'border border-rose-200 bg-rose-100 text-rose-700',
   };
+  const defaultActWorkflowStatusLabels: Record<ActWorkflowStatus, string> = {
+    Draft: 'Черновик',
+    NotSigned: 'Не подписан',
+    RequiresClientSignature: 'Требуется подпись клиента',
+    OnApproval: 'На согласовании',
+    Approved: 'Согласован',
+    ApprovalRejected: 'Отказ в согласовании',
+    NeedsCorrection: 'Требует исправления',
+    OnSigning: 'На подписании',
+    Signed: 'Подписан',
+    Cancelled: 'Аннулирован',
+  };
+  const actWorkflowStatusLabels = useMemo(
+    () => getDocumentStatusLabels(documentStatusSettings, 'act', defaultActWorkflowStatusLabels),
+    [documentStatusSettings],
+  );
+  const actWorkflowStatusClasses: Record<ActWorkflowStatus, string> = {
+    Draft: 'border border-slate-200 bg-slate-100 text-slate-700',
+    NotSigned: 'border border-slate-200 bg-slate-100 text-slate-700',
+    RequiresClientSignature: 'border border-amber-200 bg-amber-100 text-amber-800',
+    OnApproval: 'border border-cyan-200 bg-cyan-100 text-cyan-700',
+    Approved: 'border border-emerald-200 bg-emerald-100 text-emerald-700',
+    ApprovalRejected: 'border border-rose-200 bg-rose-100 text-rose-700',
+    NeedsCorrection: 'border border-orange-200 bg-orange-100 text-orange-700',
+    OnSigning: 'border border-violet-200 bg-violet-100 text-violet-700',
+    Signed: 'border border-emerald-200 bg-emerald-100 text-emerald-700',
+    Cancelled: 'border border-rose-200 bg-rose-100 text-rose-700',
+  };
+  const legacyActWorkflowStatusByStatus: Record<ActStatus, ActWorkflowStatus> = {
+    Created: 'NotSigned',
+    Transferred: 'OnSigning',
+    Signed: 'Signed',
+    Terminated: 'Cancelled',
+  };
+  const resolveActWorkflowStatus = (act: Act): ActWorkflowStatus =>
+    act.workflowStatus ?? legacyActWorkflowStatusByStatus[act.status];
 
   const statusClasses: Partial<Record<AccountStatus, string>> = {
     created: 'bg-amber-100 text-amber-700 border border-amber-200',
@@ -3011,6 +3048,13 @@ export function Accounts({
                     const actsForInvoice = row.acts ?? [];
                     const primaryAct = actsForInvoice[0] ?? null;
                     const extraActs = actsForInvoice.slice(1);
+                    const primaryActWorkflowStatus = primaryAct ? resolveActWorkflowStatus(primaryAct) : null;
+                    const primaryActStatusLabel = primaryAct && primaryActWorkflowStatus
+                      ? (actWorkflowStatusLabels[primaryActWorkflowStatus] ?? actSigningStatusLabels[primaryAct.status] ?? actStatusLabels[primaryAct.status])
+                      : null;
+                    const primaryActStatusClass = primaryAct && primaryActWorkflowStatus
+                      ? (actWorkflowStatusClasses[primaryActWorkflowStatus] ?? actSigningStatusClasses[primaryAct.status])
+                      : null;
                     const actListKey = `${row.accountNumber}-${invoice?.id ?? 'no-invoice'}`;
                     const isActListOpen = expandedActListKey === actListKey;
                     const primaryName = invoice?.clientName || invoice?.legalEntityName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
@@ -3179,7 +3223,7 @@ export function Accounts({
                                             type="button"
                                             onClick={(event) => { event.stopPropagation(); openActEditModal(primaryAct, row); }}
                                             className="inline-flex w-[8.5rem] min-w-0 flex-col items-start gap-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-left text-xs shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
-                                            title={`${primaryAct.number ? `Акт №${primaryAct.number}` : t('act') ?? 'Акт'} · ${formatDate(primaryAct.date)} · ${actSigningStatusLabels[primaryAct.status] ?? actStatusLabels[primaryAct.status]}`}
+                                            title={`${primaryAct.number ? `Акт №${primaryAct.number}` : t('act') ?? 'Акт'} · ${formatDate(primaryAct.date)} · ${primaryActStatusLabel}`}
                                           >
                                             <span className="block w-full truncate font-semibold text-blue-700">
                                               {primaryAct.number ? `Акт №${primaryAct.number}` : t('act') ?? 'Акт'}
@@ -3187,8 +3231,8 @@ export function Accounts({
                                             <span className="block w-full truncate text-[11px] font-medium text-slate-500">
                                               {formatDate(primaryAct.date)}
                                             </span>
-                                            <span className={`inline-flex max-w-full items-center justify-center rounded-full px-2 py-0.5 text-center text-[11px] font-medium leading-tight ${actSigningStatusClasses[primaryAct.status]}`}>
-                                              {actSigningStatusLabels[primaryAct.status] ?? actStatusLabels[primaryAct.status]}
+                                            <span className={`inline-flex max-w-full items-center justify-center rounded-full px-2 py-0.5 text-center text-[11px] font-medium leading-tight ${primaryActStatusClass}`}>
+                                              {primaryActStatusLabel}
                                             </span>
                                           </button>
                                           {extraActs.length > 0 && (
@@ -3218,24 +3262,35 @@ export function Accounts({
                                                 Акты по счету
                                               </div>
                                               <div className="space-y-1">
-                                                {actsForInvoice.map((act) => (
-                                                  <button
-                                                    key={act.id}
-                                                    type="button"
-                                                    onClick={(event) => { event.stopPropagation(); openActEditModal(act, row); }}
-                                                    className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-blue-50"
-                                                  >
-                                                    <span className="min-w-0">
-                                                      <span className="block truncate text-xs font-semibold text-blue-700">
-                                                        {act.number ? `Акт №${act.number}` : t('act') ?? 'Акт'}
+                                                {actsForInvoice.map((act) => {
+                                                  const actWorkflowStatus = resolveActWorkflowStatus(act);
+                                                  const actStatusLabel =
+                                                    actWorkflowStatusLabels[actWorkflowStatus] ??
+                                                    actSigningStatusLabels[act.status] ??
+                                                    actStatusLabels[act.status];
+                                                  const actStatusClass =
+                                                    actWorkflowStatusClasses[actWorkflowStatus] ??
+                                                    actSigningStatusClasses[act.status];
+
+                                                  return (
+                                                    <button
+                                                      key={act.id}
+                                                      type="button"
+                                                      onClick={(event) => { event.stopPropagation(); openActEditModal(act, row); }}
+                                                      className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-blue-50"
+                                                    >
+                                                      <span className="min-w-0">
+                                                        <span className="block truncate text-xs font-semibold text-blue-700">
+                                                          {act.number ? `Акт №${act.number}` : t('act') ?? 'Акт'}
+                                                        </span>
+                                                        <span className="block text-[11px] font-medium text-slate-500">{formatDate(act.date)}</span>
                                                       </span>
-                                                      <span className="block text-[11px] font-medium text-slate-500">{formatDate(act.date)}</span>
-                                                    </span>
-                                                    <span className={`inline-flex shrink-0 items-center justify-center rounded-full px-2 py-0.5 text-center text-[11px] font-medium leading-tight ${actSigningStatusClasses[act.status]}`}>
-                                                      {actSigningStatusLabels[act.status] ?? actStatusLabels[act.status]}
-                                                    </span>
-                                                  </button>
-                                                ))}
+                                                      <span className={`inline-flex shrink-0 items-center justify-center rounded-full px-2 py-0.5 text-center text-[11px] font-medium leading-tight ${actStatusClass}`}>
+                                                        {actStatusLabel}
+                                                      </span>
+                                                    </button>
+                                                  );
+                                                })}
                                               </div>
                                             </div>
                                           )}

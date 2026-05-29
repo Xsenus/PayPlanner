@@ -80,6 +80,65 @@ public class AccountsControllerTests
     }
 
     [Fact]
+    public async Task GetRegistry_ReturnsLinkedActWorkflowStatus()
+    {
+        await using var db = await CreateContextAsync();
+
+        var invoice = new Invoice
+        {
+            Number = "INV-ACT-WORKFLOW",
+            Date = new DateTime(2026, 5, 29),
+        };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(invoice.Date, 30_000m, "Invoice with act workflow status");
+        payment.DocumentKind = DocumentKind.Invoice;
+        payment.InvoiceId = invoice.Id;
+        payment.Account = invoice.Number;
+        payment.AccountDate = invoice.Date;
+        payment.Status = PaymentStatus.Pending;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        db.Acts.Add(new Act
+        {
+            Number = "ACT-WORKFLOW",
+            Date = invoice.Date.AddDays(1),
+            Amount = payment.Amount,
+            InvoiceId = payment.Id,
+            Status = ActStatus.Created,
+            WorkflowStatus = ActWorkflowStatus.RequiresClientSignature,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new AccountsController(db);
+
+        var result = await controller.GetRegistry(
+            from: null,
+            to: null,
+            status: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var payload = Assert.IsType<AccountsPageResponse>(ok.Value);
+        var row = Assert.Single(payload.Items);
+        var act = Assert.Single(row.Acts);
+
+        Assert.Equal(ActStatus.Created, act.Status);
+        Assert.Equal(ActWorkflowStatus.RequiresClientSignature, act.WorkflowStatus);
+        Assert.NotNull(row.Invoice);
+        Assert.Equal(ActWorkflowStatus.RequiresClientSignature, row.Invoice!.ActWorkflowStatus);
+        Assert.Equal(ActWorkflowStatus.RequiresClientSignature, Assert.Single(row.Invoice.Acts).WorkflowStatus);
+    }
+
+    [Fact]
     public async Task GetRegistry_FiltersByContractId()
     {
         await using var db = await CreateContextAsync();

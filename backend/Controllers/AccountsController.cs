@@ -395,6 +395,12 @@ public class AccountsController : ControllerBase
                     ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
                     CounterpartyInn = act.CounterpartyInn,
                     Status = act.Status,
+                    WorkflowStatus = act.WorkflowStatus,
+                    SentForSigningAt = act.SentForSigningAt,
+                    SignedAt = act.SignedAt,
+                    CancelledAt = act.CancelledAt,
+                    CancelledByUserId = act.CancelledByUserId,
+                    CancelledReason = act.CancelledReason,
                     ClientId = act.ClientId,
                     ClientName = act.Client != null ? act.Client.Name : null,
                     ResponsibleId = act.ResponsibleId,
@@ -1110,6 +1116,7 @@ public class AccountsController : ControllerBase
                 Amount = act.Amount,
                 CreationMode = act.CreationMode ?? ActCreationMode.Manual,
                 Status = act.Status,
+                WorkflowStatus = act.WorkflowStatus,
                 ClientId = act.ClientId,
                 ClientName = act.ClientName,
                 LegalEntityId = act.LegalEntityId,
@@ -1142,6 +1149,7 @@ public class AccountsController : ControllerBase
             invoice.ActNumber = invoice.Acts[0].Number;
             invoice.ActTitle = invoice.Acts[0].Title;
             invoice.ActStatus = invoice.Acts[0].Status;
+            invoice.ActWorkflowStatus = invoice.Acts[0].WorkflowStatus;
         }
 
         return invoice;

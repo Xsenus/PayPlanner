@@ -1003,6 +1003,7 @@ describe('Accounts integration', () => {
       date: '2026-04-05',
       amount: 15000,
       status: 'Created',
+      workflowStatus: 'RequiresClientSignature',
     } as Act;
     const secondAct = {
       id: 902,
@@ -1030,7 +1031,8 @@ describe('Accounts integration', () => {
 
     const primaryActButton = screen.getByRole('button', { name: /Акт №ACT-901/i });
     expect(primaryActButton).toBeTruthy();
-    expect(within(primaryActButton).getByText('Не подписан')).toBeTruthy();
+    expect(within(primaryActButton).getByText('Требуется подпись клиента')).toBeTruthy();
+    expect(within(primaryActButton).queryByText('Не подписан')).toBeNull();
     expect(screen.queryByRole('button', { name: /Акт №ACT-902/i })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /Показать все акты счета 24/i }));
