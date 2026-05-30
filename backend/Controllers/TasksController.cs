@@ -24,6 +24,7 @@ public class TasksController : ControllerBase
 {
     private const long MaxTaskFileBytes = 25L * 1024L * 1024L;
     private const string InternalTaskObjectName = "Внутренняя задача";
+    private const string DefaultTaskCompletionResult = "Задача выполнена.";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -1404,7 +1405,8 @@ public class TasksController : ControllerBase
         }
 
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
-        var statusValidation = ValidateStatusRules(nextStatus, NormalizeOptional(request.Result), participants.Items);
+        var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
+        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items);
         if (statusValidation is not null)
         {
             return BadRequest(new { message = statusValidation });
@@ -1433,7 +1435,7 @@ public class TasksController : ControllerBase
             Type = NormalizeEnumValue(request.Type, AllowedTypes, "task"),
             Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal"),
             Status = nextStatus,
-            Result = NormalizeOptional(request.Result),
+            Result = nextResult,
             RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]),
             ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]),
             TagsJson = SerializeFreeList(request.Tags),
@@ -1505,7 +1507,8 @@ public class TasksController : ControllerBase
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
         var approvalQueueRestarted = ShouldRestartApprovalQueue(previousStatus, nextStatus);
         participants = ResetApprovalQueueIfStartingApproval(previousStatus, nextStatus, participants);
-        var statusValidation = ValidateStatusRules(nextStatus, NormalizeOptional(request.Result), participants.Items);
+        var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
+        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items);
         if (statusValidation is not null)
         {
             return BadRequest(new { message = statusValidation });
@@ -1535,7 +1538,7 @@ public class TasksController : ControllerBase
         entity.Type = NormalizeEnumValue(request.Type, AllowedTypes, "task");
         entity.Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal");
         entity.Status = nextStatus;
-        entity.Result = NormalizeOptional(request.Result);
+        entity.Result = nextResult;
         entity.RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]);
         entity.ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]);
         entity.TagsJson = SerializeFreeList(request.Tags);
@@ -1616,12 +1619,8 @@ public class TasksController : ControllerBase
         }
 
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
-        var nextResult = NormalizeOptional(request.Result) ?? entity.Result;
-        if (string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
-            && string.IsNullOrWhiteSpace(nextResult))
-        {
-            return BadRequest(new { message = "Перед завершением задачи заполните результат." });
-        }
+        var requestedResult = NormalizeOptional(request.Result);
+        var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
 
         var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants);
         if (statusValidation is not null)
@@ -1636,9 +1635,11 @@ public class TasksController : ControllerBase
         var oldResult = entity.Result;
 
         entity.Status = nextStatus;
-        if (NormalizeOptional(request.Result) is { } result)
+        if (requestedResult is not null
+            || (string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(entity.Result)))
         {
-            entity.Result = result;
+            entity.Result = nextResult;
         }
         entity.UpdatedAt = DateTime.UtcNow;
 
@@ -1807,7 +1808,8 @@ public class TasksController : ControllerBase
             {
                 var oldStatus = entity.Status;
                 var oldResult = entity.Result;
-                var nextResult = NormalizeOptional(request.Result) ?? entity.Result;
+                var requestedResult = NormalizeOptional(request.Result);
+                var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
                 var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants);
                 if (statusValidation is not null)
                 {
@@ -1820,9 +1822,11 @@ public class TasksController : ControllerBase
                 entity.Status = nextStatus;
                 approvalRequested = approvalQueueRestarted
                     || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status));
-                if (NormalizeOptional(request.Result) is { } result)
+                if (requestedResult is not null
+                    || (string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
+                        && string.IsNullOrWhiteSpace(oldResult)))
                 {
-                    entity.Result = result;
+                    entity.Result = nextResult;
                 }
 
                 if (!string.Equals(oldStatus, entity.Status, StringComparison.OrdinalIgnoreCase))
@@ -2957,12 +2961,6 @@ public class TasksController : ControllerBase
             return "Комментарий к изменению не должен превышать 4000 символов.";
         }
 
-        if (string.Equals(request.Status, "done", StringComparison.OrdinalIgnoreCase)
-            && string.IsNullOrWhiteSpace(request.Result))
-        {
-            return "Перед завершением задачи заполните результат.";
-        }
-
         return null;
     }
 
@@ -3066,6 +3064,15 @@ public class TasksController : ControllerBase
 
     private static string? NormalizeOptional(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? NormalizeCompletionResult(string status, string? result)
+    {
+        var normalized = NormalizeOptional(result);
+        return string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
+            && normalized is null
+                ? DefaultTaskCompletionResult
+                : normalized;
+    }
 
     private static DateTime? NormalizeApprovalDueAt(DateTime? value)
         => value.HasValue && value.Value != default ? value.Value : null;

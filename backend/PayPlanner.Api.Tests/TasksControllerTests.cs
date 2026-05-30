@@ -302,7 +302,7 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task UpdateStatus_DoneRequiresResult()
+    public async Task UpdateStatus_DoneWithoutResultUsesDefaultResult()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
@@ -315,11 +315,15 @@ public class TasksControllerTests
             Status = "done",
         }, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result.Result);
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+
+        Assert.Equal("done", dto.Status);
+        Assert.Equal("Задача выполнена.", dto.Result);
     }
 
     [Fact]
-    public async Task UpdateTask_DoneRequiresResult()
+    public async Task UpdateTask_DoneWithoutResultUsesDefaultResult()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
@@ -335,7 +339,11 @@ public class TasksControllerTests
             Status = "done",
         }, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result.Result);
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+
+        Assert.Equal("done", dto.Status);
+        Assert.Equal("Задача выполнена.", dto.Result);
     }
 
     [Fact]
@@ -2402,6 +2410,32 @@ public class TasksControllerTests
             Assert.Contains(task.Comments, item => item.Kind == "system" && item.Text.Contains("Массовое изменение", StringComparison.OrdinalIgnoreCase));
         });
         Assert.Equal(2, notificationService.ChangedTasks.Count);
+    }
+
+    [Fact]
+    public async Task BulkUpdateTasks_DoneWithoutResultUsesDefaultResult()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, notificationService, author);
+
+        var result = await controller.BulkUpdateTasks(new BulkUpdateTaskJournalItemsRequest
+        {
+            Ids = [task.Id],
+            Status = "done",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(1, GetAnonymousInt(ok.Value, "updated"));
+        Assert.Equal(0, GetAnonymousInt(ok.Value, "skipped"));
+
+        var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("done", stored.Status);
+        Assert.Equal("Задача выполнена.", stored.Result);
+        Assert.Single(notificationService.CompletedTaskIds, task.Id);
     }
 
     [Fact]

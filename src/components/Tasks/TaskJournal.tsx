@@ -175,7 +175,7 @@ const ICS_REMINDER_PRESET_OPTIONS: Array<{ value: IcsReminderPreset; label: stri
   { value: 'day', label: '1 день', minutes: [1440] },
 ];
 
-const BULK_STATUS_OPTIONS = STATUS_OPTIONS.filter((option) => option.value !== 'approved' && option.value !== 'done');
+const BULK_STATUS_OPTIONS = STATUS_OPTIONS.filter((option) => option.value !== 'approved');
 
 const REMINDER_OPTIONS: Array<{ value: TaskJournalReminder; label: string }> = TASK_REMINDER_DEFAULT_OPTIONS;
 
@@ -2036,7 +2036,7 @@ export function TaskJournal({
     setBulkSaving(true);
     try {
       const result = await apiService.bulkUpdateTaskJournalItems(payload);
-      const skippedText = result.skipped > 0 ? ` Пропущено без прав: ${result.skipped}.` : '';
+      const skippedText = result.skipped > 0 ? ` Пропущено: ${result.skipped}.` : '';
       toast.success(`Обновлено задач: ${result.updated}.${skippedText}`, 'Журнал задач');
       clearBulkSelection();
       resetBulkFields();
@@ -2068,7 +2068,7 @@ export function TaskJournal({
     setBulkDeleting(true);
     try {
       const result = await apiService.bulkDeleteTaskJournalItems(ids);
-      const skippedText = result.skipped > 0 ? ` Пропущено без прав: ${result.skipped}.` : '';
+      const skippedText = result.skipped > 0 ? ` Пропущено: ${result.skipped}.` : '';
       toast.success(`Удалено задач: ${result.updated}.${skippedText}`, 'Журнал задач');
       clearBulkSelection();
       resetBulkFields();
@@ -2090,11 +2090,6 @@ export function TaskJournal({
       toast.error('Укажите наименование задачи.', 'Журнал задач');
       return;
     }
-    if (form.status === 'done' && !form.result.trim()) {
-      toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
-      return;
-    }
-
     if (form.contractorPaymentEnabled) {
       const selectedAssignee = assignees.find((assignee) => assignee.id === form.assigneeUserId);
       if (!selectedAssignee?.isExternalContractor) {
@@ -2130,7 +2125,9 @@ export function TaskJournal({
       objectName: form.isInternal ? INTERNAL_TASK_OBJECT_NAME : form.objectName.trim(),
       title: form.title.trim(),
       description: form.description.trim(),
-      result: form.result.trim(),
+      result: form.status === 'done' && !form.result.trim()
+        ? DEFAULT_TASK_COMPLETION_RESULT
+        : form.result.trim(),
       changeComment: form.changeComment?.trim() || null,
       dueAt: fromLocalInputValue(form.dueAt),
       approvalDueAt: form.approvalDueAt ? fromLocalInputValue(form.approvalDueAt) : null,
@@ -2173,11 +2170,9 @@ export function TaskJournal({
   };
 
   const handleResultSave = async (task: TaskJournalItem, status: TaskJournalStatus, result: string) => {
-    const normalizedResult = result.trim();
-    if (status === 'done' && !normalizedResult) {
-      toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
-      return;
-    }
+    const normalizedResult = status === 'done' && !result.trim()
+      ? DEFAULT_TASK_COMPLETION_RESULT
+      : result.trim();
 
     try {
       await apiService.updateTaskJournalStatus(task.id, status, normalizedResult);
@@ -2244,11 +2239,6 @@ export function TaskJournal({
   };
 
   const setTaskStatus = async (task: TaskJournalItem, status: TaskJournalStatus) => {
-    if (status === 'done' && !task.result.trim()) {
-      toast.error('Перед завершением задачи заполните результат.', 'Журнал задач');
-      openTaskEditor({ ...task, status: 'done' }, { syncRoute: true });
-      return;
-    }
     if (status === 'done' && hasPendingApprovers(task)) {
       toast.error('Задачу нельзя завершить, пока все согласующие не согласовали её.', 'Журнал задач');
       openTaskEditor({ ...task, status: 'onApproval' }, { syncRoute: true });
@@ -2256,7 +2246,10 @@ export function TaskJournal({
     }
 
     try {
-      await apiService.updateTaskJournalStatus(task.id, status);
+      const result = status === 'done' && !task.result.trim()
+        ? DEFAULT_TASK_COMPLETION_RESULT
+        : undefined;
+      await apiService.updateTaskJournalStatus(task.id, status, result);
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
@@ -5733,7 +5726,7 @@ function TaskModal({
               </select>
             </Field>
             <Field label="Статус">
-              <select value={form.status} onChange={(event) => update('status', event.target.value as TaskJournalStatus)} disabled={isReadOnly} className="form-input">
+              <select data-testid="task-editor-status-select" value={form.status} onChange={(event) => update('status', event.target.value as TaskJournalStatus)} disabled={isReadOnly} className="form-input">
                 {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </Field>

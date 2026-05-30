@@ -634,6 +634,39 @@ describe('TaskJournal', () => {
     expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Обновлено задач: 1'), 'Журнал задач');
   });
 
+  it('sends selected tasks to done through the bulk actions panel', async () => {
+    const task = createTask({ id: 101, title: 'Закрыть массово', result: '' });
+
+    await renderJournal([task], { waitForTitle: 'Закрыть массово' });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Закрыть массово' }));
+    fireEvent.change(screen.getByLabelText('Массово изменить статус'), { target: { value: 'done' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+
+    await waitFor(() => expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledTimes(1));
+    expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledWith({
+      ids: [101],
+      status: 'done',
+    });
+    expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Обновлено задач: 1'), 'Журнал задач');
+  });
+
+  it('shows a neutral skipped count after bulk actions', async () => {
+    apiMock.bulkUpdateTaskJournalItems.mockResolvedValueOnce({ requested: 2, updated: 1, skipped: 1 });
+    const firstTask = createTask({ id: 101, title: 'Обновить одну' });
+    const secondTask = createTask({ id: 102, title: 'Пропустить одну' });
+
+    await renderJournal([firstTask, secondTask], { waitForTitle: 'Обновить одну' });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Обновить одну' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Пропустить одну' }));
+    fireEvent.change(screen.getByLabelText('Массово изменить статус'), { target: { value: 'done' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+
+    await waitFor(() => expect(apiMock.bulkUpdateTaskJournalItems).toHaveBeenCalledTimes(1));
+    expect(toastMock.success).toHaveBeenCalledWith('Обновлено задач: 1. Пропущено: 1.', 'Журнал задач');
+  });
+
   it('deletes selected tasks through the bulk actions panel', async () => {
     const firstTask = createTask({ id: 101, title: 'Первая задача' });
     const secondTask = createTask({ id: 102, title: 'Вторая задача' });
@@ -646,6 +679,21 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.bulkDeleteTaskJournalItems).toHaveBeenCalledTimes(1));
     expect(apiMock.bulkDeleteTaskJournalItems).toHaveBeenCalledWith([101]);
     expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Удалено задач: 1'), 'Журнал задач');
+  });
+
+  it('shows a neutral skipped count after bulk delete', async () => {
+    apiMock.bulkDeleteTaskJournalItems.mockResolvedValueOnce({ requested: 2, updated: 1, skipped: 1 });
+    const firstTask = createTask({ id: 101, title: 'Удалить одну' });
+    const secondTask = createTask({ id: 102, title: 'Оставить одну' });
+
+    await renderJournal([firstTask, secondTask], { waitForTitle: 'Удалить одну' });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Удалить одну' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Оставить одну' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить выбранные' }));
+
+    await waitFor(() => expect(apiMock.bulkDeleteTaskJournalItems).toHaveBeenCalledTimes(1));
+    expect(toastMock.success).toHaveBeenCalledWith('Удалено задач: 1. Пропущено: 1.', 'Журнал задач');
   });
 
   it('opens client card from the counterparty link in the journal', async () => {
@@ -1500,15 +1548,14 @@ describe('TaskJournal', () => {
     expect(toastMock.success).toHaveBeenCalledWith('Создано контрольных задач: 1.', 'Автоконтроль дел');
   });
 
-  it('opens edit form instead of completing an active task without result', async () => {
+  it('completes an active task with a default result from the quick action', async () => {
     await renderJournal([createTask({ result: '' })]);
 
     fireEvent.click(screen.getAllByTitle('Завершить')[0]);
 
-    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
-    expect(toastMock.error).toHaveBeenCalledWith('Перед завершением задачи заполните результат.', 'Журнал задач');
-    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
-    expect(screen.getAllByText('Результат').length).toBeGreaterThan(0);
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'done', 'Задача выполнена.');
+    expect(toastMock.error).not.toHaveBeenCalledWith('Перед завершением задачи заполните результат.', 'Журнал задач');
   });
 
   it('sends an edited task to approval when approvers are configured', async () => {
@@ -1573,6 +1620,25 @@ describe('TaskJournal', () => {
       status: 'done',
       result: 'Задача выполнена.',
     }));
+  });
+
+  it('saves a task as done with a default result when the status is changed manually', async () => {
+    await renderJournal([createTask({ status: 'approved', result: '' })], { waitForTitle: null });
+    fireEvent.click(screen.getByTestId('task-quick-filter-all'));
+    fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'all' } });
+    await screen.findAllByText('Тестовая задача');
+
+    await openFirstTaskForEdit();
+
+    fireEvent.change(screen.getByTestId('task-editor-status-select'), { target: { value: 'done' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      status: 'done',
+      result: 'Задача выполнена.',
+    }));
+    expect(toastMock.error).not.toHaveBeenCalledWith('Перед завершением задачи заполните результат.', 'Журнал задач');
   });
 
   it('shows and saves approval due date in the task editor', async () => {
