@@ -969,36 +969,37 @@ public class CashOrdersController : ControllerBase
     .ko1 {
       display: grid;
       grid-template-columns: 100mm 13mm 64mm;
-      gap: 4mm;
-      width: 184mm;
+      gap: 1mm;
+      width: 178mm;
       margin: 27mm 0 0 16mm;
     }
-    .order, .receipt { min-width: 0; }
-    .cut { position: relative; min-height: 148mm; border-left: 1px solid #111; border-right: 2px solid #111; }
+    .order, .receipt { min-width: 0; position: relative; }
+    .cut { position: relative; min-height: 130mm; border-left: 1px solid #111; border-right: 2px solid #111; }
     .cut::before { content: ""; position: absolute; top: 0; bottom: 0; left: 6mm; border-left: 1px dashed #111; }
     .cut span { position: absolute; top: 42mm; left: 50%; transform: translateX(-50%); writing-mode: vertical-rl; letter-spacing: 5px; font-weight: 700; font-size: 8px; }
-    .top-note { margin-left: 56mm; margin-bottom: 9mm; font-size: 7px; line-height: 1.3; }
+    .top-note { margin-left: 56mm; margin-bottom: 3mm; font-size: 7px; line-height: 1.3; }
     .org-line { border-bottom: 2px solid #111; min-height: 18px; padding: 0 6px 2px; }
     .hint { color: #333; font-size: 6px; text-align: center; }
-    .header-row { display: grid; grid-template-columns: 1fr 21mm; gap: 3mm; align-items: end; margin-top: 0; }
+    .header-row { display: block; padding-right: 38mm; margin-top: 8mm; }
     .code-box, .doc-meta, .ledger { border-collapse: collapse; width: 100%; table-layout: fixed; }
     .code-box td, .doc-meta td, .ledger th, .ledger td { border: 1px solid #111; padding: 1.5mm 1mm; text-align: center; vertical-align: middle; }
+    .code-box { position: absolute; top: 10mm; right: 0; width: 21mm; }
     .code-box td:first-child { border-left: 0; text-align: right; padding-right: 8px; }
     .code-box td:last-child { font-weight: 700; }
-    .title { margin: 7mm 0 7mm; text-align: center; font-size: 15px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
-    .doc-meta { width: 36mm; margin-left: auto; margin-bottom: 5mm; font-size: 7px; }
+    .title { width: 62mm; margin: 6mm 0 5mm 4mm; text-align: center; font-size: 11px; line-height: 1.05; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+    .doc-meta { position: absolute; top: 31mm; right: 0; width: 36mm; margin: 0; font-size: 7px; }
     .doc-meta .value { font-size: 10px; font-weight: 700; }
     .ledger { font-size: 7px; }
     .ledger th { font-weight: 400; }
     .ledger .sum { font-size: 7px; white-space: nowrap; }
-    .line-field { display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; margin-top: 2mm; font-size: 7px; }
-    .line { min-height: 4.5mm; border-bottom: 1px solid #111; padding: 0 1.5mm .5mm; }
-    .long-line { margin-top: 2mm; min-height: 5mm; border-bottom: 1px solid #111; }
-    .amount-words { display: grid; grid-template-columns: auto 1fr auto 18mm auto 12mm auto; gap: 2mm; align-items: end; margin-top: 2.5mm; font-size: 7px; }
+    .line-field { display: grid; grid-template-columns: auto 1fr; gap: 2mm; align-items: end; margin-top: 1.4mm; font-size: 7px; }
+    .line { min-height: 4mm; border-bottom: 1px solid #111; padding: 0 1.5mm .4mm; }
+    .long-line { margin-top: 1.4mm; min-height: 4.2mm; border-bottom: 1px solid #111; }
+    .amount-words { display: grid; grid-template-columns: auto 1fr auto 18mm auto 12mm auto; gap: 2mm; align-items: end; margin-top: 1.8mm; font-size: 7px; }
     .amount-words .line { text-align: left; }
     .amount-words .kopecks, .receipt .kopecks { text-align: center; }
-    .sign-row { display: grid; grid-template-columns: 28mm 1fr 1fr; gap: 6mm; align-items: end; margin-top: 2.5mm; font-size: 7px; }
-    .sign-line { border-bottom: 1px solid #111; min-height: 5mm; text-align: center; padding-bottom: .5mm; }
+    .sign-row { display: grid; grid-template-columns: 28mm 1fr 1fr; gap: 6mm; align-items: end; margin-top: 2mm; font-size: 7px; }
+    .sign-line { border-bottom: 1px solid #111; min-height: 4.4mm; text-align: center; padding-bottom: .4mm; }
     .sign-label { font-size: 6px; text-align: center; color: #333; margin-top: .5mm; }
     .receipt .org-line { margin: 0 0 0; text-align: center; }
     .receipt-title { text-align: center; font-size: 15px; font-weight: 800; margin: 2mm 0 9mm; text-transform: uppercase; }

@@ -184,7 +184,12 @@ function createParty(
 
 function formatAccountingMoney(value: number) {
   if (!value) return "";
-  return value.toFixed(2).replace(".", ",");
+  return value
+    .toLocaleString("ru-RU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+    .replace(/\u00a0/g, " ");
 }
 
 function formatAccountingMoneyText(value: number) {
@@ -303,7 +308,7 @@ function buildReconciliationExcelHtml({
       background: #fff;
       color: #333;
       font-family: Arial, "DejaVu Sans", sans-serif;
-      font-size: ${fixedPrintLayout ? "10.5pt" : "10pt"};
+      font-size: 10pt;
       line-height: 1.18;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
@@ -312,47 +317,49 @@ function buildReconciliationExcelHtml({
       position: relative;
       width: ${fixedPrintLayout ? "265mm" : "100%"};
       min-height: ${fixedPrintLayout ? "190mm" : "auto"};
-      margin: ${fixedPrintLayout ? "3.2mm auto 0" : "0"};
+      margin: ${fixedPrintLayout ? "6mm auto 0" : "0"};
       padding: 0;
     }
     h1 {
-      margin: 0 0 ${fixedPrintLayout ? "5.5mm" : "8px"};
+      margin: 0 0 ${fixedPrintLayout ? "4mm" : "8px"};
       text-align: center;
-      font-size: ${fixedPrintLayout ? "28pt" : "16pt"};
+      font-size: ${fixedPrintLayout ? "24pt" : "16pt"};
       line-height: 1.05;
       font-weight: 400;
     }
     .subtitle {
       width: 100%;
-      margin: 0 auto ${fixedPrintLayout ? "7mm" : "14px"};
+      margin: 0 auto ${fixedPrintLayout ? "8mm" : "14px"};
       text-align: center;
       white-space: pre-line;
       font-size: ${fixedPrintLayout ? "12pt" : "10pt"};
       line-height: 1.35;
     }
     .intro {
-      margin: 0 0 ${fixedPrintLayout ? "3.2mm" : "14px"};
+      margin: 0 0 ${fixedPrintLayout ? "4.4mm" : "14px"};
       white-space: normal;
       font-size: ${fixedPrintLayout ? "12pt" : "10pt"};
       line-height: 1.35;
     }
     .act-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    .act-table col.date { width: 25mm; }
+    .act-table col.date { width: ${fixedPrintLayout ? "26mm" : "25mm"}; }
     .act-table col.doc { width: 53mm; }
-    .act-table col.debit { width: 26mm; }
-    .act-table col.credit { width: 26mm; }
+    .act-table col.debit { width: ${fixedPrintLayout ? "26.5mm" : "26mm"}; }
+    .act-table col.credit { width: ${fixedPrintLayout ? "26.5mm" : "26mm"}; }
     .act-table col.right-date { width: 27mm; }
     .act-table col.right-doc { width: 53mm; }
-    .act-table col.right-debit { width: 26mm; }
-    .act-table col.right-credit { width: 29mm; }
+    .act-table col.right-debit { width: ${fixedPrintLayout ? "26.5mm" : "26mm"}; }
+    .act-table col.right-credit { width: ${fixedPrintLayout ? "26.7mm" : "29mm"}; }
     .act-table th,
     .act-table td {
       border: 1px solid #c7c7c7;
-      padding: ${fixedPrintLayout ? "1.9mm 2.8mm" : "5px"};
-      height: ${fixedPrintLayout ? "6.75mm" : "auto"};
+      padding: ${fixedPrintLayout ? "1.15mm 2mm" : "5px"};
+      height: ${fixedPrintLayout ? "5.3mm" : "auto"};
       vertical-align: middle;
-      font-size: ${fixedPrintLayout ? "10.5pt" : "10pt"};
+      font-size: ${fixedPrintLayout ? "9pt" : "10pt"};
+      line-height: ${fixedPrintLayout ? "1.12" : "1.18"};
     }
+    ${fixedPrintLayout ? ".act-table td:nth-child(2), .act-table td:nth-child(6) { white-space: nowrap; }" : ""}
     .act-table th {
       text-align: center;
       font-weight: 400;
@@ -362,7 +369,7 @@ function buildReconciliationExcelHtml({
     .amount { text-align: right; white-space: nowrap; }
     .total td, .balance-row td { font-weight: 700; }
     .summary {
-      margin-top: ${fixedPrintLayout ? "8mm" : "18px"};
+      margin-top: ${fixedPrintLayout ? "5mm" : "18px"};
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
@@ -377,7 +384,7 @@ function buildReconciliationExcelHtml({
     .summary strong { font-weight: 700; }
     .sign {
       position: relative;
-      margin-top: ${fixedPrintLayout ? "7mm" : "18px"};
+      margin-top: ${fixedPrintLayout ? "4mm" : "18px"};
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
@@ -435,8 +442,7 @@ function buildReconciliationExcelHtml({
 <div class="act-sheet">
   <h1>Акт сверки</h1>
   <div class="subtitle">взаимных расчетов за период: ${escapeHtml(toRuDate(draft.periodFrom))} - ${escapeHtml(toRuDate(draft.periodTo))}
-между ${escapeHtml(executor.nameWithInn)}
-и ${escapeHtml(client.nameWithInn)}</div>
+между ${escapeHtml(executor.nameWithInn)} и ${escapeHtml(client.nameWithInn)}</div>
   <div class="intro">Мы, нижеподписавшиеся, ${escapeHtml(executor.signerPosition)} ${escapeHtml(executor.name)}, с одной стороны, и ${escapeHtml(client.name)}, с другой стороны, составили настоящий акт сверки в том, что состояние взаимных расчетов по данным учета следующее:</div>
   <table class="act-table">
     <colgroup>
@@ -488,8 +494,8 @@ function buildReconciliationExcelHtml({
   </table>
   <table class="summary">
     <tr>
-      <td>По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}</td>
-      <td>По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}</td>
+      <td>${fixedPrintLayout ? `По данным ${escapeHtml(executor.name)}` : `По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}`}</td>
+      <td>${fixedPrintLayout ? "" : `По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}`}</td>
     </tr>
     <tr>
       <td>${escapeHtml(getBalanceSummary(totals.balance, draft.periodTo, executor.name, client.name)).replace(" составляет ", " составляет <strong>").replace(" руб.", " руб.</strong>")}</td>
