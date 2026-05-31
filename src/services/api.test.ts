@@ -222,6 +222,58 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('/yandex-disk/settings');
   });
 
+  it('loads Yandex Disk CRM sync settings from the backend', async () => {
+    const payload = {
+      enabled: true,
+      syncInvoices: true,
+      syncActs: false,
+      syncContracts: true,
+      syncCaseDocuments: true,
+      syncTaskFiles: false,
+      overwriteExisting: false,
+      folderTemplate: 'CRM/{clientName}',
+      fileNameTemplate: '{documentDate}-{documentTitle}',
+      availableTokens: ['clientName', 'documentTitle'],
+      updatedAt: '2026-06-01T11:00:00Z',
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getYandexDiskCrmSyncSettings();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-disk/crm-sync/settings');
+  });
+
+  it('updates Yandex Disk CRM sync settings', async () => {
+    const payload = {
+      enabled: true,
+      syncInvoices: true,
+      syncActs: true,
+      syncContracts: false,
+      syncCaseDocuments: true,
+      syncTaskFiles: true,
+      overwriteExisting: true,
+      folderTemplate: 'CRM/{clientName}/{caseNumber}',
+      fileNameTemplate: '{documentDate}-{documentTitle}',
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ...payload, availableTokens: [] }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.updateYandexDiskCrmSyncSettings(payload);
+
+    expect(result.enabled).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-disk/crm-sync/settings');
+    expect(init?.method).toBe('PUT');
+    expect(JSON.parse(String(init?.body))).toEqual(payload);
+  });
+
   it('uploads a Yandex Disk file with form data', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true, path: '/docs/a.txt' }), {
       headers: { 'content-type': 'application/json' },

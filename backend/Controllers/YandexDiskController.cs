@@ -49,7 +49,44 @@ public sealed class YandexDiskController : ControllerBase
             "Обновлены настройки подключения Яндекс.Диска.",
             new { result.RootPath, result.IsConfigured, request.ClearToken },
             ct);
-        return Ok(result);
+        return result;
+    }
+
+    [HttpGet("crm-sync/settings")]
+    public async Task<ActionResult<YandexDiskCrmSyncSettingsDto>> GetCrmSyncSettings(CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanView, ct);
+        if (forbidden is not null) return forbidden;
+
+        return Ok(await _service.GetCrmSyncSettingsAsync(ct));
+    }
+
+    [HttpPut("crm-sync/settings")]
+    public async Task<ActionResult<YandexDiskCrmSyncSettingsDto>> UpdateCrmSyncSettings(
+        [FromBody] UpdateYandexDiskCrmSyncSettingsRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanEdit, ct);
+        if (forbidden is not null) return forbidden;
+
+        var result = await _service.UpdateCrmSyncSettingsAsync(request, ct);
+        await AddAuditAsync(
+            "CrmSyncSettingsUpdated",
+            "Обновлены правила синхронизации CRM-документов с Яндекс.Диском.",
+            new
+            {
+                result.Enabled,
+                result.SyncInvoices,
+                result.SyncActs,
+                result.SyncContracts,
+                result.SyncCaseDocuments,
+                result.SyncTaskFiles,
+                result.OverwriteExisting,
+                result.FolderTemplate,
+                result.FileNameTemplate,
+            },
+            ct);
+        return result;
     }
 
     [HttpGet("resources")]

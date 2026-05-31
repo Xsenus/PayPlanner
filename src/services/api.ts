@@ -254,6 +254,32 @@ export interface YandexDiskTextFileDto {
   content: string;
 }
 
+export interface YandexDiskCrmSyncSettingsDto {
+  enabled: boolean;
+  syncInvoices: boolean;
+  syncActs: boolean;
+  syncContracts: boolean;
+  syncCaseDocuments: boolean;
+  syncTaskFiles: boolean;
+  overwriteExisting: boolean;
+  folderTemplate: string;
+  fileNameTemplate: string;
+  availableTokens: string[];
+  updatedAt?: string | null;
+}
+
+export interface UpdateYandexDiskCrmSyncSettingsRequest {
+  enabled: boolean;
+  syncInvoices: boolean;
+  syncActs: boolean;
+  syncContracts: boolean;
+  syncCaseDocuments: boolean;
+  syncTaskFiles: boolean;
+  overwriteExisting: boolean;
+  folderTemplate?: string;
+  fileNameTemplate?: string;
+}
+
 export interface RolePermissionAuditRoleDto {
   roleId: number;
   roleName: string;
@@ -1510,6 +1536,17 @@ export class ApiService {
     return this.request<YandexDiskOperationResultDto>('/yandex-disk/text', {
       method: 'PUT',
       body: JSON.stringify({ path, content, overwrite }),
+    });
+  }
+
+  async getYandexDiskCrmSyncSettings() {
+    return this.request<YandexDiskCrmSyncSettingsDto>('/yandex-disk/crm-sync/settings');
+  }
+
+  async updateYandexDiskCrmSyncSettings(payload: UpdateYandexDiskCrmSyncSettingsRequest) {
+    return this.request<YandexDiskCrmSyncSettingsDto>('/yandex-disk/crm-sync/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     });
   }
 

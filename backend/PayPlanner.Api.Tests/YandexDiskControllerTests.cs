@@ -66,6 +66,36 @@ public sealed class YandexDiskControllerTests
         Assert.False(service.DownloadCalled);
     }
 
+    [Fact]
+    public async Task UpdateCrmSyncSettings_AllowsEditPermissionAndWritesAudit()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanEdit = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.UpdateCrmSyncSettings(new UpdateYandexDiskCrmSyncSettingsRequest
+        {
+            Enabled = true,
+            SyncInvoices = true,
+            SyncActs = false,
+            SyncContracts = true,
+            SyncCaseDocuments = true,
+            SyncTaskFiles = true,
+            OverwriteExisting = false,
+            FolderTemplate = "CRM/{clientName}",
+            FileNameTemplate = "{documentDate}-{documentTitle}",
+        }, CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskCrmSyncSettingsDto>(response.Value);
+        Assert.True(result.Enabled);
+        Assert.Equal("CRM/{clientName}", result.FolderTemplate);
+        var audit = Assert.Single(scope.Db.ObjectAuditEvents);
+        Assert.Equal("CrmSyncSettingsUpdated", audit.Action);
+        Assert.Equal(user.Id, audit.ActorUserId);
+        Assert.Contains("CRM/{clientName}", audit.MetadataJson);
+    }
+
     private static YandexDiskController CreateController(PaymentContext db, IYandexDiskService service, ClaimsPrincipal user)
         => new(service, db)
         {
@@ -181,6 +211,36 @@ public sealed class YandexDiskControllerTests
 
         public Task<YandexDiskOperationResultDto> SaveTextFileAsync(UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = request.Path ?? "/" });
+
+        public Task<YandexDiskCrmSyncSettingsDto> GetCrmSyncSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskCrmSyncSettingsDto
+            {
+                Enabled = false,
+                SyncInvoices = true,
+                SyncActs = true,
+                SyncContracts = true,
+                SyncCaseDocuments = true,
+                SyncTaskFiles = false,
+                OverwriteExisting = false,
+                FolderTemplate = "CRM/{clientName}/{caseNumber}/{documentType}",
+                FileNameTemplate = "{documentDate}-{documentNumber}-{documentTitle}",
+                AvailableTokens = ["clientName", "documentTitle"],
+            });
+
+        public Task<YandexDiskCrmSyncSettingsDto> UpdateCrmSyncSettingsAsync(UpdateYandexDiskCrmSyncSettingsRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskCrmSyncSettingsDto
+            {
+                Enabled = request.Enabled,
+                SyncInvoices = request.SyncInvoices,
+                SyncActs = request.SyncActs,
+                SyncContracts = request.SyncContracts,
+                SyncCaseDocuments = request.SyncCaseDocuments,
+                SyncTaskFiles = request.SyncTaskFiles,
+                OverwriteExisting = request.OverwriteExisting,
+                FolderTemplate = request.FolderTemplate ?? string.Empty,
+                FileNameTemplate = request.FileNameTemplate ?? string.Empty,
+                AvailableTokens = ["clientName", "documentTitle"],
+            });
     }
 
     private sealed class TestDbScope(SqliteConnection connection, PaymentContext db) : IAsyncDisposable

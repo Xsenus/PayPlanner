@@ -23,6 +23,8 @@ public interface IYandexDiskService
     Task<YandexDiskDownload> DownloadAsync(string? path, CancellationToken cancellationToken = default);
     Task<YandexDiskTextFileDto> GetTextFileAsync(string? path, CancellationToken cancellationToken = default);
     Task<YandexDiskOperationResultDto> SaveTextFileAsync(UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default);
+    Task<YandexDiskCrmSyncSettingsDto> GetCrmSyncSettingsAsync(CancellationToken cancellationToken = default);
+    Task<YandexDiskCrmSyncSettingsDto> UpdateCrmSyncSettingsAsync(UpdateYandexDiskCrmSyncSettingsRequest request, CancellationToken cancellationToken = default);
 }
 
 public sealed record YandexDiskDownload(string FileName, string ContentType, byte[] Content);
@@ -42,9 +44,23 @@ public sealed class YandexDiskService : IYandexDiskService
 {
     private const string OAuthTokenSettingKey = "integrations.yandexDisk.oauthToken";
     private const string RootPathSettingKey = "integrations.yandexDisk.rootPath";
+    private const string CrmSyncSettingsKey = "integrations.yandexDisk.crmSync.settings";
     private const string DefaultRootPath = "disk:/PayPlanner";
+    private const string DefaultFolderTemplate = "CRM/{clientName}/{caseNumber}/{documentType}";
+    private const string DefaultFileNameTemplate = "{documentDate}-{documentNumber}-{documentTitle}";
     private const string ApiBaseUrl = "https://cloud-api.yandex.net/v1/disk";
     private const int MaxTextFileBytes = 2 * 1024 * 1024;
+    private static readonly string[] CrmSyncTemplateTokens =
+    [
+        "clientName",
+        "legalEntityName",
+        "caseNumber",
+        "caseTitle",
+        "documentType",
+        "documentNumber",
+        "documentDate",
+        "documentTitle"
+    ];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly PaymentContext _db;
@@ -218,6 +234,62 @@ public sealed class YandexDiskService : IYandexDiskService
         var bytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(request.Content ?? string.Empty);
         await using var stream = new MemoryStream(bytes);
         return await UploadAsync(request.Path, stream, "text/plain; charset=utf-8", request.Overwrite, cancellationToken);
+    }
+
+    public async Task<YandexDiskCrmSyncSettingsDto> GetCrmSyncSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var setting = await _db.SystemSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Key == CrmSyncSettingsKey, cancellationToken);
+
+        if (setting is null || string.IsNullOrWhiteSpace(setting.Value))
+        {
+            return BuildDefaultCrmSyncSettings();
+        }
+
+        try
+        {
+            var stored = JsonSerializer.Deserialize<YandexDiskCrmSyncSettingsDto>(setting.Value, JsonOptions);
+            if (stored is not null)
+            {
+                var normalized = NormalizeCrmSyncSettings(stored);
+                normalized.UpdatedAt = setting.UpdatedAt;
+                return normalized;
+            }
+        }
+        catch (JsonException)
+        {
+            // Invalid JSON should not break the settings screen.
+        }
+
+        var defaults = BuildDefaultCrmSyncSettings();
+        defaults.UpdatedAt = setting.UpdatedAt;
+        return defaults;
+    }
+
+    public async Task<YandexDiskCrmSyncSettingsDto> UpdateCrmSyncSettingsAsync(
+        UpdateYandexDiskCrmSyncSettingsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        var normalized = NormalizeCrmSyncSettings(new YandexDiskCrmSyncSettingsDto
+        {
+            Enabled = request.Enabled,
+            SyncInvoices = request.SyncInvoices,
+            SyncActs = request.SyncActs,
+            SyncContracts = request.SyncContracts,
+            SyncCaseDocuments = request.SyncCaseDocuments,
+            SyncTaskFiles = request.SyncTaskFiles,
+            OverwriteExisting = request.OverwriteExisting,
+            FolderTemplate = request.FolderTemplate ?? string.Empty,
+            FileNameTemplate = request.FileNameTemplate ?? string.Empty,
+            UpdatedAt = now,
+        });
+        normalized.UpdatedAt = now;
+
+        await UpsertSettingAsync(CrmSyncSettingsKey, JsonSerializer.Serialize(normalized, JsonOptions), now, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+        return normalized;
     }
 
     private async Task<YandexDiskOperationResultDto> CopyOrMoveAsync(
@@ -484,6 +556,58 @@ public sealed class YandexDiskService : IYandexDiskService
             Success = true,
             Path = string.IsNullOrWhiteSpace(relativePath) ? "/" : $"/{relativePath}",
         };
+
+    private static YandexDiskCrmSyncSettingsDto BuildDefaultCrmSyncSettings()
+        => NormalizeCrmSyncSettings(new YandexDiskCrmSyncSettingsDto
+        {
+            Enabled = false,
+            SyncInvoices = true,
+            SyncActs = true,
+            SyncContracts = true,
+            SyncCaseDocuments = true,
+            SyncTaskFiles = false,
+            OverwriteExisting = false,
+            FolderTemplate = DefaultFolderTemplate,
+            FileNameTemplate = DefaultFileNameTemplate,
+        });
+
+    private static YandexDiskCrmSyncSettingsDto NormalizeCrmSyncSettings(YandexDiskCrmSyncSettingsDto settings)
+    {
+        var folderTemplate = NormalizeTemplate(settings.FolderTemplate, DefaultFolderTemplate, 240);
+        var fileNameTemplate = NormalizeTemplate(settings.FileNameTemplate, DefaultFileNameTemplate, 180);
+
+        return new YandexDiskCrmSyncSettingsDto
+        {
+            Enabled = settings.Enabled,
+            SyncInvoices = settings.SyncInvoices,
+            SyncActs = settings.SyncActs,
+            SyncContracts = settings.SyncContracts,
+            SyncCaseDocuments = settings.SyncCaseDocuments,
+            SyncTaskFiles = settings.SyncTaskFiles,
+            OverwriteExisting = settings.OverwriteExisting,
+            FolderTemplate = folderTemplate,
+            FileNameTemplate = fileNameTemplate,
+            AvailableTokens = CrmSyncTemplateTokens,
+            UpdatedAt = settings.UpdatedAt,
+        };
+    }
+
+    private static string NormalizeTemplate(string? value, string fallback, int maxLength)
+    {
+        var template = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim().Replace('\\', '/');
+        template = template.Replace("..", string.Empty, StringComparison.Ordinal).Trim('/');
+        while (template.Contains("//", StringComparison.Ordinal))
+        {
+            template = template.Replace("//", "/", StringComparison.Ordinal);
+        }
+
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            template = fallback;
+        }
+
+        return template.Length > maxLength ? template[..maxLength] : template;
+    }
 
     private static string DecodeText(byte[] content)
     {

@@ -12,12 +12,20 @@ import {
   Plus,
   RefreshCw,
   Save,
+  SlidersHorizontal,
   Trash2,
   UploadCloud,
   X,
 } from 'lucide-react';
 import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { apiService, type YandexDiskListResponseDto, type YandexDiskResourceDto, type YandexDiskSettingsDto } from '../../services/api';
+import {
+  apiService,
+  type UpdateYandexDiskCrmSyncSettingsRequest,
+  type YandexDiskCrmSyncSettingsDto,
+  type YandexDiskListResponseDto,
+  type YandexDiskResourceDto,
+  type YandexDiskSettingsDto,
+} from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { useToast } from '../../hooks/useToast';
 import { useAuth } from '../../contexts/AuthContext';
@@ -53,6 +61,18 @@ function formatDate(value?: string | null) {
   return value ? new Date(value).toLocaleString('ru-RU') : '—';
 }
 
+const defaultCrmSyncDraft: UpdateYandexDiskCrmSyncSettingsRequest = {
+  enabled: false,
+  syncInvoices: true,
+  syncActs: true,
+  syncContracts: true,
+  syncCaseDocuments: true,
+  syncTaskFiles: false,
+  overwriteExisting: false,
+  folderTemplate: 'CRM/{clientName}/{caseNumber}/{documentType}',
+  fileNameTemplate: '{documentDate}-{documentNumber}-{documentTitle}',
+};
+
 export function YandexDisk() {
   const toast = useToast();
   const { user } = useAuth();
@@ -65,6 +85,8 @@ export function YandexDisk() {
   const canExport = isAdminRole || permissions.canExport;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [settings, setSettings] = useState<YandexDiskSettingsDto | null>(null);
+  const [crmSyncSettings, setCrmSyncSettings] = useState<YandexDiskCrmSyncSettingsDto | null>(null);
+  const [crmSyncDraft, setCrmSyncDraft] = useState<UpdateYandexDiskCrmSyncSettingsRequest>(defaultCrmSyncDraft);
   const [tokenDraft, setTokenDraft] = useState('');
   const [rootPathDraft, setRootPathDraft] = useState('disk:/PayPlanner');
   const [currentPath, setCurrentPath] = useState('/');
@@ -72,6 +94,7 @@ export function YandexDisk() {
   const [newFolderName, setNewFolderName] = useState('');
   const [loading, setLoading] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [savingCrmSync, setSavingCrmSync] = useState(false);
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editorPath, setEditorPath] = useState<string | null>(null);
@@ -87,9 +110,24 @@ export function YandexDisk() {
   }, [listing]);
 
   const loadSettings = async () => {
-    const loaded = await apiService.getYandexDiskSettings();
+    const [loaded, loadedCrmSyncSettings] = await Promise.all([
+      apiService.getYandexDiskSettings(),
+      apiService.getYandexDiskCrmSyncSettings(),
+    ]);
     setSettings(loaded);
     setRootPathDraft(loaded.rootPath || 'disk:/PayPlanner');
+    setCrmSyncSettings(loadedCrmSyncSettings);
+    setCrmSyncDraft({
+      enabled: loadedCrmSyncSettings.enabled,
+      syncInvoices: loadedCrmSyncSettings.syncInvoices,
+      syncActs: loadedCrmSyncSettings.syncActs,
+      syncContracts: loadedCrmSyncSettings.syncContracts,
+      syncCaseDocuments: loadedCrmSyncSettings.syncCaseDocuments,
+      syncTaskFiles: loadedCrmSyncSettings.syncTaskFiles,
+      overwriteExisting: loadedCrmSyncSettings.overwriteExisting,
+      folderTemplate: loadedCrmSyncSettings.folderTemplate,
+      fileNameTemplate: loadedCrmSyncSettings.fileNameTemplate,
+    });
     return loaded;
   };
 
@@ -155,6 +193,32 @@ export function YandexDisk() {
       setError(extractDisplayErrorMessage(clearError, 'Не удалось удалить токен.'));
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const saveCrmSyncSettings = async () => {
+    if (!canEdit) return;
+    setSavingCrmSync(true);
+    setError(null);
+    try {
+      const updated = await apiService.updateYandexDiskCrmSyncSettings(crmSyncDraft);
+      setCrmSyncSettings(updated);
+      setCrmSyncDraft({
+        enabled: updated.enabled,
+        syncInvoices: updated.syncInvoices,
+        syncActs: updated.syncActs,
+        syncContracts: updated.syncContracts,
+        syncCaseDocuments: updated.syncCaseDocuments,
+        syncTaskFiles: updated.syncTaskFiles,
+        overwriteExisting: updated.overwriteExisting,
+        folderTemplate: updated.folderTemplate,
+        fileNameTemplate: updated.fileNameTemplate,
+      });
+      toast.success('Правила синхронизации CRM сохранены.', 'Я.Диск');
+    } catch (saveError) {
+      setError(extractDisplayErrorMessage(saveError, 'Не удалось сохранить правила синхронизации CRM.'));
+    } finally {
+      setSavingCrmSync(false);
     }
   };
 
@@ -358,6 +422,99 @@ export function YandexDisk() {
       {error ? (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
       ) : null}
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 xl:max-w-sm">
+            <div className="flex items-center gap-2 text-sm font-semibold text-sky-700">
+              <SlidersHorizontal className="h-4 w-4" />
+              <span>Синхронизация CRM</span>
+            </div>
+            <h3 className="mt-1 text-lg font-semibold text-slate-900">Правила для документов</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Настройте, какие CRM-документы будут отправляться на Яндекс.Диск и по какому шаблону формировать папки.
+            </p>
+            {crmSyncSettings?.updatedAt ? (
+              <p className="mt-2 text-xs text-slate-500">Обновлено: {formatDate(crmSyncSettings.updatedAt)}</p>
+            ) : null}
+          </div>
+
+          <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(260px,1fr)_minmax(260px,1fr)]">
+            <div className="space-y-3">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={crmSyncDraft.enabled}
+                  onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, enabled: event.target.checked }))}
+                  disabled={!canEdit}
+                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                />
+                Включить правила синхронизации
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  ['syncInvoices', 'Счета'],
+                  ['syncActs', 'Акты'],
+                  ['syncContracts', 'Договоры'],
+                  ['syncCaseDocuments', 'Документы дел'],
+                  ['syncTaskFiles', 'Файлы задач'],
+                  ['overwriteExisting', 'Перезаписывать файлы'],
+                ].map(([field, label]) => (
+                  <label key={field} className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(crmSyncDraft[field as keyof UpdateYandexDiskCrmSyncSettingsRequest])}
+                      onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, [field]: event.target.checked }))}
+                      disabled={!canEdit}
+                      className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block">
+                <span className="text-xs font-semibold text-slate-600">Шаблон папки</span>
+                <input
+                  value={crmSyncDraft.folderTemplate ?? ''}
+                  onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, folderTemplate: event.target.value }))}
+                  disabled={!canEdit}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                  placeholder="CRM/{clientName}/{caseNumber}/{documentType}"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold text-slate-600">Шаблон имени файла</span>
+                <input
+                  value={crmSyncDraft.fileNameTemplate ?? ''}
+                  onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, fileNameTemplate: event.target.value }))}
+                  disabled={!canEdit}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                  placeholder="{documentDate}-{documentNumber}-{documentTitle}"
+                />
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {(crmSyncSettings?.availableTokens ?? []).map((token) => (
+                  <span key={token} className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-600">
+                    {'{'}{token}{'}'}
+                  </span>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => void saveCrmSyncSettings()}
+                disabled={savingCrmSync || !canEdit}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingCrmSync ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Сохранить правила
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-slate-200 p-4 xl:flex-row xl:items-center xl:justify-between">

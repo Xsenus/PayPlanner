@@ -121,6 +121,37 @@ public sealed class YandexDiskServiceTests
         Assert.StartsWith("text/plain", file.ContentType);
     }
 
+    [Fact]
+    public async Task UpdateCrmSyncSettings_NormalizesTemplatesAndPersists()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(_ => JsonResponse("{}"))));
+
+        var settings = await service.UpdateCrmSyncSettingsAsync(new UpdateYandexDiskCrmSyncSettingsRequest
+        {
+            Enabled = true,
+            SyncInvoices = true,
+            SyncActs = false,
+            SyncContracts = true,
+            SyncCaseDocuments = true,
+            SyncTaskFiles = true,
+            OverwriteExisting = true,
+            FolderTemplate = "/CRM/../{clientName}/{caseNumber}/",
+            FileNameTemplate = " ../{documentDate}-{documentTitle} ",
+        }, CancellationToken.None);
+
+        Assert.True(settings.Enabled);
+        Assert.False(settings.SyncActs);
+        Assert.True(settings.SyncTaskFiles);
+        Assert.Equal("CRM/{clientName}/{caseNumber}", settings.FolderTemplate);
+        Assert.Equal("{documentDate}-{documentTitle}", settings.FileNameTemplate);
+        Assert.Contains("clientName", settings.AvailableTokens);
+
+        var stored = await scope.Db.SystemSettings.SingleAsync(item => item.Key == "integrations.yandexDisk.crmSync.settings");
+        Assert.Contains("CRM/{clientName}/{caseNumber}", stored.Value);
+        Assert.DoesNotContain("..", stored.Value);
+    }
+
     private static HttpResponseMessage JsonResponse(string json)
         => new(HttpStatusCode.OK)
         {

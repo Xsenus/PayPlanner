@@ -41,3 +41,18 @@ public sealed class YandexDiskOperationResultDto
     public bool Success { get; set; }
     public string Path { get; set; } = "/";
 }
+
+public sealed class YandexDiskCrmSyncSettingsDto
+{
+    public bool Enabled { get; set; }
+    public bool SyncInvoices { get; set; }
+    public bool SyncActs { get; set; }
+    public bool SyncContracts { get; set; }
+    public bool SyncCaseDocuments { get; set; }
+    public bool SyncTaskFiles { get; set; }
+    public bool OverwriteExisting { get; set; }
+    public string FolderTemplate { get; set; } = string.Empty;
+    public string FileNameTemplate { get; set; } = string.Empty;
+    public IReadOnlyList<string> AvailableTokens { get; set; } = Array.Empty<string>();
+    public DateTime? UpdatedAt { get; set; }
+}

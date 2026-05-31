@@ -25,3 +25,16 @@ public sealed class UpdateYandexDiskTextFileRequest
     public string? Content { get; set; }
     public bool Overwrite { get; set; } = true;
 }
+
+public sealed class UpdateYandexDiskCrmSyncSettingsRequest
+{
+    public bool Enabled { get; set; }
+    public bool SyncInvoices { get; set; }
+    public bool SyncActs { get; set; }
+    public bool SyncContracts { get; set; }
+    public bool SyncCaseDocuments { get; set; }
+    public bool SyncTaskFiles { get; set; }
+    public bool OverwriteExisting { get; set; }
+    public string? FolderTemplate { get; set; }
+    public string? FileNameTemplate { get; set; }
+}
