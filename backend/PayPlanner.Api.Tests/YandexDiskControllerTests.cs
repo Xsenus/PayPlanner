@@ -38,6 +38,38 @@ public sealed class YandexDiskControllerTests
     }
 
     [Fact]
+    public async Task List_AllowsViewPermission()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.List("/Docs", limit: 20, offset: 5, CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskListResponseDto>(response.Value);
+        Assert.Equal(20, result.Limit);
+        Assert.Equal(5, result.Offset);
+        Assert.True(service.ListCalled);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+    }
+
+    [Fact]
+    public async Task List_ForbidsUserWithoutViewPermission()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = false });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.List("/Docs", limit: 20, offset: 5, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.False(service.ListCalled);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+    }
+
+    [Fact]
     public async Task Delete_ForbidsUserWithoutDeletePermission()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -194,6 +226,38 @@ public sealed class YandexDiskControllerTests
         Assert.Equal(user.Id, audit.ActorUserId);
         Assert.Contains("/Docs/report.txt", audit.MetadataJson);
         Assert.Contains("file.txt", audit.MetadataJson);
+    }
+
+    [Fact]
+    public async Task GetText_AllowsEditPermission()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanEdit = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.GetText("/Docs/readme.txt", CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskTextFileDto>(response.Value);
+        Assert.Equal("/Docs/readme.txt", result.Path);
+        Assert.Equal("text", result.Content);
+        Assert.True(service.GetTextCalled);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+    }
+
+    [Fact]
+    public async Task GetText_ForbidsUserWithoutEditPermission()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanEdit = false });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.GetText("/Docs/readme.txt", CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.False(service.GetTextCalled);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
     }
 
     [Fact]
@@ -524,11 +588,13 @@ public sealed class YandexDiskControllerTests
     private sealed class FakeYandexDiskService : IYandexDiskService
     {
         public YandexDiskOperationResultDto CreateFolderResult { get; set; } = new() { Success = true, Path = "/" };
+        public bool ListCalled { get; private set; }
         public bool CopyCalled { get; private set; }
         public bool MoveCalled { get; private set; }
         public bool DeleteCalled { get; private set; }
         public bool UploadCalled { get; private set; }
         public bool DownloadCalled { get; private set; }
+        public bool GetTextCalled { get; private set; }
         public bool SaveTextCalled { get; private set; }
         public bool TestConnectionCalled { get; private set; }
 
@@ -562,7 +628,10 @@ public sealed class YandexDiskControllerTests
         }
 
         public Task<YandexDiskListResponseDto> ListAsync(string? path, int limit, int offset, CancellationToken cancellationToken = default)
-            => Task.FromResult(new YandexDiskListResponseDto());
+        {
+            ListCalled = true;
+            return Task.FromResult(new YandexDiskListResponseDto { Limit = limit, Offset = offset });
+        }
 
         public Task<YandexDiskOperationResultDto> CreateFolderAsync(string? path, CancellationToken cancellationToken = default)
             => Task.FromResult(CreateFolderResult);
@@ -598,7 +667,10 @@ public sealed class YandexDiskControllerTests
         }
 
         public Task<YandexDiskTextFileDto> GetTextFileAsync(string? path, CancellationToken cancellationToken = default)
-            => Task.FromResult(new YandexDiskTextFileDto { Path = path ?? "/", Content = string.Empty });
+        {
+            GetTextCalled = true;
+            return Task.FromResult(new YandexDiskTextFileDto { Path = path ?? "/", Content = "text" });
+        }
 
         public Task<YandexDiskOperationResultDto> SaveTextFileAsync(UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default)
         {
