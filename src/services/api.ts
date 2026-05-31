@@ -1798,6 +1798,13 @@ export class ApiService {
     return response.blob();
   }
 
+  async uploadContractDocumentToYandexDisk(id: number, format: 'word' | 'pdf' = 'pdf', overwrite?: boolean) {
+    const query = buildQuery({ format, overwrite });
+    return this.request<YandexDiskOperationResultDto>(`/contracts/${id}/yandex-disk${query}`, {
+      method: 'POST',
+    });
+  }
+
   async downloadContractTerminationAgreement(id: number, format: 'word' | 'pdf' | 'html' = 'word') {
     const token = getAuthToken();
     const query = buildQuery({ format });
