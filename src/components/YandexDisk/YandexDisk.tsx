@@ -128,11 +128,12 @@ export function YandexDisk() {
   const rolePermissions = useRolePermissions(user?.role?.id);
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
   const permissions = rolePermissions.yandexDisk ?? defaultRestrictedMenuPermissions;
+  const canView = isAdminRole || permissions.canView;
   const canCreate = isAdminRole || permissions.canCreate;
   const canEdit = isAdminRole || permissions.canEdit;
   const canDelete = isAdminRole || permissions.canDelete;
   const canExport = isAdminRole || permissions.canExport;
-  const canTestConnection = canEdit && canCreate && canDelete && canExport;
+  const canTestConnection = canView && canEdit && canCreate && canDelete && canExport;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [settings, setSettings] = useState<YandexDiskSettingsDto | null>(null);
   const [connectionTest, setConnectionTest] = useState<YandexDiskConnectionTestDto | null>(null);
