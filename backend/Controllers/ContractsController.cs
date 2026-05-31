@@ -314,6 +314,16 @@ public class ContractsController : ControllerBase
         }
         catch (YandexDiskOperationException ex)
         {
+            await YandexDiskCrmSyncStateRecorder.RecordFailureAsync(
+                _db,
+                "contract",
+                "contract",
+                contract.Id,
+                fileName,
+                null,
+                ex,
+                ct);
+            await _db.SaveChangesAsync(ct);
             return MapYandexDiskError(ex);
         }
     }

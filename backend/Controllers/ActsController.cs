@@ -890,6 +890,16 @@ public class ActsController : ControllerBase
         }
         catch (YandexDiskOperationException ex)
         {
+            await YandexDiskCrmSyncStateRecorder.RecordFailureAsync(
+                _db,
+                "act",
+                "act",
+                act.Id,
+                fileName,
+                null,
+                ex,
+                ct);
+            await _db.SaveChangesAsync(ct);
             return MapYandexDiskError(ex);
         }
     }

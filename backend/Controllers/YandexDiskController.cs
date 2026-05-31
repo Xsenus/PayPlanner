@@ -325,7 +325,20 @@ public sealed class YandexDiskController : ControllerBase
                 result.Path,
                 document.ClientCaseId,
                 ct),
-            ct);
+            ct,
+            async ex =>
+            {
+                await YandexDiskCrmSyncStateRecorder.RecordFailureAsync(
+                    _db,
+                    "caseDocument",
+                    "caseDocument",
+                    document.Id,
+                    document.OriginalFileName,
+                    document.ClientCaseId,
+                    ex,
+                    ct);
+                await _db.SaveChangesAsync(ct);
+            });
     }
 
     [HttpPost("crm/tasks/{taskId:int}/files/{fileId:int}/upload")]
@@ -410,7 +423,20 @@ public sealed class YandexDiskController : ControllerBase
                 result.Path,
                 task.Id,
                 ct),
-            ct);
+            ct,
+            async ex =>
+            {
+                await YandexDiskCrmSyncStateRecorder.RecordFailureAsync(
+                    _db,
+                    "taskFile",
+                    "taskFile",
+                    taskFile.Id,
+                    taskFile.OriginalFileName,
+                    task.Id,
+                    ex,
+                    ct);
+                await _db.SaveChangesAsync(ct);
+            });
     }
 
     private async Task<ActionResult?> RequirePermissionAsync(Func<RolePermission, bool> isAllowed, CancellationToken ct)
@@ -460,7 +486,8 @@ public sealed class YandexDiskController : ControllerBase
         string description,
         object metadata,
         Func<T, Task>? afterSuccess,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<YandexDiskOperationException, Task>? afterFailure = null)
     {
         try
         {
@@ -475,6 +502,11 @@ public sealed class YandexDiskController : ControllerBase
         }
         catch (YandexDiskOperationException ex)
         {
+            if (afterFailure is not null)
+            {
+                await afterFailure(ex);
+            }
+
             return MapError(ex);
         }
     }

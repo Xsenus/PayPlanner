@@ -2553,6 +2553,16 @@ public class InvoicesController : ControllerBase
         }
         catch (YandexDiskOperationException ex)
         {
+            await YandexDiskCrmSyncStateRecorder.RecordFailureAsync(
+                _db,
+                "invoice",
+                "payment",
+                payment.Id,
+                fileName,
+                null,
+                ex,
+                ct);
+            await _db.SaveChangesAsync(ct);
             return MapYandexDiskError(ex);
         }
     }

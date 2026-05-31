@@ -148,6 +148,8 @@ builder.Services.AddSingleton<ClientCaseCourtSyncSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ClientCaseCourtSyncSchedulerService>());
 builder.Services.AddSingleton<UserActivityRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UserActivityRetentionService>());
+builder.Services.AddSingleton<YandexDiskCrmSyncSchedulerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<YandexDiskCrmSyncSchedulerService>());
 
 builder.Services.AddCors(options =>
 {

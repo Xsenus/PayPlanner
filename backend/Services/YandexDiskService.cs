@@ -417,7 +417,20 @@ public sealed class YandexDiskService : IYandexDiskService
         using var request = new HttpRequestMessage(method, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("OAuth", token);
         request.Content = content;
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.SendAsync(request, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new YandexDiskOperationException(502, $"Не удалось подключиться к Яндекс.Диску: {ex.Message}");
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new YandexDiskOperationException(504, $"Яндекс.Диск не ответил вовремя: {ex.Message}");
+        }
+
         await EnsureSuccessAsync(response, cancellationToken);
         return response;
     }
