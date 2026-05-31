@@ -53,6 +53,27 @@ public sealed class YandexDiskControllerTests
     }
 
     [Fact]
+    public async Task Delete_AllowsDeletePermissionAndWritesAudit()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanDelete = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.Delete("/Docs/old.txt", permanently: true, CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskOperationResultDto>(response.Value);
+        Assert.Equal("/Docs/old.txt", result.Path);
+        Assert.True(service.DeleteCalled);
+        var audit = Assert.Single(scope.Db.ObjectAuditEvents);
+        Assert.Equal("Deleted", audit.Action);
+        Assert.Equal(user.Id, audit.ActorUserId);
+        Assert.Contains("/Docs/old.txt", audit.MetadataJson);
+        Assert.Contains("permanently", audit.MetadataJson);
+        Assert.Contains("true", audit.MetadataJson);
+    }
+
+    [Fact]
     public async Task Copy_AllowsCreatePermissionAndWritesAudit()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -152,6 +173,27 @@ public sealed class YandexDiskControllerTests
 
         Assert.IsType<ForbidResult>(response);
         Assert.False(service.DownloadCalled);
+    }
+
+    [Fact]
+    public async Task Download_AllowsExportPermissionAndWritesAudit()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanExport = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.Download("/Docs/report.txt", CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(response);
+        Assert.Equal("file.txt", file.FileDownloadName);
+        Assert.Equal("text/plain", file.ContentType);
+        Assert.True(service.DownloadCalled);
+        var audit = Assert.Single(scope.Db.ObjectAuditEvents);
+        Assert.Equal("Downloaded", audit.Action);
+        Assert.Equal(user.Id, audit.ActorUserId);
+        Assert.Contains("/Docs/report.txt", audit.MetadataJson);
+        Assert.Contains("file.txt", audit.MetadataJson);
     }
 
     [Fact]
