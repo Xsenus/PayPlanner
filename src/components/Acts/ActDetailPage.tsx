@@ -1,4 +1,4 @@
-import { ArrowLeft, Ban, Check, ChevronDown, Download, Link2, List, Loader2, Pencil, Printer, Send, Trash2, UserRound } from 'lucide-react';
+import { ArrowLeft, Ban, Check, ChevronDown, Download, Link2, List, Loader2, Pencil, Printer, Send, Trash2, UploadCloud, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -25,7 +25,7 @@ interface ActDetailPageProps {
 }
 
 type DocumentFormat = 'word' | 'pdf';
-type PageAction = 'send' | 'notSigned' | 'transferred' | 'signed' | 'cancel' | 'delete';
+type PageAction = 'send' | 'yandexDisk' | 'notSigned' | 'transferred' | 'signed' | 'cancel' | 'delete';
 
 const ACT_WORKFLOW_STATUS_ORDER: ActWorkflowStatus[] = [
   'Draft',
@@ -438,6 +438,23 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       setDownloadMenuOpen(false);
     } catch (downloadError) {
       setError(getDocumentActionErrorMessage(downloadError, 'Не удалось скачать документ акта.'));
+    }
+  };
+
+  const handleUploadDocumentToYandexDisk = async () => {
+    if (!act?.id) return;
+
+    setPageActionLoading('yandexDisk');
+    try {
+      const result = await apiService.uploadActDocumentToYandexDisk(act.id, 'pdf', {
+        includeSignatureAndSeal: false,
+      });
+      setError(null);
+      toast.success(`Акт отправлен на Яндекс.Диск: ${result.path}.`, 'Я.Диск');
+    } catch (uploadError) {
+      setError(extractDisplayErrorMessage(uploadError, 'Не удалось отправить акт на Яндекс.Диск.'));
+    } finally {
+      setPageActionLoading(null);
     }
   };
 
@@ -917,7 +934,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             </aside>
           </div>
 
-          <div className={`grid gap-2 rounded-lg border border-slate-300 bg-white p-2 ${canDelete ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-7' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-6'}`}>
+          <div className={`grid gap-2 rounded-lg border border-slate-300 bg-white p-2 ${canDelete ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-8' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-7'}`}>
             <button
               type="button"
               onClick={() => void handleSend()}
@@ -935,6 +952,16 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             >
               <Printer className="h-4 w-4" />
               Печать
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleUploadDocumentToYandexDisk()}
+              disabled={pageActionLoading === 'yandexDisk'}
+              className="inline-flex items-center justify-center gap-2 rounded border border-sky-200 px-3 py-2 text-sm text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {pageActionLoading === 'yandexDisk' ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+              Я.Диск
             </button>
 
             <div className="relative" ref={downloadMenuRef}>

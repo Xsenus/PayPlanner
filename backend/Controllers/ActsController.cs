@@ -33,17 +33,20 @@ public class ActsController : ControllerBase
     private readonly IFormRequirementsService _formRequirements;
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
     private readonly IEmailService? _emailService;
+    private readonly IYandexDiskService? _yandexDiskService;
 
     public ActsController(
         PaymentContext db,
         IFormRequirementsService formRequirements,
         IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
-        IEmailService? emailService = null)
+        IEmailService? emailService = null,
+        IYandexDiskService? yandexDiskService = null)
     {
         _db = db;
         _formRequirements = formRequirements;
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
         _emailService = emailService;
+        _yandexDiskService = yandexDiskService;
     }
 
     private Task<DataVisibilityAccess?> ResolveActsVisibilityAsync(CancellationToken ct)
@@ -773,6 +776,114 @@ public class ActsController : ControllerBase
         return File(Encoding.UTF8.GetBytes(documentHtml), "application/msword", fileName);
     }
 
+    [HttpPost("{id:int}/yandex-disk")]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> UploadDocumentToYandexDisk(
+        int id,
+        [FromQuery] string? format = "pdf",
+        [FromQuery] bool? includeSignatureAndSeal = null,
+        [FromQuery] bool? overwrite = null,
+        CancellationToken ct = default)
+    {
+        if (_yandexDiskService is null)
+        {
+            return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: "Сервис Яндекс.Диска не зарегистрирован на сервере.");
+        }
+
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.YandexDisk, permission => permission.CanCreate, ct) is { } yandexForbidden)
+        {
+            return yandexForbidden;
+        }
+
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Acts, permission => permission.CanExport, ct) is { } actForbidden)
+        {
+            return actForbidden;
+        }
+
+        var act = await LoadActDocumentAsync(id, ct);
+        if (act is null)
+        {
+            return NotFound();
+        }
+
+        var normalizedFormat = NormalizeDocumentFormat(format);
+        if (normalizedFormat == "html")
+        {
+            normalizedFormat = "word";
+        }
+
+        var mainCompany = await LoadMainCompanyAsync(ct);
+        var documentHtml = ActDocumentTemplateEngine.RenderHtml(
+            act,
+            act.LineItems
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.Id)
+                .ToList(),
+            mainCompany,
+            includeSignatureAndSeal ?? false);
+
+        byte[] bytes;
+        string fileName;
+        string contentType;
+        if (normalizedFormat == "pdf")
+        {
+            try
+            {
+                bytes = await RenderDocumentPdfAsync(documentHtml, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
+            }
+
+            fileName = $"act-{SanitizeFilePart(act.Number)}.pdf";
+            contentType = "application/pdf";
+        }
+        else
+        {
+            bytes = Encoding.UTF8.GetBytes(documentHtml);
+            fileName = $"act-{SanitizeFilePart(act.Number)}.doc";
+            contentType = "application/msword";
+        }
+
+        await using var stream = new MemoryStream(bytes);
+        try
+        {
+            var result = await _yandexDiskService.UploadCrmDocumentAsync(new YandexDiskCrmDocumentUpload(
+                stream,
+                contentType,
+                fileName,
+                "act",
+                "Акт",
+                act.Number,
+                act.Date,
+                string.IsNullOrWhiteSpace(act.Title) ? $"Акт {act.Number}" : act.Title,
+                ResolveActClientName(act),
+                ResolveActLegalEntityName(act),
+                act.Invoice?.ClientCase?.CaseNumber ?? act.Invoice?.InvoiceClientCases.FirstOrDefault()?.ClientCase?.CaseNumber,
+                act.Invoice?.ClientCase?.Title ?? act.Invoice?.InvoiceClientCases.FirstOrDefault()?.ClientCase?.Title,
+                overwrite),
+                ct);
+
+            _db.ObjectAuditEvents.Add(new ObjectAuditEvent
+            {
+                ObjectType = "act",
+                ObjectId = act.Id,
+                Action = "YandexDiskUploaded",
+                Description = $"Акт «{act.Number}» отправлен на Яндекс.Диск.",
+                ActorUserId = User.GetUserId(),
+                ActorUserName = User.GetDisplayName(),
+                MetadataJson = JsonSerializer.Serialize(new { act.Id, act.Number, FileName = fileName, result.Path }),
+                CreatedAt = DateTime.UtcNow,
+            });
+            await _db.SaveChangesAsync(ct);
+            return result;
+        }
+        catch (YandexDiskOperationException ex)
+        {
+            return MapYandexDiskError(ex);
+        }
+    }
+
     [HttpPost("{id:int}/send-email")]
     public async Task<IActionResult> SendActEmail(int id, [FromBody] SendInvoiceEmailRequest request, CancellationToken ct)
     {
@@ -993,6 +1104,11 @@ public class ActsController : ControllerBase
             .Include(act => act.Invoice)
                 .ThenInclude(invoice => invoice!.ExpenseLegalEntity)
                     .ThenInclude(entity => entity!.Addresses)
+            .Include(act => act.Invoice)
+                .ThenInclude(invoice => invoice!.ClientCase)
+            .Include(act => act.Invoice)
+                .ThenInclude(invoice => invoice!.InvoiceClientCases)
+                    .ThenInclude(link => link.ClientCase)
             .FirstOrDefaultAsync(act => act.Id == id, ct);
     }
 
@@ -1260,6 +1376,67 @@ public class ActsController : ControllerBase
         }
 
         return _invoiceDocumentPdfService.RenderAsync(documentHtml, ct);
+    }
+
+    private async Task<ActionResult?> RequireSectionPermissionAsync(
+        string section,
+        Func<RolePermission, bool> isAllowed,
+        CancellationToken ct)
+    {
+        if (User.IsInRole("admin"))
+        {
+            return null;
+        }
+
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, section, ct);
+        return permission is not null && permission.CanView && isAllowed(permission)
+            ? null
+            : Forbid();
+    }
+
+    private static ActionResult MapYandexDiskError(YandexDiskOperationException ex)
+    {
+        if (ex.StatusCode >= 400 && ex.StatusCode < 500)
+        {
+            return new BadRequestObjectResult(ex.Message);
+        }
+
+        return new ObjectResult(ex.Message)
+        {
+            StatusCode = StatusCodes.Status502BadGateway,
+        };
+    }
+
+    private static string? ResolveActClientName(Act act)
+    {
+        if (act.Client is not null)
+        {
+            return act.Client.Name;
+        }
+
+        return act.Invoice?.Type == PaymentType.Expense
+            ? act.Invoice.ExpenseClient?.Name ?? act.Invoice.CounterpartyName
+            : act.Invoice?.Client?.Name ?? act.Invoice?.CounterpartyName;
+    }
+
+    private static string? ResolveActLegalEntityName(Act act)
+    {
+        if (act.LegalEntity is not null)
+        {
+            return act.LegalEntity.ShortName ?? act.LegalEntity.FullName;
+        }
+
+        var legalEntity = act.Invoice?.Type == PaymentType.Expense
+            ? act.Invoice.ExpenseLegalEntity
+            : act.Invoice?.LegalEntity;
+
+        return legalEntity?.ShortName ?? legalEntity?.FullName;
     }
 
     private async Task<LegalEntity?> LoadMainCompanyAsync(CancellationToken ct)
