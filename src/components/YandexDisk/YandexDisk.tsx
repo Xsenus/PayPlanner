@@ -4,6 +4,7 @@ import {
   Copy,
   Download,
   Edit3,
+  Eye,
   File,
   Folder,
   KeyRound,
@@ -21,6 +22,7 @@ import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from 're
 import {
   apiService,
   type UpdateYandexDiskCrmSyncSettingsRequest,
+  type YandexDiskCrmSyncPreviewDto,
   type YandexDiskCrmSyncSettingsDto,
   type YandexDiskListResponseDto,
   type YandexDiskResourceDto,
@@ -86,6 +88,7 @@ export function YandexDisk() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [settings, setSettings] = useState<YandexDiskSettingsDto | null>(null);
   const [crmSyncSettings, setCrmSyncSettings] = useState<YandexDiskCrmSyncSettingsDto | null>(null);
+  const [crmSyncPreview, setCrmSyncPreview] = useState<YandexDiskCrmSyncPreviewDto | null>(null);
   const [crmSyncDraft, setCrmSyncDraft] = useState<UpdateYandexDiskCrmSyncSettingsRequest>(defaultCrmSyncDraft);
   const [tokenDraft, setTokenDraft] = useState('');
   const [rootPathDraft, setRootPathDraft] = useState('disk:/PayPlanner');
@@ -110,13 +113,15 @@ export function YandexDisk() {
   }, [listing]);
 
   const loadSettings = async () => {
-    const [loaded, loadedCrmSyncSettings] = await Promise.all([
+    const [loaded, loadedCrmSyncSettings, loadedCrmSyncPreview] = await Promise.all([
       apiService.getYandexDiskSettings(),
       apiService.getYandexDiskCrmSyncSettings(),
+      apiService.getYandexDiskCrmSyncPreview(),
     ]);
     setSettings(loaded);
     setRootPathDraft(loaded.rootPath || 'disk:/PayPlanner');
     setCrmSyncSettings(loadedCrmSyncSettings);
+    setCrmSyncPreview(loadedCrmSyncPreview);
     setCrmSyncDraft({
       enabled: loadedCrmSyncSettings.enabled,
       syncInvoices: loadedCrmSyncSettings.syncInvoices,
@@ -214,11 +219,20 @@ export function YandexDisk() {
         folderTemplate: updated.folderTemplate,
         fileNameTemplate: updated.fileNameTemplate,
       });
+      setCrmSyncPreview(await apiService.getYandexDiskCrmSyncPreview());
       toast.success('Правила синхронизации CRM сохранены.', 'Я.Диск');
     } catch (saveError) {
       setError(extractDisplayErrorMessage(saveError, 'Не удалось сохранить правила синхронизации CRM.'));
     } finally {
       setSavingCrmSync(false);
+    }
+  };
+
+  const refreshCrmSyncPreview = async () => {
+    try {
+      setCrmSyncPreview(await apiService.getYandexDiskCrmSyncPreview());
+    } catch (previewError) {
+      setError(extractDisplayErrorMessage(previewError, 'Не удалось обновить предпросмотр синхронизации CRM.'));
     }
   };
 
@@ -513,6 +527,58 @@ export function YandexDisk() {
               </button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-100 pb-3 md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-semibold text-sky-700">
+              <Eye className="h-4 w-4" />
+              <span>Dry-run CRM</span>
+            </div>
+            <h3 className="mt-1 text-lg font-semibold text-slate-900">Предпросмотр путей синхронизации</h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refreshCrmSyncPreview()}
+            disabled={savingCrmSync}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left font-semibold">Тип</th>
+                <th className="px-3 py-2 text-left font-semibold">Статус</th>
+                <th className="px-3 py-2 text-left font-semibold">Путь</th>
+                <th className="px-3 py-2 text-left font-semibold">Действие</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {(crmSyncPreview?.items ?? []).map((item) => (
+                <tr key={item.documentKind} className={item.enabled ? 'bg-white' : 'bg-slate-50 text-slate-500'}>
+                  <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-800">{item.documentType}</td>
+                  <td className="whitespace-nowrap px-3 py-2">
+                    {item.enabled ? 'Будет отправляться' : 'Отключено'}
+                  </td>
+                  <td className="max-w-[520px] px-3 py-2">
+                    <div className="truncate font-mono text-xs text-slate-700" title={item.fullPath}>{item.fullPath}</div>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2">{item.operationText}</td>
+                </tr>
+              ))}
+              {!crmSyncPreview?.items?.length ? (
+                <tr>
+                  <td colSpan={4} className="px-3 py-6 text-center text-sm text-slate-500">Предпросмотр пока не загружен.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </section>
 

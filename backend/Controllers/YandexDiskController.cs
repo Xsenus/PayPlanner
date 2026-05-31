@@ -66,6 +66,15 @@ public sealed class YandexDiskController : ControllerBase
         return Ok(await _service.GetCrmSyncSettingsAsync(ct));
     }
 
+    [HttpGet("crm-sync/preview")]
+    public async Task<ActionResult<YandexDiskCrmSyncPreviewDto>> PreviewCrmSync(CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanView, ct);
+        if (forbidden is not null) return forbidden;
+
+        return Ok(await _service.PreviewCrmSyncAsync(ct));
+    }
+
     [HttpPut("crm-sync/settings")]
     public async Task<ActionResult<YandexDiskCrmSyncSettingsDto>> UpdateCrmSyncSettings(
         [FromBody] UpdateYandexDiskCrmSyncSettingsRequest request,

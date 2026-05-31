@@ -96,6 +96,23 @@ public sealed class YandexDiskControllerTests
         Assert.Contains("CRM/{clientName}", audit.MetadataJson);
     }
 
+    [Fact]
+    public async Task PreviewCrmSync_AllowsViewPermission()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.PreviewCrmSync(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var preview = Assert.IsType<YandexDiskCrmSyncPreviewDto>(ok.Value);
+        var item = Assert.Single(preview.Items);
+        Assert.Equal("invoice", item.DocumentKind);
+        Assert.Equal("disk:/PayPlanner/CRM/Счет/example.pdf", item.FullPath);
+    }
+
     private static YandexDiskController CreateController(PaymentContext db, IYandexDiskService service, ClaimsPrincipal user)
         => new(service, db)
         {
@@ -240,6 +257,26 @@ public sealed class YandexDiskControllerTests
                 FolderTemplate = request.FolderTemplate ?? string.Empty,
                 FileNameTemplate = request.FileNameTemplate ?? string.Empty,
                 AvailableTokens = ["clientName", "documentTitle"],
+            });
+
+        public Task<YandexDiskCrmSyncPreviewDto> PreviewCrmSyncAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskCrmSyncPreviewDto
+            {
+                SyncEnabled = false,
+                RootPath = "disk:/PayPlanner",
+                Items =
+                [
+                    new YandexDiskCrmSyncPreviewItemDto
+                    {
+                        DocumentKind = "invoice",
+                        DocumentType = "Счет",
+                        Enabled = true,
+                        TargetPath = "/CRM/Счет/example.pdf",
+                        FullPath = "disk:/PayPlanner/CRM/Счет/example.pdf",
+                        Operation = "create",
+                        OperationText = "Создать новый файл",
+                    },
+                ],
             });
 
         public Task<YandexDiskOperationResultDto> UploadCrmDocumentAsync(YandexDiskCrmDocumentUpload upload, CancellationToken cancellationToken = default)

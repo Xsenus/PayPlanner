@@ -274,6 +274,38 @@ describe('apiService auth handling', () => {
     expect(JSON.parse(String(init?.body))).toEqual(payload);
   });
 
+  it('loads Yandex Disk CRM sync preview', async () => {
+    const payload = {
+      syncEnabled: true,
+      overwriteExisting: false,
+      rootPath: 'disk:/PayPlanner',
+      folderTemplate: 'CRM/{clientName}',
+      fileNameTemplate: '{documentDate}-{documentTitle}',
+      items: [
+        {
+          documentKind: 'invoice',
+          documentType: 'Счет',
+          enabled: true,
+          originalFileName: 'invoice.pdf',
+          targetPath: '/CRM/ООО Клиент/invoice.pdf',
+          fullPath: 'disk:/PayPlanner/CRM/ООО Клиент/invoice.pdf',
+          operation: 'create',
+          operationText: 'Создать новый файл',
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getYandexDiskCrmSyncPreview();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-disk/crm-sync/preview');
+  });
+
   it('uploads a case document to Yandex Disk', async () => {
     const payload = { success: true, path: '/CRM/client/file.pdf' };
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {

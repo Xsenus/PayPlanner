@@ -26,6 +26,7 @@ public interface IYandexDiskService
     Task<YandexDiskOperationResultDto> SaveTextFileAsync(UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default);
     Task<YandexDiskCrmSyncSettingsDto> GetCrmSyncSettingsAsync(CancellationToken cancellationToken = default);
     Task<YandexDiskCrmSyncSettingsDto> UpdateCrmSyncSettingsAsync(UpdateYandexDiskCrmSyncSettingsRequest request, CancellationToken cancellationToken = default);
+    Task<YandexDiskCrmSyncPreviewDto> PreviewCrmSyncAsync(CancellationToken cancellationToken = default);
     Task<YandexDiskOperationResultDto> UploadCrmDocumentAsync(YandexDiskCrmDocumentUpload upload, CancellationToken cancellationToken = default);
 }
 
@@ -333,6 +334,23 @@ public sealed class YandexDiskService : IYandexDiskService
 
         await EnsureFolderPathAsync(settings, folderPath, cancellationToken);
         return await UploadAsync(targetPath, upload.Content, upload.ContentType, upload.OverwriteExisting ?? syncSettings.OverwriteExisting, cancellationToken);
+    }
+
+    public async Task<YandexDiskCrmSyncPreviewDto> PreviewCrmSyncAsync(CancellationToken cancellationToken = default)
+    {
+        var syncSettings = await GetCrmSyncSettingsAsync(cancellationToken);
+        var diskSettings = await LoadSettingsAsync(cancellationToken);
+        var samples = BuildCrmPreviewSamples();
+
+        return new YandexDiskCrmSyncPreviewDto
+        {
+            SyncEnabled = syncSettings.Enabled,
+            OverwriteExisting = syncSettings.OverwriteExisting,
+            RootPath = diskSettings.RootPath,
+            FolderTemplate = syncSettings.FolderTemplate,
+            FileNameTemplate = syncSettings.FileNameTemplate,
+            Items = samples.Select(sample => BuildPreviewItem(syncSettings, diskSettings.RootPath, sample)).ToList(),
+        };
     }
 
     private async Task<YandexDiskOperationResultDto> CopyOrMoveAsync(
@@ -705,6 +723,103 @@ public sealed class YandexDiskService : IYandexDiskService
             "taskFile" => settings.SyncTaskFiles,
             _ => false,
         };
+
+    private static IReadOnlyList<YandexDiskCrmDocumentUpload> BuildCrmPreviewSamples()
+    {
+        var date = new DateTime(2026, 6, 1);
+        return
+        [
+            new YandexDiskCrmDocumentUpload(
+                Stream.Null,
+                "application/pdf",
+                "invoice-INV-001.pdf",
+                "invoice",
+                "Счет",
+                "INV-001",
+                date,
+                "Счет за юридические услуги",
+                "ООО Клиент",
+                "Юркомпания",
+                "А40-12345/2026",
+                "Взыскание задолженности"),
+            new YandexDiskCrmDocumentUpload(
+                Stream.Null,
+                "application/pdf",
+                "act-ACT-001.pdf",
+                "act",
+                "Акт",
+                "ACT-001",
+                date,
+                "Акт оказанных услуг",
+                "ООО Клиент",
+                "Юркомпания",
+                "А40-12345/2026",
+                "Взыскание задолженности"),
+            new YandexDiskCrmDocumentUpload(
+                Stream.Null,
+                "application/pdf",
+                "contract-CTR-001.pdf",
+                "contract",
+                "Договор",
+                "CTR-001",
+                date,
+                "Договор на сопровождение",
+                "ООО Клиент",
+                "Юркомпания",
+                null,
+                "Договор на сопровождение"),
+            new YandexDiskCrmDocumentUpload(
+                Stream.Null,
+                "application/pdf",
+                "iskovoe-zayavlenie.pdf",
+                "caseDocument",
+                "Документ дела",
+                "CASE-DOC-001",
+                date,
+                "Исковое заявление",
+                "ООО Клиент",
+                "Юркомпания",
+                "А40-12345/2026",
+                "Взыскание задолженности"),
+            new YandexDiskCrmDocumentUpload(
+                Stream.Null,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "poruchenie.docx",
+                "taskFile",
+                "Файл задачи",
+                "TASK-FILE-001",
+                date,
+                "Поручение юристу",
+                "ООО Клиент",
+                "Юркомпания",
+                "А40-12345/2026",
+                "Взыскание задолженности"),
+        ];
+    }
+
+    private static YandexDiskCrmSyncPreviewItemDto BuildPreviewItem(
+        YandexDiskCrmSyncSettingsDto settings,
+        string rootPath,
+        YandexDiskCrmDocumentUpload sample)
+    {
+        var tokens = BuildCrmDocumentTokens(sample);
+        var folderPath = ApplyCrmTemplate(settings.FolderTemplate, tokens, isFileName: false);
+        var fileName = ApplyCrmTemplate(settings.FileNameTemplate, tokens, isFileName: true);
+        fileName = EnsureFileExtension(fileName, sample.OriginalFileName);
+        var targetPath = string.IsNullOrWhiteSpace(folderPath) ? fileName : $"{folderPath}/{fileName}";
+        var overwrite = sample.OverwriteExisting ?? settings.OverwriteExisting;
+        return new YandexDiskCrmSyncPreviewItemDto
+        {
+            DocumentKind = sample.DocumentKind,
+            DocumentType = sample.DocumentType,
+            Enabled = IsCrmDocumentKindEnabled(settings, sample.DocumentKind),
+            OriginalFileName = sample.OriginalFileName,
+            TargetPath = $"/{targetPath}",
+            FullPath = BuildFullPath(rootPath, targetPath),
+            Operation = overwrite ? "create-or-update" : "create",
+            OperationText = overwrite ? "Создать или обновить файл" : "Создать новый файл",
+        };
+    }
 
     private static Dictionary<string, string> BuildCrmDocumentTokens(YandexDiskCrmDocumentUpload upload)
         => new(StringComparer.OrdinalIgnoreCase)

@@ -268,6 +268,26 @@ export interface YandexDiskCrmSyncSettingsDto {
   updatedAt?: string | null;
 }
 
+export interface YandexDiskCrmSyncPreviewItemDto {
+  documentKind: string;
+  documentType: string;
+  enabled: boolean;
+  originalFileName: string;
+  targetPath: string;
+  fullPath: string;
+  operation: string;
+  operationText: string;
+}
+
+export interface YandexDiskCrmSyncPreviewDto {
+  syncEnabled: boolean;
+  overwriteExisting: boolean;
+  rootPath: string;
+  folderTemplate: string;
+  fileNameTemplate: string;
+  items: YandexDiskCrmSyncPreviewItemDto[];
+}
+
 export interface UpdateYandexDiskCrmSyncSettingsRequest {
   enabled: boolean;
   syncInvoices: boolean;
@@ -1541,6 +1561,10 @@ export class ApiService {
 
   async getYandexDiskCrmSyncSettings() {
     return this.request<YandexDiskCrmSyncSettingsDto>('/yandex-disk/crm-sync/settings');
+  }
+
+  async getYandexDiskCrmSyncPreview() {
+    return this.request<YandexDiskCrmSyncPreviewDto>('/yandex-disk/crm-sync/preview');
   }
 
   async updateYandexDiskCrmSyncSettings(payload: UpdateYandexDiskCrmSyncSettingsRequest) {

@@ -2869,6 +2869,9 @@ public class ActsControllerTests
         public Task<YandexDiskCrmSyncSettingsDto> UpdateCrmSyncSettingsAsync(UpdateYandexDiskCrmSyncSettingsRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexDiskCrmSyncSettingsDto());
 
+        public Task<YandexDiskCrmSyncPreviewDto> PreviewCrmSyncAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskCrmSyncPreviewDto());
+
         public async Task<YandexDiskOperationResultDto> UploadCrmDocumentAsync(YandexDiskCrmDocumentUpload upload, CancellationToken cancellationToken = default)
         {
             Upload = upload;

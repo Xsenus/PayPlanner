@@ -212,6 +212,47 @@ public sealed class YandexDiskServiceTests
         Assert.Contains(requests, item => item.StartsWith("PUT https://upload.local/file", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task PreviewCrmSyncAsync_BuildsDryRunPathsWithoutNetworkCalls()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.rootPath", Value = "disk:/PayPlanner", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+        var requestCount = 0;
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(_ =>
+        {
+            requestCount++;
+            return JsonResponse("{}");
+        })));
+
+        await service.UpdateCrmSyncSettingsAsync(new UpdateYandexDiskCrmSyncSettingsRequest
+        {
+            Enabled = true,
+            SyncInvoices = true,
+            SyncActs = false,
+            SyncContracts = true,
+            SyncCaseDocuments = true,
+            SyncTaskFiles = false,
+            OverwriteExisting = true,
+            FolderTemplate = "CRM/{clientName}/{caseNumber}/{documentType}",
+            FileNameTemplate = "{documentDate}-{documentNumber}-{documentTitle}",
+        }, CancellationToken.None);
+
+        var preview = await service.PreviewCrmSyncAsync(CancellationToken.None);
+
+        Assert.Equal(0, requestCount);
+        Assert.True(preview.SyncEnabled);
+        Assert.True(preview.OverwriteExisting);
+        Assert.Equal("disk:/PayPlanner", preview.RootPath);
+        Assert.Equal(5, preview.Items.Count);
+        var invoice = Assert.Single(preview.Items, item => item.DocumentKind == "invoice");
+        Assert.True(invoice.Enabled);
+        Assert.Equal("create-or-update", invoice.Operation);
+        Assert.Contains("/CRM/ООО Клиент/А40-12345/2026/Счет/", invoice.TargetPath);
+        var taskFile = Assert.Single(preview.Items, item => item.DocumentKind == "taskFile");
+        Assert.False(taskFile.Enabled);
+    }
+
     private static HttpResponseMessage JsonResponse(string json)
         => new(HttpStatusCode.OK)
         {

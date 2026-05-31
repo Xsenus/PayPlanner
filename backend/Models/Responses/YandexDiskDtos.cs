@@ -56,3 +56,25 @@ public sealed class YandexDiskCrmSyncSettingsDto
     public IReadOnlyList<string> AvailableTokens { get; set; } = Array.Empty<string>();
     public DateTime? UpdatedAt { get; set; }
 }
+
+public sealed class YandexDiskCrmSyncPreviewDto
+{
+    public bool SyncEnabled { get; set; }
+    public bool OverwriteExisting { get; set; }
+    public string RootPath { get; set; } = string.Empty;
+    public string FolderTemplate { get; set; } = string.Empty;
+    public string FileNameTemplate { get; set; } = string.Empty;
+    public IReadOnlyList<YandexDiskCrmSyncPreviewItemDto> Items { get; set; } = Array.Empty<YandexDiskCrmSyncPreviewItemDto>();
+}
+
+public sealed class YandexDiskCrmSyncPreviewItemDto
+{
+    public string DocumentKind { get; set; } = string.Empty;
+    public string DocumentType { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+    public string OriginalFileName { get; set; } = string.Empty;
+    public string TargetPath { get; set; } = string.Empty;
+    public string FullPath { get; set; } = string.Empty;
+    public string Operation { get; set; } = string.Empty;
+    public string OperationText { get; set; } = string.Empty;
+}
