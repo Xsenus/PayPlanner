@@ -334,6 +334,70 @@ public sealed class YandexDiskServiceTests
     }
 
     [Theory]
+    [InlineData("delete", "../Other")]
+    [InlineData("download", "../Other.txt")]
+    [InlineData("upload", "../Other.txt")]
+    [InlineData("saveText", "../Other.txt")]
+    [InlineData("copySource", "../Source.txt")]
+    [InlineData("copyTarget", "../Target.txt")]
+    [InlineData("moveSource", "../Source.txt")]
+    [InlineData("moveTarget", "../Target.txt")]
+    public async Task FileOperations_RejectParentTraversalBeforeNetworkCall(string operation, string path)
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+        var requestCount = 0;
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(_ =>
+        {
+            requestCount++;
+            return JsonResponse("{}");
+        })));
+
+        async Task ActAsync()
+        {
+            switch (operation)
+            {
+                case "delete":
+                    await service.DeleteAsync(path, permanently: true, CancellationToken.None);
+                    break;
+                case "download":
+                    await service.DownloadAsync(path, CancellationToken.None);
+                    break;
+                case "upload":
+                    using (var stream = new MemoryStream(Encoding.UTF8.GetBytes("file")))
+                    {
+                        await service.UploadAsync(path, stream, "text/plain", overwrite: false, CancellationToken.None);
+                    }
+                    break;
+                case "saveText":
+                    await service.SaveTextFileAsync(new UpdateYandexDiskTextFileRequest { Path = path, Content = "text" }, CancellationToken.None);
+                    break;
+                case "copySource":
+                    await service.CopyAsync(path, "/Target.txt", overwrite: false, CancellationToken.None);
+                    break;
+                case "copyTarget":
+                    await service.CopyAsync("/Source.txt", path, overwrite: false, CancellationToken.None);
+                    break;
+                case "moveSource":
+                    await service.MoveAsync(path, "/Target.txt", overwrite: false, CancellationToken.None);
+                    break;
+                case "moveTarget":
+                    await service.MoveAsync("/Source.txt", path, overwrite: false, CancellationToken.None);
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unknown operation {operation}.");
+            }
+        }
+
+        var error = await Assert.ThrowsAsync<YandexDiskOperationException>(ActAsync);
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Contains("Путь не должен содержать переходы", error.Message);
+        Assert.Equal(0, requestCount);
+    }
+
+    [Theory]
     [InlineData(401, """{"message":"Unauthorized"}""", "OAuth-токен")]
     [InlineData(403, """{"message":"Forbidden"}""", "нет прав")]
     [InlineData(507, """{"message":"Insufficient Storage"}""", "не хватает свободного места")]
