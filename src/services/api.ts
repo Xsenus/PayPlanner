@@ -262,6 +262,8 @@ export interface YandexDiskCrmSyncSettingsDto {
   syncCaseDocuments: boolean;
   syncTaskFiles: boolean;
   overwriteExisting: boolean;
+  conflictResolutionMode: string;
+  conflictResolutionModeText: string;
   folderTemplate: string;
   fileNameTemplate: string;
   availableTokens: string[];
@@ -282,6 +284,8 @@ export interface YandexDiskCrmSyncPreviewItemDto {
 export interface YandexDiskCrmSyncPreviewDto {
   syncEnabled: boolean;
   overwriteExisting: boolean;
+  conflictResolutionMode: string;
+  conflictResolutionModeText: string;
   rootPath: string;
   folderTemplate: string;
   fileNameTemplate: string;
@@ -296,6 +300,7 @@ export interface UpdateYandexDiskCrmSyncSettingsRequest {
   syncCaseDocuments: boolean;
   syncTaskFiles: boolean;
   overwriteExisting: boolean;
+  conflictResolutionMode?: string;
   folderTemplate?: string;
   fileNameTemplate?: string;
 }

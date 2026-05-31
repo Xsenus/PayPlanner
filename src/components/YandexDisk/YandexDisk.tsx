@@ -71,6 +71,7 @@ const defaultCrmSyncDraft: UpdateYandexDiskCrmSyncSettingsRequest = {
   syncCaseDocuments: true,
   syncTaskFiles: false,
   overwriteExisting: false,
+  conflictResolutionMode: 'yandexDiskMaster',
   folderTemplate: 'CRM/{clientName}/{caseNumber}/{documentType}',
   fileNameTemplate: '{documentDate}-{documentNumber}-{documentTitle}',
 };
@@ -130,6 +131,7 @@ export function YandexDisk() {
       syncCaseDocuments: loadedCrmSyncSettings.syncCaseDocuments,
       syncTaskFiles: loadedCrmSyncSettings.syncTaskFiles,
       overwriteExisting: loadedCrmSyncSettings.overwriteExisting,
+      conflictResolutionMode: loadedCrmSyncSettings.conflictResolutionMode ?? 'yandexDiskMaster',
       folderTemplate: loadedCrmSyncSettings.folderTemplate,
       fileNameTemplate: loadedCrmSyncSettings.fileNameTemplate,
     });
@@ -216,6 +218,7 @@ export function YandexDisk() {
         syncCaseDocuments: updated.syncCaseDocuments,
         syncTaskFiles: updated.syncTaskFiles,
         overwriteExisting: updated.overwriteExisting,
+        conflictResolutionMode: updated.conflictResolutionMode ?? 'yandexDiskMaster',
         folderTemplate: updated.folderTemplate,
         fileNameTemplate: updated.fileNameTemplate,
       });
@@ -472,7 +475,6 @@ export function YandexDisk() {
                   ['syncContracts', 'Договоры'],
                   ['syncCaseDocuments', 'Документы дел'],
                   ['syncTaskFiles', 'Файлы задач'],
-                  ['overwriteExisting', 'Перезаписывать файлы'],
                 ].map(([field, label]) => (
                   <label key={field} className="flex items-center gap-2 text-sm text-slate-700">
                     <input
@@ -489,6 +491,23 @@ export function YandexDisk() {
             </div>
 
             <div className="space-y-3">
+              <label className="block">
+                <span className="text-xs font-semibold text-slate-600">Правило конфликтов</span>
+                <select
+                  value={crmSyncDraft.conflictResolutionMode ?? 'yandexDiskMaster'}
+                  onChange={(event) => setCrmSyncDraft((draft) => ({
+                    ...draft,
+                    conflictResolutionMode: event.target.value,
+                    overwriteExisting: event.target.value === 'crmMaster',
+                  }))}
+                  disabled={!canEdit}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                >
+                  <option value="yandexDiskMaster">Яндекс.Диск главный</option>
+                  <option value="crmMaster">CRM главная</option>
+                  <option value="manualConfirmation">Ручное подтверждение</option>
+                </select>
+              </label>
               <label className="block">
                 <span className="text-xs font-semibold text-slate-600">Шаблон папки</span>
                 <input

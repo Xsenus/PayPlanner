@@ -66,6 +66,9 @@ public sealed class YandexDiskService : IYandexDiskService
     private const string DefaultRootPath = "disk:/PayPlanner";
     private const string DefaultFolderTemplate = "CRM/{clientName}/{caseNumber}/{documentType}";
     private const string DefaultFileNameTemplate = "{documentDate}-{documentNumber}-{documentTitle}";
+    private const string ConflictModeCrmMaster = "crmMaster";
+    private const string ConflictModeYandexDiskMaster = "yandexDiskMaster";
+    private const string ConflictModeManualConfirmation = "manualConfirmation";
     private const string ApiBaseUrl = "https://cloud-api.yandex.net/v1/disk";
     private const int MaxTextFileBytes = 2 * 1024 * 1024;
     private static readonly string[] CrmSyncTemplateTokens =
@@ -299,6 +302,7 @@ public sealed class YandexDiskService : IYandexDiskService
             SyncCaseDocuments = request.SyncCaseDocuments,
             SyncTaskFiles = request.SyncTaskFiles,
             OverwriteExisting = request.OverwriteExisting,
+            ConflictResolutionMode = request.ConflictResolutionMode ?? string.Empty,
             FolderTemplate = request.FolderTemplate ?? string.Empty,
             FileNameTemplate = request.FileNameTemplate ?? string.Empty,
             UpdatedAt = now,
@@ -331,9 +335,17 @@ public sealed class YandexDiskService : IYandexDiskService
         var fileName = ApplyCrmTemplate(syncSettings.FileNameTemplate, tokens, isFileName: true);
         fileName = EnsureFileExtension(fileName, upload.OriginalFileName);
         var targetPath = string.IsNullOrWhiteSpace(folderPath) ? fileName : $"{folderPath}/{fileName}";
+        var overwrite = ResolveCrmOverwrite(upload.OverwriteExisting, syncSettings);
 
         await EnsureFolderPathAsync(settings, folderPath, cancellationToken);
-        return await UploadAsync(targetPath, upload.Content, upload.ContentType, upload.OverwriteExisting ?? syncSettings.OverwriteExisting, cancellationToken);
+        try
+        {
+            return await UploadAsync(targetPath, upload.Content, upload.ContentType, overwrite, cancellationToken);
+        }
+        catch (YandexDiskOperationException ex) when (ex.StatusCode == 409 && !overwrite)
+        {
+            throw new YandexDiskOperationException(409, BuildCrmConflictMessage(syncSettings.ConflictResolutionMode));
+        }
     }
 
     public async Task<YandexDiskCrmSyncPreviewDto> PreviewCrmSyncAsync(CancellationToken cancellationToken = default)
@@ -346,6 +358,8 @@ public sealed class YandexDiskService : IYandexDiskService
         {
             SyncEnabled = syncSettings.Enabled,
             OverwriteExisting = syncSettings.OverwriteExisting,
+            ConflictResolutionMode = syncSettings.ConflictResolutionMode,
+            ConflictResolutionModeText = syncSettings.ConflictResolutionModeText,
             RootPath = diskSettings.RootPath,
             FolderTemplate = syncSettings.FolderTemplate,
             FileNameTemplate = syncSettings.FileNameTemplate,
@@ -641,6 +655,7 @@ public sealed class YandexDiskService : IYandexDiskService
             SyncCaseDocuments = true,
             SyncTaskFiles = false,
             OverwriteExisting = false,
+            ConflictResolutionMode = ConflictModeYandexDiskMaster,
             FolderTemplate = DefaultFolderTemplate,
             FileNameTemplate = DefaultFileNameTemplate,
         });
@@ -649,6 +664,8 @@ public sealed class YandexDiskService : IYandexDiskService
     {
         var folderTemplate = NormalizeTemplate(settings.FolderTemplate, DefaultFolderTemplate, 240);
         var fileNameTemplate = NormalizeTemplate(settings.FileNameTemplate, DefaultFileNameTemplate, 180);
+        var conflictMode = NormalizeConflictResolutionMode(settings.ConflictResolutionMode, settings.OverwriteExisting);
+        var overwriteExisting = conflictMode == ConflictModeCrmMaster;
 
         return new YandexDiskCrmSyncSettingsDto
         {
@@ -658,13 +675,43 @@ public sealed class YandexDiskService : IYandexDiskService
             SyncContracts = settings.SyncContracts,
             SyncCaseDocuments = settings.SyncCaseDocuments,
             SyncTaskFiles = settings.SyncTaskFiles,
-            OverwriteExisting = settings.OverwriteExisting,
+            OverwriteExisting = overwriteExisting,
+            ConflictResolutionMode = conflictMode,
+            ConflictResolutionModeText = GetConflictResolutionModeText(conflictMode),
             FolderTemplate = folderTemplate,
             FileNameTemplate = fileNameTemplate,
             AvailableTokens = CrmSyncTemplateTokens,
             UpdatedAt = settings.UpdatedAt,
         };
     }
+
+    private static string NormalizeConflictResolutionMode(string? value, bool overwriteExistingFallback)
+    {
+        if (string.Equals(value, ConflictModeCrmMaster, StringComparison.OrdinalIgnoreCase))
+        {
+            return ConflictModeCrmMaster;
+        }
+
+        if (string.Equals(value, ConflictModeYandexDiskMaster, StringComparison.OrdinalIgnoreCase))
+        {
+            return ConflictModeYandexDiskMaster;
+        }
+
+        if (string.Equals(value, ConflictModeManualConfirmation, StringComparison.OrdinalIgnoreCase))
+        {
+            return ConflictModeManualConfirmation;
+        }
+
+        return overwriteExistingFallback ? ConflictModeCrmMaster : ConflictModeYandexDiskMaster;
+    }
+
+    private static string GetConflictResolutionModeText(string mode)
+        => mode switch
+        {
+            ConflictModeCrmMaster => "CRM главная",
+            ConflictModeManualConfirmation => "Ручное подтверждение",
+            _ => "Яндекс.Диск главный",
+        };
 
     private static string NormalizeTemplate(string? value, string fallback, int maxLength)
     {
@@ -722,6 +769,23 @@ public sealed class YandexDiskService : IYandexDiskService
             "caseDocument" => settings.SyncCaseDocuments,
             "taskFile" => settings.SyncTaskFiles,
             _ => false,
+        };
+
+    private static bool ResolveCrmOverwrite(bool? explicitOverwrite, YandexDiskCrmSyncSettingsDto settings)
+        => explicitOverwrite ?? settings.ConflictResolutionMode switch
+        {
+            ConflictModeCrmMaster => true,
+            ConflictModeYandexDiskMaster => false,
+            ConflictModeManualConfirmation => false,
+            _ => settings.OverwriteExisting,
+        };
+
+    private static string BuildCrmConflictMessage(string conflictMode)
+        => conflictMode switch
+        {
+            ConflictModeManualConfirmation => "На Яндекс.Диске уже есть файл с таким именем. Выберите перезапись вручную или измените правило конфликтов в настройках Я.Диска.",
+            ConflictModeYandexDiskMaster => "На Яндекс.Диске уже есть файл с таким именем. По текущему правилу Яндекс.Диск главный, поэтому файл CRM не перезаписан.",
+            _ => "На Яндекс.Диске уже есть файл с таким именем.",
         };
 
     private static IReadOnlyList<YandexDiskCrmDocumentUpload> BuildCrmPreviewSamples()
@@ -807,7 +871,13 @@ public sealed class YandexDiskService : IYandexDiskService
         var fileName = ApplyCrmTemplate(settings.FileNameTemplate, tokens, isFileName: true);
         fileName = EnsureFileExtension(fileName, sample.OriginalFileName);
         var targetPath = string.IsNullOrWhiteSpace(folderPath) ? fileName : $"{folderPath}/{fileName}";
-        var overwrite = sample.OverwriteExisting ?? settings.OverwriteExisting;
+        var overwrite = ResolveCrmOverwrite(sample.OverwriteExisting, settings);
+        var operation = settings.ConflictResolutionMode == ConflictModeManualConfirmation
+            ? "manual-confirmation"
+            : overwrite ? "create-or-update" : "create";
+        var operationText = settings.ConflictResolutionMode == ConflictModeManualConfirmation
+            ? "Создать, при конфликте запросить подтверждение"
+            : overwrite ? "Создать или обновить файл" : "Создать новый файл";
         return new YandexDiskCrmSyncPreviewItemDto
         {
             DocumentKind = sample.DocumentKind,
@@ -816,8 +886,8 @@ public sealed class YandexDiskService : IYandexDiskService
             OriginalFileName = sample.OriginalFileName,
             TargetPath = $"/{targetPath}",
             FullPath = BuildFullPath(rootPath, targetPath),
-            Operation = overwrite ? "create-or-update" : "create",
-            OperationText = overwrite ? "Создать или обновить файл" : "Создать новый файл",
+            Operation = operation,
+            OperationText = operationText,
         };
     }
 

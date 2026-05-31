@@ -51,6 +51,8 @@ public sealed class YandexDiskCrmSyncSettingsDto
     public bool SyncCaseDocuments { get; set; }
     public bool SyncTaskFiles { get; set; }
     public bool OverwriteExisting { get; set; }
+    public string ConflictResolutionMode { get; set; } = "yandexDiskMaster";
+    public string ConflictResolutionModeText { get; set; } = string.Empty;
     public string FolderTemplate { get; set; } = string.Empty;
     public string FileNameTemplate { get; set; } = string.Empty;
     public IReadOnlyList<string> AvailableTokens { get; set; } = Array.Empty<string>();
@@ -61,6 +63,8 @@ public sealed class YandexDiskCrmSyncPreviewDto
 {
     public bool SyncEnabled { get; set; }
     public bool OverwriteExisting { get; set; }
+    public string ConflictResolutionMode { get; set; } = "yandexDiskMaster";
+    public string ConflictResolutionModeText { get; set; } = string.Empty;
     public string RootPath { get; set; } = string.Empty;
     public string FolderTemplate { get; set; } = string.Empty;
     public string FileNameTemplate { get; set; } = string.Empty;

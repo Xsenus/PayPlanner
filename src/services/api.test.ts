@@ -231,6 +231,8 @@ describe('apiService auth handling', () => {
       syncCaseDocuments: true,
       syncTaskFiles: false,
       overwriteExisting: false,
+      conflictResolutionMode: 'yandexDiskMaster',
+      conflictResolutionModeText: 'Яндекс.Диск главный',
       folderTemplate: 'CRM/{clientName}',
       fileNameTemplate: '{documentDate}-{documentTitle}',
       availableTokens: ['clientName', 'documentTitle'],
@@ -257,6 +259,7 @@ describe('apiService auth handling', () => {
       syncCaseDocuments: true,
       syncTaskFiles: true,
       overwriteExisting: true,
+      conflictResolutionMode: 'crmMaster',
       folderTemplate: 'CRM/{clientName}/{caseNumber}',
       fileNameTemplate: '{documentDate}-{documentTitle}',
     };
@@ -278,6 +281,8 @@ describe('apiService auth handling', () => {
     const payload = {
       syncEnabled: true,
       overwriteExisting: false,
+      conflictResolutionMode: 'yandexDiskMaster',
+      conflictResolutionModeText: 'Яндекс.Диск главный',
       rootPath: 'disk:/PayPlanner',
       folderTemplate: 'CRM/{clientName}',
       fileNameTemplate: '{documentDate}-{documentTitle}',

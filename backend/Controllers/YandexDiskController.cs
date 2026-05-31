@@ -96,6 +96,7 @@ public sealed class YandexDiskController : ControllerBase
                 result.SyncCaseDocuments,
                 result.SyncTaskFiles,
                 result.OverwriteExisting,
+                result.ConflictResolutionMode,
                 result.FolderTemplate,
                 result.FileNameTemplate,
             },

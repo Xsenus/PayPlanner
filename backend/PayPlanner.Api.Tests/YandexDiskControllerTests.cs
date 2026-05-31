@@ -83,12 +83,14 @@ public sealed class YandexDiskControllerTests
             SyncCaseDocuments = true,
             SyncTaskFiles = true,
             OverwriteExisting = false,
+            ConflictResolutionMode = "manualConfirmation",
             FolderTemplate = "CRM/{clientName}",
             FileNameTemplate = "{documentDate}-{documentTitle}",
         }, CancellationToken.None);
 
         var result = Assert.IsType<YandexDiskCrmSyncSettingsDto>(response.Value);
         Assert.True(result.Enabled);
+        Assert.Equal("manualConfirmation", result.ConflictResolutionMode);
         Assert.Equal("CRM/{clientName}", result.FolderTemplate);
         var audit = Assert.Single(scope.Db.ObjectAuditEvents);
         Assert.Equal("CrmSyncSettingsUpdated", audit.Action);
@@ -239,6 +241,8 @@ public sealed class YandexDiskControllerTests
                 SyncCaseDocuments = true,
                 SyncTaskFiles = false,
                 OverwriteExisting = false,
+                ConflictResolutionMode = "yandexDiskMaster",
+                ConflictResolutionModeText = "Яндекс.Диск главный",
                 FolderTemplate = "CRM/{clientName}/{caseNumber}/{documentType}",
                 FileNameTemplate = "{documentDate}-{documentNumber}-{documentTitle}",
                 AvailableTokens = ["clientName", "documentTitle"],
@@ -254,6 +258,8 @@ public sealed class YandexDiskControllerTests
                 SyncCaseDocuments = request.SyncCaseDocuments,
                 SyncTaskFiles = request.SyncTaskFiles,
                 OverwriteExisting = request.OverwriteExisting,
+                ConflictResolutionMode = request.ConflictResolutionMode ?? "yandexDiskMaster",
+                ConflictResolutionModeText = request.ConflictResolutionMode == "manualConfirmation" ? "Ручное подтверждение" : "Яндекс.Диск главный",
                 FolderTemplate = request.FolderTemplate ?? string.Empty,
                 FileNameTemplate = request.FileNameTemplate ?? string.Empty,
                 AvailableTokens = ["clientName", "documentTitle"],
@@ -263,6 +269,8 @@ public sealed class YandexDiskControllerTests
             => Task.FromResult(new YandexDiskCrmSyncPreviewDto
             {
                 SyncEnabled = false,
+                ConflictResolutionMode = "yandexDiskMaster",
+                ConflictResolutionModeText = "Яндекс.Диск главный",
                 RootPath = "disk:/PayPlanner",
                 Items =
                 [

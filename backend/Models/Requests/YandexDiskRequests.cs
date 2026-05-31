@@ -35,6 +35,7 @@ public sealed class UpdateYandexDiskCrmSyncSettingsRequest
     public bool SyncCaseDocuments { get; set; }
     public bool SyncTaskFiles { get; set; }
     public bool OverwriteExisting { get; set; }
+    public string? ConflictResolutionMode { get; set; }
     public string? FolderTemplate { get; set; }
     public string? FileNameTemplate { get; set; }
 }
