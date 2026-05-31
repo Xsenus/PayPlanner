@@ -20,6 +20,7 @@ public static class RolePermissionCatalog
     public const string Notifications = "notifications";
     public const string Roles = "roles";
     public const string Audit = "audit";
+    public const string YandexDisk = "yandexDisk";
 
     public static readonly string[] AllSections =
     [
@@ -37,7 +38,8 @@ public static class RolePermissionCatalog
         Dictionaries,
         Notifications,
         Roles,
-        Audit
+        Audit,
+        YandexDisk
     ];
 
     public static readonly string[] DataScopedSections =
@@ -103,7 +105,15 @@ public static class RolePermissionCatalog
                 false,
                 false,
                 false,
-                GetDefaultViewScope(Audit, allowRoleManagement))
+                GetDefaultViewScope(Audit, allowRoleManagement)),
+            [YandexDisk] = new(
+                allowRoleManagement,
+                allowRoleManagement,
+                allowRoleManagement,
+                allowRoleManagement,
+                allowRoleManagement,
+                false,
+                GetDefaultViewScope(YandexDisk, allowRoleManagement))
         };
 
     public static RolePermissionsDto CreateDto(bool allowRoleManagement)
@@ -126,7 +136,8 @@ public static class RolePermissionCatalog
             Dictionaries = ToSection(defaults[Dictionaries]),
             Notifications = ToSection(defaults[Notifications]),
             Roles = ToSection(defaults[Roles]),
-            Audit = ToSection(defaults[Audit])
+            Audit = ToSection(defaults[Audit]),
+            YandexDisk = ToSection(defaults[YandexDisk])
         };
     }
 

@@ -20,6 +20,9 @@ import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from 're
 import { apiService, type YandexDiskListResponseDto, type YandexDiskResourceDto, type YandexDiskSettingsDto } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { useToast } from '../../hooks/useToast';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { defaultRestrictedMenuPermissions } from '../../types/permissions';
 
 function joinPath(directory: string, name: string) {
   const cleanName = name.trim().replace(/^\/+/, '');
@@ -52,6 +55,14 @@ function formatDate(value?: string | null) {
 
 export function YandexDisk() {
   const toast = useToast();
+  const { user } = useAuth();
+  const rolePermissions = useRolePermissions(user?.role?.id);
+  const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
+  const permissions = rolePermissions.yandexDisk ?? defaultRestrictedMenuPermissions;
+  const canCreate = isAdminRole || permissions.canCreate;
+  const canEdit = isAdminRole || permissions.canEdit;
+  const canDelete = isAdminRole || permissions.canDelete;
+  const canExport = isAdminRole || permissions.canExport;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [settings, setSettings] = useState<YandexDiskSettingsDto | null>(null);
   const [tokenDraft, setTokenDraft] = useState('');
@@ -110,6 +121,7 @@ export function YandexDisk() {
   }, []);
 
   const saveSettings = async () => {
+    if (!canEdit) return;
     setSavingSettings(true);
     setError(null);
     try {
@@ -131,6 +143,7 @@ export function YandexDisk() {
   };
 
   const clearToken = async () => {
+    if (!canEdit) return;
     if (!window.confirm('Удалить сохраненный OAuth-токен Яндекс.Диска?')) return;
     setSavingSettings(true);
     try {
@@ -146,6 +159,7 @@ export function YandexDisk() {
   };
 
   const createFolder = async () => {
+    if (!canCreate) return;
     const name = newFolderName.trim();
     if (!name) return;
     setBusyPath(joinPath(currentPath, name));
@@ -162,6 +176,7 @@ export function YandexDisk() {
   };
 
   const uploadFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (!canCreate) return;
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
@@ -179,6 +194,7 @@ export function YandexDisk() {
   };
 
   const downloadFile = async (item: YandexDiskResourceDto) => {
+    if (!canExport) return;
     setBusyPath(item.path);
     try {
       const result = await apiService.downloadYandexDiskFile(item.path);
@@ -198,6 +214,7 @@ export function YandexDisk() {
   };
 
   const deleteResource = async (item: YandexDiskResourceDto) => {
+    if (!canDelete) return;
     if (!window.confirm(`Удалить "${item.name}" с Яндекс.Диска?`)) return;
     setBusyPath(item.path);
     try {
@@ -212,6 +229,7 @@ export function YandexDisk() {
   };
 
   const copyResource = async (item: YandexDiskResourceDto) => {
+    if (!canCreate) return;
     const target = window.prompt('Куда скопировать ресурс?', joinPath(parentPath(item.path), `copy-${item.name}`));
     if (!target) return;
     setBusyPath(item.path);
@@ -227,6 +245,7 @@ export function YandexDisk() {
   };
 
   const moveResource = async (item: YandexDiskResourceDto) => {
+    if (!canEdit) return;
     const target = window.prompt('Новый путь ресурса:', item.path);
     if (!target || target === item.path) return;
     setBusyPath(item.path);
@@ -242,6 +261,7 @@ export function YandexDisk() {
   };
 
   const openTextEditor = async (item: YandexDiskResourceDto) => {
+    if (!canEdit) return;
     setEditorPath(item.path);
     setEditorContent('');
     setEditorLoading(true);
@@ -258,6 +278,7 @@ export function YandexDisk() {
   };
 
   const saveTextEditor = async () => {
+    if (!canEdit) return;
     if (!editorPath) return;
     setEditorLoading(true);
     try {
@@ -293,6 +314,7 @@ export function YandexDisk() {
               <input
                 value={rootPathDraft}
                 onChange={(event) => setRootPathDraft(event.target.value)}
+                disabled={!canEdit}
                 className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                 placeholder="disk:/PayPlanner"
               />
@@ -305,6 +327,7 @@ export function YandexDisk() {
                   type="password"
                   value={tokenDraft}
                   onChange={(event) => setTokenDraft(event.target.value)}
+                  disabled={!canEdit}
                   className="h-10 w-full rounded-lg border border-slate-300 pl-9 pr-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                   placeholder="Новый токен"
                 />
@@ -313,7 +336,7 @@ export function YandexDisk() {
             <button
               type="button"
               onClick={() => void saveSettings()}
-              disabled={savingSettings}
+              disabled={savingSettings || !canEdit}
               className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {savingSettings ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -322,7 +345,7 @@ export function YandexDisk() {
             <button
               type="button"
               onClick={() => void clearToken()}
-              disabled={savingSettings || !settings?.isConfigured}
+              disabled={savingSettings || !settings?.isConfigured || !canEdit}
               className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <X className="h-4 w-4" />
@@ -364,7 +387,7 @@ export function YandexDisk() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={!settings?.isConfigured}
+              disabled={!settings?.isConfigured || !canCreate}
               className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <UploadCloud className="h-4 w-4" />
@@ -383,12 +406,12 @@ export function YandexDisk() {
             }}
             className="h-10 min-w-0 flex-1 rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
             placeholder="Название новой папки"
-            disabled={!settings?.isConfigured}
+            disabled={!settings?.isConfigured || !canCreate}
           />
           <button
             type="button"
             onClick={() => void createFolder()}
-            disabled={!newFolderName.trim() || !settings?.isConfigured}
+            disabled={!newFolderName.trim() || !settings?.isConfigured || !canCreate}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Plus className="h-4 w-4" />
@@ -446,13 +469,13 @@ export function YandexDisk() {
                           {isBusy ? <Loader2 className="h-8 w-8 animate-spin rounded-lg p-2 text-slate-500" /> : null}
                           {!isFolder ? (
                             <>
-                              <IconButton label="Скачать" onClick={() => void downloadFile(item)} icon={<Download className="h-4 w-4" />} />
-                              <IconButton label="Редактировать текст" onClick={() => void openTextEditor(item)} icon={<Edit3 className="h-4 w-4" />} />
+                              {canExport ? <IconButton label="Скачать" onClick={() => void downloadFile(item)} icon={<Download className="h-4 w-4" />} /> : null}
+                              {canEdit ? <IconButton label="Редактировать текст" onClick={() => void openTextEditor(item)} icon={<Edit3 className="h-4 w-4" />} /> : null}
                             </>
                           ) : null}
-                          <IconButton label="Копировать" onClick={() => void copyResource(item)} icon={<Copy className="h-4 w-4" />} />
-                          <IconButton label="Переместить" onClick={() => void moveResource(item)} icon={<MoveRight className="h-4 w-4" />} />
-                          <IconButton label="Удалить" danger onClick={() => void deleteResource(item)} icon={<Trash2 className="h-4 w-4" />} />
+                          {canCreate ? <IconButton label="Копировать" onClick={() => void copyResource(item)} icon={<Copy className="h-4 w-4" />} /> : null}
+                          {canEdit ? <IconButton label="Переместить" onClick={() => void moveResource(item)} icon={<MoveRight className="h-4 w-4" />} /> : null}
+                          {canDelete ? <IconButton label="Удалить" danger onClick={() => void deleteResource(item)} icon={<Trash2 className="h-4 w-4" />} /> : null}
                         </div>
                       </td>
                     </tr>

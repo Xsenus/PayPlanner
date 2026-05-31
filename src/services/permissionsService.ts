@@ -49,6 +49,7 @@ function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePerm
     notifications: normalizeSectionPermissions(defaultRolePermissions.notifications, source.notifications),
     roles: normalizeSectionPermissions(defaultRolePermissions.roles, source.roles),
     audit: normalizeSectionPermissions(defaultRolePermissions.audit, source.audit),
+    yandexDisk: normalizeSectionPermissions(defaultRolePermissions.yandexDisk, source.yandexDisk),
   };
 }
 
@@ -69,6 +70,7 @@ function clonePermissions(perms: RolePermissions): RolePermissions {
     notifications: { ...perms.notifications },
     roles: { ...perms.roles },
     audit: { ...perms.audit },
+    yandexDisk: { ...perms.yandexDisk },
   };
 }
 

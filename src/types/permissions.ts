@@ -13,7 +13,8 @@ export type MenuSectionKey =
   | 'dictionaries'
   | 'notifications'
   | 'roles'
-  | 'audit';
+  | 'audit'
+  | 'yandexDisk';
 
 export type MenuPermissionKey =
   | 'canView'
@@ -61,6 +62,7 @@ export const MENU_SECTION_KEYS: MenuSectionKey[] = [
   'notifications',
   'roles',
   'audit',
+  'yandexDisk',
 ];
 
 export const MENU_PERMISSION_KEYS: MenuPermissionKey[] = [
@@ -108,4 +110,5 @@ export const defaultRolePermissions: RolePermissions = {
   notifications: { ...defaultRestrictedMenuPermissions },
   roles: { ...defaultRestrictedMenuPermissions },
   audit: { ...defaultRestrictedMenuPermissions },
+  yandexDisk: { ...defaultRestrictedMenuPermissions },
 };

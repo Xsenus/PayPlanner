@@ -302,9 +302,10 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
 
   const canManageRoles = isAdmin() || permissions.roles.canView;
   const canViewSettings = isAdmin() || permissions.audit.canView || permissions.notifications.canView;
+  const canViewYandexDisk = isAdmin() || Boolean(permissions.yandexDisk?.canView);
 
   const adminItems = useMemo<SidebarItem[]>(() => {
-    if (!isAdmin() && !canManageRoles && !canViewSettings) {
+    if (!isAdmin() && !canManageRoles && !canViewSettings && !canViewYandexDisk) {
       return [];
     }
 
@@ -321,14 +322,16 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       ...(isAdmin()
         ? [
             { id: 'userActivity', tab: 'userActivity' as Tab, label: '\u041a\u043e\u043d\u0442\u0440\u043e\u043b\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u0439', icon: Eye },
-            { id: 'yandexDisk', tab: 'yandexDisk' as Tab, label: 'Я.Диск', icon: Cloud },
           ]
+        : []),
+      ...(canViewYandexDisk
+        ? [{ id: 'yandexDisk', tab: 'yandexDisk' as Tab, label: 'Я.Диск', icon: Cloud }]
         : []),
       ...(canViewSettings
         ? [{ id: 'settings', tab: 'settings' as Tab, label: '\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438', icon: Settings }]
         : []),
     ];
-  }, [canManageRoles, canViewSettings, isAdmin]);
+  }, [canManageRoles, canViewSettings, canViewYandexDisk, isAdmin]);
 
   const sidebarItems = useMemo(() => [...mainItems, ...adminItems], [mainItems, adminItems]);
 

@@ -178,6 +178,7 @@ function AppContent() {
   const canManageRoles = isAdminRole || permissions.roles.canView;
   const canViewAudit = isAdminRole || permissions.audit.canView;
   const canViewSettings = canViewAudit || permissions.notifications.canView;
+  const canViewYandexDisk = isAdminRole || Boolean(permissions.yandexDisk?.canView);
 
   const tabNames: Record<string, string> = useMemo(
     () => ({
@@ -298,12 +299,12 @@ function AppContent() {
         { tab: 'users' as Tab, allowed: isAdminRole },
         { tab: 'roles' as Tab, allowed: canManageRoles },
         { tab: 'audit' as Tab, allowed: canViewAudit },
-        { tab: 'yandexDisk' as Tab, allowed: isAdminRole },
+        { tab: 'yandexDisk' as Tab, allowed: canViewYandexDisk },
         { tab: 'settings' as Tab, allowed: canViewSettings },
       ]
         .filter((entry) => entry.allowed)
         .map((entry) => entry.tab),
-    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings],
+    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk],
   );
 
   const canViewTab = useCallback(
@@ -373,7 +374,7 @@ function AppContent() {
         case 'audit':
           return canViewAudit;
         case 'yandexDisk':
-          return isAdminRole;
+          return canViewYandexDisk;
         case 'settings':
           return canViewSettings;
         case 'roles':
@@ -384,7 +385,7 @@ function AppContent() {
           return true;
       }
     },
-    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings],
+    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk],
   );
 
   const handleOpenClient = useCallback(
@@ -1752,9 +1753,9 @@ function AppContent() {
           : renderNoAccess('Нужны права администратора.');
 
       case 'yandexDisk':
-        return isAdminRole
+        return canViewYandexDisk
           ? <YandexDisk />
-          : renderNoAccess('Раздел Я.Диска доступен только администратору.');
+          : renderNoAccess('Недостаточно прав для доступа к разделу Я.Диск.');
 
       case 'dictionaries':
         return permissions.dictionaries.canView
