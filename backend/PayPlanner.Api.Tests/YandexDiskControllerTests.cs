@@ -148,6 +148,29 @@ public sealed class YandexDiskControllerTests
     }
 
     [Fact]
+    public async Task TestConnection_UsesDefaultRequestWhenBodyIsEmpty()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with
+        {
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = true,
+            CanExport = true,
+        });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.TestConnection(null, CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskConnectionTestDto>(response.Value);
+        Assert.True(result.Success);
+        Assert.Equal("/_payplanner-test", result.TestFolderPath);
+        Assert.True(service.TestConnectionCalled);
+    }
+
+    [Fact]
     public async Task PreviewCrmSync_AllowsViewPermission()
     {
         await using var scope = await CreateDbScopeAsync();

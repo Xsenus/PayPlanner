@@ -59,14 +59,14 @@ public sealed class YandexDiskController : ControllerBase
 
     [HttpPost("connection-test")]
     public async Task<ActionResult<YandexDiskConnectionTestDto>> TestConnection(
-        [FromBody] TestYandexDiskConnectionRequest request,
+        [FromBody] TestYandexDiskConnectionRequest? request,
         CancellationToken ct)
     {
         var forbidden = await RequirePermissionAsync(permission =>
             permission.CanEdit && permission.CanCreate && permission.CanDelete && permission.CanExport, ct);
         if (forbidden is not null) return forbidden;
 
-        var result = await ExecuteAsync(() => _service.TestConnectionAsync(request, ct));
+        var result = await ExecuteAsync(() => _service.TestConnectionAsync(request ?? new TestYandexDiskConnectionRequest(), ct));
         if (result.Result is null && result.Value is { } value)
         {
             await AddAuditAsync(

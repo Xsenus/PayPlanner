@@ -49,10 +49,11 @@
 - `73e10723` - Сохранять причину сбоя проверки Я.Диска.
 - `d3780a45` - Синхронизировать права проверки Я.Диска в интерфейсе.
 - `15be5d57` - Актуализировать отчет по Я.Диску.
+- `cedf4ef6` - Закрепить сбой очистки проверки Я.Диска.
 
 ## Выполненные проверки
 
-- `dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --filter "YandexDisk"` - успешно, 28 тестов.
+- `dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --filter "YandexDisk"` - успешно, 29 тестов.
 - `npm run test:unit -- src/services/api.test.ts` - успешно, 68 тестов.
 - `npm run build` - успешно.
 - Browser smoke на `http://127.0.0.1:4173/` - приложение открывается без ошибок консоли, дальнейшая проверка требует входа в систему.
