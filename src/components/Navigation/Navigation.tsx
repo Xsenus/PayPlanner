@@ -27,6 +27,7 @@ import {
   History,
   Bell,
   Briefcase,
+  Cloud,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -320,6 +321,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       ...(isAdmin()
         ? [
             { id: 'userActivity', tab: 'userActivity' as Tab, label: '\u041a\u043e\u043d\u0442\u0440\u043e\u043b\u044c \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u0439', icon: Eye },
+            { id: 'yandexDisk', tab: 'yandexDisk' as Tab, label: 'Я.Диск', icon: Cloud },
           ]
         : []),
       ...(canViewSettings

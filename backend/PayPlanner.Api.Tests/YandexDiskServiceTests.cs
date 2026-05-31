@@ -1,0 +1,160 @@
+using System.Net;
+using System.Text;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Services;
+using Xunit;
+
+namespace PayPlanner.Api.Tests;
+
+public sealed class YandexDiskServiceTests
+{
+    [Fact]
+    public async Task UpdateSettings_NormalizesRootPathAndDoesNotReturnToken()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(_ => JsonResponse("{}"))));
+
+        var settings = await service.UpdateSettingsAsync(new UpdateYandexDiskSettingsRequest
+        {
+            OAuthToken = "secret-token-123456",
+            RootPath = "/PayPlanner/Test/",
+        }, CancellationToken.None);
+
+        Assert.True(settings.IsConfigured);
+        Assert.Equal("disk:/PayPlanner/Test", settings.RootPath);
+        Assert.Equal("secr...3456", settings.TokenPreview);
+        Assert.DoesNotContain("secret-token", settings.TokenPreview);
+
+        var storedToken = await scope.Db.SystemSettings.SingleAsync(item => item.Key == "integrations.yandexDisk.oauthToken");
+        Assert.Equal("secret-token-123456", storedToken.Value);
+    }
+
+    [Fact]
+    public async Task ListAsync_UsesOAuthHeaderAndMapsRelativePaths()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.rootPath", Value = "disk:/PayPlanner", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+
+        HttpRequestMessage? captured = null;
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(request =>
+        {
+            captured = request;
+            return JsonResponse("""
+            {
+              "name": "Docs",
+              "path": "disk:/PayPlanner/Docs",
+              "type": "dir",
+              "_embedded": {
+                "limit": 100,
+                "offset": 0,
+                "total": 1,
+                "items": [
+                  {
+                    "name": "contract.txt",
+                    "path": "disk:/PayPlanner/Docs/contract.txt",
+                    "type": "file",
+                    "mime_type": "text/plain",
+                    "size": 12,
+                    "modified": "2026-06-01T03:00:00Z"
+                  }
+                ]
+              }
+            }
+            """);
+        })));
+
+        var result = await service.ListAsync("/Docs", 100, 0, CancellationToken.None);
+
+        Assert.Equal("/Docs", result.Current.Path);
+        var item = Assert.Single(result.Items);
+        Assert.Equal("/Docs/contract.txt", item.Path);
+        Assert.Equal("text/plain", item.MimeType);
+        Assert.Equal("OAuth", captured?.Headers.Authorization?.Scheme);
+        Assert.Equal("ya-token", captured?.Headers.Authorization?.Parameter);
+        Assert.Contains("path=disk%3A%2FPayPlanner%2FDocs", captured?.RequestUri?.Query);
+    }
+
+    [Fact]
+    public async Task CreateFolder_RejectsParentTraversal()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(_ => JsonResponse("{}"))));
+
+        var error = await Assert.ThrowsAsync<YandexDiskOperationException>(() =>
+            service.CreateFolderAsync("../Other", CancellationToken.None));
+
+        Assert.Equal(400, error.StatusCode);
+    }
+
+    [Fact]
+    public async Task DownloadAsync_RequestsDownloadLinkAndLoadsFile()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(request =>
+        {
+            if (request.RequestUri?.Host == "download.local")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("hello", Encoding.UTF8, "text/plain"),
+                };
+            }
+
+            return JsonResponse("""{ "href": "https://download.local/file.txt" }""");
+        })));
+
+        var file = await service.DownloadAsync("/file.txt", CancellationToken.None);
+
+        Assert.Equal("file.txt", file.FileName);
+        Assert.Equal("hello", Encoding.UTF8.GetString(file.Content));
+        Assert.StartsWith("text/plain", file.ContentType);
+    }
+
+    private static HttpResponseMessage JsonResponse(string json)
+        => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+
+    private static async Task<TestDbScope> CreateDbScopeAsync()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection)
+            .Options;
+        var db = new PaymentContext(options, useObjectAuditModel: false);
+        await db.Database.EnsureCreatedAsync();
+
+        return new TestDbScope(connection, db);
+    }
+
+    private sealed class FakeYandexDiskHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(handler(request));
+    }
+
+    private sealed class TestDbScope(SqliteConnection connection, PaymentContext db) : IAsyncDisposable
+    {
+        public PaymentContext Db { get; } = db;
+
+        public async ValueTask DisposeAsync()
+        {
+            await Db.DisposeAsync();
+            await connection.DisposeAsync();
+        }
+    }
+}

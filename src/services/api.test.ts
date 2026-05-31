@@ -203,6 +203,41 @@ describe('apiService auth handling', () => {
     expect(JSON.parse(String(init?.body))).toEqual(payload);
   });
 
+  it('loads Yandex Disk settings from the backend', async () => {
+    const payload = {
+      isConfigured: true,
+      rootPath: 'disk:/PayPlanner',
+      tokenPreview: 'abcd...wxyz',
+      updatedAt: '2026-06-01T10:00:00Z',
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getYandexDiskSettings();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-disk/settings');
+  });
+
+  it('uploads a Yandex Disk file with form data', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true, path: '/docs/a.txt' }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const file = new File(['hello'], 'a.txt', { type: 'text/plain' });
+    await apiService.uploadYandexDiskFile('/docs/a.txt', file, true);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-disk/upload');
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBeInstanceOf(FormData);
+    expect((init?.headers as Record<string, string> | undefined)?.['Content-Type']).toBeUndefined();
+  });
+
   it('loads system job diagnostics from the backend', async () => {
     const payload = {
       generatedAt: '2026-05-26T12:00:00Z',

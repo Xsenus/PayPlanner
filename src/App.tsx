@@ -163,6 +163,7 @@ const MoneyOperations = lazy(() => import('./components/Money/MoneyOperations').
 const CompanyProfile = lazy(() => import('./components/CompanyProfile/CompanyProfile').then((module) => ({ default: module.CompanyProfile })));
 const AppSettings = lazy(() => import('./components/Settings/AppSettings').then((module) => ({ default: module.AppSettings })));
 const ProfilePage = lazy(() => import('./components/Profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
+const YandexDisk = lazy(() => import('./components/YandexDisk/YandexDisk').then((module) => ({ default: module.YandexDisk })));
 
 function ActiveTabContent({ render }: { render: () => ReactNode }) {
   return <>{render()}</>;
@@ -223,6 +224,7 @@ function AppContent() {
       roles: 'Роли',
       audit: 'Аудит объектов',
       userActivity: 'Контроль пользователей',
+      yandexDisk: 'Я.Диск',
       dictionaries: 'Справочники',
       settings: 'Настройки',
     }),
@@ -296,6 +298,7 @@ function AppContent() {
         { tab: 'users' as Tab, allowed: isAdminRole },
         { tab: 'roles' as Tab, allowed: canManageRoles },
         { tab: 'audit' as Tab, allowed: canViewAudit },
+        { tab: 'yandexDisk' as Tab, allowed: isAdminRole },
         { tab: 'settings' as Tab, allowed: canViewSettings },
       ]
         .filter((entry) => entry.allowed)
@@ -369,6 +372,8 @@ function AppContent() {
           return isAdminRole;
         case 'audit':
           return canViewAudit;
+        case 'yandexDisk':
+          return isAdminRole;
         case 'settings':
           return canViewSettings;
         case 'roles':
@@ -1745,6 +1750,11 @@ function AppContent() {
         return isAdminRole
           ? <UserActivity />
           : renderNoAccess('Нужны права администратора.');
+
+      case 'yandexDisk':
+        return isAdminRole
+          ? <YandexDisk />
+          : renderNoAccess('Раздел Я.Диска доступен только администратору.');
 
       case 'dictionaries':
         return permissions.dictionaries.canView

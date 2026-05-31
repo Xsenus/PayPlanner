@@ -211,6 +211,49 @@ export interface UpdateCalendarSyncSettingsRequest {
   notes?: string;
 }
 
+export interface YandexDiskSettingsDto {
+  isConfigured: boolean;
+  rootPath: string;
+  tokenPreview?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface UpdateYandexDiskSettingsRequest {
+  oAuthToken?: string;
+  clearToken?: boolean;
+  rootPath?: string;
+}
+
+export interface YandexDiskResourceDto {
+  name: string;
+  path: string;
+  fullPath: string;
+  type: string;
+  mimeType?: string | null;
+  size?: number | null;
+  created?: string | null;
+  modified?: string | null;
+  publicUrl?: string | null;
+}
+
+export interface YandexDiskListResponseDto {
+  current: YandexDiskResourceDto;
+  items: YandexDiskResourceDto[];
+  limit: number;
+  offset: number;
+  total: number;
+}
+
+export interface YandexDiskOperationResultDto {
+  success: boolean;
+  path: string;
+}
+
+export interface YandexDiskTextFileDto {
+  path: string;
+  content: string;
+}
+
 export interface RolePermissionAuditRoleDto {
   roleId: number;
   roleName: string;
@@ -1382,6 +1425,91 @@ export class ApiService {
     return this.request<CalendarSyncSettingsDto>('/calendar-sync/settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async getYandexDiskSettings() {
+    return this.request<YandexDiskSettingsDto>('/yandex-disk/settings');
+  }
+
+  async updateYandexDiskSettings(payload: UpdateYandexDiskSettingsRequest) {
+    return this.request<YandexDiskSettingsDto>('/yandex-disk/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async listYandexDiskResources(path = '/') {
+    return this.request<YandexDiskListResponseDto>(`/yandex-disk/resources?path=${encodeURIComponent(path)}`);
+  }
+
+  async createYandexDiskFolder(path: string) {
+    return this.request<YandexDiskOperationResultDto>('/yandex-disk/folders', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  }
+
+  async copyYandexDiskResource(fromPath: string, toPath: string, overwrite = false) {
+    return this.request<YandexDiskOperationResultDto>('/yandex-disk/copy', {
+      method: 'POST',
+      body: JSON.stringify({ fromPath, toPath, overwrite }),
+    });
+  }
+
+  async moveYandexDiskResource(fromPath: string, toPath: string, overwrite = false) {
+    return this.request<YandexDiskOperationResultDto>('/yandex-disk/move', {
+      method: 'POST',
+      body: JSON.stringify({ fromPath, toPath, overwrite }),
+    });
+  }
+
+  async deleteYandexDiskResource(path: string, permanently = false) {
+    return this.request<YandexDiskOperationResultDto>(
+      `/yandex-disk/resources?path=${encodeURIComponent(path)}&permanently=${permanently}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  async uploadYandexDiskFile(path: string, file: File, overwrite = true) {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('path', path);
+    form.append('overwrite', String(overwrite));
+    return this.request<YandexDiskOperationResultDto>('/yandex-disk/upload', {
+      method: 'POST',
+      body: form,
+    });
+  }
+
+  async downloadYandexDiskFile(path: string) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/yandex-disk/download?path=${encodeURIComponent(path)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        notifyAuthSessionExpired();
+      }
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(`HTTP ${response.status} ${response.statusText} - ${text}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || path.split('/').pop() || 'yandex-disk-file',
+    };
+  }
+
+  async getYandexDiskTextFile(path: string) {
+    return this.request<YandexDiskTextFileDto>(`/yandex-disk/text?path=${encodeURIComponent(path)}`);
+  }
+
+  async saveYandexDiskTextFile(path: string, content: string, overwrite = true) {
+    return this.request<YandexDiskOperationResultDto>('/yandex-disk/text', {
+      method: 'PUT',
+      body: JSON.stringify({ path, content, overwrite }),
     });
   }
 
