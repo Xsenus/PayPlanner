@@ -608,6 +608,15 @@ public class ContractsControllerTests
             && item.Action == "YandexDiskUploaded");
         Assert.Equal("YandexDiskUploaded", audit.Action);
         Assert.Contains("отправлен на Яндекс.Диск", audit.Description);
+
+        var syncState = await db.YandexDiskCrmSyncStates.AsNoTracking().SingleAsync(item =>
+            item.DocumentKind == "contract"
+            && item.ObjectType == "contract"
+            && item.ObjectId == createdDto.Id);
+        Assert.Equal(YandexDiskCrmSyncStatus.Success, syncState.Status);
+        Assert.Equal("/CRM/contract-CT-YD-1.doc", syncState.YandexDiskPath);
+        Assert.Equal("contract-CT-YD-1.doc", syncState.FileName);
+        Assert.Equal(1, syncState.AttemptCount);
     }
 
     [Fact]

@@ -288,6 +288,16 @@ public class ContractsController : ControllerBase
                 overwrite),
                 ct);
 
+            await YandexDiskCrmSyncStateRecorder.RecordSuccessAsync(
+                _db,
+                "contract",
+                "contract",
+                contract.Id,
+                fileName,
+                result.Path,
+                null,
+                ct);
+
             _db.ObjectAuditEvents.Add(new ObjectAuditEvent
             {
                 ObjectType = "contract",

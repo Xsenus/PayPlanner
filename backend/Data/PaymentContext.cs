@@ -2024,6 +2024,27 @@ public class PaymentContext : DbContext
                 .HasDatabaseName("IX_ObjectAuditEvents_CreatedAt");
         });
 
+        modelBuilder.Entity<YandexDiskCrmSyncState>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DocumentKind).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ObjectType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.FileName).HasMaxLength(512);
+            entity.Property(e => e.YandexDiskPath).HasMaxLength(1024);
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.LastError).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => new { e.DocumentKind, e.ObjectType, e.ObjectId })
+                .IsUnique()
+                .HasDatabaseName("IX_YandexDiskCrmSyncStates_Document_Object");
+            entity.HasIndex(e => e.Status)
+                .HasDatabaseName("IX_YandexDiskCrmSyncStates_Status");
+            entity.HasIndex(e => e.LastSyncedAt)
+                .HasDatabaseName("IX_YandexDiskCrmSyncStates_LastSyncedAt");
+        });
+
         // ------------------ UserSettings ------------------
         modelBuilder.Entity<UserSetting>(entity =>
         {
@@ -3045,6 +3066,7 @@ public class PaymentContext : DbContext
     /// </summary>
     public DbSet<UserActivityLog> UserActivityLogs { get; set; }
     public DbSet<ObjectAuditEvent> ObjectAuditEvents { get; set; }
+    public DbSet<YandexDiskCrmSyncState> YandexDiskCrmSyncStates { get; set; }
     public DbSet<TaskJournalItem> TaskJournalItems { get; set; }
     public DbSet<TaskJournalParticipant> TaskJournalParticipants { get; set; }
     public DbSet<TaskJournalComment> TaskJournalComments { get; set; }

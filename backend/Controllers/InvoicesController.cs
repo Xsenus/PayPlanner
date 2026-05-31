@@ -2527,6 +2527,16 @@ public class InvoicesController : ControllerBase
                 overwrite),
                 ct);
 
+            await YandexDiskCrmSyncStateRecorder.RecordSuccessAsync(
+                _db,
+                "invoice",
+                "payment",
+                payment.Id,
+                fileName,
+                result.Path,
+                null,
+                ct);
+
             _db.ObjectAuditEvents.Add(new ObjectAuditEvent
             {
                 ObjectType = "payment",

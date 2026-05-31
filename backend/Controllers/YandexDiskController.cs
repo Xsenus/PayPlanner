@@ -120,6 +120,7 @@ public sealed class YandexDiskController : ControllerBase
             "FolderCreated",
             "Создана папка на Яндекс.Диске.",
             new { request.Path },
+            null,
             ct);
     }
 
@@ -136,6 +137,7 @@ public sealed class YandexDiskController : ControllerBase
             "Copied",
             "Ресурс скопирован на Яндекс.Диске.",
             new { request.FromPath, request.ToPath, request.Overwrite },
+            null,
             ct);
     }
 
@@ -152,6 +154,7 @@ public sealed class YandexDiskController : ControllerBase
             "Moved",
             "Ресурс перемещен или переименован на Яндекс.Диске.",
             new { request.FromPath, request.ToPath, request.Overwrite },
+            null,
             ct);
     }
 
@@ -171,6 +174,7 @@ public sealed class YandexDiskController : ControllerBase
                 ? "Ресурс окончательно удален с Яндекс.Диска."
                 : "Ресурс удален с Яндекс.Диска.",
             new { Path = path, Permanently = permanently },
+            null,
             ct);
     }
 
@@ -196,6 +200,7 @@ public sealed class YandexDiskController : ControllerBase
             "Uploaded",
             "Файл загружен на Яндекс.Диск.",
             new { Path = path, file.FileName, file.Length, file.ContentType, Overwrite = overwrite },
+            null,
             ct);
     }
 
@@ -243,6 +248,7 @@ public sealed class YandexDiskController : ControllerBase
             "TextUpdated",
             "Текстовый файл обновлен на Яндекс.Диске.",
             new { request.Path, ContentLength = request.Content?.Length ?? 0, request.Overwrite },
+            null,
             ct);
     }
 
@@ -310,6 +316,15 @@ public sealed class YandexDiskController : ControllerBase
                 document.DocumentType,
                 Overwrite = overwrite,
             },
+            result => YandexDiskCrmSyncStateRecorder.RecordSuccessAsync(
+                _db,
+                "caseDocument",
+                "caseDocument",
+                document.Id,
+                document.OriginalFileName,
+                result.Path,
+                document.ClientCaseId,
+                ct),
             ct);
     }
 
@@ -386,6 +401,15 @@ public sealed class YandexDiskController : ControllerBase
                 task.Title,
                 Overwrite = overwrite,
             },
+            result => YandexDiskCrmSyncStateRecorder.RecordSuccessAsync(
+                _db,
+                "taskFile",
+                "taskFile",
+                taskFile.Id,
+                taskFile.OriginalFileName,
+                result.Path,
+                task.Id,
+                ct),
             ct);
     }
 
@@ -435,11 +459,17 @@ public sealed class YandexDiskController : ControllerBase
         string auditAction,
         string description,
         object metadata,
+        Func<T, Task>? afterSuccess,
         CancellationToken ct)
     {
         try
         {
             var result = await action();
+            if (afterSuccess is not null)
+            {
+                await afterSuccess(result);
+            }
+
             await AddAuditAsync(auditAction, description, metadata, ct);
             return result;
         }

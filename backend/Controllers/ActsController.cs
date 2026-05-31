@@ -864,6 +864,16 @@ public class ActsController : ControllerBase
                 overwrite),
                 ct);
 
+            await YandexDiskCrmSyncStateRecorder.RecordSuccessAsync(
+                _db,
+                "act",
+                "act",
+                act.Id,
+                fileName,
+                result.Path,
+                null,
+                ct);
+
             _db.ObjectAuditEvents.Add(new ObjectAuditEvent
             {
                 ObjectType = "act",

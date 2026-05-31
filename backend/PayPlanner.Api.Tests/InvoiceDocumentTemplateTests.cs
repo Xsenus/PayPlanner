@@ -1098,6 +1098,15 @@ public class InvoiceDocumentTemplateTests
             && item.ObjectId == paymentId
             && item.Action == "YandexDiskUploaded");
         Assert.Contains("отправлен на Яндекс.Диск", audit.Description);
+
+        var syncState = await db.YandexDiskCrmSyncStates.AsNoTracking().SingleAsync(item =>
+            item.DocumentKind == "invoice"
+            && item.ObjectType == "payment"
+            && item.ObjectId == paymentId);
+        Assert.Equal(YandexDiskCrmSyncStatus.Success, syncState.Status);
+        Assert.Equal("/CRM/invoice-25.doc", syncState.YandexDiskPath);
+        Assert.Equal("invoice-25.doc", syncState.FileName);
+        Assert.Equal(1, syncState.AttemptCount);
     }
 
     private static async Task<int> CreateInvoiceDocumentFixtureAsync(PaymentContext db, bool createNormalizedPassport = true)
