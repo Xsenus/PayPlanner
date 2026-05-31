@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -25,9 +26,25 @@ public interface IYandexDiskService
     Task<YandexDiskOperationResultDto> SaveTextFileAsync(UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default);
     Task<YandexDiskCrmSyncSettingsDto> GetCrmSyncSettingsAsync(CancellationToken cancellationToken = default);
     Task<YandexDiskCrmSyncSettingsDto> UpdateCrmSyncSettingsAsync(UpdateYandexDiskCrmSyncSettingsRequest request, CancellationToken cancellationToken = default);
+    Task<YandexDiskOperationResultDto> UploadCrmDocumentAsync(YandexDiskCrmDocumentUpload upload, CancellationToken cancellationToken = default);
 }
 
 public sealed record YandexDiskDownload(string FileName, string ContentType, byte[] Content);
+
+public sealed record YandexDiskCrmDocumentUpload(
+    Stream Content,
+    string? ContentType,
+    string OriginalFileName,
+    string DocumentKind,
+    string DocumentType,
+    string? DocumentNumber,
+    DateTime? DocumentDate,
+    string DocumentTitle,
+    string? ClientName,
+    string? LegalEntityName,
+    string? CaseNumber,
+    string? CaseTitle,
+    bool? OverwriteExisting = null);
 
 public sealed class YandexDiskOperationException : Exception
 {
@@ -290,6 +307,32 @@ public sealed class YandexDiskService : IYandexDiskService
         await UpsertSettingAsync(CrmSyncSettingsKey, JsonSerializer.Serialize(normalized, JsonOptions), now, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         return normalized;
+    }
+
+    public async Task<YandexDiskOperationResultDto> UploadCrmDocumentAsync(
+        YandexDiskCrmDocumentUpload upload,
+        CancellationToken cancellationToken = default)
+    {
+        var syncSettings = await GetCrmSyncSettingsAsync(cancellationToken);
+        if (!syncSettings.Enabled)
+        {
+            throw new YandexDiskOperationException(400, "Включите правила синхронизации CRM в разделе Я.Диск.");
+        }
+
+        if (!IsCrmDocumentKindEnabled(syncSettings, upload.DocumentKind))
+        {
+            throw new YandexDiskOperationException(400, "Для этого типа CRM-документа синхронизация с Яндекс.Диском отключена.");
+        }
+
+        var settings = await LoadConfiguredSettingsAsync(cancellationToken);
+        var tokens = BuildCrmDocumentTokens(upload);
+        var folderPath = ApplyCrmTemplate(syncSettings.FolderTemplate, tokens, isFileName: false);
+        var fileName = ApplyCrmTemplate(syncSettings.FileNameTemplate, tokens, isFileName: true);
+        fileName = EnsureFileExtension(fileName, upload.OriginalFileName);
+        var targetPath = string.IsNullOrWhiteSpace(folderPath) ? fileName : $"{folderPath}/{fileName}";
+
+        await EnsureFolderPathAsync(settings, folderPath, cancellationToken);
+        return await UploadAsync(targetPath, upload.Content, upload.ContentType, upload.OverwriteExisting ?? syncSettings.OverwriteExisting, cancellationToken);
     }
 
     private async Task<YandexDiskOperationResultDto> CopyOrMoveAsync(
@@ -607,6 +650,108 @@ public sealed class YandexDiskService : IYandexDiskService
         }
 
         return template.Length > maxLength ? template[..maxLength] : template;
+    }
+
+    private async Task EnsureFolderPathAsync(YandexDiskSettingsState settings, string folderPath, CancellationToken cancellationToken)
+    {
+        var normalizedFolder = NormalizeRelativePath(folderPath);
+        if (string.IsNullOrWhiteSpace(normalizedFolder))
+        {
+            return;
+        }
+
+        var token = settings.OAuthToken!;
+        var accumulated = string.Empty;
+        foreach (var part in normalizedFolder.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            accumulated = string.IsNullOrWhiteSpace(accumulated) ? part : $"{accumulated}/{part}";
+            var fullPath = BuildFullPath(settings.RootPath, accumulated);
+            try
+            {
+                await SendAsync(
+                    HttpMethod.Put,
+                    $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(fullPath)}",
+                    token,
+                    null,
+                    cancellationToken);
+            }
+            catch (YandexDiskOperationException ex) when (ex.StatusCode == 409)
+            {
+                // Folder already exists.
+            }
+        }
+    }
+
+    private static bool IsCrmDocumentKindEnabled(YandexDiskCrmSyncSettingsDto settings, string kind)
+        => kind switch
+        {
+            "invoice" => settings.SyncInvoices,
+            "act" => settings.SyncActs,
+            "contract" => settings.SyncContracts,
+            "caseDocument" => settings.SyncCaseDocuments,
+            "taskFile" => settings.SyncTaskFiles,
+            _ => false,
+        };
+
+    private static Dictionary<string, string> BuildCrmDocumentTokens(YandexDiskCrmDocumentUpload upload)
+        => new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["clientName"] = upload.ClientName ?? string.Empty,
+            ["legalEntityName"] = upload.LegalEntityName ?? string.Empty,
+            ["caseNumber"] = upload.CaseNumber ?? string.Empty,
+            ["caseTitle"] = upload.CaseTitle ?? string.Empty,
+            ["documentType"] = upload.DocumentType,
+            ["documentNumber"] = upload.DocumentNumber ?? string.Empty,
+            ["documentDate"] = upload.DocumentDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            ["documentTitle"] = upload.DocumentTitle,
+        };
+
+    private static string ApplyCrmTemplate(string template, IReadOnlyDictionary<string, string> tokens, bool isFileName)
+    {
+        var value = template;
+        foreach (var token in CrmSyncTemplateTokens)
+        {
+            var replacement = tokens.TryGetValue(token, out var tokenValue) ? tokenValue : string.Empty;
+            value = value.Replace($"{{{token}}}", replacement, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var segments = value
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(SanitizePathSegment)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToList();
+
+        if (segments.Count == 0)
+        {
+            return isFileName ? "document" : string.Empty;
+        }
+
+        return isFileName ? segments[^1] : string.Join('/', segments);
+    }
+
+    private static string SanitizePathSegment(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var builder = new StringBuilder(value.Length);
+        foreach (var ch in value.Trim())
+        {
+            builder.Append(invalid.Contains(ch) || ch == '/' || ch == '\\' ? '_' : ch);
+        }
+
+        var result = builder.ToString().Trim(' ', '.');
+        return string.IsNullOrWhiteSpace(result) ? "document" : result;
+    }
+
+    private static string EnsureFileExtension(string fileName, string originalFileName)
+    {
+        var extension = Path.GetExtension(originalFileName);
+        if (string.IsNullOrWhiteSpace(extension) || !string.IsNullOrWhiteSpace(Path.GetExtension(fileName)))
+        {
+            return fileName;
+        }
+
+        return $"{fileName}{extension}";
     }
 
     private static string DecodeText(byte[] content)

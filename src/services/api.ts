@@ -1550,6 +1550,13 @@ export class ApiService {
     });
   }
 
+  async uploadCaseDocumentToYandexDisk(documentId: number, overwrite?: boolean) {
+    const query = overwrite === undefined ? '' : `?overwrite=${overwrite}`;
+    return this.request<YandexDiskOperationResultDto>(`/yandex-disk/crm/case-documents/${documentId}/upload${query}`, {
+      method: 'POST',
+    });
+  }
+
   // ===== Acts =====
   async getActs(params?: {
     from?: string;

@@ -152,6 +152,66 @@ public sealed class YandexDiskServiceTests
         Assert.DoesNotContain("..", stored.Value);
     }
 
+    [Fact]
+    public async Task UploadCrmDocumentAsync_BuildsPathFromSettingsAndCreatesFolders()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.rootPath", Value = "disk:/PayPlanner", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+
+        var requests = new List<string>();
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(request =>
+        {
+            requests.Add($"{request.Method} {request.RequestUri}");
+            if (request.RequestUri?.Host == "upload.local")
+            {
+                return new HttpResponseMessage(HttpStatusCode.Created);
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/resources/upload", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return JsonResponse("""{ "href": "https://upload.local/file" }""");
+            }
+
+            return JsonResponse("{}");
+        })));
+
+        await service.UpdateCrmSyncSettingsAsync(new UpdateYandexDiskCrmSyncSettingsRequest
+        {
+            Enabled = true,
+            SyncInvoices = false,
+            SyncActs = false,
+            SyncContracts = false,
+            SyncCaseDocuments = true,
+            SyncTaskFiles = false,
+            OverwriteExisting = true,
+            FolderTemplate = "CRM/{clientName}/{caseNumber}/{documentType}",
+            FileNameTemplate = "{documentDate}-{documentTitle}",
+        }, CancellationToken.None);
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("document"));
+        var result = await service.UploadCrmDocumentAsync(new YandexDiskCrmDocumentUpload(
+            stream,
+            "text/plain",
+            "source.txt",
+            "caseDocument",
+            "Заявление",
+            "claim",
+            new DateTime(2026, 6, 1),
+            "Иск к должнику",
+            "Иванов",
+            null,
+            "CASE-7",
+            "Банкротство"),
+            CancellationToken.None);
+
+        Assert.Equal("/CRM/Иванов/CASE-7/Заявление/2026-06-01-Иск к должнику.txt", result.Path);
+        Assert.Contains(requests, item => item.Contains("/resources?path=disk%3A%2FPayPlanner%2FCRM", StringComparison.Ordinal));
+        Assert.Contains(requests, item => item.Contains("/resources/upload", StringComparison.Ordinal) && item.Contains("overwrite=true", StringComparison.Ordinal));
+        Assert.Contains(requests, item => item.StartsWith("PUT https://upload.local/file", StringComparison.Ordinal));
+    }
+
     private static HttpResponseMessage JsonResponse(string json)
         => new(HttpStatusCode.OK)
         {

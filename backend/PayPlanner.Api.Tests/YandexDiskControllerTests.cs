@@ -241,6 +241,9 @@ public sealed class YandexDiskControllerTests
                 FileNameTemplate = request.FileNameTemplate ?? string.Empty,
                 AvailableTokens = ["clientName", "documentTitle"],
             });
+
+        public Task<YandexDiskOperationResultDto> UploadCrmDocumentAsync(YandexDiskCrmDocumentUpload upload, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = $"/CRM/{upload.OriginalFileName}" });
     }
 
     private sealed class TestDbScope(SqliteConnection connection, PaymentContext db) : IAsyncDisposable

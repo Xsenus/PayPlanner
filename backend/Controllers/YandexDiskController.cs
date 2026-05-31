@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -19,11 +20,13 @@ public sealed class YandexDiskController : ControllerBase
 
     private readonly IYandexDiskService _service;
     private readonly PaymentContext _db;
+    private readonly ICaseDocumentStorage _caseDocumentStorage;
 
-    public YandexDiskController(IYandexDiskService service, PaymentContext db)
+    public YandexDiskController(IYandexDiskService service, PaymentContext db, IWebHostEnvironment? environment = null, ICaseDocumentStorage? caseDocumentStorage = null)
     {
         _service = service;
         _db = db;
+        _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
     }
 
     [HttpGet("settings")]
@@ -241,6 +244,73 @@ public sealed class YandexDiskController : ControllerBase
             ct);
     }
 
+    [HttpPost("crm/case-documents/{documentId:int}/upload")]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> UploadCaseDocument(
+        int documentId,
+        [FromQuery] bool? overwrite,
+        CancellationToken ct)
+    {
+        var yandexForbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
+        if (yandexForbidden is not null) return yandexForbidden;
+
+        var caseForbidden = await RequireSectionPermissionAsync(RolePermissionCatalog.Cases, permission => permission.CanExport, ct);
+        if (caseForbidden is not null) return caseForbidden;
+
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var document = await _db.ClientCaseDocuments
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == documentId, ct);
+        if (document is null)
+        {
+            return NotFound();
+        }
+
+        var clientCase = await _db.ClientCases
+            .AsNoTracking()
+            .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == document.ClientCaseId, ct);
+        if (clientCase is null || !_caseDocumentStorage.Exists(document.StoragePath))
+        {
+            return NotFound();
+        }
+
+        await using var stream = System.IO.File.OpenRead(_caseDocumentStorage.ResolvePath(document.StoragePath));
+        return await ExecuteAndAuditAsync(
+            () => _service.UploadCrmDocumentAsync(new YandexDiskCrmDocumentUpload(
+                stream,
+                document.ContentType,
+                document.OriginalFileName,
+                "caseDocument",
+                document.DocumentType,
+                document.DocumentKey,
+                document.UploadedAt,
+                Path.GetFileNameWithoutExtension(document.OriginalFileName),
+                clientCase.Client?.Name,
+                clientCase.LegalEntity?.ShortName ?? clientCase.LegalEntity?.FullName,
+                clientCase.CaseNumber,
+                clientCase.Title,
+                overwrite),
+                ct),
+            "CrmCaseDocumentUploaded",
+            "Документ дела отправлен на Яндекс.Диск.",
+            new
+            {
+                DocumentId = document.Id,
+                document.ClientCaseId,
+                document.OriginalFileName,
+                document.DocumentType,
+                Overwrite = overwrite,
+            },
+            ct);
+    }
+
     private async Task<ActionResult?> RequirePermissionAsync(Func<RolePermission, bool> isAllowed, CancellationToken ct)
     {
         if (User.IsInRole("admin"))
@@ -255,6 +325,28 @@ public sealed class YandexDiskController : ControllerBase
         }
 
         var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.YandexDisk, ct);
+        return permission is not null && permission.CanView && isAllowed(permission)
+            ? null
+            : Forbid();
+    }
+
+    private async Task<ActionResult?> RequireSectionPermissionAsync(
+        string section,
+        Func<RolePermission, bool> isAllowed,
+        CancellationToken ct)
+    {
+        if (User.IsInRole("admin"))
+        {
+            return null;
+        }
+
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, section, ct);
         return permission is not null && permission.CanView && isAllowed(permission)
             ? null
             : Forbid();

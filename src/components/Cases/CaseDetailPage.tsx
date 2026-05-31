@@ -24,6 +24,7 @@ import {
   Save,
   Send,
   Trash2,
+  UploadCloud,
   UserRound,
   WalletCards,
   X,
@@ -1054,6 +1055,7 @@ export function CaseDetailPage({
   const [uploadingDocumentVersionId, setUploadingDocumentVersionId] = useState<number | null>(null);
   const [downloadingDocumentId, setDownloadingDocumentId] = useState<number | null>(null);
   const [previewingDocumentId, setPreviewingDocumentId] = useState<number | null>(null);
+  const [sendingYandexDocumentId, setSendingYandexDocumentId] = useState<number | null>(null);
   const [documentPreview, setDocumentPreview] = useState<DocumentPreviewState | null>(null);
   const [updatingDocumentId, setUpdatingDocumentId] = useState<number | null>(null);
   const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
@@ -1919,6 +1921,22 @@ export function CaseDetailPage({
       setError(err instanceof Error ? err.message : 'Не удалось открыть предпросмотр документа по делу.');
     } finally {
       setPreviewingDocumentId(null);
+    }
+  };
+
+  const sendDocumentToYandexDisk = async (caseDocument: ClientCaseDocument) => {
+    if (!caseItem) return;
+
+    setSendingYandexDocumentId(caseDocument.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await apiService.uploadCaseDocumentToYandexDisk(caseDocument.id);
+      setNotice(`Документ «${caseDocument.originalFileName}» отправлен на Яндекс.Диск: ${result.path}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось отправить документ на Яндекс.Диск.');
+    } finally {
+      setSendingYandexDocumentId(null);
     }
   };
 
@@ -3315,6 +3333,7 @@ export function CaseDetailPage({
                   documents={documents}
                   downloadingDocumentId={downloadingDocumentId}
                   previewingDocumentId={previewingDocumentId}
+                  sendingYandexDocumentId={sendingYandexDocumentId}
                   uploadingDocumentVersionId={uploadingDocumentVersionId}
                   updatingDocumentId={updatingDocumentId}
                   deletingDocumentId={deletingDocumentId}
@@ -3324,6 +3343,7 @@ export function CaseDetailPage({
                   canDelete={canDeleteDocuments}
                   onPreview={(caseDocument) => void previewDocument(caseDocument)}
                   onDownload={(caseDocument) => void downloadDocument(caseDocument)}
+                  onSendToYandexDisk={(caseDocument) => void sendDocumentToYandexDisk(caseDocument)}
                   onUploadVersion={(caseDocument, file) => void uploadDocumentVersion(caseDocument, file)}
                   onUpdate={(caseDocument, payload) => void updateDocument(caseDocument, payload)}
                   onDelete={(caseDocument) => void deleteDocument(caseDocument)}
@@ -5728,6 +5748,7 @@ function DocumentList({
   documents,
   downloadingDocumentId,
   previewingDocumentId,
+  sendingYandexDocumentId,
   uploadingDocumentVersionId,
   updatingDocumentId,
   deletingDocumentId,
@@ -5737,6 +5758,7 @@ function DocumentList({
   canDelete,
   onPreview,
   onDownload,
+  onSendToYandexDisk,
   onUploadVersion,
   onUpdate,
   onDelete,
@@ -5744,6 +5766,7 @@ function DocumentList({
   documents: ClientCaseDocument[];
   downloadingDocumentId: number | null;
   previewingDocumentId: number | null;
+  sendingYandexDocumentId: number | null;
   uploadingDocumentVersionId: number | null;
   updatingDocumentId: number | null;
   deletingDocumentId: number | null;
@@ -5753,6 +5776,7 @@ function DocumentList({
   canDelete: boolean;
   onPreview: (caseDocument: ClientCaseDocument) => void;
   onDownload: (caseDocument: ClientCaseDocument) => void;
+  onSendToYandexDisk: (caseDocument: ClientCaseDocument) => void;
   onUploadVersion: (caseDocument: ClientCaseDocument, file: File | null | undefined) => void;
   onUpdate: (caseDocument: ClientCaseDocument, payload: { documentType: string; status: string }) => void;
   onDelete: (caseDocument: ClientCaseDocument) => void;
@@ -5862,6 +5886,7 @@ function DocumentList({
               versionSummary={versionSummaries.get(document.documentKey)}
               downloading={downloadingDocumentId === document.id}
               previewing={previewingDocumentId === document.id}
+              sendingToYandex={sendingYandexDocumentId === document.id}
               uploadingVersion={uploadingDocumentVersionId === document.id}
               updating={updatingDocumentId === document.id}
               deleting={deletingDocumentId === document.id}
@@ -5871,6 +5896,7 @@ function DocumentList({
               canDelete={canDelete}
               onPreview={onPreview}
               onDownload={onDownload}
+              onSendToYandexDisk={onSendToYandexDisk}
               onUploadVersion={onUploadVersion}
               onUpdate={onUpdate}
               onDelete={onDelete}
@@ -5920,6 +5946,7 @@ function DocumentCard({
   versionSummary,
   downloading,
   previewing,
+  sendingToYandex,
   uploadingVersion,
   updating,
   deleting,
@@ -5929,6 +5956,7 @@ function DocumentCard({
   canDelete,
   onPreview,
   onDownload,
+  onSendToYandexDisk,
   onUploadVersion,
   onUpdate,
   onDelete,
@@ -5937,6 +5965,7 @@ function DocumentCard({
   versionSummary?: DocumentVersionSummary;
   downloading: boolean;
   previewing: boolean;
+  sendingToYandex: boolean;
   uploadingVersion: boolean;
   updating: boolean;
   deleting: boolean;
@@ -5946,6 +5975,7 @@ function DocumentCard({
   canDelete: boolean;
   onPreview: (caseDocument: ClientCaseDocument) => void;
   onDownload: (caseDocument: ClientCaseDocument) => void;
+  onSendToYandexDisk: (caseDocument: ClientCaseDocument) => void;
   onUploadVersion: (caseDocument: ClientCaseDocument, file: File | null | undefined) => void;
   onUpdate: (caseDocument: ClientCaseDocument, payload: { documentType: string; status: string }) => void;
   onDelete: (caseDocument: ClientCaseDocument) => void;
@@ -6026,7 +6056,7 @@ function DocumentCard({
           </select>
         </label>
       </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {canEdit ? (
           <button
             type="button"
@@ -6052,6 +6082,14 @@ function DocumentCard({
           aria-label={`Скачать документ ${document.originalFileName}`}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
           {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Скачать
+        </button>
+        <button
+          type="button"
+          onClick={() => onSendToYandexDisk(document)}
+          disabled={sendingToYandex || deleting}
+          aria-label={`Отправить документ ${document.originalFileName} на Яндекс.Диск`}
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-200 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50">
+          {sendingToYandex ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />} Я.Диск
         </button>
         {canEdit ? (
           <label
