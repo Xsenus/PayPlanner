@@ -1891,10 +1891,10 @@ public class CasesV2ControllerTests
     public async Task ProceduralDeadlines_CreateWithCourtEventSourceBackfillsCourtEventLink()
     {
         await using var db = await CreateContextAsync();
-        var owner = await CreateUserAsync(db, "deadline-court-link@example.com", "Р’Р»Р°РґРµР»РµС†");
+        var owner = await CreateUserAsync(db, "deadline-court-link@example.com", "Владелец");
         var client = new Client
         {
-            Name = "РљР»РёРµРЅС‚ СЃ РґРІСѓСЃС‚РѕСЂРѕРЅРЅРµР№ СЃРІСЏР·СЊСЋ",
+            Name = "Клиент с двусторонней связью",
             IsActive = true,
             ResponsibleUserId = owner.Id,
         };

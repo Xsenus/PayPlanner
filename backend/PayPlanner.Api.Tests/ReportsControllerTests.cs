@@ -190,7 +190,7 @@ public class ReportsControllerTests
             today.AddDays(30),
             nameof(ClientCaseStatus.Open),
             responsible.Id,
-            "Р‘Р°РЅРє",
+            "Банк",
             CancellationToken.None);
         var excel = Assert.IsType<FileContentResult>(excelAction);
         Assert.Equal("application/vnd.ms-excel; charset=utf-8", excel.ContentType);
@@ -204,7 +204,7 @@ public class ReportsControllerTests
             today.AddDays(30),
             nameof(ClientCaseStatus.Open),
             responsible.Id,
-            "Р‘Р°РЅРє",
+            "Банк",
             CancellationToken.None);
         var pdf = Assert.IsType<FileContentResult>(pdfAction);
         Assert.Equal("application/pdf", pdf.ContentType);
