@@ -251,48 +251,57 @@ export function Acts({
     Terminated: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
 
-  const defaultWorkflowStatusLabels: Record<ActWorkflowStatus, string> = {
-    Draft: 'Черновик',
-    NotSigned: 'Не подписан',
-    RequiresClientSignature: 'Требуется подпись клиента',
-    OnApproval: 'На согласовании',
-    Approved: 'Согласован',
-    ApprovalRejected: 'Отказ в согласовании',
-    NeedsCorrection: 'Требует исправления',
-    OnSigning: 'На подписании',
-    Signed: 'Подписан',
-    Cancelled: 'Аннулирован',
-  };
+  const defaultWorkflowStatusLabels = useMemo<Record<ActWorkflowStatus, string>>(
+    () => ({
+      Draft: 'Черновик',
+      NotSigned: 'Не подписан',
+      RequiresClientSignature: 'Требуется подпись клиента',
+      OnApproval: 'На согласовании',
+      Approved: 'Согласован',
+      ApprovalRejected: 'Отказ в согласовании',
+      NeedsCorrection: 'Требует исправления',
+      OnSigning: 'На подписании',
+      Signed: 'Подписан',
+      Cancelled: 'Аннулирован',
+    }),
+    [],
+  );
 
   const workflowStatusLabels = useMemo(
     () => getDocumentStatusLabels(documentStatusSettings, 'act', defaultWorkflowStatusLabels),
-    [documentStatusSettings],
+    [defaultWorkflowStatusLabels, documentStatusSettings],
   );
 
-  const workflowStatusClasses: Record<ActWorkflowStatus, string> = {
-    Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
-    NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
-    RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
-    OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
-    Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
-    NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
-    OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
-    Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
-  };
-  const workflowStatusDescriptions: Record<ActWorkflowStatus, string> = {
-    Draft: 'Акт вернется в черновик, даты подписания будут очищены.',
-    NotSigned: 'Акт будет отмечен как неподписанный.',
-    RequiresClientSignature: 'Акт будет ожидать подпись клиента.',
-    OnApproval: 'Акт будет отправлен на внутреннее согласование.',
-    Approved: 'Акт будет отмечен как согласованный.',
-    ApprovalRejected: 'В журнал попадет отказ в согласовании акта.',
-    NeedsCorrection: 'Акт будет возвращен на исправление.',
-    OnSigning: 'Акт будет отмечен как переданный на подписание.',
-    Signed: 'Акт будет отмечен как подписанный.',
-    Cancelled: 'Акт будет аннулирован, основной статус станет расторгнутым.',
-  };
+  const workflowStatusClasses = useMemo<Record<ActWorkflowStatus, string>>(
+    () => ({
+      Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
+      NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+      RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
+      OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
+      Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+      ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
+      NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
+      OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
+      Signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+      Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
+    }),
+    [],
+  );
+  const workflowStatusDescriptions = useMemo<Record<ActWorkflowStatus, string>>(
+    () => ({
+      Draft: 'Акт вернется в черновик, даты подписания будут очищены.',
+      NotSigned: 'Акт будет отмечен как неподписанный.',
+      RequiresClientSignature: 'Акт будет ожидать подпись клиента.',
+      OnApproval: 'Акт будет отправлен на внутреннее согласование.',
+      Approved: 'Акт будет отмечен как согласованный.',
+      ApprovalRejected: 'В журнал попадет отказ в согласовании акта.',
+      NeedsCorrection: 'Акт будет возвращен на исправление.',
+      OnSigning: 'Акт будет отмечен как переданный на подписание.',
+      Signed: 'Акт будет отмечен как подписанный.',
+      Cancelled: 'Акт будет аннулирован, основной статус станет расторгнутым.',
+    }),
+    [],
+  );
 
   const workflowStatusCodes = useMemo(
     () => getDocumentStatusCodes(documentStatusSettings, 'act', ACT_WORKFLOW_STATUS_ORDER),
@@ -306,7 +315,7 @@ export function Acts({
       description: workflowStatusDescriptions[status],
       className: workflowStatusClasses[status],
     })),
-    [workflowStatusCodes, workflowStatusLabels],
+    [workflowStatusClasses, workflowStatusCodes, workflowStatusDescriptions, workflowStatusLabels],
   );
 
   const resolveWorkflowStatus = (act: Act): ActWorkflowStatus => {

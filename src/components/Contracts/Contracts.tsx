@@ -184,51 +184,60 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
     [columnsByKey, orderedVisibleColumns],
   );
 
-  const defaultContractStatusLabels: Record<ContractStatus, string> = {
-    Draft: 'Черновик',
-    NotSigned: 'Не подписан',
-    RequiresClientSignature: 'Требуется подпись клиента',
-    OnApproval: 'На согласовании',
-    Approved: 'Согласован',
-    ApprovalRejected: 'Отказ в согласовании',
-    NeedsCorrection: 'Требует исправления',
-    OnSigning: 'На подписании',
-    Concluded: 'Подписан',
-    Terminated: 'Расторгнут',
-    Cancelled: 'Аннулирован',
-  };
+  const defaultContractStatusLabels = useMemo<Record<ContractStatus, string>>(
+    () => ({
+      Draft: 'Черновик',
+      NotSigned: 'Не подписан',
+      RequiresClientSignature: 'Требуется подпись клиента',
+      OnApproval: 'На согласовании',
+      Approved: 'Согласован',
+      ApprovalRejected: 'Отказ в согласовании',
+      NeedsCorrection: 'Требует исправления',
+      OnSigning: 'На подписании',
+      Concluded: 'Подписан',
+      Terminated: 'Расторгнут',
+      Cancelled: 'Аннулирован',
+    }),
+    [],
+  );
 
   const contractStatusLabels = useMemo(
     () => getDocumentStatusLabels(documentStatusSettings, 'contract', defaultContractStatusLabels),
-    [documentStatusSettings],
+    [defaultContractStatusLabels, documentStatusSettings],
   );
 
-  const contractStatusClasses: Record<ContractStatus, string> = {
-    Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
-    NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
-    RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
-    OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
-    Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
-    NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
-    OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
-    Concluded: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    Terminated: 'bg-orange-100 text-orange-700 border border-orange-200',
-    Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
-  };
-  const contractStatusDescriptions: Record<ContractStatus, string> = {
-    Draft: 'Договор вернется в черновик, даты подписания и закрытия будут очищены.',
-    NotSigned: 'Договор будет отмечен как неподписанный.',
-    RequiresClientSignature: 'Договор будет ожидать подпись клиента.',
-    OnApproval: 'Договор будет отправлен на внутреннее согласование.',
-    Approved: 'Договор будет отмечен как согласованный.',
-    ApprovalRejected: 'В журнал попадет отказ в согласовании договора.',
-    NeedsCorrection: 'Договор будет возвращен на исправление.',
-    OnSigning: 'Договор будет отмечен как отправленный на подписание.',
-    Concluded: 'Договор будет отмечен как подписанный.',
-    Terminated: 'Договор будет расторгнут сегодняшней датой.',
-    Cancelled: 'Договор будет аннулирован сегодняшней датой.',
-  };
+  const contractStatusClasses = useMemo<Record<ContractStatus, string>>(
+    () => ({
+      Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
+      NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+      RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
+      OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
+      Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+      ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
+      NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
+      OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
+      Concluded: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+      Terminated: 'bg-orange-100 text-orange-700 border border-orange-200',
+      Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
+    }),
+    [],
+  );
+  const contractStatusDescriptions = useMemo<Record<ContractStatus, string>>(
+    () => ({
+      Draft: 'Договор вернется в черновик, даты подписания и закрытия будут очищены.',
+      NotSigned: 'Договор будет отмечен как неподписанный.',
+      RequiresClientSignature: 'Договор будет ожидать подпись клиента.',
+      OnApproval: 'Договор будет отправлен на внутреннее согласование.',
+      Approved: 'Договор будет отмечен как согласованный.',
+      ApprovalRejected: 'В журнал попадет отказ в согласовании договора.',
+      NeedsCorrection: 'Договор будет возвращен на исправление.',
+      OnSigning: 'Договор будет отмечен как отправленный на подписание.',
+      Concluded: 'Договор будет отмечен как подписанный.',
+      Terminated: 'Договор будет расторгнут сегодняшней датой.',
+      Cancelled: 'Договор будет аннулирован сегодняшней датой.',
+    }),
+    [],
+  );
 
   const contractStatusCodes = useMemo(
     () => getDocumentStatusCodes(documentStatusSettings, 'contract', CONTRACT_STATUS_ORDER),
@@ -242,7 +251,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
       description: contractStatusDescriptions[status],
       className: contractStatusClasses[status],
     })),
-    [contractStatusCodes, contractStatusLabels],
+    [contractStatusClasses, contractStatusCodes, contractStatusDescriptions, contractStatusLabels],
   );
 
   const handleSort = (key: ContractsSortKey) => {

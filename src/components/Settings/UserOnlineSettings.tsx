@@ -151,7 +151,7 @@ export function UserOnlineSettings() {
     return () => window.clearInterval(intervalId);
   }, [load]);
 
-  const users = data?.users ?? [];
+  const users = useMemo(() => data?.users ?? [], [data?.users]);
   const inactiveCount = useMemo(
     () => users.filter((user) => !user.isActive || !user.isApproved).length,
     [users],

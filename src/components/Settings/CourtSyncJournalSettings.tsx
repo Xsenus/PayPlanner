@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, RefreshCw, Search } from 'lucide-react';
 import { apiService } from '../../services/api';
 import type { ClientCaseCourtSyncJournalEntry } from '../../types';
@@ -57,7 +57,7 @@ export function CourtSyncJournalSettings() {
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
 
-  const loadJournal = async () => {
+  const loadJournal = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -73,11 +73,11 @@ export function CourtSyncJournalSettings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [appliedSearch, statusFilter]);
 
   useEffect(() => {
     void loadJournal();
-  }, [statusFilter, appliedSearch]);
+  }, [loadJournal]);
 
   const counters = useMemo(() => ({
     total: items.length,

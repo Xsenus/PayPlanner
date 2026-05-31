@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiService, type AppReleaseDto, type AppVersionLatestDto } from '../../services/api';
+import {
+  hasAppVersionLocalDismissal,
+  hasAppVersionSessionDismissal,
+  rememberAppVersionLocalDismissal,
+  rememberAppVersionSessionDismissal,
+} from './AppVersionDismissals';
 import { AppVersionModal } from './AppVersionModal';
 
 type ModalState =
@@ -20,41 +26,6 @@ type AppVersionGateProps = {
   manualOpenSignal: number;
   onManualOpenHandled: () => void;
 };
-
-const sessionDismissed = new Set<string>();
-const localDismissedPrefix = 'payplanner.appVersion.dismissed';
-
-function getDismissedStorageKey(userId: number, releaseId: string) {
-  return `${localDismissedPrefix}.${userId}.${releaseId}`;
-}
-
-function hasLocalDismissal(userId: number, releaseId: string) {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  try {
-    return window.localStorage.getItem(getDismissedStorageKey(userId, releaseId)) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function rememberLocalDismissal(userId: number, releaseId: string) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(getDismissedStorageKey(userId, releaseId), '1');
-  } catch {
-    // Local storage can be unavailable in private mode; server-side seen mark still works.
-  }
-}
-
-export function resetAppVersionSessionDismissalsForTests() {
-  sessionDismissed.clear();
-}
 
 export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }: AppVersionGateProps) {
   const [latest, setLatest] = useState<AppVersionLatestDto | null>(null);
@@ -95,8 +66,8 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
         if (
           releaseId
           && !data.seenByCurrentUser
-          && !sessionDismissed.has(releaseId)
-          && !hasLocalDismissal(userId, releaseId)
+          && !hasAppVersionSessionDismissal(releaseId)
+          && !hasAppVersionLocalDismissal(userId, releaseId)
           && autoOpenedReleaseRef.current !== releaseId
         ) {
           autoOpenedReleaseRef.current = releaseId;
@@ -144,9 +115,9 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
       return;
     }
 
-    sessionDismissed.add(releaseId);
+    rememberAppVersionSessionDismissal(releaseId);
     if (userId) {
-      rememberLocalDismissal(userId, releaseId);
+      rememberAppVersionLocalDismissal(userId, releaseId);
     }
     apiService.markAppVersionSeen(releaseId)
       .then(() => {
@@ -155,7 +126,7 @@ export function AppVersionGate({ userId, manualOpenSignal, onManualOpenHandled }
           : current);
       })
       .catch(() => {
-        sessionDismissed.add(releaseId);
+        rememberAppVersionSessionDismissal(releaseId);
       });
   }, [modalState, userId]);
 

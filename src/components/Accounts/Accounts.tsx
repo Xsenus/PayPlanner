@@ -815,21 +815,24 @@ export function Accounts({
     Signed: 'border border-emerald-200 bg-emerald-100 text-emerald-700',
     Terminated: 'border border-rose-200 bg-rose-100 text-rose-700',
   };
-  const defaultActWorkflowStatusLabels: Record<ActWorkflowStatus, string> = {
-    Draft: 'Черновик',
-    NotSigned: 'Не подписан',
-    RequiresClientSignature: 'Требуется подпись клиента',
-    OnApproval: 'На согласовании',
-    Approved: 'Согласован',
-    ApprovalRejected: 'Отказ в согласовании',
-    NeedsCorrection: 'Требует исправления',
-    OnSigning: 'На подписании',
-    Signed: 'Подписан',
-    Cancelled: 'Аннулирован',
-  };
+  const defaultActWorkflowStatusLabels = useMemo<Record<ActWorkflowStatus, string>>(
+    () => ({
+      Draft: 'Черновик',
+      NotSigned: 'Не подписан',
+      RequiresClientSignature: 'Требуется подпись клиента',
+      OnApproval: 'На согласовании',
+      Approved: 'Согласован',
+      ApprovalRejected: 'Отказ в согласовании',
+      NeedsCorrection: 'Требует исправления',
+      OnSigning: 'На подписании',
+      Signed: 'Подписан',
+      Cancelled: 'Аннулирован',
+    }),
+    [],
+  );
   const actWorkflowStatusLabels = useMemo(
     () => getDocumentStatusLabels(documentStatusSettings, 'act', defaultActWorkflowStatusLabels),
-    [documentStatusSettings],
+    [defaultActWorkflowStatusLabels, documentStatusSettings],
   );
   const actWorkflowStatusClasses: Record<ActWorkflowStatus, string> = {
     Draft: 'border border-slate-200 bg-slate-100 text-slate-700',
@@ -899,56 +902,65 @@ export function Accounts({
     signed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
-  const defaultInvoiceWorkflowStatusLabels: Record<InvoiceWorkflowStatus, string> = {
-    Draft: 'Черновик',
-    NotSigned: 'Не подписан',
-    RequiresClientSignature: 'Требуется подпись клиента',
-    OnApproval: 'На согласовании',
-    Approved: 'Согласован',
-    ApprovalRejected: 'Отказ в согласовании',
-    NeedsCorrection: 'Требует исправления',
-    OnSigning: 'На подписании',
-    SignedByClient: 'Подписан клиентом',
-    Paid: 'Оплачен',
-    PartiallyPaid: 'Частично оплачен',
-    Overdue: 'Просрочен',
-    Cancelled: 'Аннулирован',
-  };
+  const defaultInvoiceWorkflowStatusLabels = useMemo<Record<InvoiceWorkflowStatus, string>>(
+    () => ({
+      Draft: 'Черновик',
+      NotSigned: 'Не подписан',
+      RequiresClientSignature: 'Требуется подпись клиента',
+      OnApproval: 'На согласовании',
+      Approved: 'Согласован',
+      ApprovalRejected: 'Отказ в согласовании',
+      NeedsCorrection: 'Требует исправления',
+      OnSigning: 'На подписании',
+      SignedByClient: 'Подписан клиентом',
+      Paid: 'Оплачен',
+      PartiallyPaid: 'Частично оплачен',
+      Overdue: 'Просрочен',
+      Cancelled: 'Аннулирован',
+    }),
+    [],
+  );
 
   const invoiceWorkflowStatusLabels = useMemo(
     () => getDocumentStatusLabels(documentStatusSettings, 'invoice', defaultInvoiceWorkflowStatusLabels),
-    [documentStatusSettings],
+    [defaultInvoiceWorkflowStatusLabels, documentStatusSettings],
   );
-  const invoiceWorkflowStatusClasses: Record<InvoiceWorkflowStatus, string> = {
-    Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
-    NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
-    RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
-    OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
-    Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
-    NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
-    OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
-    SignedByClient: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    Paid: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    PartiallyPaid: 'bg-blue-100 text-blue-700 border border-blue-200',
-    Overdue: 'bg-rose-100 text-rose-700 border border-rose-200',
-    Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
-  };
-  const invoiceWorkflowStatusDescriptions: Record<InvoiceWorkflowStatus, string> = {
-    Draft: 'Документ вернется в черновик, даты отправки и подписи будут очищены.',
-    NotSigned: 'Документ будет отмечен как неподписанный.',
-    RequiresClientSignature: 'Документ требует подпись клиента; статус оплаты счета не меняется.',
-    OnApproval: 'Документ будет отправлен на внутреннее согласование.',
-    Approved: 'Документ будет отмечен как согласованный.',
-    ApprovalRejected: 'В журнал попадет отказ в согласовании документа.',
-    NeedsCorrection: 'Документ будет возвращен на исправление.',
-    OnSigning: 'Документ будет отмечен как отправленный на подписание.',
-    SignedByClient: 'Документ будет отмечен как подписанный клиентом.',
-    Paid: 'Статус оплаты ведется отдельно.',
-    PartiallyPaid: 'Статус оплаты ведется отдельно.',
-    Overdue: 'Статус оплаты ведется отдельно.',
-    Cancelled: 'Изменится только статус документа; статус оплаты счета не меняется.',
-  };
+  const invoiceWorkflowStatusClasses = useMemo<Record<InvoiceWorkflowStatus, string>>(
+    () => ({
+      Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
+      NotSigned: 'bg-slate-100 text-slate-700 border border-slate-200',
+      RequiresClientSignature: 'bg-amber-100 text-amber-800 border border-amber-200',
+      OnApproval: 'bg-cyan-100 text-cyan-700 border border-cyan-200',
+      Approved: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+      ApprovalRejected: 'bg-rose-100 text-rose-700 border border-rose-200',
+      NeedsCorrection: 'bg-orange-100 text-orange-700 border border-orange-200',
+      OnSigning: 'bg-violet-100 text-violet-700 border border-violet-200',
+      SignedByClient: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+      Paid: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+      PartiallyPaid: 'bg-blue-100 text-blue-700 border border-blue-200',
+      Overdue: 'bg-rose-100 text-rose-700 border border-rose-200',
+      Cancelled: 'bg-rose-100 text-rose-700 border border-rose-200',
+    }),
+    [],
+  );
+  const invoiceWorkflowStatusDescriptions = useMemo<Record<InvoiceWorkflowStatus, string>>(
+    () => ({
+      Draft: 'Документ вернется в черновик, даты отправки и подписи будут очищены.',
+      NotSigned: 'Документ будет отмечен как неподписанный.',
+      RequiresClientSignature: 'Документ требует подпись клиента; статус оплаты счета не меняется.',
+      OnApproval: 'Документ будет отправлен на внутреннее согласование.',
+      Approved: 'Документ будет отмечен как согласованный.',
+      ApprovalRejected: 'В журнал попадет отказ в согласовании документа.',
+      NeedsCorrection: 'Документ будет возвращен на исправление.',
+      OnSigning: 'Документ будет отмечен как отправленный на подписание.',
+      SignedByClient: 'Документ будет отмечен как подписанный клиентом.',
+      Paid: 'Статус оплаты ведется отдельно.',
+      PartiallyPaid: 'Статус оплаты ведется отдельно.',
+      Overdue: 'Статус оплаты ведется отдельно.',
+      Cancelled: 'Изменится только статус документа; статус оплаты счета не меняется.',
+    }),
+    [],
+  );
 
   const invoiceWorkflowStatusCodes = useMemo(
     () => getDocumentStatusCodes(documentStatusSettings, 'invoice', INVOICE_WORKFLOW_STATUS_ORDER),
@@ -962,7 +974,7 @@ export function Accounts({
       description: invoiceWorkflowStatusDescriptions[status],
       className: invoiceWorkflowStatusClasses[status],
     })),
-    [invoiceWorkflowStatusCodes, invoiceWorkflowStatusLabels],
+    [invoiceWorkflowStatusClasses, invoiceWorkflowStatusCodes, invoiceWorkflowStatusDescriptions, invoiceWorkflowStatusLabels],
   );
   const statusBadgeClass =
     'inline-flex max-w-full items-center justify-center rounded-full px-3 py-1 text-center text-xs font-medium leading-tight whitespace-normal';

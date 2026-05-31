@@ -207,52 +207,6 @@ function downloadBlob(filename: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
-export function exportLegalWorkReport(report: LegalWorkReport) {
-  const rows: unknown[][] = [
-    ['Раздел', 'Наименование', 'Ответственный', 'Дата/период', 'Дела', 'Задачи', 'Сроки', 'Сумма', 'Примечание'],
-    ['Сводка', 'Всего дел', '', `${report.from} - ${report.to}`, report.totalCases, '', '', report.feeTotal, `Оплачено: ${report.paidTotal}; остаток: ${report.outstandingTotal}`],
-    ['Сводка', 'Дел в работе', '', `${report.from} - ${report.to}`, report.activeCases, report.openTaskCount, report.overdueDeadlineCount, report.outstandingTotal, `Просрочено задач: ${report.overdueTaskCount}; на согласовании: ${report.onApprovalTaskCount}`],
-  ];
-
-  report.responsibles.forEach((item) => {
-    rows.push([
-      'Ответственный',
-      item.responsibleName,
-      item.responsibleName,
-      `${report.from} - ${report.to}`,
-      item.activeCases,
-      item.openTasks,
-      item.overdueDeadlines,
-      item.outstandingTotal,
-      `Закрыто: ${item.closedCases}; проиграно: ${item.lostCases}; оплачено: ${item.paidTotal}`,
-    ]);
-  });
-
-  report.casesByStatus.forEach((item) => {
-    rows.push(['Статусы дел', item.statusLabel, '', `${report.from} - ${report.to}`, item.count, '', item.overdueDeadlines, item.feeTotal, item.status]);
-  });
-
-  report.casesByType.forEach((item) => {
-    rows.push(['Типы дел', item.caseType, '', `${report.from} - ${report.to}`, item.count, item.activeTasks, '', item.feeTotal, '']);
-  });
-
-  [...report.overdueDeadlines, ...report.upcomingDeadlines].forEach((item) => {
-    rows.push([
-      item.daysOffset < 0 ? 'Просроченный срок' : 'Ближайший срок',
-      `${item.clientName} · ${item.caseTitle || item.caseNumber}`,
-      item.responsibleName,
-      item.dueAt,
-      '',
-      '',
-      item.deadlineLabel,
-      '',
-      formatDeadlineOffset(item.daysOffset),
-    ]);
-  });
-
-  downloadCsv('legal-work-report.csv', rows);
-}
-
 function exportCaseFinanceReport(report: CaseFinanceReport) {
   const rows: unknown[][] = [
     ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус дела', 'Финансовый статус', 'Гонорар', 'Оплачено', 'Остаток', 'Оплачено %', 'Срок дела'],

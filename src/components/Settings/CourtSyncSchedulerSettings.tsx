@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, RefreshCw, Save } from 'lucide-react';
 import { apiService } from '../../services/api';
 import type { ClientCaseCourtSyncProvider, ClientCaseCourtSyncSettings } from '../../types';
@@ -29,14 +29,14 @@ export function CourtSyncSchedulerSettings() {
 
   const limits = settings ?? DEFAULT_LIMITS;
 
-  const applySettings = (next: ClientCaseCourtSyncSettings) => {
+  const applySettings = useCallback((next: ClientCaseCourtSyncSettings) => {
     setSettings(next);
     setIsEnabled(next.isEnabled);
     setIntervalMinutes(String(next.intervalMinutes));
     setBatchSize(String(next.batchSize));
-  };
+  }, []);
 
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     setLoading(true);
     setError(null);
     setSavedMessage(null);
@@ -52,11 +52,11 @@ export function CourtSyncSchedulerSettings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [applySettings]);
 
   useEffect(() => {
     void loadSettings();
-  }, []);
+  }, [loadSettings]);
 
   const saveSettings = async () => {
     setSaving(true);

@@ -1,5 +1,5 @@
 import { AlertTriangle, CalendarDays, CheckCircle2, RefreshCw, Save } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   apiService,
   type CalendarSyncProviderDto,
@@ -33,12 +33,12 @@ export function CalendarSyncProviderSettings() {
     [readiness],
   );
 
-  const applyLoadedSettings = (next: CalendarSyncSettingsDto) => {
+  const applyLoadedSettings = useCallback((next: CalendarSyncSettingsDto) => {
     setSettings(next);
     setDraft({ ...next });
-  };
+  }, []);
 
-  const loadCalendarSyncState = async () => {
+  const loadCalendarSyncState = useCallback(async () => {
     setLoading(true);
     setError(null);
     setSaveMessage(null);
@@ -56,11 +56,11 @@ export function CalendarSyncProviderSettings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [applyLoadedSettings]);
 
   useEffect(() => {
     void loadCalendarSyncState();
-  }, []);
+  }, [loadCalendarSyncState]);
 
   const updateDraft = (patch: Partial<CalendarSyncSettingsDto>) => {
     setDraft((current) => (current ? { ...current, ...patch } : current));

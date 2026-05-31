@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiService, type AppVersionLatestDto } from '../../services/api';
-import { AppVersionGate, resetAppVersionSessionDismissalsForTests } from './AppVersionGate';
+import { resetAppVersionSessionDismissalsForTests } from './AppVersionDismissals';
+import { AppVersionGate } from './AppVersionGate';
 
 vi.mock('../../services/api', () => ({
   apiService: {
