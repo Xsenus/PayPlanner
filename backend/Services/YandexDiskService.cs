@@ -173,6 +173,7 @@ public sealed class YandexDiskService : IYandexDiskService
 
         steps.Add(BuildConnectionTestStep("upload", "Проверка загрузки файла", "Служебный файл загружен в тестовую папку."));
 
+        Exception? primaryError = null;
         try
         {
             var downloadLink = await SendJsonAsync<YandexDiskLinkPayload>(
@@ -194,17 +195,28 @@ public sealed class YandexDiskService : IYandexDiskService
 
             steps.Add(BuildConnectionTestStep("download", "Проверка скачивания файла", "Служебный файл скачан и прочитан."));
         }
+        catch (Exception ex)
+        {
+            primaryError = ex;
+            throw;
+        }
         finally
         {
-            await SendAsync(
-                HttpMethod.Delete,
-                $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(testFileFullPath)}&permanently=true",
-                token,
-                null,
-                cancellationToken);
-            steps.Add(BuildConnectionTestStep("cleanup", "Очистка служебного файла", "Служебный файл удален после проверки."));
+            try
+            {
+                await SendAsync(
+                    HttpMethod.Delete,
+                    $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(testFileFullPath)}&permanently=true",
+                    token,
+                    null,
+                    cancellationToken);
+                steps.Add(BuildConnectionTestStep("cleanup", "Очистка служебного файла", "Служебный файл удален после проверки."));
+            }
+            catch when (primaryError is not null)
+            {
+                // Preserve the original connection-test failure; cleanup was already a best-effort recovery step.
+            }
         }
-
 
         return new YandexDiskConnectionTestDto
         {

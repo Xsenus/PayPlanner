@@ -150,7 +150,7 @@ public sealed class YandexDiskServiceTests
     }
 
     [Fact]
-    public async Task TestConnectionAsync_DeletesMarkerFileWhenReadValidationFails()
+    public async Task TestConnectionAsync_PreservesReadFailureWhenCleanupAlsoFails()
     {
         await using var scope = await CreateDbScopeAsync();
         scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
@@ -186,7 +186,10 @@ public sealed class YandexDiskServiceTests
 
             if (request.Method == HttpMethod.Delete)
             {
-                return JsonResponse("{}");
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                {
+                    Content = new StringContent("""{"message":"cleanup failed"}""", Encoding.UTF8, "application/json"),
+                };
             }
 
             return JsonResponse("""{ "name": "PayPlanner", "path": "disk:/PayPlanner", "type": "dir" }""");
