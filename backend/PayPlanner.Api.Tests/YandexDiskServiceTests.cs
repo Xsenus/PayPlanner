@@ -203,6 +203,62 @@ public sealed class YandexDiskServiceTests
     }
 
     [Fact]
+    public async Task TestConnectionAsync_FailsWhenCleanupAfterSuccessfulReadFails()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.rootPath", Value = "disk:/PayPlanner", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+
+        var requests = new List<string>();
+        string? uploadedText = null;
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(request =>
+        {
+            requests.Add($"{request.Method} {request.RequestUri}");
+            if (request.RequestUri?.Host == "upload.local")
+            {
+                uploadedText = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.Created);
+            }
+
+            if (request.RequestUri?.Host == "download.local")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(uploadedText ?? string.Empty, Encoding.UTF8, "text/plain"),
+                };
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/resources/upload", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return JsonResponse("""{ "href": "https://upload.local/marker.txt" }""");
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/resources/download", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return JsonResponse("""{ "href": "https://download.local/marker.txt" }""");
+            }
+
+            if (request.Method == HttpMethod.Delete)
+            {
+                return new HttpResponseMessage(HttpStatusCode.Forbidden)
+                {
+                    Content = new StringContent("""{"message":"delete forbidden"}""", Encoding.UTF8, "application/json"),
+                };
+            }
+
+            return JsonResponse("""{ "name": "PayPlanner", "path": "disk:/PayPlanner", "type": "dir" }""");
+        })));
+
+        var error = await Assert.ThrowsAsync<YandexDiskOperationException>(() =>
+            service.TestConnectionAsync(new TestYandexDiskConnectionRequest { TestFolderPath = "/Acceptance" }, CancellationToken.None));
+
+        Assert.Equal(403, error.StatusCode);
+        Assert.Contains("delete forbidden", error.Message);
+        Assert.Contains(requests, item => item.StartsWith("DELETE https://cloud-api.yandex.net/v1/disk/resources?", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task CreateFolder_RejectsParentTraversal()
     {
         await using var scope = await CreateDbScopeAsync();
