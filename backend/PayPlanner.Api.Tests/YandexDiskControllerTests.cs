@@ -244,6 +244,26 @@ public sealed class YandexDiskControllerTests
         public Task<YandexDiskSettingsDto> UpdateSettingsAsync(UpdateYandexDiskSettingsRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexDiskSettingsDto { IsConfigured = true, RootPath = request.RootPath ?? "disk:/PayPlanner" });
 
+        public Task<YandexDiskConnectionTestDto> TestConnectionAsync(TestYandexDiskConnectionRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskConnectionTestDto
+            {
+                Success = true,
+                RootPath = "disk:/PayPlanner",
+                TestFolderPath = request.TestFolderPath ?? "/_payplanner-test",
+                TestFilePath = "/_payplanner-test/payplanner-connection-test.txt",
+                CheckedAt = DateTime.UtcNow,
+                Steps =
+                [
+                    new YandexDiskConnectionTestStepDto
+                    {
+                        Key = "root",
+                        Name = "Проверка корневой папки",
+                        Success = true,
+                        Message = "Корневая папка доступна.",
+                    },
+                ],
+            });
+
         public Task<YandexDiskListResponseDto> ListAsync(string? path, int limit, int offset, CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexDiskListResponseDto());
 

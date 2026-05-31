@@ -2836,6 +2836,9 @@ public class ActsControllerTests
         public Task<YandexDiskSettingsDto> UpdateSettingsAsync(UpdateYandexDiskSettingsRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexDiskSettingsDto { IsConfigured = true, RootPath = request.RootPath ?? "/CRM" });
 
+        public Task<YandexDiskConnectionTestDto> TestConnectionAsync(TestYandexDiskConnectionRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskConnectionTestDto { Success = true, RootPath = "/CRM" });
+
         public Task<YandexDiskListResponseDto> ListAsync(string? path, int limit, int offset, CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexDiskListResponseDto());
 

@@ -16,6 +16,7 @@ public interface IYandexDiskService
 {
     Task<YandexDiskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default);
     Task<YandexDiskSettingsDto> UpdateSettingsAsync(UpdateYandexDiskSettingsRequest request, CancellationToken cancellationToken = default);
+    Task<YandexDiskConnectionTestDto> TestConnectionAsync(TestYandexDiskConnectionRequest request, CancellationToken cancellationToken = default);
     Task<YandexDiskListResponseDto> ListAsync(string? path, int limit, int offset, CancellationToken cancellationToken = default);
     Task<YandexDiskOperationResultDto> CreateFolderAsync(string? path, CancellationToken cancellationToken = default);
     Task<YandexDiskOperationResultDto> CopyAsync(string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default);
@@ -65,6 +66,7 @@ public sealed class YandexDiskService : IYandexDiskService
     private const string RootPathSettingKey = "integrations.yandexDisk.rootPath";
     private const string CrmSyncSettingsKey = "integrations.yandexDisk.crmSync.settings";
     private const string DefaultRootPath = "disk:/PayPlanner";
+    private const string DefaultConnectionTestFolderPath = "_payplanner-test";
     private const string DefaultFolderTemplate = "CRM/{clientName}/{caseNumber}/{documentType}";
     private const string DefaultFileNameTemplate = "{documentDate}-{documentNumber}-{documentTitle}";
     private const string ConflictModeCrmMaster = "crmMaster";
@@ -117,6 +119,95 @@ public sealed class YandexDiskService : IYandexDiskService
 
         await _db.SaveChangesAsync(cancellationToken);
         return await GetSettingsAsync(cancellationToken);
+    }
+
+    public async Task<YandexDiskConnectionTestDto> TestConnectionAsync(
+        TestYandexDiskConnectionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadConfiguredSettingsAsync(cancellationToken);
+        var token = settings.OAuthToken!;
+        var checkedAt = DateTime.UtcNow;
+        var testFolderPath = NormalizeConnectionTestFolderPath(request.TestFolderPath);
+        var marker = $"payplanner-connection-test-{checkedAt:yyyyMMddHHmmss}.txt";
+        var testFilePath = $"{testFolderPath}/{marker}";
+        var steps = new List<YandexDiskConnectionTestStepDto>();
+
+        await SendJsonAsync<YandexDiskResourcePayload>(
+            HttpMethod.Get,
+            $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(settings.RootPath)}&limit=1&offset=0",
+            token,
+            null,
+            cancellationToken);
+        steps.Add(BuildConnectionTestStep("root", "Проверка корневой папки", "Корневая папка доступна."));
+
+        try
+        {
+            await SendAsync(
+                HttpMethod.Put,
+                $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(BuildFullPath(settings.RootPath, testFolderPath))}",
+                token,
+                null,
+                cancellationToken);
+            steps.Add(BuildConnectionTestStep("folder", "Проверка тестовой папки", "Тестовая папка создана."));
+        }
+        catch (YandexDiskOperationException ex) when (ex.StatusCode == StatusCodes.Status409Conflict)
+        {
+            steps.Add(BuildConnectionTestStep("folder", "Проверка тестовой папки", "Тестовая папка уже существует и доступна."));
+        }
+
+        var markerText = $"PayPlanner Yandex Disk connection test {checkedAt:O}";
+        var uploadLink = await SendJsonAsync<YandexDiskLinkPayload>(
+            HttpMethod.Get,
+            $"{ApiBaseUrl}/resources/upload?path={Uri.EscapeDataString(BuildFullPath(settings.RootPath, testFilePath))}&overwrite=true",
+            token,
+            null,
+            cancellationToken);
+
+        using (var content = new StringContent(markerText, Encoding.UTF8, "text/plain"))
+        using (var uploadResponse = await _httpClient.PutAsync(uploadLink.Href, content, cancellationToken))
+        {
+            await EnsureSuccessAsync(uploadResponse, cancellationToken);
+        }
+
+        steps.Add(BuildConnectionTestStep("upload", "Проверка загрузки файла", "Служебный файл загружен в тестовую папку."));
+
+        var downloadLink = await SendJsonAsync<YandexDiskLinkPayload>(
+            HttpMethod.Get,
+            $"{ApiBaseUrl}/resources/download?path={Uri.EscapeDataString(BuildFullPath(settings.RootPath, testFilePath))}",
+            token,
+            null,
+            cancellationToken);
+
+        using (var downloadResponse = await _httpClient.GetAsync(downloadLink.Href, cancellationToken))
+        {
+            await EnsureSuccessAsync(downloadResponse, cancellationToken);
+            var downloaded = await downloadResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (!string.Equals(downloaded, markerText, StringComparison.Ordinal))
+            {
+                throw new YandexDiskOperationException(502, "Яндекс.Диск вернул служебный файл с неожиданным содержимым. Повторите проверку позже.");
+            }
+        }
+
+        steps.Add(BuildConnectionTestStep("download", "Проверка скачивания файла", "Служебный файл скачан и прочитан."));
+
+        await SendAsync(
+            HttpMethod.Delete,
+            $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(BuildFullPath(settings.RootPath, testFilePath))}&permanently=true",
+            token,
+            null,
+            cancellationToken);
+        steps.Add(BuildConnectionTestStep("cleanup", "Очистка служебного файла", "Служебный файл удален после проверки."));
+
+        return new YandexDiskConnectionTestDto
+        {
+            Success = true,
+            RootPath = settings.RootPath,
+            TestFolderPath = $"/{testFolderPath}",
+            TestFilePath = $"/{testFilePath}",
+            CheckedAt = checkedAt,
+            Steps = steps,
+        };
     }
 
     public async Task<YandexDiskListResponseDto> ListAsync(string? path, int limit, int offset, CancellationToken cancellationToken = default)
@@ -623,6 +714,17 @@ public sealed class YandexDiskService : IYandexDiskService
         return path;
     }
 
+    private static string NormalizeConnectionTestFolderPath(string? value)
+    {
+        var path = NormalizeRelativePath(value);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return DefaultConnectionTestFolderPath;
+        }
+
+        return path.Length > 160 ? path[..160].Trim('/') : path;
+    }
+
     private static string BuildFullPath(string rootPath, string relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath))
@@ -682,6 +784,15 @@ public sealed class YandexDiskService : IYandexDiskService
         {
             Success = true,
             Path = string.IsNullOrWhiteSpace(relativePath) ? "/" : $"/{relativePath}",
+        };
+
+    private static YandexDiskConnectionTestStepDto BuildConnectionTestStep(string key, string name, string message)
+        => new()
+        {
+            Key = key,
+            Name = name,
+            Success = true,
+            Message = message,
         };
 
     private static YandexDiskCrmSyncSettingsDto BuildDefaultCrmSyncSettings()

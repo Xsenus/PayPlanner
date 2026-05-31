@@ -222,6 +222,36 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('/yandex-disk/settings');
   });
 
+  it('runs Yandex Disk connection test', async () => {
+    const payload = {
+      success: true,
+      rootPath: 'disk:/PayPlanner',
+      testFolderPath: '/Acceptance',
+      testFilePath: '/Acceptance/payplanner-connection-test.txt',
+      checkedAt: '2026-06-01T08:00:00Z',
+      steps: [
+        {
+          key: 'root',
+          name: 'Проверка корневой папки',
+          success: true,
+          message: 'Корневая папка доступна.',
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.testYandexDiskConnection('/Acceptance');
+
+    expect(result).toEqual(payload);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-disk/connection-test');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ testFolderPath: '/Acceptance' });
+  });
+
   it('loads Yandex Disk CRM sync settings from the backend', async () => {
     const payload = {
       enabled: true,

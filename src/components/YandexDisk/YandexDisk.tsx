@@ -1,5 +1,6 @@
 import {
   ArrowUp,
+  CheckCircle2,
   Cloud,
   Copy,
   Download,
@@ -14,6 +15,7 @@ import {
   RefreshCw,
   Save,
   SlidersHorizontal,
+  TestTube2,
   Trash2,
   UploadCloud,
   X,
@@ -22,6 +24,7 @@ import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from 're
 import {
   apiService,
   type UpdateYandexDiskCrmSyncSettingsRequest,
+  type YandexDiskConnectionTestDto,
   type YandexDiskCrmSyncPreviewDto,
   type YandexDiskCrmSyncSettingsDto,
   type YandexDiskCrmSyncStatusReportDto,
@@ -129,8 +132,10 @@ export function YandexDisk() {
   const canEdit = isAdminRole || permissions.canEdit;
   const canDelete = isAdminRole || permissions.canDelete;
   const canExport = isAdminRole || permissions.canExport;
+  const canTestConnection = canEdit && canCreate && canDelete && canExport;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [settings, setSettings] = useState<YandexDiskSettingsDto | null>(null);
+  const [connectionTest, setConnectionTest] = useState<YandexDiskConnectionTestDto | null>(null);
   const [crmSyncSettings, setCrmSyncSettings] = useState<YandexDiskCrmSyncSettingsDto | null>(null);
   const [crmSyncPreview, setCrmSyncPreview] = useState<YandexDiskCrmSyncPreviewDto | null>(null);
   const [crmSyncStatus, setCrmSyncStatus] = useState<YandexDiskCrmSyncStatusReportDto | null>(null);
@@ -142,6 +147,7 @@ export function YandexDisk() {
   const [newFolderName, setNewFolderName] = useState('');
   const [loading, setLoading] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
   const [savingCrmSync, setSavingCrmSync] = useState(false);
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -246,6 +252,23 @@ export function YandexDisk() {
       setError(extractYandexDiskErrorMessage(clearError, 'Не удалось удалить токен.'));
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const testConnection = async () => {
+    if (!canTestConnection) return;
+    setTestingConnection(true);
+    setError(null);
+    try {
+      const result = await apiService.testYandexDiskConnection('/_payplanner-test');
+      setConnectionTest(result);
+      toast.success('Подключение к Яндекс.Диску проверено.', 'Я.Диск');
+      await loadListing(currentPath, true);
+    } catch (connectionError) {
+      setConnectionTest(null);
+      setError(extractYandexDiskErrorMessage(connectionError, 'Не удалось проверить подключение к Яндекс.Диску.'));
+    } finally {
+      setTestingConnection(false);
     }
   };
 
@@ -443,7 +466,7 @@ export function YandexDisk() {
             </p>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-[minmax(180px,280px)_minmax(180px,260px)_auto_auto]">
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(180px,280px)_minmax(180px,260px)_auto_auto_auto]">
             <label className="block">
               <span className="text-xs font-semibold text-slate-600">Корневая папка</span>
               <input
@@ -486,9 +509,42 @@ export function YandexDisk() {
               <X className="h-4 w-4" />
               Сбросить
             </button>
+            <button
+              type="button"
+              onClick={() => void testConnection()}
+              disabled={testingConnection || !settings?.isConfigured || !canTestConnection}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-300 px-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+              title="Создает служебный файл в тестовой папке, проверяет чтение и удаляет файл"
+            >
+              {testingConnection ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube2 className="h-4 w-4" />}
+              Проверить
+            </button>
           </div>
         </div>
       </section>
+
+      {connectionTest ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 font-semibold">
+                <CheckCircle2 className="h-4 w-4" />
+                Подключение к Яндекс.Диску проверено
+              </div>
+              <div className="mt-1 text-emerald-700">
+                Тестовая папка: <span className="font-mono">{connectionTest.testFolderPath}</span>. Проверено: {formatDate(connectionTest.checkedAt)}.
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {connectionTest.steps.map((step) => (
+                <span key={step.key} className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-emerald-700 shadow-sm" title={step.message}>
+                  {step.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>

@@ -249,6 +249,22 @@ export interface YandexDiskOperationResultDto {
   path: string;
 }
 
+export interface YandexDiskConnectionTestStepDto {
+  key: string;
+  name: string;
+  success: boolean;
+  message: string;
+}
+
+export interface YandexDiskConnectionTestDto {
+  success: boolean;
+  rootPath: string;
+  testFolderPath: string;
+  testFilePath: string;
+  checkedAt: string;
+  steps: YandexDiskConnectionTestStepDto[];
+}
+
 export interface YandexDiskTextFileDto {
   path: string;
   content: string;
@@ -1510,6 +1526,13 @@ export class ApiService {
     return this.request<YandexDiskSettingsDto>('/yandex-disk/settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async testYandexDiskConnection(testFolderPath?: string) {
+    return this.request<YandexDiskConnectionTestDto>('/yandex-disk/connection-test', {
+      method: 'POST',
+      body: JSON.stringify({ testFolderPath }),
     });
   }
 

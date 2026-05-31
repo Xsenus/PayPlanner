@@ -57,6 +57,28 @@ public sealed class YandexDiskController : ControllerBase
         return result;
     }
 
+    [HttpPost("connection-test")]
+    public async Task<ActionResult<YandexDiskConnectionTestDto>> TestConnection(
+        [FromBody] TestYandexDiskConnectionRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission =>
+            permission.CanEdit && permission.CanCreate && permission.CanDelete && permission.CanExport, ct);
+        if (forbidden is not null) return forbidden;
+
+        var result = await ExecuteAsync(() => _service.TestConnectionAsync(request, ct));
+        if (result.Result is null && result.Value is { } value)
+        {
+            await AddAuditAsync(
+                "ConnectionTested",
+                "Проверено подключение к Яндекс.Диску через тестовую папку.",
+                new { value.RootPath, value.TestFolderPath, value.Success },
+                ct);
+        }
+
+        return result;
+    }
+
     [HttpGet("crm-sync/settings")]
     public async Task<ActionResult<YandexDiskCrmSyncSettingsDto>> GetCrmSyncSettings(CancellationToken ct)
     {

@@ -42,6 +42,24 @@ public sealed class YandexDiskOperationResultDto
     public string Path { get; set; } = "/";
 }
 
+public sealed class YandexDiskConnectionTestDto
+{
+    public bool Success { get; set; }
+    public string RootPath { get; set; } = string.Empty;
+    public string TestFolderPath { get; set; } = string.Empty;
+    public string TestFilePath { get; set; } = string.Empty;
+    public DateTime CheckedAt { get; set; }
+    public IReadOnlyList<YandexDiskConnectionTestStepDto> Steps { get; set; } = Array.Empty<YandexDiskConnectionTestStepDto>();
+}
+
+public sealed class YandexDiskConnectionTestStepDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
 public sealed class YandexDiskCrmSyncSettingsDto
 {
     public bool Enabled { get; set; }

@@ -7,6 +7,11 @@ public sealed class UpdateYandexDiskSettingsRequest
     public string? RootPath { get; set; }
 }
 
+public sealed class TestYandexDiskConnectionRequest
+{
+    public string? TestFolderPath { get; set; }
+}
+
 public sealed class CreateYandexDiskFolderRequest
 {
     public string? Path { get; set; }
