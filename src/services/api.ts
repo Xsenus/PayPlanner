@@ -1557,6 +1557,13 @@ export class ApiService {
     });
   }
 
+  async uploadTaskJournalFileToYandexDisk(taskId: number, fileId: number, overwrite?: boolean) {
+    const query = overwrite === undefined ? '' : `?overwrite=${overwrite}`;
+    return this.request<YandexDiskOperationResultDto>(`/yandex-disk/crm/tasks/${taskId}/files/${fileId}/upload${query}`, {
+      method: 'POST',
+    });
+  }
+
   // ===== Acts =====
   async getActs(params?: {
     from?: string;

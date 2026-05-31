@@ -289,6 +289,21 @@ describe('apiService auth handling', () => {
     expect(init?.method).toBe('POST');
   });
 
+  it('uploads a task file to Yandex Disk', async () => {
+    const payload = { success: true, path: '/CRM/tasks/file.pdf' };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.uploadTaskJournalFileToYandexDisk(11, 42, false);
+
+    expect(result).toEqual(payload);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-disk/crm/tasks/11/files/42/upload?overwrite=false');
+    expect(init?.method).toBe('POST');
+  });
+
   it('uploads a Yandex Disk file with form data', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true, path: '/docs/a.txt' }), {
       headers: { 'content-type': 'application/json' },

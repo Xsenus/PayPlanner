@@ -21,12 +21,14 @@ public sealed class YandexDiskController : ControllerBase
     private readonly IYandexDiskService _service;
     private readonly PaymentContext _db;
     private readonly ICaseDocumentStorage _caseDocumentStorage;
+    private readonly string _taskFilesRoot;
 
     public YandexDiskController(IYandexDiskService service, PaymentContext db, IWebHostEnvironment? environment = null, ICaseDocumentStorage? caseDocumentStorage = null)
     {
         _service = service;
         _db = db;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
+        _taskFilesRoot = Path.Combine(environment?.ContentRootPath ?? AppContext.BaseDirectory, "App_Data", "task-files");
     }
 
     [HttpGet("settings")]
@@ -311,6 +313,82 @@ public sealed class YandexDiskController : ControllerBase
             ct);
     }
 
+    [HttpPost("crm/tasks/{taskId:int}/files/{fileId:int}/upload")]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> UploadTaskFile(
+        int taskId,
+        int fileId,
+        [FromQuery] bool? overwrite,
+        CancellationToken ct)
+    {
+        var yandexForbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
+        if (yandexForbidden is not null) return yandexForbidden;
+
+        var taskForbidden = await RequireSectionPermissionAsync(RolePermissionCatalog.Tasks, permission => permission.CanExport, ct);
+        if (taskForbidden is not null) return taskForbidden;
+
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var task = await _db.TaskJournalItems
+            .AsNoTracking()
+            .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
+            .Include(item => item.ClientCase)
+            .Include(item => item.Participants)
+            .ApplyTaskVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == taskId, ct);
+        if (task is null)
+        {
+            return NotFound();
+        }
+
+        var taskFile = await _db.TaskJournalFiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == fileId && item.TaskJournalItemId == taskId, ct);
+        if (taskFile is null)
+        {
+            return NotFound();
+        }
+
+        var fullPath = ResolveTaskFilePath(taskFile.StoragePath);
+        if (!System.IO.File.Exists(fullPath))
+        {
+            return NotFound(new { message = "Файл не найден в хранилище." });
+        }
+
+        await using var stream = System.IO.File.OpenRead(fullPath);
+        return await ExecuteAndAuditAsync(
+            () => _service.UploadCrmDocumentAsync(new YandexDiskCrmDocumentUpload(
+                stream,
+                taskFile.ContentType,
+                taskFile.OriginalFileName,
+                "taskFile",
+                "Файл задачи",
+                taskFile.DocumentKey,
+                taskFile.UploadedAt,
+                Path.GetFileNameWithoutExtension(taskFile.OriginalFileName),
+                task.Client?.Name,
+                task.LegalEntity?.ShortName ?? task.LegalEntity?.FullName,
+                task.ClientCase?.CaseNumber,
+                task.ClientCase?.Title ?? task.Title,
+                overwrite),
+                ct),
+            "CrmTaskFileUploaded",
+            "Файл задачи отправлен на Яндекс.Диск.",
+            new
+            {
+                TaskId = task.Id,
+                FileId = taskFile.Id,
+                taskFile.OriginalFileName,
+                task.Title,
+                Overwrite = overwrite,
+            },
+            ct);
+    }
+
     private async Task<ActionResult?> RequirePermissionAsync(Func<RolePermission, bool> isAllowed, CancellationToken ct)
     {
         if (User.IsInRole("admin"))
@@ -397,6 +475,19 @@ public sealed class YandexDiskController : ControllerBase
             CreatedAt = DateTime.UtcNow,
         });
         await _db.SaveChangesAsync(ct);
+    }
+
+    private string ResolveTaskFilePath(string storagePath)
+    {
+        var root = Path.GetFullPath(_taskFilesRoot);
+        var fullPath = Path.GetFullPath(Path.Combine(root, storagePath));
+        if (!fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Некорректный путь файла задачи.");
+        }
+
+        return fullPath;
     }
 
     private static ActionResult MapError(YandexDiskOperationException ex)
