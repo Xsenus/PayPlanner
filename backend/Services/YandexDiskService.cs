@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -456,11 +457,11 @@ public sealed class YandexDiskService : IYandexDiskService
         }
         catch (HttpRequestException ex)
         {
-            throw new YandexDiskOperationException(502, $"Не удалось подключиться к Яндекс.Диску: {ex.Message}");
+            throw new YandexDiskOperationException(502, $"Не удалось подключиться к Яндекс.Диску. Проверьте интернет-соединение и доступность сервиса, затем повторите операцию. Техническая деталь: {ex.Message}");
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new YandexDiskOperationException(504, $"Яндекс.Диск не ответил вовремя: {ex.Message}");
+            throw new YandexDiskOperationException(504, $"Яндекс.Диск не ответил вовремя. Сервис может быть временно недоступен, попробуйте повторить операцию позже. Техническая деталь: {ex.Message}");
         }
 
         await EnsureSuccessAsync(response, cancellationToken);
@@ -483,8 +484,9 @@ public sealed class YandexDiskService : IYandexDiskService
         }
 
         var message = await ReadErrorMessageAsync(response, cancellationToken);
+        var userMessage = BuildYandexDiskErrorMessage((int)response.StatusCode, message);
         response.Dispose();
-        throw new YandexDiskOperationException((int)response.StatusCode, message);
+        throw new YandexDiskOperationException((int)response.StatusCode, userMessage);
     }
 
     private static async Task<string> ReadErrorMessageAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -504,6 +506,43 @@ public sealed class YandexDiskService : IYandexDiskService
         }
 
         return $"Яндекс.Диск вернул ошибку {(int)response.StatusCode}.";
+    }
+
+    private static string BuildYandexDiskErrorMessage(int statusCode, string message)
+    {
+        var details = string.IsNullOrWhiteSpace(message) ? string.Empty : $" Техническая деталь: {message}";
+        var normalized = message.ToLowerInvariant();
+
+        if (statusCode == StatusCodes.Status401Unauthorized)
+        {
+            return $"OAuth-токен Яндекс.Диска не принят. Проверьте токен в настройках раздела «Я.Диск» и сохраните его заново.{details}";
+        }
+
+        if (statusCode == StatusCodes.Status403Forbidden)
+        {
+            return $"У токена Яндекс.Диска нет прав для этой операции. Проверьте доступ приложения к Диску или выпустите токен с нужными правами.{details}";
+        }
+
+        if (statusCode == 507
+            || normalized.Contains("insufficient", StringComparison.Ordinal)
+            || normalized.Contains("not enough", StringComparison.Ordinal)
+            || normalized.Contains("no space", StringComparison.Ordinal)
+            || normalized.Contains("quota", StringComparison.Ordinal)
+            || normalized.Contains("мест", StringComparison.Ordinal))
+        {
+            return $"На Яндекс.Диске не хватает свободного места. Освободите место или подключите другой аккаунт, затем повторите операцию.{details}";
+        }
+
+        if (statusCode is StatusCodes.Status502BadGateway
+            or StatusCodes.Status503ServiceUnavailable
+            or StatusCodes.Status504GatewayTimeout)
+        {
+            return $"Яндекс.Диск временно недоступен или не отвечает. Попробуйте повторить операцию позже.{details}";
+        }
+
+        return string.IsNullOrWhiteSpace(message)
+            ? $"Яндекс.Диск вернул ошибку {statusCode}."
+            : message;
     }
 
     private static YandexDiskSettingsDto BuildSettingsDto(YandexDiskSettingsState settings)

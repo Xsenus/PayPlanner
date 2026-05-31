@@ -64,6 +64,48 @@ function formatDate(value?: string | null) {
   return value ? new Date(value).toLocaleString('ru-RU') : '—';
 }
 
+function appendYandexDiskHint(message: string, hint: string) {
+  const normalized = message.toLowerCase();
+  const hintStart = hint.slice(0, 32).toLowerCase();
+  return normalized.includes(hintStart) ? message : `${message} ${hint}`;
+}
+
+function extractYandexDiskErrorMessage(error: unknown, fallback: string) {
+  const message = extractDisplayErrorMessage(error, fallback);
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = `${message} ${raw}`.toLowerCase();
+
+  if (normalized.includes('oauth') || normalized.includes('токен') || normalized.includes('token')) {
+    return appendYandexDiskHint(message, 'Проверьте OAuth-токен в настройках раздела «Я.Диск» и сохраните его заново.');
+  }
+
+  if (
+    (normalized.includes('яндекс') || normalized.includes('yandex'))
+    && (normalized.includes('прав') || normalized.includes('forbidden') || normalized.includes('access'))
+  ) {
+    return appendYandexDiskHint(message, 'Проверьте, что токен выдан с доступом к Яндекс.Диску и нужным операциям с файлами.');
+  }
+
+  if (
+    normalized.includes('quota')
+    || normalized.includes('insufficient')
+    || normalized.includes('not enough')
+    || normalized.includes('no space')
+    || normalized.includes('не хватает')
+  ) {
+    return appendYandexDiskHint(message, 'Освободите место на Яндекс.Диске или подключите другой аккаунт.');
+  }
+
+  if (
+    (normalized.includes('яндекс') || normalized.includes('yandex'))
+    && (normalized.includes('недоступ') || normalized.includes('не ответил') || normalized.includes('timeout') || normalized.includes('502') || normalized.includes('503') || normalized.includes('504'))
+  ) {
+    return appendYandexDiskHint(message, 'Повторите операцию позже; если ошибка сохраняется, проверьте доступность Яндекс.Диска и сети.');
+  }
+
+  return message;
+}
+
 const defaultCrmSyncDraft: UpdateYandexDiskCrmSyncSettingsRequest = {
   enabled: false,
   syncInvoices: true,
@@ -155,7 +197,7 @@ export function YandexDisk() {
       setListing(data);
       setCurrentPath(data.current.path || path || '/');
     } catch (loadError) {
-      setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить Яндекс.Диск.'));
+      setError(extractYandexDiskErrorMessage(loadError, 'Не удалось загрузить Яндекс.Диск.'));
     } finally {
       if (!silent) setLoading(false);
     }
@@ -185,7 +227,7 @@ export function YandexDisk() {
         await loadListing('/');
       }
     } catch (saveError) {
-      setError(extractDisplayErrorMessage(saveError, 'Не удалось сохранить настройки Яндекс.Диска.'));
+      setError(extractYandexDiskErrorMessage(saveError, 'Не удалось сохранить настройки Яндекс.Диска.'));
     } finally {
       setSavingSettings(false);
     }
@@ -201,7 +243,7 @@ export function YandexDisk() {
       setListing(null);
       toast.success('OAuth-токен удален.', 'Я.Диск');
     } catch (clearError) {
-      setError(extractDisplayErrorMessage(clearError, 'Не удалось удалить токен.'));
+      setError(extractYandexDiskErrorMessage(clearError, 'Не удалось удалить токен.'));
     } finally {
       setSavingSettings(false);
     }
@@ -229,7 +271,7 @@ export function YandexDisk() {
       setCrmSyncPreview(await apiService.getYandexDiskCrmSyncPreview());
       toast.success('Правила синхронизации CRM сохранены.', 'Я.Диск');
     } catch (saveError) {
-      setError(extractDisplayErrorMessage(saveError, 'Не удалось сохранить правила синхронизации CRM.'));
+      setError(extractYandexDiskErrorMessage(saveError, 'Не удалось сохранить правила синхронизации CRM.'));
     } finally {
       setSavingCrmSync(false);
     }
@@ -239,7 +281,7 @@ export function YandexDisk() {
     try {
       setCrmSyncPreview(await apiService.getYandexDiskCrmSyncPreview());
     } catch (previewError) {
-      setError(extractDisplayErrorMessage(previewError, 'Не удалось обновить предпросмотр синхронизации CRM.'));
+      setError(extractYandexDiskErrorMessage(previewError, 'Не удалось обновить предпросмотр синхронизации CRM.'));
     }
   };
 
@@ -247,7 +289,7 @@ export function YandexDisk() {
     try {
       setCrmSyncStatus(await apiService.getYandexDiskCrmSyncStatus());
     } catch (statusError) {
-      setError(extractDisplayErrorMessage(statusError, 'Не удалось обновить отчет синхронизации CRM.'));
+      setError(extractYandexDiskErrorMessage(statusError, 'Не удалось обновить отчет синхронизации CRM.'));
     }
   };
 
@@ -262,7 +304,7 @@ export function YandexDisk() {
       toast.success('Папка создана.', 'Я.Диск');
       await loadListing(currentPath, true);
     } catch (createError) {
-      setError(extractDisplayErrorMessage(createError, 'Не удалось создать папку.'));
+      setError(extractYandexDiskErrorMessage(createError, 'Не удалось создать папку.'));
     } finally {
       setBusyPath(null);
     }
@@ -280,7 +322,7 @@ export function YandexDisk() {
       toast.success('Файл загружен.', 'Я.Диск');
       await loadListing(currentPath, true);
     } catch (uploadError) {
-      setError(extractDisplayErrorMessage(uploadError, 'Не удалось загрузить файл.'));
+      setError(extractYandexDiskErrorMessage(uploadError, 'Не удалось загрузить файл.'));
     } finally {
       setBusyPath(null);
     }
@@ -300,7 +342,7 @@ export function YandexDisk() {
       link.remove();
       URL.revokeObjectURL(url);
     } catch (downloadError) {
-      setError(extractDisplayErrorMessage(downloadError, 'Не удалось скачать файл.'));
+      setError(extractYandexDiskErrorMessage(downloadError, 'Не удалось скачать файл.'));
     } finally {
       setBusyPath(null);
     }
@@ -315,7 +357,7 @@ export function YandexDisk() {
       toast.success('Ресурс удален.', 'Я.Диск');
       await loadListing(currentPath, true);
     } catch (deleteError) {
-      setError(extractDisplayErrorMessage(deleteError, 'Не удалось удалить ресурс.'));
+      setError(extractYandexDiskErrorMessage(deleteError, 'Не удалось удалить ресурс.'));
     } finally {
       setBusyPath(null);
     }
@@ -331,7 +373,7 @@ export function YandexDisk() {
       toast.success('Ресурс скопирован.', 'Я.Диск');
       await loadListing(currentPath, true);
     } catch (copyError) {
-      setError(extractDisplayErrorMessage(copyError, 'Не удалось скопировать ресурс.'));
+      setError(extractYandexDiskErrorMessage(copyError, 'Не удалось скопировать ресурс.'));
     } finally {
       setBusyPath(null);
     }
@@ -347,7 +389,7 @@ export function YandexDisk() {
       toast.success('Ресурс перемещен.', 'Я.Диск');
       await loadListing(currentPath, true);
     } catch (moveError) {
-      setError(extractDisplayErrorMessage(moveError, 'Не удалось переместить ресурс.'));
+      setError(extractYandexDiskErrorMessage(moveError, 'Не удалось переместить ресурс.'));
     } finally {
       setBusyPath(null);
     }
@@ -364,7 +406,7 @@ export function YandexDisk() {
       setEditorContent(file.content);
     } catch (editorError) {
       setEditorPath(null);
-      setError(extractDisplayErrorMessage(editorError, 'Не удалось открыть файл для редактирования.'));
+      setError(extractYandexDiskErrorMessage(editorError, 'Не удалось открыть файл для редактирования.'));
     } finally {
       setEditorLoading(false);
     }
@@ -380,7 +422,7 @@ export function YandexDisk() {
       await loadListing(currentPath, true);
       setEditorPath(null);
     } catch (editorError) {
-      setError(extractDisplayErrorMessage(editorError, 'Не удалось сохранить файл.'));
+      setError(extractYandexDiskErrorMessage(editorError, 'Не удалось сохранить файл.'));
     } finally {
       setEditorLoading(false);
     }

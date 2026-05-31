@@ -94,6 +94,29 @@ public sealed class YandexDiskServiceTests
         Assert.Equal(400, error.StatusCode);
     }
 
+    [Theory]
+    [InlineData(401, """{"message":"Unauthorized"}""", "OAuth-токен")]
+    [InlineData(403, """{"message":"Forbidden"}""", "нет прав")]
+    [InlineData(507, """{"message":"Insufficient Storage"}""", "не хватает свободного места")]
+    [InlineData(503, """{"message":"Service unavailable"}""", "временно недоступен")]
+    public async Task ListAsync_ReturnsHelpfulMessageForCommonYandexDiskErrors(int statusCode, string responseBody, string expectedMessagePart)
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(_ =>
+            new HttpResponseMessage((HttpStatusCode)statusCode)
+            {
+                Content = new StringContent(responseBody, Encoding.UTF8, "application/json"),
+            })));
+
+        var error = await Assert.ThrowsAsync<YandexDiskOperationException>(() =>
+            service.ListAsync("/", 100, 0, CancellationToken.None));
+
+        Assert.Equal(statusCode, error.StatusCode);
+        Assert.Contains(expectedMessagePart, error.Message);
+    }
+
     [Fact]
     public async Task DownloadAsync_RequestsDownloadLinkAndLoadsFile()
     {
