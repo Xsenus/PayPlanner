@@ -292,6 +292,29 @@ export interface YandexDiskCrmSyncPreviewDto {
   items: YandexDiskCrmSyncPreviewItemDto[];
 }
 
+export interface YandexDiskCrmSyncStatusItemDto {
+  documentKind: string;
+  objectType: string;
+  objectId: number;
+  parentObjectId?: number | null;
+  fileName?: string | null;
+  yandexDiskPath?: string | null;
+  status: string;
+  statusText: string;
+  lastError?: string | null;
+  attemptCount: number;
+  lastSyncedAt?: string | null;
+  updatedAt: string;
+}
+
+export interface YandexDiskCrmSyncStatusReportDto {
+  pendingCount: number;
+  failedCount: number;
+  successCount: number;
+  lastSuccessfulSyncAt?: string | null;
+  recentItems: YandexDiskCrmSyncStatusItemDto[];
+}
+
 export interface UpdateYandexDiskCrmSyncSettingsRequest {
   enabled: boolean;
   syncInvoices: boolean;
@@ -1570,6 +1593,10 @@ export class ApiService {
 
   async getYandexDiskCrmSyncPreview() {
     return this.request<YandexDiskCrmSyncPreviewDto>('/yandex-disk/crm-sync/preview');
+  }
+
+  async getYandexDiskCrmSyncStatus() {
+    return this.request<YandexDiskCrmSyncStatusReportDto>('/yandex-disk/crm-sync/status');
   }
 
   async updateYandexDiskCrmSyncSettings(payload: UpdateYandexDiskCrmSyncSettingsRequest) {

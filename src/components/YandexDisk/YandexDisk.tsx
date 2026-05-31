@@ -24,6 +24,7 @@ import {
   type UpdateYandexDiskCrmSyncSettingsRequest,
   type YandexDiskCrmSyncPreviewDto,
   type YandexDiskCrmSyncSettingsDto,
+  type YandexDiskCrmSyncStatusReportDto,
   type YandexDiskListResponseDto,
   type YandexDiskResourceDto,
   type YandexDiskSettingsDto,
@@ -90,6 +91,7 @@ export function YandexDisk() {
   const [settings, setSettings] = useState<YandexDiskSettingsDto | null>(null);
   const [crmSyncSettings, setCrmSyncSettings] = useState<YandexDiskCrmSyncSettingsDto | null>(null);
   const [crmSyncPreview, setCrmSyncPreview] = useState<YandexDiskCrmSyncPreviewDto | null>(null);
+  const [crmSyncStatus, setCrmSyncStatus] = useState<YandexDiskCrmSyncStatusReportDto | null>(null);
   const [crmSyncDraft, setCrmSyncDraft] = useState<UpdateYandexDiskCrmSyncSettingsRequest>(defaultCrmSyncDraft);
   const [tokenDraft, setTokenDraft] = useState('');
   const [rootPathDraft, setRootPathDraft] = useState('disk:/PayPlanner');
@@ -114,15 +116,17 @@ export function YandexDisk() {
   }, [listing]);
 
   const loadSettings = async () => {
-    const [loaded, loadedCrmSyncSettings, loadedCrmSyncPreview] = await Promise.all([
+    const [loaded, loadedCrmSyncSettings, loadedCrmSyncPreview, loadedCrmSyncStatus] = await Promise.all([
       apiService.getYandexDiskSettings(),
       apiService.getYandexDiskCrmSyncSettings(),
       apiService.getYandexDiskCrmSyncPreview(),
+      apiService.getYandexDiskCrmSyncStatus(),
     ]);
     setSettings(loaded);
     setRootPathDraft(loaded.rootPath || 'disk:/PayPlanner');
     setCrmSyncSettings(loadedCrmSyncSettings);
     setCrmSyncPreview(loadedCrmSyncPreview);
+    setCrmSyncStatus(loadedCrmSyncStatus);
     setCrmSyncDraft({
       enabled: loadedCrmSyncSettings.enabled,
       syncInvoices: loadedCrmSyncSettings.syncInvoices,
@@ -236,6 +240,14 @@ export function YandexDisk() {
       setCrmSyncPreview(await apiService.getYandexDiskCrmSyncPreview());
     } catch (previewError) {
       setError(extractDisplayErrorMessage(previewError, 'Не удалось обновить предпросмотр синхронизации CRM.'));
+    }
+  };
+
+  const refreshCrmSyncStatus = async () => {
+    try {
+      setCrmSyncStatus(await apiService.getYandexDiskCrmSyncStatus());
+    } catch (statusError) {
+      setError(extractDisplayErrorMessage(statusError, 'Не удалось обновить отчет синхронизации CRM.'));
     }
   };
 
@@ -546,6 +558,71 @@ export function YandexDisk() {
               </button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-100 pb-3 md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-semibold text-sky-700">
+              <RefreshCw className="h-4 w-4" />
+              <span>Мониторинг CRM</span>
+            </div>
+            <h3 className="mt-1 text-lg font-semibold text-slate-900">Состояние синхронизации</h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refreshCrmSyncStatus()}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-4">
+          {[
+            ['Ожидают', crmSyncStatus?.pendingCount ?? 0],
+            ['Ошибки', crmSyncStatus?.failedCount ?? 0],
+            ['Успешно', crmSyncStatus?.successCount ?? 0],
+            ['Последний обмен', crmSyncStatus?.lastSuccessfulSyncAt ? formatDate(crmSyncStatus.lastSuccessfulSyncAt) : '—'],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+              <div className="mt-1 truncate text-base font-semibold text-slate-900">{value}</div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left font-semibold">Документ</th>
+                <th className="px-3 py-2 text-left font-semibold">Статус</th>
+                <th className="px-3 py-2 text-left font-semibold">Путь</th>
+                <th className="px-3 py-2 text-left font-semibold">Обновлено</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {(crmSyncStatus?.recentItems ?? []).map((item) => (
+                <tr key={`${item.documentKind}-${item.objectType}-${item.objectId}`}>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-slate-800">{item.fileName ?? item.documentKind}</div>
+                    {item.lastError ? <div className="mt-1 max-w-[360px] truncate text-xs text-rose-600" title={item.lastError}>{item.lastError}</div> : null}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2">{item.statusText}</td>
+                  <td className="max-w-[460px] px-3 py-2">
+                    <div className="truncate font-mono text-xs text-slate-700" title={item.yandexDiskPath ?? undefined}>{item.yandexDiskPath ?? '—'}</div>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2">{formatDate(item.updatedAt)}</td>
+                </tr>
+              ))}
+              {!crmSyncStatus?.recentItems?.length ? (
+                <tr>
+                  <td colSpan={4} className="px-3 py-6 text-center text-sm text-slate-500">История синхронизации пока пуста.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </section>
 

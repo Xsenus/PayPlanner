@@ -75,6 +75,59 @@ public sealed class YandexDiskController : ControllerBase
         return Ok(await _service.PreviewCrmSyncAsync(ct));
     }
 
+    [HttpGet("crm-sync/status")]
+    public async Task<ActionResult<YandexDiskCrmSyncStatusReportDto>> GetCrmSyncStatus(CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanView, ct);
+        if (forbidden is not null) return forbidden;
+
+        var counts = await _db.YandexDiskCrmSyncStates
+            .AsNoTracking()
+            .GroupBy(item => item.Status)
+            .Select(group => new { Status = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Status, item => item.Count, ct);
+
+        var lastSuccessAt = await _db.YandexDiskCrmSyncStates
+            .AsNoTracking()
+            .Where(item => item.Status == YandexDiskCrmSyncStatus.Success)
+            .MaxAsync(item => (DateTime?)item.LastSyncedAt, ct);
+
+        var recent = await _db.YandexDiskCrmSyncStates
+            .AsNoTracking()
+            .OrderByDescending(item => item.UpdatedAt)
+            .ThenByDescending(item => item.Id)
+            .Take(20)
+            .Select(item => new YandexDiskCrmSyncStatusItemDto
+            {
+                DocumentKind = item.DocumentKind,
+                ObjectType = item.ObjectType,
+                ObjectId = item.ObjectId,
+                ParentObjectId = item.ParentObjectId,
+                FileName = item.FileName,
+                YandexDiskPath = item.YandexDiskPath,
+                Status = item.Status,
+                StatusText = item.Status == YandexDiskCrmSyncStatus.Success
+                    ? "Успешно"
+                    : item.Status == YandexDiskCrmSyncStatus.Failed
+                        ? "Ошибка"
+                        : "Ожидает",
+                LastError = item.LastError,
+                AttemptCount = item.AttemptCount,
+                LastSyncedAt = item.LastSyncedAt,
+                UpdatedAt = item.UpdatedAt,
+            })
+            .ToListAsync(ct);
+
+        return Ok(new YandexDiskCrmSyncStatusReportDto
+        {
+            PendingCount = counts.GetValueOrDefault(YandexDiskCrmSyncStatus.Pending),
+            FailedCount = counts.GetValueOrDefault(YandexDiskCrmSyncStatus.Failed),
+            SuccessCount = counts.GetValueOrDefault(YandexDiskCrmSyncStatus.Success),
+            LastSuccessfulSyncAt = lastSuccessAt,
+            RecentItems = recent,
+        });
+    }
+
     [HttpPut("crm-sync/settings")]
     public async Task<ActionResult<YandexDiskCrmSyncSettingsDto>> UpdateCrmSyncSettings(
         [FromBody] UpdateYandexDiskCrmSyncSettingsRequest request,

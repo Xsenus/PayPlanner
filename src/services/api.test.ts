@@ -311,6 +311,41 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('/yandex-disk/crm-sync/preview');
   });
 
+  it('loads Yandex Disk CRM sync status report', async () => {
+    const payload = {
+      pendingCount: 1,
+      failedCount: 2,
+      successCount: 3,
+      lastSuccessfulSyncAt: '2026-06-01T08:00:00Z',
+      recentItems: [
+        {
+          documentKind: 'contract',
+          objectType: 'contract',
+          objectId: 10,
+          parentObjectId: null,
+          fileName: 'contract.pdf',
+          yandexDiskPath: '/CRM/contract.pdf',
+          status: 'success',
+          statusText: 'Успешно',
+          lastError: null,
+          attemptCount: 1,
+          lastSyncedAt: '2026-06-01T08:00:00Z',
+          updatedAt: '2026-06-01T08:00:00Z',
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getYandexDiskCrmSyncStatus();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-disk/crm-sync/status');
+  });
+
   it('uploads a case document to Yandex Disk', async () => {
     const payload = { success: true, path: '/CRM/client/file.pdf' };
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {

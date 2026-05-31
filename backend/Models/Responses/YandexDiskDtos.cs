@@ -82,3 +82,28 @@ public sealed class YandexDiskCrmSyncPreviewItemDto
     public string Operation { get; set; } = string.Empty;
     public string OperationText { get; set; } = string.Empty;
 }
+
+public sealed class YandexDiskCrmSyncStatusReportDto
+{
+    public int PendingCount { get; set; }
+    public int FailedCount { get; set; }
+    public int SuccessCount { get; set; }
+    public DateTime? LastSuccessfulSyncAt { get; set; }
+    public IReadOnlyList<YandexDiskCrmSyncStatusItemDto> RecentItems { get; set; } = Array.Empty<YandexDiskCrmSyncStatusItemDto>();
+}
+
+public sealed class YandexDiskCrmSyncStatusItemDto
+{
+    public string DocumentKind { get; set; } = string.Empty;
+    public string ObjectType { get; set; } = string.Empty;
+    public int ObjectId { get; set; }
+    public int? ParentObjectId { get; set; }
+    public string? FileName { get; set; }
+    public string? YandexDiskPath { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string StatusText { get; set; } = string.Empty;
+    public string? LastError { get; set; }
+    public int AttemptCount { get; set; }
+    public DateTime? LastSyncedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}

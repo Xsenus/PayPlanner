@@ -115,6 +115,52 @@ public sealed class YandexDiskControllerTests
         Assert.Equal("disk:/PayPlanner/CRM/Счет/example.pdf", item.FullPath);
     }
 
+    [Fact]
+    public async Task GetCrmSyncStatus_ReturnsCountsAndRecentItems()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true });
+        scope.Db.YandexDiskCrmSyncStates.AddRange(
+            new YandexDiskCrmSyncState
+            {
+                DocumentKind = "contract",
+                ObjectType = "contract",
+                ObjectId = 1,
+                FileName = "contract.pdf",
+                YandexDiskPath = "/CRM/contract.pdf",
+                Status = YandexDiskCrmSyncStatus.Success,
+                AttemptCount = 1,
+                LastSyncedAt = now.AddMinutes(-5),
+                CreatedAt = now.AddMinutes(-10),
+                UpdatedAt = now.AddMinutes(-5),
+            },
+            new YandexDiskCrmSyncState
+            {
+                DocumentKind = "invoice",
+                ObjectType = "payment",
+                ObjectId = 2,
+                FileName = "invoice.pdf",
+                Status = YandexDiskCrmSyncStatus.Failed,
+                LastError = "Temporary error",
+                AttemptCount = 2,
+                CreatedAt = now.AddMinutes(-20),
+                UpdatedAt = now.AddMinutes(-2),
+            });
+        await scope.Db.SaveChangesAsync();
+        var controller = CreateController(scope.Db, new FakeYandexDiskService(), CreateUserPrincipal(user.Id));
+
+        var response = await controller.GetCrmSyncStatus(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(response.Result);
+        var report = Assert.IsType<YandexDiskCrmSyncStatusReportDto>(ok.Value);
+        Assert.Equal(1, report.SuccessCount);
+        Assert.Equal(1, report.FailedCount);
+        Assert.Equal(now.AddMinutes(-5), report.LastSuccessfulSyncAt);
+        Assert.Equal(2, report.RecentItems.Count);
+        Assert.Equal("Ошибка", report.RecentItems[0].StatusText);
+    }
+
     private static YandexDiskController CreateController(PaymentContext db, IYandexDiskService service, ClaimsPrincipal user)
         => new(service, db)
         {
