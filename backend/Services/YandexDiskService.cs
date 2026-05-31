@@ -157,9 +157,10 @@ public sealed class YandexDiskService : IYandexDiskService
         }
 
         var markerText = $"PayPlanner Yandex Disk connection test {checkedAt:O}";
+        var testFileFullPath = BuildFullPath(settings.RootPath, testFilePath);
         var uploadLink = await SendJsonAsync<YandexDiskLinkPayload>(
             HttpMethod.Get,
-            $"{ApiBaseUrl}/resources/upload?path={Uri.EscapeDataString(BuildFullPath(settings.RootPath, testFilePath))}&overwrite=true",
+            $"{ApiBaseUrl}/resources/upload?path={Uri.EscapeDataString(testFileFullPath)}&overwrite=true",
             token,
             null,
             cancellationToken);
@@ -172,32 +173,38 @@ public sealed class YandexDiskService : IYandexDiskService
 
         steps.Add(BuildConnectionTestStep("upload", "Проверка загрузки файла", "Служебный файл загружен в тестовую папку."));
 
-        var downloadLink = await SendJsonAsync<YandexDiskLinkPayload>(
-            HttpMethod.Get,
-            $"{ApiBaseUrl}/resources/download?path={Uri.EscapeDataString(BuildFullPath(settings.RootPath, testFilePath))}",
-            token,
-            null,
-            cancellationToken);
-
-        using (var downloadResponse = await _httpClient.GetAsync(downloadLink.Href, cancellationToken))
+        try
         {
-            await EnsureSuccessAsync(downloadResponse, cancellationToken);
-            var downloaded = await downloadResponse.Content.ReadAsStringAsync(cancellationToken);
-            if (!string.Equals(downloaded, markerText, StringComparison.Ordinal))
+            var downloadLink = await SendJsonAsync<YandexDiskLinkPayload>(
+                HttpMethod.Get,
+                $"{ApiBaseUrl}/resources/download?path={Uri.EscapeDataString(testFileFullPath)}",
+                token,
+                null,
+                cancellationToken);
+
+            using (var downloadResponse = await _httpClient.GetAsync(downloadLink.Href, cancellationToken))
             {
-                throw new YandexDiskOperationException(502, "Яндекс.Диск вернул служебный файл с неожиданным содержимым. Повторите проверку позже.");
+                await EnsureSuccessAsync(downloadResponse, cancellationToken);
+                var downloaded = await downloadResponse.Content.ReadAsStringAsync(cancellationToken);
+                if (!string.Equals(downloaded, markerText, StringComparison.Ordinal))
+                {
+                    throw new YandexDiskOperationException(502, "Яндекс.Диск вернул служебный файл с неожиданным содержимым. Повторите проверку позже.");
+                }
             }
+
+            steps.Add(BuildConnectionTestStep("download", "Проверка скачивания файла", "Служебный файл скачан и прочитан."));
+        }
+        finally
+        {
+            await SendAsync(
+                HttpMethod.Delete,
+                $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(testFileFullPath)}&permanently=true",
+                token,
+                null,
+                cancellationToken);
+            steps.Add(BuildConnectionTestStep("cleanup", "Очистка служебного файла", "Служебный файл удален после проверки."));
         }
 
-        steps.Add(BuildConnectionTestStep("download", "Проверка скачивания файла", "Служебный файл скачан и прочитан."));
-
-        await SendAsync(
-            HttpMethod.Delete,
-            $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(BuildFullPath(settings.RootPath, testFilePath))}&permanently=true",
-            token,
-            null,
-            cancellationToken);
-        steps.Add(BuildConnectionTestStep("cleanup", "Очистка служебного файла", "Служебный файл удален после проверки."));
 
         return new YandexDiskConnectionTestDto
         {
