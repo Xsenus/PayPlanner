@@ -34,6 +34,9 @@ jobs:
       - name: Restore backend
         run: dotnet restore "${{ env.BE_CSPROJ }}"
 
+      - name: Test backend
+        run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore
+
       - name: Publish backend
         run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
 
