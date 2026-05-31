@@ -2498,6 +2498,21 @@ export class ApiService {
     return response.blob();
   }
 
+  async uploadInvoiceDocumentToYandexDisk(
+    id: number,
+    format: 'word' | 'pdf' = 'pdf',
+    options?: { includeSignatureAndSeal?: boolean; overwrite?: boolean },
+  ) {
+    const query = buildQuery({
+      format,
+      includeSignatureAndSeal: options?.includeSignatureAndSeal,
+      overwrite: options?.overwrite,
+    });
+    return this.request<YandexDiskOperationResultDto>(`/invoices/${id}/yandex-disk${query}`, {
+      method: 'POST',
+    });
+  }
+
   async downloadActDocument(
     id: number,
     format: 'word' | 'pdf' | 'html' = 'word',

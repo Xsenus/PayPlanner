@@ -319,6 +319,24 @@ describe('apiService auth handling', () => {
     expect(init?.method).toBe('POST');
   });
 
+  it('uploads an invoice document to Yandex Disk', async () => {
+    const payload = { success: true, path: '/CRM/invoices/invoice.pdf' };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.uploadInvoiceDocumentToYandexDisk(88, 'pdf', {
+      includeSignatureAndSeal: true,
+      overwrite: false,
+    });
+
+    expect(result).toEqual(payload);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/invoices/88/yandex-disk?format=pdf&includeSignatureAndSeal=true&overwrite=false');
+    expect(init?.method).toBe('POST');
+  });
+
   it('uploads a Yandex Disk file with form data', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true, path: '/docs/a.txt' }), {
       headers: { 'content-type': 'application/json' },

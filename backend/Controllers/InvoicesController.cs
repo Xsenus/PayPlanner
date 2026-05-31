@@ -36,6 +36,7 @@ public class InvoicesController : ControllerBase
     private readonly IEmailService _emailService;
     private readonly IFormRequirementsService _formRequirements;
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
+    private readonly IYandexDiskService? _yandexDiskService;
     private const string InstallmentPaymentMarker = "[pp:installment-payment]";
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private static readonly JsonSerializerOptions InstallmentMetadataJsonOptions = new()
@@ -47,12 +48,14 @@ public class InvoicesController : ControllerBase
         PaymentContext db,
         IEmailService emailService,
         IFormRequirementsService formRequirements,
-        IInvoiceDocumentPdfService? invoiceDocumentPdfService = null)
+        IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
+        IYandexDiskService? yandexDiskService = null)
     {
         _db = db;
         _emailService = emailService;
         _formRequirements = formRequirements;
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
+        _yandexDiskService = yandexDiskService;
     }
 
     [HttpGet]
@@ -2430,6 +2433,120 @@ public class InvoicesController : ControllerBase
         return File(bytes, "application/msword", fileName);
     }
 
+    [HttpPost("{id:int}/yandex-disk")]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> UploadDocumentToYandexDisk(
+        int id,
+        [FromQuery] string? format = "pdf",
+        [FromQuery] string? templateKey = null,
+        [FromQuery] bool? includeSignatureAndSeal = null,
+        [FromQuery] bool? overwrite = null,
+        CancellationToken ct = default)
+    {
+        if (_yandexDiskService is null)
+        {
+            return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: "Сервис Яндекс.Диска не зарегистрирован на сервере.");
+        }
+
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.YandexDisk, permission => permission.CanCreate, ct) is { } yandexForbidden)
+        {
+            return yandexForbidden;
+        }
+
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Accounts, permission => permission.CanExport, ct) is { } invoiceForbidden)
+        {
+            return invoiceForbidden;
+        }
+
+        var payment = await LoadInvoiceDocumentPaymentAsync(id, ct);
+        if (payment is null)
+        {
+            return NotFound();
+        }
+
+        var normalizedFormat = NormalizeDocumentFormat(format);
+        if (normalizedFormat == "html")
+        {
+            normalizedFormat = "word";
+        }
+
+        var lineItems = await LoadInvoiceLineItemsAsync(payment.Id, payment.SystemNotes, ct);
+        var installmentDocumentContext = await BuildInstallmentDocumentContextAsync(payment, lineItems, ct);
+        var documentSettings = await GetInvoiceDocumentTemplateSettingsAsync(ct);
+        var template = SelectInvoiceDocumentTemplate(documentSettings, templateKey);
+        var mainCompany = await LoadMainCompanyAsync(ct);
+        var shouldIncludeSignatureAndSeal = includeSignatureAndSeal ?? documentSettings.PrintWithSignatureAndSealByDefault;
+        var documentHtml = InvoiceDocumentTemplateEngine.RenderHtml(
+            template.Html,
+            payment,
+            installmentDocumentContext.LineItems,
+            mainCompany,
+            shouldIncludeSignatureAndSeal,
+            installmentDocumentContext.ScheduleHtml);
+
+        var documentNumber = payment.Invoice?.Number ?? payment.Account;
+        byte[] bytes;
+        string fileName;
+        string contentType;
+        if (normalizedFormat == "pdf")
+        {
+            try
+            {
+                bytes = await RenderInvoicePdfAsync(documentHtml, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
+            }
+
+            fileName = $"invoice-{SanitizeFilePart(documentNumber)}.pdf";
+            contentType = "application/pdf";
+        }
+        else
+        {
+            bytes = Encoding.UTF8.GetBytes(documentHtml);
+            fileName = $"invoice-{SanitizeFilePart(documentNumber)}.doc";
+            contentType = "application/msword";
+        }
+
+        await using var stream = new MemoryStream(bytes);
+        try
+        {
+            var result = await _yandexDiskService.UploadCrmDocumentAsync(new YandexDiskCrmDocumentUpload(
+                stream,
+                contentType,
+                fileName,
+                "invoice",
+                "Счет",
+                documentNumber,
+                payment.Invoice?.Date ?? payment.AccountDate ?? payment.Date,
+                string.IsNullOrWhiteSpace(payment.Description) ? $"Счет {documentNumber}" : payment.Description,
+                ResolveInvoiceClientName(payment),
+                ResolveInvoiceLegalEntityName(payment),
+                payment.ClientCase?.CaseNumber ?? payment.InvoiceClientCases.FirstOrDefault()?.ClientCase?.CaseNumber,
+                payment.ClientCase?.Title ?? payment.InvoiceClientCases.FirstOrDefault()?.ClientCase?.Title,
+                overwrite),
+                ct);
+
+            _db.ObjectAuditEvents.Add(new ObjectAuditEvent
+            {
+                ObjectType = "payment",
+                ObjectId = payment.Id,
+                Action = "YandexDiskUploaded",
+                Description = $"Счет «{documentNumber}» отправлен на Яндекс.Диск.",
+                ActorUserId = User.GetUserId(),
+                ActorUserName = User.GetDisplayName(),
+                MetadataJson = JsonSerializer.Serialize(new { payment.Id, DocumentNumber = documentNumber, FileName = fileName, result.Path }),
+                CreatedAt = DateTime.UtcNow,
+            });
+            await _db.SaveChangesAsync(ct);
+            return result;
+        }
+        catch (YandexDiskOperationException ex)
+        {
+            return MapYandexDiskError(ex);
+        }
+    }
+
     [HttpPost("{id:int}/send-email")]
     public async Task<IActionResult> SendInvoiceEmail(int id, [FromBody] SendInvoiceEmailRequest request, CancellationToken ct)
     {
@@ -2522,6 +2639,59 @@ public class InvoicesController : ControllerBase
         }
 
         return _invoiceDocumentPdfService.RenderAsync(documentHtml, ct);
+    }
+
+    private async Task<ActionResult?> RequireSectionPermissionAsync(
+        string section,
+        Func<RolePermission, bool> isAllowed,
+        CancellationToken ct)
+    {
+        if (User.IsInRole("admin"))
+        {
+            return null;
+        }
+
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, section, ct);
+        return permission is not null && permission.CanView && isAllowed(permission)
+            ? null
+            : Forbid();
+    }
+
+    private static ActionResult MapYandexDiskError(YandexDiskOperationException ex)
+    {
+        if (ex.StatusCode >= 400 && ex.StatusCode < 500)
+        {
+            return new BadRequestObjectResult(ex.Message);
+        }
+
+        return new ObjectResult(ex.Message)
+        {
+            StatusCode = StatusCodes.Status502BadGateway,
+        };
+    }
+
+    private static string? ResolveInvoiceClientName(Payment payment)
+    {
+        var client = payment.Type == PaymentType.Expense
+            ? payment.ExpenseClient
+            : payment.Client;
+
+        return client?.Name ?? payment.CounterpartyName;
+    }
+
+    private static string? ResolveInvoiceLegalEntityName(Payment payment)
+    {
+        var legalEntity = payment.Type == PaymentType.Expense
+            ? payment.ExpenseLegalEntity
+            : payment.LegalEntity;
+
+        return legalEntity?.ShortName ?? legalEntity?.FullName;
     }
 
     private IQueryable<InvoiceQueryItem> BuildInvoiceQuery(DataVisibilityAccess? visibility = null)
