@@ -280,17 +280,44 @@ describe("ClientReconciliationAct", () => {
   });
 
   it("prints the reconciliation act with the fixed PDF layout", async () => {
+    apiMock.getInvoices.mockResolvedValueOnce({
+      items: [invoice({ amount: 10000 })],
+      total: 1,
+      page: 1,
+      pageSize: 500,
+    });
+    apiMock.getPaymentsV2.mockResolvedValueOnce({
+      items: [payment({ amount: 10000, paidAmount: 10000 })],
+      total: 1,
+      page: 1,
+      pageSize: 500,
+      summary: {
+        income: 10000,
+        expense: 0,
+        balance: 10000,
+        incomeCount: 1,
+        expenseCount: 0,
+        total: 1,
+      },
+    });
+    apiMock.getActs.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 500,
+    });
+
     render(
       <ClientReconciliationAct
         clientId={1}
-        clientName="ООО Ромашка"
+        clientName="Петров Петр Петрович"
         client={
           {
             id: 1,
-            name: "ООО Ромашка",
+            name: "Петров Петр Петрович",
             legalEntity: {
               id: 2,
-              shortName: "ООО Ромашка",
+              shortName: "Петров Петр Петрович",
               inn: "9876543210",
               clientsCount: 1,
             },
@@ -310,6 +337,11 @@ describe("ClientReconciliationAct", () => {
     expect(writtenHtml).toContain("По данным ООО ЭлитПраво, руб.");
     expect(writtenHtml).toContain("Продажа (№15 от 10.01.2026)");
     expect(writtenHtml).toContain("10 000,00");
+    expect(writtenHtml).toContain("<strong>на ");
+    expect(writtenHtml).toContain("задолженности нет</strong>");
+    expect(writtenHtml).toContain("(Петров П.П.)");
+    expect(writtenHtml).toContain("(ООО ЭлитПраво)");
+    expect(writtenHtml).not.toContain("(ООО Э.)");
     expect(writtenHtml).not.toContain("Покупка (№15 от 10.01.2026)");
   });
 });

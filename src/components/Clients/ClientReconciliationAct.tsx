@@ -164,18 +164,49 @@ function getPartySignerPosition(
   return fallback;
 }
 
+function formatSignatureName(value: string) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (/^(?:ООО|АО|ПАО|ЗАО|ОАО|НКО|АНО|Фонд|Ассоциация)(?:\s|$)/i.test(normalized)) {
+    return normalized;
+  }
+
+  const personName = normalized.replace(/^ИП\s+/i, "");
+  const parts = personName.split(" ").filter(Boolean);
+  if (parts.length < 2) {
+    return personName;
+  }
+
+  const initials = parts
+    .slice(1)
+    .map((part) => {
+      const letters = part.replace(/\./g, "");
+      if (part.includes(".") && letters.length > 0 && letters.length <= 2) {
+        return letters
+          .split("")
+          .map((letter) => `${letter.toUpperCase()}.`)
+          .join("");
+      }
+
+      return part[0] ? `${part[0].toUpperCase()}.` : "";
+    })
+    .filter(Boolean)
+    .join("");
+  return initials ? `${parts[0]} ${initials}` : personName;
+}
+
 function createParty(
   entity: LegalEntitySummary | LegalEntityDetail | null | undefined,
   fallbackName: string,
   signerPosition: string,
 ): ReconciliationParty {
   const name = getPartyName(entity, fallbackName);
+  const signerName = getPartySignerName(entity, fallbackName);
 
   return {
     name,
     nameWithInn: entity?.inn ? `${name} (ИНН ${entity.inn})` : name,
     details: getPartyDetails(entity, fallbackName),
-    signerName: getPartySignerName(entity, fallbackName),
+    signerName: formatSignatureName(signerName),
     signerPosition: getPartySignerPosition(entity, signerPosition),
     signatureDataUrl: entity?.directorSignatureDataUrl ?? null,
     sealDataUrl: entity?.sealDataUrl ?? null,
@@ -248,6 +279,22 @@ function getBalanceSummary(
   }
 
   return `на ${toRuDate(periodTo)} задолженности нет`;
+}
+
+function renderBalanceSummaryHtml(
+  balance: number,
+  periodTo: string,
+  executorName: string,
+  clientName: string,
+) {
+  const summary = escapeHtml(getBalanceSummary(balance, periodTo, executorName, clientName));
+  if (balance === 0) {
+    return `<strong>${summary}</strong>`;
+  }
+
+  return summary
+    .replace(" составляет ", " составляет <strong>")
+    .replace(" руб.", " руб.</strong>");
 }
 
 function renderAssetImage(
@@ -498,7 +545,7 @@ function buildReconciliationExcelHtml({
       <td>${fixedPrintLayout ? "" : `По данным ${escapeHtml(executor.name)} и ${escapeHtml(client.name)}`}</td>
     </tr>
     <tr>
-      <td>${escapeHtml(getBalanceSummary(totals.balance, draft.periodTo, executor.name, client.name)).replace(" составляет ", " составляет <strong>").replace(" руб.", " руб.</strong>")}</td>
+      <td>${renderBalanceSummaryHtml(totals.balance, draft.periodTo, executor.name, client.name)}</td>
       <td>${fixedPrintLayout ? "" : `на ${escapeHtml(toRuDate(draft.periodTo))}`}</td>
     </tr>
   </table>
