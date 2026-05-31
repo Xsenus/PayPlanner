@@ -99,6 +99,55 @@ public sealed class YandexDiskControllerTests
     }
 
     [Fact]
+    public async Task TestConnection_RequiresFullFilePermissions()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with
+        {
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = false,
+            CanExport = true,
+        });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.TestConnection(new TestYandexDiskConnectionRequest { TestFolderPath = "/Check" }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.False(service.TestConnectionCalled);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+    }
+
+    [Fact]
+    public async Task TestConnection_AllowsFullFilePermissionsAndWritesAudit()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with
+        {
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = true,
+            CanExport = true,
+        });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.TestConnection(new TestYandexDiskConnectionRequest { TestFolderPath = "/Check" }, CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskConnectionTestDto>(response.Value);
+        Assert.True(result.Success);
+        Assert.Equal("/Check", result.TestFolderPath);
+        Assert.True(service.TestConnectionCalled);
+        var audit = Assert.Single(scope.Db.ObjectAuditEvents);
+        Assert.Equal("ConnectionTested", audit.Action);
+        Assert.Equal(user.Id, audit.ActorUserId);
+        Assert.Contains("/Check", audit.MetadataJson);
+    }
+
+    [Fact]
     public async Task PreviewCrmSync_AllowsViewPermission()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -237,6 +286,7 @@ public sealed class YandexDiskControllerTests
         public YandexDiskOperationResultDto CreateFolderResult { get; set; } = new() { Success = true, Path = "/" };
         public bool DeleteCalled { get; private set; }
         public bool DownloadCalled { get; private set; }
+        public bool TestConnectionCalled { get; private set; }
 
         public Task<YandexDiskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexDiskSettingsDto { IsConfigured = true, RootPath = "disk:/PayPlanner" });
@@ -245,7 +295,9 @@ public sealed class YandexDiskControllerTests
             => Task.FromResult(new YandexDiskSettingsDto { IsConfigured = true, RootPath = request.RootPath ?? "disk:/PayPlanner" });
 
         public Task<YandexDiskConnectionTestDto> TestConnectionAsync(TestYandexDiskConnectionRequest request, CancellationToken cancellationToken = default)
-            => Task.FromResult(new YandexDiskConnectionTestDto
+        {
+            TestConnectionCalled = true;
+            return Task.FromResult(new YandexDiskConnectionTestDto
             {
                 Success = true,
                 RootPath = "disk:/PayPlanner",
@@ -263,6 +315,7 @@ public sealed class YandexDiskControllerTests
                     },
                 ],
             });
+        }
 
         public Task<YandexDiskListResponseDto> ListAsync(string? path, int limit, int offset, CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexDiskListResponseDto());
