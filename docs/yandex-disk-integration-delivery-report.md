@@ -52,10 +52,11 @@
 - `cedf4ef6` - Закрепить сбой очистки проверки Я.Диска.
 - `f131f64c` - Поддержать пустой запрос проверки Я.Диска.
 - `efba0a42` - Закрепить стандартную папку проверки Я.Диска.
+- `8d0d76aa` - Закрепить защиту путей Я.Диска тестами.
 
 ## Выполненные проверки
 
-- `dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --filter "YandexDisk"` - успешно, 38 тестов.
+- `dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --filter "YandexDisk"` - успешно, 46 тестов.
 - `npm run test:unit -- src/services/api.test.ts` - успешно, 68 тестов.
 - `npm run build` - успешно.
 - Browser smoke на `http://127.0.0.1:4173/` - приложение открывается без ошибок консоли, дальнейшая проверка требует входа в систему.

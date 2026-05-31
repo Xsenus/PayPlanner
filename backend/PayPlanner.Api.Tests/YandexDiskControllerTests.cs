@@ -53,6 +53,94 @@ public sealed class YandexDiskControllerTests
     }
 
     [Fact]
+    public async Task Copy_AllowsCreatePermissionAndWritesAudit()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanCreate = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.Copy(new YandexDiskResourceOperationRequest
+        {
+            FromPath = "/Docs/source.txt",
+            ToPath = "/Docs/copy.txt",
+            Overwrite = true,
+        }, CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskOperationResultDto>(response.Value);
+        Assert.Equal("/Docs/copy.txt", result.Path);
+        Assert.True(service.CopyCalled);
+        var audit = Assert.Single(scope.Db.ObjectAuditEvents);
+        Assert.Equal("Copied", audit.Action);
+        Assert.Equal(user.Id, audit.ActorUserId);
+        Assert.Contains("/Docs/source.txt", audit.MetadataJson);
+        Assert.Contains("/Docs/copy.txt", audit.MetadataJson);
+    }
+
+    [Fact]
+    public async Task Copy_ForbidsUserWithoutCreatePermission()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanCreate = false });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.Copy(new YandexDiskResourceOperationRequest
+        {
+            FromPath = "/Docs/source.txt",
+            ToPath = "/Docs/copy.txt",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+        Assert.False(service.CopyCalled);
+    }
+
+    [Fact]
+    public async Task Move_AllowsEditPermissionAndWritesAudit()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanEdit = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.Move(new YandexDiskResourceOperationRequest
+        {
+            FromPath = "/Docs/source.txt",
+            ToPath = "/Archive/source.txt",
+            Overwrite = false,
+        }, CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskOperationResultDto>(response.Value);
+        Assert.Equal("/Archive/source.txt", result.Path);
+        Assert.True(service.MoveCalled);
+        var audit = Assert.Single(scope.Db.ObjectAuditEvents);
+        Assert.Equal("Moved", audit.Action);
+        Assert.Equal(user.Id, audit.ActorUserId);
+        Assert.Contains("/Docs/source.txt", audit.MetadataJson);
+        Assert.Contains("/Archive/source.txt", audit.MetadataJson);
+    }
+
+    [Fact]
+    public async Task Move_ForbidsUserWithoutEditPermission()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanEdit = false });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.Move(new YandexDiskResourceOperationRequest
+        {
+            FromPath = "/Docs/source.txt",
+            ToPath = "/Archive/source.txt",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+        Assert.False(service.MoveCalled);
+    }
+
+    [Fact]
     public async Task Download_RequiresExportPermission()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -64,6 +152,93 @@ public sealed class YandexDiskControllerTests
 
         Assert.IsType<ForbidResult>(response);
         Assert.False(service.DownloadCalled);
+    }
+
+    [Fact]
+    public async Task Upload_AllowsCreatePermissionAndWritesAudit()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanCreate = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+        using var stream = new MemoryStream([1, 2, 3]);
+        var file = new FormFile(stream, 0, stream.Length, "file", "report.txt")
+        {
+            Headers = new HeaderDictionary(),
+            ContentType = "text/plain",
+        };
+
+        var response = await controller.Upload(file, "/Docs/report.txt", overwrite: true, CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskOperationResultDto>(response.Value);
+        Assert.Equal("/Docs/report.txt", result.Path);
+        Assert.True(service.UploadCalled);
+        var audit = Assert.Single(scope.Db.ObjectAuditEvents);
+        Assert.Equal("Uploaded", audit.Action);
+        Assert.Equal(user.Id, audit.ActorUserId);
+        Assert.Contains("/Docs/report.txt", audit.MetadataJson);
+        Assert.Contains("report.txt", audit.MetadataJson);
+    }
+
+    [Fact]
+    public async Task Upload_ForbidsUserWithoutCreatePermission()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanCreate = false });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+        using var stream = new MemoryStream([1, 2, 3]);
+        var file = new FormFile(stream, 0, stream.Length, "file", "report.txt");
+
+        var response = await controller.Upload(file, "/Docs/report.txt", overwrite: true, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+        Assert.False(service.UploadCalled);
+    }
+
+    [Fact]
+    public async Task SaveText_AllowsEditPermissionAndWritesAudit()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanEdit = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.SaveText(new UpdateYandexDiskTextFileRequest
+        {
+            Path = "/Docs/readme.txt",
+            Content = "updated",
+            Overwrite = true,
+        }, CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskOperationResultDto>(response.Value);
+        Assert.Equal("/Docs/readme.txt", result.Path);
+        Assert.True(service.SaveTextCalled);
+        var audit = Assert.Single(scope.Db.ObjectAuditEvents);
+        Assert.Equal("TextUpdated", audit.Action);
+        Assert.Equal(user.Id, audit.ActorUserId);
+        Assert.Contains("/Docs/readme.txt", audit.MetadataJson);
+        Assert.Contains("contentLength", audit.MetadataJson);
+    }
+
+    [Fact]
+    public async Task SaveText_ForbidsUserWithoutEditPermission()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanEdit = false });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.SaveText(new UpdateYandexDiskTextFileRequest
+        {
+            Path = "/Docs/readme.txt",
+            Content = "updated",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+        Assert.False(service.SaveTextCalled);
     }
 
     [Fact]
@@ -307,8 +482,12 @@ public sealed class YandexDiskControllerTests
     private sealed class FakeYandexDiskService : IYandexDiskService
     {
         public YandexDiskOperationResultDto CreateFolderResult { get; set; } = new() { Success = true, Path = "/" };
+        public bool CopyCalled { get; private set; }
+        public bool MoveCalled { get; private set; }
         public bool DeleteCalled { get; private set; }
+        public bool UploadCalled { get; private set; }
         public bool DownloadCalled { get; private set; }
+        public bool SaveTextCalled { get; private set; }
         public bool TestConnectionCalled { get; private set; }
 
         public Task<YandexDiskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
@@ -347,10 +526,16 @@ public sealed class YandexDiskControllerTests
             => Task.FromResult(CreateFolderResult);
 
         public Task<YandexDiskOperationResultDto> CopyAsync(string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
-            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = toPath ?? "/" });
+        {
+            CopyCalled = true;
+            return Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = toPath ?? "/" });
+        }
 
         public Task<YandexDiskOperationResultDto> MoveAsync(string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
-            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = toPath ?? "/" });
+        {
+            MoveCalled = true;
+            return Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = toPath ?? "/" });
+        }
 
         public Task<YandexDiskOperationResultDto> DeleteAsync(string? path, bool permanently, CancellationToken cancellationToken = default)
         {
@@ -359,7 +544,10 @@ public sealed class YandexDiskControllerTests
         }
 
         public Task<YandexDiskOperationResultDto> UploadAsync(string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default)
-            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = path ?? "/" });
+        {
+            UploadCalled = true;
+            return Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = path ?? "/" });
+        }
 
         public Task<YandexDiskDownload> DownloadAsync(string? path, CancellationToken cancellationToken = default)
         {
@@ -371,7 +559,10 @@ public sealed class YandexDiskControllerTests
             => Task.FromResult(new YandexDiskTextFileDto { Path = path ?? "/", Content = string.Empty });
 
         public Task<YandexDiskOperationResultDto> SaveTextFileAsync(UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default)
-            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = request.Path ?? "/" });
+        {
+            SaveTextCalled = true;
+            return Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = request.Path ?? "/" });
+        }
 
         public Task<YandexDiskCrmSyncSettingsDto> GetCrmSyncSettingsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexDiskCrmSyncSettingsDto
