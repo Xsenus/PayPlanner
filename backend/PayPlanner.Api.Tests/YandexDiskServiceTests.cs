@@ -150,6 +150,67 @@ public sealed class YandexDiskServiceTests
     }
 
     [Fact]
+    public async Task TestConnectionAsync_UsesDefaultFolderWhenRequestHasNoPath()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.rootPath", Value = "disk:/PayPlanner", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+
+        var requests = new List<string>();
+        string? uploadedText = null;
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(request =>
+        {
+            requests.Add($"{request.Method} {request.RequestUri}");
+            if (request.RequestUri?.Host == "upload.local")
+            {
+                uploadedText = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.Created);
+            }
+
+            if (request.RequestUri?.Host == "download.local")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(uploadedText ?? string.Empty, Encoding.UTF8, "text/plain"),
+                };
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/resources/upload", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return JsonResponse("""{ "href": "https://upload.local/marker.txt" }""");
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/resources/download", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return JsonResponse("""{ "href": "https://download.local/marker.txt" }""");
+            }
+
+            if (request.Method == HttpMethod.Delete)
+            {
+                return JsonResponse("{}");
+            }
+
+            if (request.Method == HttpMethod.Put)
+            {
+                return JsonResponse("{}");
+            }
+
+            return JsonResponse("""{ "name": "PayPlanner", "path": "disk:/PayPlanner", "type": "dir" }""");
+        })));
+
+        var result = await service.TestConnectionAsync(new TestYandexDiskConnectionRequest(), CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("/_payplanner-test", result.TestFolderPath);
+        Assert.Equal(5, result.Steps.Count);
+        Assert.All(result.Steps, step => Assert.True(step.Success));
+        Assert.Contains(requests, item => item.StartsWith("PUT https://cloud-api.yandex.net/v1/disk/resources?path=disk%3A%2FPayPlanner%2F_payplanner-test", StringComparison.Ordinal));
+        Assert.Contains(requests, item => item.Contains("/resources/upload", StringComparison.Ordinal) && item.Contains("%2F_payplanner-test%2F", StringComparison.Ordinal));
+        Assert.Contains(requests, item => item.StartsWith("DELETE https://cloud-api.yandex.net/v1/disk/resources?", StringComparison.Ordinal) && item.Contains("%2F_payplanner-test%2F", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task TestConnectionAsync_PreservesReadFailureWhenCleanupAlsoFails()
     {
         await using var scope = await CreateDbScopeAsync();
