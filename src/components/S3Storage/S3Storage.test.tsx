@@ -162,6 +162,14 @@ describe('S3Storage', () => {
     expect(await screen.findByText('Редактирование подключения')).toBeTruthy();
     expect(screen.getByDisplayValue('https://s3-nl.hostkey.com')).toBeTruthy();
     expect(screen.getByLabelText(/Рабочая папка/i)).toBeTruthy();
+
+    const accessKeyInput = screen.getByLabelText('Access Key') as HTMLInputElement;
+    const secretKeyInput = screen.getByLabelText('Secret Key') as HTMLInputElement;
+    expect(accessKeyInput.closest('form')?.getAttribute('autocomplete')).toBe('off');
+    expect(accessKeyInput.getAttribute('autocomplete')).toBe('new-password');
+    expect(accessKeyInput.getAttribute('data-lpignore')).toBe('true');
+    expect(secretKeyInput.getAttribute('autocomplete')).toBe('new-password');
+    expect(secretKeyInput.getAttribute('data-1p-ignore')).toBe('true');
   });
 
   it('saves edited connection without exposing existing secret', async () => {

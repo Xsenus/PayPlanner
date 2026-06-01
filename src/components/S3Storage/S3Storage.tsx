@@ -685,7 +685,11 @@ export function S3Storage() {
           ) : null}
 
           <div className="grid w-full gap-5 xl:grid-cols-[minmax(0,1fr)_28rem]">
-            <form id="s3-storage-form" className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm" onSubmit={(event) => void submitConnection(event)}>
+            <form
+              id="s3-storage-form"
+              className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+              autoComplete="off"
+              onSubmit={(event) => void submitConnection(event)}>
               <div className="grid gap-4 lg:grid-cols-2">
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-slate-700">
                   Провайдер
@@ -755,6 +759,13 @@ export function S3Storage() {
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-slate-700">
                   Access Key
                   <input
+                    name="s3-storage-access-key-id"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-1p-ignore="true"
                     value={draft.accessKeyId}
                     onChange={(event) => setDraft((current) => ({ ...current, accessKeyId: event.target.value }))}
                     className="rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
@@ -767,6 +778,13 @@ export function S3Storage() {
                   Secret Key
                   <input
                     type="password"
+                    name="s3-storage-secret-access-key"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-1p-ignore="true"
                     value={draft.secretAccessKey}
                     onChange={(event) => setDraft((current) => ({ ...current, secretAccessKey: event.target.value, clearSecret: false }))}
                     className="rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
