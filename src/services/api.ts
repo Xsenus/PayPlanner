@@ -344,6 +344,97 @@ export interface UpdateYandexDiskCrmSyncSettingsRequest {
   fileNameTemplate?: string;
 }
 
+export interface S3StorageProviderPresetDto {
+  key: string;
+  name: string;
+  endpoint: string;
+  region: string;
+  forcePathStyle: boolean;
+}
+
+export interface S3StorageConnectionDto {
+  id: string;
+  name: string;
+  provider: string;
+  providerName: string;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  rootPrefix: string;
+  isEnabled: boolean;
+  isConfigured: boolean;
+  accessKeyPreview?: string | null;
+  secretKeyPreview?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface S3StorageConnectionsOverviewDto {
+  providerPresets: S3StorageProviderPresetDto[];
+  connections: S3StorageConnectionDto[];
+}
+
+export interface UpsertS3StorageConnectionRequest {
+  id?: string | null;
+  name: string;
+  provider: string;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  rootPrefix: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  clearSecret: boolean;
+  isEnabled: boolean;
+}
+
+export interface S3StorageConnectionTestStepDto {
+  key: string;
+  name: string;
+  success: boolean;
+  message: string;
+}
+
+export interface S3StorageConnectionTestDto {
+  success: boolean;
+  connectionId: string;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  testKey: string;
+  checkedAt: string;
+  steps: S3StorageConnectionTestStepDto[];
+}
+
+export interface S3StorageObjectDto {
+  name: string;
+  path: string;
+  key: string;
+  type: string;
+  contentType?: string | null;
+  size?: number | null;
+  lastModified?: string | null;
+}
+
+export interface S3StorageListResponseDto {
+  current: S3StorageObjectDto;
+  items: S3StorageObjectDto[];
+  limit: number;
+  offset: number;
+  total: number;
+}
+
+export interface S3StorageOperationResultDto {
+  success: boolean;
+  path: string;
+  key: string;
+}
+
+export interface S3StorageTextFileDto {
+  path: string;
+  content: string;
+}
+
 export interface RolePermissionAuditRoleDto {
   roleId: number;
   roleName: string;
@@ -680,6 +771,43 @@ export interface DatabaseBackupFormatOptionDto {
   isDefault: boolean;
 }
 
+export interface DatabaseBackupS3UploadSettingsDto {
+  enabled: boolean;
+  connectionIds: string[];
+  prefixTemplate: string;
+}
+
+export interface DatabaseBackupS3UploadResultDto {
+  id: string;
+  backupRelativePath: string;
+  backupFileName: string;
+  connectionId: string;
+  status: string;
+  targetPath: string;
+  targetKey?: string | null;
+  sizeBytes: number;
+  error?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DatabaseBackupYandexDiskUploadSettingsDto {
+  enabled: boolean;
+  prefixTemplate: string;
+}
+
+export interface DatabaseBackupYandexDiskUploadResultDto {
+  id: string;
+  backupRelativePath: string;
+  backupFileName: string;
+  status: string;
+  targetPath: string;
+  sizeBytes: number;
+  error?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DatabaseBackupOverviewDto {
   provider: string;
   providerDisplayName: string;
@@ -693,6 +821,10 @@ export interface DatabaseBackupOverviewDto {
   rootDirectory: string;
   timeZone: string;
   toolCommand?: string | null;
+  s3Upload?: DatabaseBackupS3UploadSettingsDto;
+  s3UploadResults?: DatabaseBackupS3UploadResultDto[];
+  yandexDiskUpload?: DatabaseBackupYandexDiskUploadSettingsDto;
+  yandexDiskUploadResults?: DatabaseBackupYandexDiskUploadResultDto[];
   items: DatabaseBackupFileDto[];
 }
 
@@ -736,6 +868,8 @@ export interface SystemJobManualRunResultDto {
 export interface DatabaseBackupCreateResultDto {
   backup: DatabaseBackupFileDto;
   downloadPath: string;
+  s3UploadResults?: DatabaseBackupS3UploadResultDto[];
+  yandexDiskUploadResults?: DatabaseBackupYandexDiskUploadResultDto[];
 }
 
 export interface DatabaseBackupDeleteResultDto {
@@ -1629,6 +1763,109 @@ export class ApiService {
     });
   }
 
+  async getS3StorageConnections() {
+    return this.request<S3StorageConnectionsOverviewDto>('/s3-storages');
+  }
+
+  async upsertS3StorageConnection(payload: UpsertS3StorageConnectionRequest) {
+    return this.request<S3StorageConnectionDto>('/s3-storages', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteS3StorageConnection(id: string) {
+    return this.request<void>(`/s3-storages/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async testS3StorageConnection(id: string, testPrefix = '_payplanner-test') {
+    return this.request<S3StorageConnectionTestDto>(`/s3-storages/${encodeURIComponent(id)}/connection-test`, {
+      method: 'POST',
+      body: JSON.stringify({ testPrefix }),
+    });
+  }
+
+  async listS3StorageObjects(id: string, path = '/', limit = 100, offset = 0) {
+    const query = new URLSearchParams({
+      path,
+      limit: String(limit),
+      offset: String(offset),
+    });
+    return this.request<S3StorageListResponseDto>(`/s3-storages/${encodeURIComponent(id)}/objects?${query}`);
+  }
+
+  async createS3StorageFolder(id: string, path: string) {
+    return this.request<S3StorageOperationResultDto>(`/s3-storages/${encodeURIComponent(id)}/folders`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  }
+
+  async uploadS3StorageFile(id: string, path: string, file: File, overwrite = true) {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('path', path);
+    form.append('overwrite', String(overwrite));
+    return this.request<S3StorageOperationResultDto>(`/s3-storages/${encodeURIComponent(id)}/upload`, {
+      method: 'POST',
+      body: form,
+    });
+  }
+
+  async downloadS3StorageFile(id: string, path: string) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/s3-storages/${encodeURIComponent(id)}/download?path=${encodeURIComponent(path)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        notifyAuthSessionExpired();
+      }
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(`HTTP ${response.status} ${response.statusText} - ${text}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || path.split('/').pop() || 's3-file',
+    };
+  }
+
+  async deleteS3StorageObject(id: string, path: string, recursive = false) {
+    return this.request<S3StorageOperationResultDto>(
+      `/s3-storages/${encodeURIComponent(id)}/objects?path=${encodeURIComponent(path)}&recursive=${recursive}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  async copyS3StorageObject(id: string, fromPath: string, toPath: string, overwrite = false) {
+    return this.request<S3StorageOperationResultDto>(`/s3-storages/${encodeURIComponent(id)}/copy`, {
+      method: 'POST',
+      body: JSON.stringify({ fromPath, toPath, overwrite }),
+    });
+  }
+
+  async moveS3StorageObject(id: string, fromPath: string, toPath: string, overwrite = false) {
+    return this.request<S3StorageOperationResultDto>(`/s3-storages/${encodeURIComponent(id)}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ fromPath, toPath, overwrite }),
+    });
+  }
+
+  async getS3StorageTextFile(id: string, path: string) {
+    return this.request<S3StorageTextFileDto>(`/s3-storages/${encodeURIComponent(id)}/text?path=${encodeURIComponent(path)}`);
+  }
+
+  async saveS3StorageTextFile(id: string, path: string, content: string, overwrite = true) {
+    return this.request<S3StorageOperationResultDto>(`/s3-storages/${encodeURIComponent(id)}/text`, {
+      method: 'PUT',
+      body: JSON.stringify({ path, content, overwrite }),
+    });
+  }
+
   async uploadCaseDocumentToYandexDisk(documentId: number, overwrite?: boolean) {
     const query = overwrite === undefined ? '' : `?overwrite=${overwrite}`;
     return this.request<YandexDiskOperationResultDto>(`/yandex-disk/crm/case-documents/${documentId}/upload${query}`, {
@@ -2111,6 +2348,11 @@ export class ApiService {
     scheduleLocal: string;
     retentionDays: number;
     backupFormat?: string;
+    s3UploadEnabled?: boolean;
+    s3ConnectionIds?: string[];
+    s3PrefixTemplate?: string;
+    yandexDiskUploadEnabled?: boolean;
+    yandexDiskPrefixTemplate?: string;
   }) {
     return this.request<DatabaseBackupOverviewDto>('/database/backups/settings', {
       method: 'PUT',
@@ -2120,6 +2362,18 @@ export class ApiService {
 
   async createDatabaseBackup() {
     return this.request<DatabaseBackupCreateResultDto>('/database/backups', {
+      method: 'POST',
+    });
+  }
+
+  async retryDatabaseBackupS3Upload(uploadResultId: string) {
+    return this.request<DatabaseBackupOverviewDto>(`/database/backups/s3-uploads/${encodeURIComponent(uploadResultId)}/retry`, {
+      method: 'POST',
+    });
+  }
+
+  async retryDatabaseBackupYandexDiskUpload(uploadResultId: string) {
+    return this.request<DatabaseBackupOverviewDto>(`/database/backups/yandex-disk-uploads/${encodeURIComponent(uploadResultId)}/retry`, {
       method: 'POST',
     });
   }

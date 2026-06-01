@@ -303,9 +303,10 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   const canManageRoles = isAdmin() || permissions.roles.canView;
   const canViewSettings = isAdmin() || permissions.audit.canView || permissions.notifications.canView;
   const canViewYandexDisk = isAdmin() || Boolean(permissions.yandexDisk?.canView);
+  const canViewS3Storage = isAdmin() || Boolean(permissions.s3Storage?.canView);
 
   const adminItems = useMemo<SidebarItem[]>(() => {
-    if (!isAdmin() && !canManageRoles && !canViewSettings && !canViewYandexDisk) {
+    if (!isAdmin() && !canManageRoles && !canViewSettings && !canViewYandexDisk && !canViewS3Storage) {
       return [];
     }
 
@@ -327,11 +328,14 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       ...(canViewYandexDisk
         ? [{ id: 'yandexDisk', tab: 'yandexDisk' as Tab, label: 'Я.Диск', icon: Cloud }]
         : []),
+      ...(canViewS3Storage
+        ? [{ id: 's3Storage', tab: 's3Storage' as Tab, label: 'S3-хранилища', icon: Cloud }]
+        : []),
       ...(canViewSettings
         ? [{ id: 'settings', tab: 'settings' as Tab, label: '\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438', icon: Settings }]
         : []),
     ];
-  }, [canManageRoles, canViewSettings, canViewYandexDisk, isAdmin]);
+  }, [canManageRoles, canViewSettings, canViewYandexDisk, canViewS3Storage, isAdmin]);
 
   const sidebarItems = useMemo(() => [...mainItems, ...adminItems], [mainItems, adminItems]);
 

@@ -165,6 +165,12 @@ const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
     description: 'Доступ к подключению Яндекс.Диска и операциям с файлами в облачном хранилище.',
     icon: Cloud,
   },
+  s3Storage: {
+    key: 's3Storage',
+    title: 'S3-хранилища',
+    description: 'Подключение S3-совместимых хранилищ, проверка доступа и подготовка резервных копий.',
+    icon: Cloud,
+  },
 };
 
 const GROUPS: GroupConfig[] = [
@@ -190,7 +196,7 @@ const GROUPS: GroupConfig[] = [
     key: 'administration',
     title: 'Администрирование прав',
     description: 'Просмотр ролей, уведомлений и делегирование управления правилами.',
-    sections: ['notifications', 'roles', 'audit', 'yandexDisk'],
+    sections: ['notifications', 'roles', 'audit', 'yandexDisk', 's3Storage'],
   },
 ];
 

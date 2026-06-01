@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Archive, Database, Download, Loader2, RefreshCw, Save, ShieldAlert, Trash2 } from 'lucide-react';
+import { Archive, Database, Download, Loader2, RefreshCw, Save, ShieldAlert, Trash2, UploadCloud } from 'lucide-react';
 import { apiService } from '../../services/api';
 import type {
   DatabaseBackupOverviewDto,
   DatabaseStatusDto,
   InvoiceCounterpartyCleanupResultDto,
   InvoiceOrphanCleanupResultDto,
+  S3StorageConnectionDto,
   UserActivityCleanupResultDto,
   UserActivityCompactionResultDto,
   UserActivityMaintenanceDto,
+  YandexDiskSettingsDto,
 } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
@@ -19,6 +21,9 @@ import { ObjectAuditDeletedObjectsSettings } from './ObjectAuditDeletedObjectsSe
 import { SystemJobDiagnosticsSettings } from './SystemJobDiagnosticsSettings';
 
 type MaintenanceTab = 'overview' | 'activity' | 'operations' | 'backups' | 'jobs' | 'deleted';
+
+const DEFAULT_DATABASE_BACKUP_S3_PREFIX = 'backups/database/{yyyy}/{MM}/';
+const DEFAULT_DATABASE_BACKUP_YANDEX_DISK_PREFIX = 'backups/database/{yyyy}/{MM}/';
 
 const TABS: Array<{ id: MaintenanceTab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
@@ -60,6 +65,35 @@ function formatDateTime(value?: string | null) {
 
 function getErrorMessage(error: unknown, fallback: string) {
   return extractDisplayErrorMessage(error, fallback);
+}
+
+function buildIdSetKey(ids?: string[] | null) {
+  return [...new Set(ids ?? [])].sort((left, right) => left.localeCompare(right)).join('|');
+}
+
+function getS3UploadStatusLabel(status: string) {
+  switch (status) {
+    case 'success':
+      return 'Загружено';
+    case 'failed':
+      return 'Ошибка';
+    case 'pending':
+      return 'Ожидает загрузки';
+    default:
+      return status || '—';
+  }
+}
+
+function getS3UploadStatusTone(status: string): 'success' | 'warning' | 'muted' {
+  if (status === 'success') {
+    return 'success';
+  }
+
+  if (status === 'failed' || status === 'pending') {
+    return 'warning';
+  }
+
+  return 'muted';
 }
 
 function StatusBadge({ value, tone }: { value: string; tone: 'success' | 'warning' | 'muted' }) {
@@ -112,8 +146,17 @@ export function DatabaseMaintenanceSettings() {
   const [databaseBackupScheduleLocal, setDatabaseBackupScheduleLocal] = useState('00:00,06:00,12:00,18:00');
   const [databaseBackupRetentionDays, setDatabaseBackupRetentionDays] = useState(8);
   const [databaseBackupFormat, setDatabaseBackupFormat] = useState('');
+  const [s3StorageConnections, setS3StorageConnections] = useState<S3StorageConnectionDto[]>([]);
+  const [databaseBackupS3UploadEnabled, setDatabaseBackupS3UploadEnabled] = useState(false);
+  const [databaseBackupS3ConnectionIds, setDatabaseBackupS3ConnectionIds] = useState<string[]>([]);
+  const [databaseBackupS3PrefixTemplate, setDatabaseBackupS3PrefixTemplate] = useState(DEFAULT_DATABASE_BACKUP_S3_PREFIX);
+  const [yandexDiskSettings, setYandexDiskSettings] = useState<YandexDiskSettingsDto | null>(null);
+  const [databaseBackupYandexDiskUploadEnabled, setDatabaseBackupYandexDiskUploadEnabled] = useState(false);
+  const [databaseBackupYandexDiskPrefixTemplate, setDatabaseBackupYandexDiskPrefixTemplate] = useState(DEFAULT_DATABASE_BACKUP_YANDEX_DISK_PREFIX);
   const [databaseBackupSaving, setDatabaseBackupSaving] = useState(false);
   const [databaseBackupCreating, setDatabaseBackupCreating] = useState(false);
+  const [databaseBackupS3RetryingId, setDatabaseBackupS3RetryingId] = useState<string | null>(null);
+  const [databaseBackupYandexDiskRetryingId, setDatabaseBackupYandexDiskRetryingId] = useState<string | null>(null);
   const [databaseBackupDeleting, setDatabaseBackupDeleting] = useState<string | null>(null);
   const [databaseBackupClearing, setDatabaseBackupClearing] = useState(false);
   const [databaseBackupMessage, setDatabaseBackupMessage] = useState<string | null>(null);
@@ -131,6 +174,11 @@ export function DatabaseMaintenanceSettings() {
     setDatabaseBackupScheduleLocal(overview?.scheduleLocal ?? '00:00,06:00,12:00,18:00');
     setDatabaseBackupRetentionDays(Math.max(1, Number(overview?.retentionDays ?? 8) || 8));
     setDatabaseBackupFormat(overview?.selectedFormat ?? overview?.availableFormats[0]?.key ?? '');
+    setDatabaseBackupS3UploadEnabled(overview?.s3Upload?.enabled ?? false);
+    setDatabaseBackupS3ConnectionIds(overview?.s3Upload?.connectionIds ?? []);
+    setDatabaseBackupS3PrefixTemplate(overview?.s3Upload?.prefixTemplate ?? DEFAULT_DATABASE_BACKUP_S3_PREFIX);
+    setDatabaseBackupYandexDiskUploadEnabled(overview?.yandexDiskUpload?.enabled ?? false);
+    setDatabaseBackupYandexDiskPrefixTemplate(overview?.yandexDiskUpload?.prefixTemplate ?? DEFAULT_DATABASE_BACKUP_YANDEX_DISK_PREFIX);
   };
 
   const refreshAll = useCallback(async (silent = false) => {
@@ -141,14 +189,18 @@ export function DatabaseMaintenanceSettings() {
     }
 
     try {
-      const [status, maintenance, backups] = await Promise.all([
+      const [status, maintenance, backups, s3Overview, yandexDisk] = await Promise.all([
         apiService.getDatabaseStatus(),
         apiService.getUserActivityMaintenance(),
         apiService.getDatabaseBackupOverview(),
+        apiService.getS3StorageConnections().catch(() => null),
+        apiService.getYandexDiskSettings().catch(() => null),
       ]);
 
       setDatabaseStatus(status);
       setUserActivityMaintenance(maintenance);
+      setS3StorageConnections(s3Overview?.connections ?? []);
+      setYandexDiskSettings(yandexDisk);
       setUserActivityLoggingEnabled(maintenance.isEnabled);
       setUserActivityRetentionDays(Math.max(0, Number(maintenance.retentionDays ?? 0) || 0));
       applyDatabaseBackupOverview(backups);
@@ -193,12 +245,22 @@ export function DatabaseMaintenanceSettings() {
         || databaseBackupScheduleLocal.trim() !== databaseBackupOverview.scheduleLocal.trim()
         || databaseBackupRetentionDays !== Math.max(1, Number(databaseBackupOverview.retentionDays ?? 0) || 1)
         || databaseBackupFormat !== databaseBackupOverview.selectedFormat
+        || databaseBackupS3UploadEnabled !== (databaseBackupOverview.s3Upload?.enabled ?? false)
+        || buildIdSetKey(databaseBackupS3ConnectionIds) !== buildIdSetKey(databaseBackupOverview.s3Upload?.connectionIds)
+        || databaseBackupS3PrefixTemplate.trim() !== (databaseBackupOverview.s3Upload?.prefixTemplate ?? DEFAULT_DATABASE_BACKUP_S3_PREFIX).trim()
+        || databaseBackupYandexDiskUploadEnabled !== (databaseBackupOverview.yandexDiskUpload?.enabled ?? false)
+        || databaseBackupYandexDiskPrefixTemplate.trim() !== (databaseBackupOverview.yandexDiskUpload?.prefixTemplate ?? DEFAULT_DATABASE_BACKUP_YANDEX_DISK_PREFIX).trim()
       ),
     [
       databaseBackupAutomaticEnabled,
       databaseBackupFormat,
       databaseBackupOverview,
       databaseBackupRetentionDays,
+      databaseBackupS3ConnectionIds,
+      databaseBackupS3PrefixTemplate,
+      databaseBackupS3UploadEnabled,
+      databaseBackupYandexDiskPrefixTemplate,
+      databaseBackupYandexDiskUploadEnabled,
       databaseBackupScheduleLocal,
     ],
   );
@@ -326,16 +388,41 @@ export function DatabaseMaintenanceSettings() {
     }
   };
 
+  const toggleDatabaseBackupS3Connection = (connectionId: string, checked: boolean) => {
+    setDatabaseBackupS3ConnectionIds((current) => {
+      if (checked) {
+        return current.includes(connectionId) ? current : [...current, connectionId];
+      }
+
+      return current.filter((id) => id !== connectionId);
+    });
+  };
+
   const saveDatabaseBackupSettings = async () => {
     setDatabaseBackupSaving(true);
     setDatabaseBackupError(null);
     setDatabaseBackupMessage(null);
     try {
+      if (databaseBackupS3UploadEnabled && databaseBackupS3ConnectionIds.length === 0) {
+        setDatabaseBackupError('Выберите хотя бы одно S3-хранилище для отправки резервных копий.');
+        return;
+      }
+
+      if (databaseBackupYandexDiskUploadEnabled && !yandexDiskSettings?.isConfigured) {
+        setDatabaseBackupError('Сначала настройте OAuth-токен Яндекс.Диска в разделе «Я.Диск».');
+        return;
+      }
+
       const overview = await apiService.updateDatabaseBackupSettings({
         automaticEnabled: databaseBackupAutomaticEnabled,
         scheduleLocal: databaseBackupScheduleLocal.trim(),
         retentionDays: Math.max(1, Math.floor(Number(databaseBackupRetentionDays) || 1)),
         backupFormat: databaseBackupFormat,
+        s3UploadEnabled: databaseBackupS3UploadEnabled,
+        s3ConnectionIds: databaseBackupS3ConnectionIds,
+        s3PrefixTemplate: databaseBackupS3PrefixTemplate.trim() || DEFAULT_DATABASE_BACKUP_S3_PREFIX,
+        yandexDiskUploadEnabled: databaseBackupYandexDiskUploadEnabled,
+        yandexDiskPrefixTemplate: databaseBackupYandexDiskPrefixTemplate.trim() || DEFAULT_DATABASE_BACKUP_YANDEX_DISK_PREFIX,
       });
       applyDatabaseBackupOverview(overview);
       setDatabaseBackupMessage('Настройки резервного копирования сохранены.');
@@ -371,6 +458,36 @@ export function DatabaseMaintenanceSettings() {
       setDatabaseBackupError(getErrorMessage(error, 'Не удалось создать резервную копию.'));
     } finally {
       setDatabaseBackupCreating(false);
+    }
+  };
+
+  const retryDatabaseBackupS3Upload = async (uploadResultId: string) => {
+    setDatabaseBackupS3RetryingId(uploadResultId);
+    setDatabaseBackupError(null);
+    setDatabaseBackupMessage(null);
+    try {
+      const overview = await apiService.retryDatabaseBackupS3Upload(uploadResultId);
+      applyDatabaseBackupOverview(overview);
+      setDatabaseBackupMessage('S3-выгрузка резервной копии повторена.');
+    } catch (error) {
+      setDatabaseBackupError(getErrorMessage(error, 'Не удалось повторить S3-выгрузку резервной копии.'));
+    } finally {
+      setDatabaseBackupS3RetryingId(null);
+    }
+  };
+
+  const retryDatabaseBackupYandexDiskUpload = async (uploadResultId: string) => {
+    setDatabaseBackupYandexDiskRetryingId(uploadResultId);
+    setDatabaseBackupError(null);
+    setDatabaseBackupMessage(null);
+    try {
+      const overview = await apiService.retryDatabaseBackupYandexDiskUpload(uploadResultId);
+      applyDatabaseBackupOverview(overview);
+      setDatabaseBackupMessage('Выгрузка резервной копии на Яндекс.Диск повторена.');
+    } catch (error) {
+      setDatabaseBackupError(getErrorMessage(error, 'Не удалось повторить выгрузку резервной копии на Яндекс.Диск.'));
+    } finally {
+      setDatabaseBackupYandexDiskRetryingId(null);
     }
   };
 
@@ -881,6 +998,134 @@ export function DatabaseMaintenanceSettings() {
                   </label>
                 </div>
 
+                <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h5 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <UploadCloud size={16} />
+                        Отправка backup в S3
+                      </h5>
+                      <p className="mt-1 text-sm text-slate-600">
+                        После создания локальной резервной копии система может дополнительно загрузить файл в одно или несколько подключенных S3-хранилищ.
+                      </p>
+                    </div>
+                    <StatusBadge
+                      value={databaseBackupS3UploadEnabled ? 'S3 включен' : 'S3 выключен'}
+                      tone={databaseBackupS3UploadEnabled ? 'success' : 'muted'}
+                    />
+                  </div>
+
+                  <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={databaseBackupS3UploadEnabled}
+                      onChange={(event) => setDatabaseBackupS3UploadEnabled(event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                      <span className="block font-medium text-slate-900">Загружать новые резервные копии в S3</span>
+                      <span className="mt-1 block text-slate-600">Локальный файл все равно сохраняется в обычном каталоге backup.</span>
+                    </span>
+                  </label>
+
+                  <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr),minmax(260px,0.8fr)]">
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">Хранилища</div>
+                      {s3StorageConnections.length ? (
+                        <div className="mt-2 space-y-2">
+                          {s3StorageConnections.map((connection) => {
+                            const disabled = !connection.isEnabled || !connection.isConfigured;
+                            return (
+                              <label
+                                key={connection.id}
+                                className={`flex items-start gap-3 rounded-xl border bg-white px-3 py-2 text-sm ${disabled ? 'border-slate-200 opacity-60' : 'border-slate-200'}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={databaseBackupS3ConnectionIds.includes(connection.id)}
+                                  disabled={disabled}
+                                  onChange={(event) => toggleDatabaseBackupS3Connection(connection.id, event.target.checked)}
+                                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="min-w-0">
+                                  <span className="block truncate font-medium text-slate-900">{connection.name}</span>
+                                  <span className="mt-1 block break-all text-xs text-slate-500">
+                                    {connection.providerName} · {connection.bucket}{connection.rootPrefix ? `/${connection.rootPrefix}` : ''}
+                                  </span>
+                                  {disabled ? (
+                                    <span className="mt-1 block text-xs text-amber-700">Подключение выключено или заполнено не полностью.</span>
+                                  ) : null}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="mt-2 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
+                          S3-хранилища пока не добавлены. Добавьте подключение в разделе «S3-хранилища», затем выберите его здесь.
+                        </div>
+                      )}
+                    </div>
+
+                    <label className="text-sm text-slate-700">
+                      <span className="block font-medium text-slate-900">Папка в S3</span>
+                      <span className="mt-1 block text-slate-600">Можно использовать {`{yyyy}`}, {`{MM}`} и {`{dd}`} для даты создания backup.</span>
+                      <input
+                        value={databaseBackupS3PrefixTemplate}
+                        onChange={(event) => setDatabaseBackupS3PrefixTemplate(event.target.value)}
+                        className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h5 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <UploadCloud size={16} />
+                        Отправка backup на Яндекс.Диск
+                      </h5>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Тот же локальный backup-файл можно дополнительно отправлять в подключенный Яндекс.Диск.
+                      </p>
+                    </div>
+                    <StatusBadge
+                      value={databaseBackupYandexDiskUploadEnabled ? 'Я.Диск включен' : 'Я.Диск выключен'}
+                      tone={databaseBackupYandexDiskUploadEnabled ? 'success' : 'muted'}
+                    />
+                  </div>
+
+                  <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={databaseBackupYandexDiskUploadEnabled}
+                      onChange={(event) => setDatabaseBackupYandexDiskUploadEnabled(event.target.checked)}
+                      disabled={!yandexDiskSettings?.isConfigured}
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-60"
+                    />
+                    <span>
+                      <span className="block font-medium text-slate-900">Загружать новые резервные копии на Яндекс.Диск</span>
+                      <span className="mt-1 block text-slate-600">
+                        {yandexDiskSettings?.isConfigured
+                          ? `Корневая папка Я.Диска: ${yandexDiskSettings.rootPath}.`
+                          : 'Сначала сохраните OAuth-токен в разделе «Я.Диск».'}
+                      </span>
+                    </span>
+                  </label>
+
+                  <label className="mt-4 block text-sm text-slate-700">
+                    <span className="block font-medium text-slate-900">Папка на Яндекс.Диске</span>
+                    <span className="mt-1 block text-slate-600">Можно использовать {`{yyyy}`}, {`{MM}`} и {`{dd}`} для даты создания backup.</span>
+                    <input
+                      value={databaseBackupYandexDiskPrefixTemplate}
+                      onChange={(event) => setDatabaseBackupYandexDiskPrefixTemplate(event.target.value)}
+                      disabled={!yandexDiskSettings?.isConfigured}
+                      className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
+                    />
+                  </label>
+                </div>
+
                 <div className="mt-4 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
@@ -915,6 +1160,94 @@ export function DatabaseMaintenanceSettings() {
                     <p>Для PostgreSQL используется: {databaseBackupOverview.toolCommand || 'pg_dump'}.</p>
                   ) : (
                     <p>Для SQLite резервная копия строится из консистентной копии файла базы данных.</p>
+                  )}
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h5 className="text-sm font-semibold text-slate-900">Последние выгрузки в S3</h5>
+                    <StatusBadge
+                      value={databaseBackupOverview?.s3Upload?.enabled ? 'S3 активен' : 'S3 не используется'}
+                      tone={databaseBackupOverview?.s3Upload?.enabled ? 'success' : 'muted'}
+                    />
+                  </div>
+                  {databaseBackupOverview?.s3UploadResults?.length ? (
+                    <div className="mt-3 space-y-2">
+                      {databaseBackupOverview.s3UploadResults.slice(0, 5).map((result) => (
+                        <div key={result.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="min-w-0 truncate font-medium text-slate-900">{result.backupFileName}</span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <StatusBadge value={getS3UploadStatusLabel(result.status)} tone={getS3UploadStatusTone(result.status)} />
+                              {result.status === 'failed' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void retryDatabaseBackupS3Upload(result.id)}
+                                  disabled={databaseBackupS3RetryingId === result.id}
+                                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
+                                >
+                                  {databaseBackupS3RetryingId === result.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                                  Повторить
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="mt-1 break-all text-xs text-slate-500">{result.targetPath}</div>
+                          <div className="mt-1 text-xs text-slate-500">{formatDateTime(result.updatedAt)} · {formatBytes(result.sizeBytes)}</div>
+                          {result.error ? (
+                            <div className="mt-1 text-xs text-red-700">{result.error}</div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-600">
+                      История S3-выгрузок появится после создания резервной копии с включенной отправкой в S3.
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h5 className="text-sm font-semibold text-slate-900">Последние выгрузки на Яндекс.Диск</h5>
+                    <StatusBadge
+                      value={databaseBackupOverview?.yandexDiskUpload?.enabled ? 'Я.Диск активен' : 'Я.Диск не используется'}
+                      tone={databaseBackupOverview?.yandexDiskUpload?.enabled ? 'success' : 'muted'}
+                    />
+                  </div>
+                  {databaseBackupOverview?.yandexDiskUploadResults?.length ? (
+                    <div className="mt-3 space-y-2">
+                      {databaseBackupOverview.yandexDiskUploadResults.slice(0, 5).map((result) => (
+                        <div key={result.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="min-w-0 truncate font-medium text-slate-900">{result.backupFileName}</span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <StatusBadge value={getS3UploadStatusLabel(result.status)} tone={getS3UploadStatusTone(result.status)} />
+                              {result.status === 'failed' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void retryDatabaseBackupYandexDiskUpload(result.id)}
+                                  disabled={databaseBackupYandexDiskRetryingId === result.id}
+                                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
+                                >
+                                  {databaseBackupYandexDiskRetryingId === result.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                                  Повторить
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="mt-1 break-all text-xs text-slate-500">{result.targetPath}</div>
+                          <div className="mt-1 text-xs text-slate-500">{formatDateTime(result.updatedAt)} · {formatBytes(result.sizeBytes)}</div>
+                          {result.error ? (
+                            <div className="mt-1 text-xs text-red-700">{result.error}</div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-600">
+                      История выгрузок на Яндекс.Диск появится после создания резервной копии с включенной отправкой на Я.Диск.
+                    </p>
                   )}
                 </div>
 

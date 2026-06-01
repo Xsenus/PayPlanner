@@ -164,6 +164,7 @@ const CompanyProfile = lazy(() => import('./components/CompanyProfile/CompanyPro
 const AppSettings = lazy(() => import('./components/Settings/AppSettings').then((module) => ({ default: module.AppSettings })));
 const ProfilePage = lazy(() => import('./components/Profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
 const YandexDisk = lazy(() => import('./components/YandexDisk/YandexDisk').then((module) => ({ default: module.YandexDisk })));
+const S3Storage = lazy(() => import('./components/S3Storage/S3Storage').then((module) => ({ default: module.S3Storage })));
 
 function ActiveTabContent({ render }: { render: () => ReactNode }) {
   return <>{render()}</>;
@@ -179,6 +180,7 @@ function AppContent() {
   const canViewAudit = isAdminRole || permissions.audit.canView;
   const canViewSettings = canViewAudit || permissions.notifications.canView;
   const canViewYandexDisk = isAdminRole || Boolean(permissions.yandexDisk?.canView);
+  const canViewS3Storage = isAdminRole || Boolean(permissions.s3Storage?.canView);
 
   const tabNames: Record<string, string> = useMemo(
     () => ({
@@ -226,6 +228,7 @@ function AppContent() {
       audit: 'Аудит объектов',
       userActivity: 'Контроль пользователей',
       yandexDisk: 'Я.Диск',
+      s3Storage: 'S3-хранилища',
       dictionaries: 'Справочники',
       settings: 'Настройки',
     }),
@@ -300,11 +303,12 @@ function AppContent() {
         { tab: 'roles' as Tab, allowed: canManageRoles },
         { tab: 'audit' as Tab, allowed: canViewAudit },
         { tab: 'yandexDisk' as Tab, allowed: canViewYandexDisk },
+        { tab: 's3Storage' as Tab, allowed: canViewS3Storage },
         { tab: 'settings' as Tab, allowed: canViewSettings },
       ]
         .filter((entry) => entry.allowed)
         .map((entry) => entry.tab),
-    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk],
+    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk, canViewS3Storage],
   );
 
   const canViewTab = useCallback(
@@ -375,6 +379,8 @@ function AppContent() {
           return canViewAudit;
         case 'yandexDisk':
           return canViewYandexDisk;
+        case 's3Storage':
+          return canViewS3Storage;
         case 'settings':
           return canViewSettings;
         case 'roles':
@@ -385,7 +391,7 @@ function AppContent() {
           return true;
       }
     },
-    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk],
+    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk, canViewS3Storage],
   );
 
   const handleOpenClient = useCallback(
@@ -1756,6 +1762,11 @@ function AppContent() {
         return canViewYandexDisk
           ? <YandexDisk />
           : renderNoAccess('Недостаточно прав для доступа к разделу Я.Диск.');
+
+      case 's3Storage':
+        return canViewS3Storage
+          ? <S3Storage />
+          : renderNoAccess('Недостаточно прав для доступа к разделу S3-хранилищ.');
 
       case 'dictionaries':
         return permissions.dictionaries.canView
