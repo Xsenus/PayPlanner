@@ -23,6 +23,8 @@ public sealed class SystemJobsController : ControllerBase
     private const string DatabaseBackupS3EnabledKey = "database-backup.s3.enabled";
     private const string DatabaseBackupS3ConnectionIdsKey = "database-backup.s3.connection-ids";
     private const string DatabaseBackupS3ResultsKey = "database-backup.s3.results";
+    private const string DatabaseBackupYandexDiskEnabledKey = "database-backup.yandex-disk.enabled";
+    private const string DatabaseBackupYandexDiskResultsKey = "database-backup.yandex-disk.results";
     private const string CaseControlEnabledKey = "tasks.automation.caseControl.enabled";
     private const string CaseControlInactiveDaysKey = "tasks.automation.caseControl.inactiveDays";
     private const string CaseControlLimitKey = "tasks.automation.caseControl.limit";
@@ -91,6 +93,8 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == DatabaseBackupS3EnabledKey ||
                 item.Key == DatabaseBackupS3ConnectionIdsKey ||
                 item.Key == DatabaseBackupS3ResultsKey ||
+                item.Key == DatabaseBackupYandexDiskEnabledKey ||
+                item.Key == DatabaseBackupYandexDiskResultsKey ||
                 item.Key == NotificationRetrySchedulerService.EnabledSettingKey ||
                 item.Key == NotificationRetrySchedulerService.IntervalMinutesSettingKey ||
                 item.Key == NotificationRetrySchedulerService.DelayMinutesSettingKey ||
@@ -335,16 +339,35 @@ public sealed class SystemJobsController : ControllerBase
         var s3Enabled = ParseBool(settings.GetValueOrDefault(DatabaseBackupS3EnabledKey), false);
         var s3ConnectionCount = CountS3Connections(settings.GetValueOrDefault(DatabaseBackupS3ConnectionIdsKey));
         var recentS3Result = GetRecentS3UploadResult(settings.GetValueOrDefault(DatabaseBackupS3ResultsKey));
-        var description = s3Enabled && s3ConnectionCount > 0
-            ? $"Проверяет расписание, создает резервные копии базы и отправляет их в S3-подключений: {s3ConnectionCount}."
+        var yandexDiskEnabled = ParseBool(settings.GetValueOrDefault(DatabaseBackupYandexDiskEnabledKey), false);
+        var recentYandexDiskResult = GetRecentYandexDiskUploadResult(settings.GetValueOrDefault(DatabaseBackupYandexDiskResultsKey));
+        var cloudDestinations = new List<string>();
+        if (s3Enabled && s3ConnectionCount > 0)
+        {
+            cloudDestinations.Add($"S3-подключений: {s3ConnectionCount}");
+        }
+
+        if (yandexDiskEnabled)
+        {
+            cloudDestinations.Add("Яндекс.Диск");
+        }
+
+        var description = cloudDestinations.Count > 0
+            ? $"Проверяет расписание, создает резервные копии базы и отправляет их в облачные хранилища: {string.Join(", ", cloudDestinations)}."
             : "Проверяет расписание и создает автоматические резервные копии базы.";
         var status = enabled
-            ? recentS3Result?.Status == "failed" ? "warning" : "active"
+            ? recentS3Result?.Status == "failed" || recentYandexDiskResult?.Status == "failed" ? "warning" : "active"
             : "disabled";
         var statusText = enabled
-            ? recentS3Result?.Status == "failed" ? "Есть ошибка S3" : "Включено"
+            ? recentS3Result?.Status == "failed" || recentYandexDiskResult?.Status == "failed" ? "Есть ошибка облачной выгрузки" : "Включено"
             : "Выключено";
-        var lastActivityDescription = recentS3Result is null
+        var lastActivityDescription = recentYandexDiskResult is not null && (recentS3Result is null || recentYandexDiskResult.UpdatedAt >= recentS3Result.UpdatedAt)
+            ? recentYandexDiskResult.Status == "success"
+                ? $"Последняя выгрузка backup на Яндекс.Диск успешна: {recentYandexDiskResult.TargetPath}"
+                : recentYandexDiskResult.Status == "failed"
+                    ? $"Последняя ошибка Яндекс.Диска backup: {recentYandexDiskResult.Error}"
+                    : $"Выгрузка backup на Яндекс.Диск ожидает выполнения: {recentYandexDiskResult.TargetPath}"
+            : recentS3Result is null
             ? lastBackup?.Description
             : recentS3Result.Status == "success"
                 ? $"Последняя S3-выгрузка backup успешна: {recentS3Result.TargetPath}"
@@ -361,11 +384,11 @@ public sealed class SystemJobsController : ControllerBase
             Status = status,
             StatusText = statusText,
             IntervalText = $"Расписание: {schedule}",
-            LastActivityAt = recentS3Result?.UpdatedAt ?? lastBackup?.CreatedAt,
+            LastActivityAt = new[] { recentS3Result?.UpdatedAt, recentYandexDiskResult?.UpdatedAt, lastBackup?.CreatedAt }.Where(value => value.HasValue).Max(),
             LastActivityDescription = lastActivityDescription,
             NextRunHint = enabled
-                ? s3Enabled && s3ConnectionCount > 0
-                    ? "Следующая проверка расписания создаст локальную копию и отправит ее в настроенные S3-хранилища."
+                ? cloudDestinations.Count > 0
+                    ? $"Следующая проверка расписания создаст локальную копию и отправит ее в облачные хранилища: {string.Join(", ", cloudDestinations)}."
                     : "Следующая проверка расписания выполняется фоновым сервисом."
                 : "Автоматические резервные копии отключены.",
             ManualRunEnabled = true,
@@ -811,6 +834,8 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == DatabaseBackupS3EnabledKey ||
                 item.Key == DatabaseBackupS3ConnectionIdsKey ||
                 item.Key == DatabaseBackupS3ResultsKey ||
+                item.Key == DatabaseBackupYandexDiskEnabledKey ||
+                item.Key == DatabaseBackupYandexDiskResultsKey ||
                 item.Key == NotificationRetrySchedulerService.EnabledSettingKey ||
                 item.Key == NotificationRetrySchedulerService.IntervalMinutesSettingKey ||
                 item.Key == NotificationRetrySchedulerService.DelayMinutesSettingKey ||
@@ -968,6 +993,25 @@ public sealed class SystemJobsController : ControllerBase
         try
         {
             return JsonSerializer.Deserialize<List<DatabaseBackupS3UploadResult>>(rawValue, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                ?.OrderByDescending(item => item.UpdatedAt)
+                .FirstOrDefault();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static DatabaseBackupYandexDiskUploadResult? GetRecentYandexDiskUploadResult(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<DatabaseBackupYandexDiskUploadResult>>(rawValue, new JsonSerializerOptions(JsonSerializerDefaults.Web))
                 ?.OrderByDescending(item => item.UpdatedAt)
                 .FirstOrDefault();
         }

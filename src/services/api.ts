@@ -791,6 +791,23 @@ export interface DatabaseBackupS3UploadResultDto {
   updatedAt: string;
 }
 
+export interface DatabaseBackupYandexDiskUploadSettingsDto {
+  enabled: boolean;
+  prefixTemplate: string;
+}
+
+export interface DatabaseBackupYandexDiskUploadResultDto {
+  id: string;
+  backupRelativePath: string;
+  backupFileName: string;
+  status: string;
+  targetPath: string;
+  sizeBytes: number;
+  error?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DatabaseBackupOverviewDto {
   provider: string;
   providerDisplayName: string;
@@ -806,6 +823,8 @@ export interface DatabaseBackupOverviewDto {
   toolCommand?: string | null;
   s3Upload?: DatabaseBackupS3UploadSettingsDto;
   s3UploadResults?: DatabaseBackupS3UploadResultDto[];
+  yandexDiskUpload?: DatabaseBackupYandexDiskUploadSettingsDto;
+  yandexDiskUploadResults?: DatabaseBackupYandexDiskUploadResultDto[];
   items: DatabaseBackupFileDto[];
 }
 
@@ -850,6 +869,7 @@ export interface DatabaseBackupCreateResultDto {
   backup: DatabaseBackupFileDto;
   downloadPath: string;
   s3UploadResults?: DatabaseBackupS3UploadResultDto[];
+  yandexDiskUploadResults?: DatabaseBackupYandexDiskUploadResultDto[];
 }
 
 export interface DatabaseBackupDeleteResultDto {
@@ -2331,6 +2351,8 @@ export class ApiService {
     s3UploadEnabled?: boolean;
     s3ConnectionIds?: string[];
     s3PrefixTemplate?: string;
+    yandexDiskUploadEnabled?: boolean;
+    yandexDiskPrefixTemplate?: string;
   }) {
     return this.request<DatabaseBackupOverviewDto>('/database/backups/settings', {
       method: 'PUT',
@@ -2346,6 +2368,12 @@ export class ApiService {
 
   async retryDatabaseBackupS3Upload(uploadResultId: string) {
     return this.request<DatabaseBackupOverviewDto>(`/database/backups/s3-uploads/${encodeURIComponent(uploadResultId)}/retry`, {
+      method: 'POST',
+    });
+  }
+
+  async retryDatabaseBackupYandexDiskUpload(uploadResultId: string) {
+    return this.request<DatabaseBackupOverviewDto>(`/database/backups/yandex-disk-uploads/${encodeURIComponent(uploadResultId)}/retry`, {
       method: 'POST',
     });
   }

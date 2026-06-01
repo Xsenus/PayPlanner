@@ -37,6 +37,21 @@ public sealed record DatabaseBackupS3UploadResult(
     DateTime CreatedAt,
     DateTime UpdatedAt);
 
+public sealed record DatabaseBackupYandexDiskUploadSettings(
+    bool Enabled,
+    string PrefixTemplate);
+
+public sealed record DatabaseBackupYandexDiskUploadResult(
+    string Id,
+    string BackupRelativePath,
+    string BackupFileName,
+    string Status,
+    string TargetPath,
+    long SizeBytes,
+    string? Error,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
 public sealed record DatabaseBackupFormatOption(
     string Key,
     string Label,
@@ -59,12 +74,15 @@ public sealed record DatabaseBackupOverview(
     string? ToolCommand,
     DatabaseBackupS3UploadSettings S3Upload,
     IReadOnlyList<DatabaseBackupS3UploadResult> S3UploadResults,
+    DatabaseBackupYandexDiskUploadSettings YandexDiskUpload,
+    IReadOnlyList<DatabaseBackupYandexDiskUploadResult> YandexDiskUploadResults,
     IReadOnlyList<DatabaseBackupFileInfo> Items);
 
 public sealed record DatabaseBackupCreateResult(
     DatabaseBackupFileInfo Backup,
     string DownloadPath,
-    IReadOnlyList<DatabaseBackupS3UploadResult> S3UploadResults);
+    IReadOnlyList<DatabaseBackupS3UploadResult> S3UploadResults,
+    IReadOnlyList<DatabaseBackupYandexDiskUploadResult> YandexDiskUploadResults);
 
 public sealed record DatabaseBackupDeleteResult(
     int DeletedCount,
@@ -80,7 +98,11 @@ public sealed class DatabaseBackupService
     private const string S3ConnectionIdsSettingKey = "database-backup.s3.connection-ids";
     private const string S3PrefixTemplateSettingKey = "database-backup.s3.prefix-template";
     private const string S3UploadResultsSettingKey = "database-backup.s3.results";
+    private const string YandexDiskUploadEnabledSettingKey = "database-backup.yandex-disk.enabled";
+    private const string YandexDiskPrefixTemplateSettingKey = "database-backup.yandex-disk.prefix-template";
+    private const string YandexDiskUploadResultsSettingKey = "database-backup.yandex-disk.results";
     private const string DefaultS3PrefixTemplate = "backups/database/{yyyy}/{MM}/";
+    private const string DefaultYandexDiskPrefixTemplate = "backups/database/{yyyy}/{MM}/";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeOnly[] DefaultSchedule =
     [
@@ -119,6 +141,7 @@ public sealed class DatabaseBackupService
         var settings = await LoadSettingsAsync(cancellationToken);
         var items = await ListBackupsAsync(cancellationToken);
         var s3Results = await LoadS3UploadResultsAsync(cancellationToken);
+        var yandexDiskResults = await LoadYandexDiskUploadResultsAsync(cancellationToken);
 
         return new DatabaseBackupOverview(
             _databaseProvider.Key,
@@ -135,6 +158,8 @@ public sealed class DatabaseBackupService
             ResolveToolCommandDisplay(settings.ToolCommand),
             settings.S3Upload,
             s3Results,
+            settings.YandexDiskUpload,
+            yandexDiskResults,
             items);
     }
 
@@ -164,6 +189,8 @@ public sealed class DatabaseBackupService
         bool? s3UploadEnabled = null,
         IReadOnlyList<string>? s3ConnectionIds = null,
         string? s3PrefixTemplate = null,
+        bool? yandexDiskUploadEnabled = null,
+        string? yandexDiskPrefixTemplate = null,
         CancellationToken cancellationToken = default)
     {
         var parsedSchedule = ParseSchedule(scheduleLocal, fallbackToDefault: false);
@@ -199,7 +226,17 @@ public sealed class DatabaseBackupService
 
         if (s3PrefixTemplate is not null)
         {
-            await UpsertSystemSettingAsync(context, S3PrefixTemplateSettingKey, NormalizeS3PrefixTemplate(s3PrefixTemplate), now, cancellationToken);
+            await UpsertSystemSettingAsync(context, S3PrefixTemplateSettingKey, NormalizeCloudBackupPrefixTemplate(s3PrefixTemplate, DefaultS3PrefixTemplate), now, cancellationToken);
+        }
+
+        if (yandexDiskUploadEnabled.HasValue)
+        {
+            await UpsertSystemSettingAsync(context, YandexDiskUploadEnabledSettingKey, yandexDiskUploadEnabled.Value ? "true" : "false", now, cancellationToken);
+        }
+
+        if (yandexDiskPrefixTemplate is not null)
+        {
+            await UpsertSystemSettingAsync(context, YandexDiskPrefixTemplateSettingKey, NormalizeCloudBackupPrefixTemplate(yandexDiskPrefixTemplate, DefaultYandexDiskPrefixTemplate), now, cancellationToken);
         }
         await context.SaveChangesAsync(cancellationToken);
 
@@ -208,11 +245,12 @@ public sealed class DatabaseBackupService
 
     public async Task<DatabaseBackupCreateResult> CreateManualBackupAsync(CancellationToken cancellationToken = default)
     {
-        var (backup, s3UploadResults) = await CreateBackupAsync("manual", null, cancellationToken);
+        var (backup, s3UploadResults, yandexDiskUploadResults) = await CreateBackupAsync("manual", null, cancellationToken);
         return new DatabaseBackupCreateResult(
             backup,
             $"/api/database/backups/download?relativePath={Uri.EscapeDataString(backup.RelativePath)}",
-            s3UploadResults);
+            s3UploadResults,
+            yandexDiskUploadResults);
     }
 
     public async Task<DatabaseBackupS3UploadResult> RetryS3UploadAsync(string? uploadResultId, CancellationToken cancellationToken = default)
@@ -255,6 +293,49 @@ public sealed class DatabaseBackupService
 
         var completedResult = await UploadBackupFileToS3Async(pendingResult, resolvedPath, cancellationToken);
         await SaveS3UploadResultAsync(completedResult, cancellationToken);
+
+        return completedResult;
+    }
+
+    public async Task<DatabaseBackupYandexDiskUploadResult> RetryYandexDiskUploadAsync(string? uploadResultId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(uploadResultId))
+        {
+            throw new ArgumentException("Укажите выгрузку Яндекс.Диска для повторной отправки.");
+        }
+
+        var storedResults = await LoadYandexDiskUploadResultsAsync(cancellationToken);
+        var storedResult = storedResults.FirstOrDefault(result =>
+            string.Equals(result.Id, uploadResultId.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (storedResult is null)
+        {
+            throw new FileNotFoundException("Выгрузка резервной копии на Яндекс.Диск не найдена.");
+        }
+
+        if (!string.Equals(storedResult.Status, "failed", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Повторить можно только выгрузку на Яндекс.Диск, которая завершилась ошибкой.");
+        }
+
+        var resolvedPath = ResolveBackupPath(storedResult.BackupRelativePath);
+        if (string.IsNullOrWhiteSpace(resolvedPath))
+        {
+            throw new FileNotFoundException("Локальная резервная копия для повторной отправки не найдена.");
+        }
+
+        var fileInfo = new FileInfo(resolvedPath);
+        var pendingResult = storedResult with
+        {
+            Status = "pending",
+            TargetPath = string.IsNullOrWhiteSpace(storedResult.TargetPath) ? storedResult.BackupFileName : storedResult.TargetPath,
+            SizeBytes = fileInfo.Length,
+            Error = null,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        await SaveYandexDiskUploadResultAsync(pendingResult, cancellationToken);
+
+        var completedResult = await UploadBackupFileToYandexDiskAsync(pendingResult, resolvedPath, cancellationToken);
+        await SaveYandexDiskUploadResultAsync(completedResult, cancellationToken);
 
         return completedResult;
     }
@@ -352,7 +433,10 @@ public sealed class DatabaseBackupService
         return File.Exists(fullPath) ? fullPath : null;
     }
 
-    private async Task<(DatabaseBackupFileInfo Backup, IReadOnlyList<DatabaseBackupS3UploadResult> S3UploadResults)> CreateBackupAsync(
+    private async Task<(
+        DatabaseBackupFileInfo Backup,
+        IReadOnlyList<DatabaseBackupS3UploadResult> S3UploadResults,
+        IReadOnlyList<DatabaseBackupYandexDiskUploadResult> YandexDiskUploadResults)> CreateBackupAsync(
         string trigger,
         string? scheduleSlot,
         CancellationToken cancellationToken)
@@ -378,7 +462,8 @@ public sealed class DatabaseBackupService
 
             await CleanupExpiredBackupsAsync(settings.RetentionDays, cancellationToken);
             var s3UploadResults = await UploadBackupToS3Async(fileInfo, settings.S3Upload, nowLocal, cancellationToken);
-            return (fileInfo, s3UploadResults);
+            var yandexDiskUploadResults = await UploadBackupToYandexDiskAsync(fileInfo, settings.YandexDiskUpload, nowLocal, cancellationToken);
+            return (fileInfo, s3UploadResults, yandexDiskUploadResults);
         }
         finally
         {
@@ -628,7 +713,7 @@ public sealed class DatabaseBackupService
             cancellationToken.ThrowIfCancellationRequested();
 
             var startedAt = DateTime.UtcNow;
-            var targetPath = BuildS3BackupTargetPath(settings.PrefixTemplate, backup.FileName, nowLocal);
+            var targetPath = BuildCloudBackupTargetPath(settings.PrefixTemplate, backup.FileName, nowLocal, DefaultS3PrefixTemplate);
             var result = new DatabaseBackupS3UploadResult(
                 Guid.NewGuid().ToString("N"),
                 backup.RelativePath,
@@ -684,6 +769,82 @@ public sealed class DatabaseBackupService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Failed to upload database backup {BackupPath} to S3 connection {ConnectionId}.", result.BackupRelativePath, result.ConnectionId);
+            return result with
+            {
+                Status = "failed",
+                Error = ex.Message,
+                UpdatedAt = DateTime.UtcNow,
+            };
+        }
+    }
+
+    private async Task<IReadOnlyList<DatabaseBackupYandexDiskUploadResult>> UploadBackupToYandexDiskAsync(
+        DatabaseBackupFileInfo backup,
+        DatabaseBackupYandexDiskUploadSettings settings,
+        DateTimeOffset nowLocal,
+        CancellationToken cancellationToken)
+    {
+        if (!settings.Enabled)
+        {
+            return [];
+        }
+
+        var resolvedPath = ResolveBackupPath(backup.RelativePath);
+        if (string.IsNullOrWhiteSpace(resolvedPath))
+        {
+            return [];
+        }
+
+        var startedAt = DateTime.UtcNow;
+        var targetPath = BuildCloudBackupTargetPath(settings.PrefixTemplate, backup.FileName, nowLocal, DefaultYandexDiskPrefixTemplate);
+        var result = new DatabaseBackupYandexDiskUploadResult(
+            Guid.NewGuid().ToString("N"),
+            backup.RelativePath,
+            backup.FileName,
+            "pending",
+            targetPath,
+            backup.SizeBytes,
+            null,
+            startedAt,
+            startedAt);
+
+        await SaveYandexDiskUploadResultAsync(result, cancellationToken);
+
+        result = await UploadBackupFileToYandexDiskAsync(result, resolvedPath, cancellationToken);
+
+        await SaveYandexDiskUploadResultAsync(result, cancellationToken);
+        return [result];
+    }
+
+    private async Task<DatabaseBackupYandexDiskUploadResult> UploadBackupFileToYandexDiskAsync(
+        DatabaseBackupYandexDiskUploadResult result,
+        string resolvedPath,
+        CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var yandexDiskService = scope.ServiceProvider.GetRequiredService<IYandexDiskService>();
+
+        try
+        {
+            await using var stream = File.OpenRead(resolvedPath);
+            var upload = await yandexDiskService.UploadAsync(
+                result.TargetPath,
+                stream,
+                "application/octet-stream",
+                overwrite: true,
+                cancellationToken);
+
+            return result with
+            {
+                Status = "success",
+                TargetPath = upload.Path,
+                Error = null,
+                UpdatedAt = DateTime.UtcNow,
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to upload database backup {BackupPath} to Yandex Disk.", result.BackupRelativePath);
             return result with
             {
                 Status = "failed",
@@ -754,6 +915,67 @@ public sealed class DatabaseBackupService
         }
     }
 
+    private async Task<IReadOnlyList<DatabaseBackupYandexDiskUploadResult>> LoadYandexDiskUploadResultsAsync(CancellationToken cancellationToken)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var raw = await context.SystemSettings
+            .AsNoTracking()
+            .Where(setting => setting.Key == YandexDiskUploadResultsSettingKey)
+            .Select(setting => setting.Value)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return DeserializeYandexDiskUploadResults(raw);
+    }
+
+    private async Task SaveYandexDiskUploadResultAsync(DatabaseBackupYandexDiskUploadResult result, CancellationToken cancellationToken)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        var setting = await context.SystemSettings.FirstOrDefaultAsync(item => item.Key == YandexDiskUploadResultsSettingKey, cancellationToken);
+        var results = DeserializeYandexDiskUploadResults(setting?.Value)
+            .Where(item => !string.Equals(item.Id, result.Id, StringComparison.OrdinalIgnoreCase))
+            .Prepend(result)
+            .OrderByDescending(item => item.UpdatedAt)
+            .Take(100)
+            .ToList();
+
+        var value = JsonSerializer.Serialize(results, JsonOptions);
+        if (setting is null)
+        {
+            context.SystemSettings.Add(new SystemSetting
+            {
+                Key = YandexDiskUploadResultsSettingKey,
+                Value = value,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+        else
+        {
+            setting.Value = value;
+            setting.UpdatedAt = now;
+        }
+
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static IReadOnlyList<DatabaseBackupYandexDiskUploadResult> DeserializeYandexDiskUploadResults(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<DatabaseBackupYandexDiskUploadResult>>(raw, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
     private async Task<BackupSettings> LoadSettingsAsync(CancellationToken cancellationToken)
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
@@ -766,7 +988,9 @@ public sealed class DatabaseBackupService
                 || x.Key == FormatSettingKey
                 || x.Key == S3UploadEnabledSettingKey
                 || x.Key == S3ConnectionIdsSettingKey
-                || x.Key == S3PrefixTemplateSettingKey)
+                || x.Key == S3PrefixTemplateSettingKey
+                || x.Key == YandexDiskUploadEnabledSettingKey
+                || x.Key == YandexDiskPrefixTemplateSettingKey)
             .ToDictionaryAsync(x => x.Key, x => x.Value, cancellationToken);
 
         var scheduleRaw = GetSettingOrConfig(settings, ScheduleSettingKey, "DatabaseBackup:ScheduleLocal") ?? BuildLegacyScheduleFallback();
@@ -787,7 +1011,10 @@ public sealed class DatabaseBackupService
         var s3Upload = new DatabaseBackupS3UploadSettings(
             ParseBoolean(GetSettingOrConfig(settings, S3UploadEnabledSettingKey, "DatabaseBackup:S3:Enabled"), fallback: false),
             ParseS3ConnectionIds(GetSettingOrConfig(settings, S3ConnectionIdsSettingKey, "DatabaseBackup:S3:ConnectionIds")),
-            NormalizeS3PrefixTemplate(GetSettingOrConfig(settings, S3PrefixTemplateSettingKey, "DatabaseBackup:S3:PrefixTemplate") ?? DefaultS3PrefixTemplate));
+            NormalizeCloudBackupPrefixTemplate(GetSettingOrConfig(settings, S3PrefixTemplateSettingKey, "DatabaseBackup:S3:PrefixTemplate") ?? DefaultS3PrefixTemplate, DefaultS3PrefixTemplate));
+        var yandexDiskUpload = new DatabaseBackupYandexDiskUploadSettings(
+            ParseBoolean(GetSettingOrConfig(settings, YandexDiskUploadEnabledSettingKey, "DatabaseBackup:YandexDisk:Enabled"), fallback: false),
+            NormalizeCloudBackupPrefixTemplate(GetSettingOrConfig(settings, YandexDiskPrefixTemplateSettingKey, "DatabaseBackup:YandexDisk:PrefixTemplate") ?? DefaultYandexDiskPrefixTemplate, DefaultYandexDiskPrefixTemplate));
 
         return new BackupSettings(
             automaticEnabled,
@@ -798,7 +1025,8 @@ public sealed class DatabaseBackupService
             availableFormats,
             _backupRootDirectory,
             _databaseProvider.IsPostgreSql ? ResolveConfiguredPgDumpCommand() : null,
-            s3Upload);
+            s3Upload,
+            yandexDiskUpload);
     }
 
     private string? GetSettingOrConfig(IReadOnlyDictionary<string, string> settings, string key, string configPath)
@@ -1250,27 +1478,27 @@ public sealed class DatabaseBackupService
             .Take(20)
             .ToList();
 
-    private static string NormalizeS3PrefixTemplate(string? value)
+    private static string NormalizeCloudBackupPrefixTemplate(string? value, string fallback)
     {
-        var template = string.IsNullOrWhiteSpace(value) ? DefaultS3PrefixTemplate : value.Trim().Replace('\\', '/');
+        var template = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim().Replace('\\', '/');
         template = template.Trim('/');
         if (string.IsNullOrWhiteSpace(template))
         {
-            template = DefaultS3PrefixTemplate.Trim('/');
+            template = fallback.Trim('/');
         }
 
         var parts = template.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (parts.Any(part => part == "." || part == ".."))
         {
-            throw new ArgumentException("Путь S3 для резервных копий не должен содержать переходы между каталогами.");
+            throw new ArgumentException("Путь облачного хранения резервных копий не должен содержать переходы между каталогами.");
         }
 
         return string.Join('/', parts);
     }
 
-    private static string BuildS3BackupTargetPath(string prefixTemplate, string fileName, DateTimeOffset nowLocal)
+    private static string BuildCloudBackupTargetPath(string prefixTemplate, string fileName, DateTimeOffset nowLocal, string fallback)
     {
-        var prefix = NormalizeS3PrefixTemplate(prefixTemplate)
+        var prefix = NormalizeCloudBackupPrefixTemplate(prefixTemplate, fallback)
             .Replace("{yyyy}", nowLocal.ToString("yyyy", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
             .Replace("{MM}", nowLocal.ToString("MM", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
             .Replace("{dd}", nowLocal.ToString("dd", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
@@ -1355,5 +1583,6 @@ public sealed class DatabaseBackupService
         IReadOnlyList<DatabaseBackupFormatOption> AvailableFormats,
         string RootDirectory,
         string? ToolCommand,
-        DatabaseBackupS3UploadSettings S3Upload);
+        DatabaseBackupS3UploadSettings S3Upload,
+        DatabaseBackupYandexDiskUploadSettings YandexDiskUpload);
 }

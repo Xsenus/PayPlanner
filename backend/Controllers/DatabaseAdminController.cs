@@ -68,6 +68,8 @@ public class DatabaseAdminController : ControllerBase
                 request.S3UploadEnabled,
                 request.S3ConnectionIds,
                 request.S3PrefixTemplate,
+                request.YandexDiskUploadEnabled,
+                request.YandexDiskPrefixTemplate,
                 cancellationToken);
 
             return Ok(MapOverview(overview));
@@ -89,6 +91,7 @@ public class DatabaseAdminController : ControllerBase
                 Backup = MapFile(result.Backup),
                 DownloadPath = result.DownloadPath,
                 S3UploadResults = result.S3UploadResults.Select(MapS3UploadResult).ToList(),
+                YandexDiskUploadResults = result.YandexDiskUploadResults.Select(MapYandexDiskUploadResult).ToList(),
             });
         }
         catch (InvalidOperationException ex)
@@ -105,6 +108,27 @@ public class DatabaseAdminController : ControllerBase
         try
         {
             await _databaseBackupService.RetryS3UploadAsync(uploadResultId, cancellationToken);
+            var overview = await _databaseBackupService.GetOverviewAsync(cancellationToken);
+            return Ok(MapOverview(overview));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("backups/yandex-disk-uploads/{uploadResultId}/retry")]
+    public async Task<ActionResult<DatabaseBackupOverviewDto>> RetryBackupYandexDiskUploadAsync(
+        string uploadResultId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _databaseBackupService.RetryYandexDiskUploadAsync(uploadResultId, cancellationToken);
             var overview = await _databaseBackupService.GetOverviewAsync(cancellationToken);
             return Ok(MapOverview(overview));
         }
@@ -348,6 +372,12 @@ public class DatabaseAdminController : ControllerBase
                 PrefixTemplate = overview.S3Upload.PrefixTemplate,
             },
             S3UploadResults = overview.S3UploadResults.Select(MapS3UploadResult).ToList(),
+            YandexDiskUpload = new DatabaseBackupYandexDiskUploadSettingsDto
+            {
+                Enabled = overview.YandexDiskUpload.Enabled,
+                PrefixTemplate = overview.YandexDiskUpload.PrefixTemplate,
+            },
+            YandexDiskUploadResults = overview.YandexDiskUploadResults.Select(MapYandexDiskUploadResult).ToList(),
             Items = overview.Items.Select(MapFile).ToList(),
         };
     }
@@ -363,6 +393,22 @@ public class DatabaseAdminController : ControllerBase
             Status = result.Status,
             TargetPath = result.TargetPath,
             TargetKey = result.TargetKey,
+            SizeBytes = result.SizeBytes,
+            Error = result.Error,
+            CreatedAt = result.CreatedAt,
+            UpdatedAt = result.UpdatedAt,
+        };
+    }
+
+    private static DatabaseBackupYandexDiskUploadResultDto MapYandexDiskUploadResult(DatabaseBackupYandexDiskUploadResult result)
+    {
+        return new DatabaseBackupYandexDiskUploadResultDto
+        {
+            Id = result.Id,
+            BackupRelativePath = result.BackupRelativePath,
+            BackupFileName = result.BackupFileName,
+            Status = result.Status,
+            TargetPath = result.TargetPath,
             SizeBytes = result.SizeBytes,
             Error = result.Error,
             CreatedAt = result.CreatedAt,

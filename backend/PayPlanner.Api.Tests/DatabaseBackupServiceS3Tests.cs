@@ -27,7 +27,7 @@ public sealed class DatabaseBackupServiceS3Tests
             s3UploadEnabled: true,
             s3ConnectionIds: ["s3-main"],
             s3PrefixTemplate: "backups/database/{yyyy}/{MM}",
-            CancellationToken.None);
+            cancellationToken: CancellationToken.None);
 
         var result = await service.CreateManualBackupAsync(CancellationToken.None);
 
@@ -63,7 +63,7 @@ public sealed class DatabaseBackupServiceS3Tests
             s3UploadEnabled: true,
             s3ConnectionIds: ["s3-main"],
             s3PrefixTemplate: "backups/database/{yyyy}/{MM}",
-            CancellationToken.None);
+            cancellationToken: CancellationToken.None);
 
         var result = await service.CreateManualBackupAsync(CancellationToken.None);
 
@@ -87,7 +87,7 @@ public sealed class DatabaseBackupServiceS3Tests
             s3UploadEnabled: true,
             s3ConnectionIds: ["s3-main"],
             s3PrefixTemplate: "backups/database/{yyyy}/{MM}",
-            CancellationToken.None);
+            cancellationToken: CancellationToken.None);
 
         var failedResult = await service.CreateManualBackupAsync(CancellationToken.None);
         var failedUpload = Assert.Single(failedResult.S3UploadResults);
@@ -110,6 +110,74 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Equal("success", stored.Status);
     }
 
+    [Fact]
+    public async Task CreateManualBackupAsync_UploadsBackupToYandexDiskWhenEnabled()
+    {
+        await using var scope = await CreateScopeAsync();
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(
+            automaticEnabled: true,
+            scheduleLocal: "03:00",
+            retentionDays: 14,
+            backupFormat: "sqlite",
+            yandexDiskUploadEnabled: true,
+            yandexDiskPrefixTemplate: "backups/database/{yyyy}/{MM}",
+            cancellationToken: CancellationToken.None);
+
+        var result = await service.CreateManualBackupAsync(CancellationToken.None);
+
+        var upload = Assert.Single(result.YandexDiskUploadResults);
+        Assert.Equal("success", upload.Status);
+        Assert.EndsWith(result.Backup.FileName, upload.TargetPath, StringComparison.Ordinal);
+        Assert.Contains($"/{DateTimeOffset.Now:yyyy}/{DateTimeOffset.Now:MM}/", $"/{upload.TargetPath}");
+        Assert.Equal(result.Backup.RelativePath, upload.BackupRelativePath);
+        Assert.Equal(result.Backup.SizeBytes, upload.SizeBytes);
+        Assert.Equal(upload.TargetPath, scope.YandexDisk.UploadedPath);
+        Assert.True(scope.YandexDisk.UploadedBytes > 0);
+
+        var overview = await service.GetOverviewAsync(CancellationToken.None);
+        var stored = Assert.Single(overview.YandexDiskUploadResults);
+        Assert.Equal(upload.Id, stored.Id);
+        Assert.Equal("success", stored.Status);
+        Assert.True(overview.YandexDiskUpload.Enabled);
+    }
+
+    [Fact]
+    public async Task RetryYandexDiskUploadAsync_ReuploadsFailedBackupAndUpdatesStoredResult()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.YandexDisk.ThrowOnUpload = true;
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(
+            automaticEnabled: true,
+            scheduleLocal: "03:00",
+            retentionDays: 14,
+            backupFormat: "sqlite",
+            yandexDiskUploadEnabled: true,
+            yandexDiskPrefixTemplate: "backups/database/{yyyy}/{MM}",
+            cancellationToken: CancellationToken.None);
+
+        var failedResult = await service.CreateManualBackupAsync(CancellationToken.None);
+        var failedUpload = Assert.Single(failedResult.YandexDiskUploadResults);
+        Assert.Equal("failed", failedUpload.Status);
+
+        scope.YandexDisk.ThrowOnUpload = false;
+
+        var retry = await service.RetryYandexDiskUploadAsync(failedUpload.Id, CancellationToken.None);
+
+        Assert.Equal(failedUpload.Id, retry.Id);
+        Assert.Equal("success", retry.Status);
+        Assert.Null(retry.Error);
+        Assert.Equal(failedUpload.TargetPath, retry.TargetPath);
+        Assert.Equal(failedResult.Backup.SizeBytes, retry.SizeBytes);
+        Assert.True(scope.YandexDisk.UploadedBytes > 0);
+
+        var overview = await service.GetOverviewAsync(CancellationToken.None);
+        var stored = Assert.Single(overview.YandexDiskUploadResults);
+        Assert.Equal(failedUpload.Id, stored.Id);
+        Assert.Equal("success", stored.Status);
+    }
+
     private static async Task<TestScope> CreateScopeAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), $"payplanner-backup-s3-{Guid.NewGuid():N}");
@@ -119,6 +187,7 @@ public sealed class DatabaseBackupServiceS3Tests
         var connectionString = $"Data Source={dbPath}";
         var providerInfo = new DatabaseProviderInfo(DatabaseProviderKind.Sqlite, DatabaseProviderResolver.NormalizeSqliteConnection(connectionString));
         var s3 = new FakeS3StorageService();
+        var yandexDisk = new FakeYandexDiskService();
         var services = new ServiceCollection();
         services.AddSingleton(providerInfo);
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
@@ -129,7 +198,9 @@ public sealed class DatabaseBackupServiceS3Tests
             .Build());
         services.AddDbContextFactory<PaymentContext>(options => options.UseSqlite(providerInfo.ConnectionString));
         services.AddScoped<IS3StorageService>(_ => s3);
+        services.AddScoped<IYandexDiskService>(_ => yandexDisk);
         services.AddSingleton(s3);
+        services.AddSingleton(yandexDisk);
         services.AddSingleton<ILogger<DatabaseBackupService>>(NullLogger<DatabaseBackupService>.Instance);
         services.AddSingleton<DatabaseBackupService>();
         var serviceProvider = services.BuildServiceProvider();
@@ -139,7 +210,7 @@ public sealed class DatabaseBackupServiceS3Tests
             await db.Database.EnsureCreatedAsync();
         }
 
-        return new TestScope(root, serviceProvider, s3);
+        return new TestScope(root, serviceProvider, s3, yandexDisk);
     }
 
     private sealed class FakeS3StorageService : IS3StorageService
@@ -204,10 +275,81 @@ public sealed class DatabaseBackupServiceS3Tests
             => throw new NotSupportedException();
     }
 
-    private sealed class TestScope(string root, ServiceProvider provider, FakeS3StorageService s3) : IAsyncDisposable
+    private sealed class FakeYandexDiskService : IYandexDiskService
+    {
+        public bool ThrowOnUpload { get; set; }
+        public string? UploadedPath { get; private set; }
+        public long UploadedBytes { get; private set; }
+
+        public Task<YandexDiskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskSettingsDto { IsConfigured = true, RootPath = "disk:/PayPlanner" });
+
+        public Task<YandexDiskSettingsDto> UpdateSettingsAsync(UpdateYandexDiskSettingsRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskConnectionTestDto> TestConnectionAsync(TestYandexDiskConnectionRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskListResponseDto> ListAsync(string? path, int limit, int offset, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskOperationResultDto> CreateFolderAsync(string? path, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskOperationResultDto> CopyAsync(string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskOperationResultDto> MoveAsync(string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskOperationResultDto> DeleteAsync(string? path, bool permanently, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public async Task<YandexDiskOperationResultDto> UploadAsync(string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnUpload)
+            {
+                throw new YandexDiskOperationException(503, "Yandex Disk unavailable");
+            }
+
+            UploadedPath = path;
+            using var memory = new MemoryStream();
+            await content.CopyToAsync(memory, cancellationToken);
+            UploadedBytes = memory.Length;
+            return new YandexDiskOperationResultDto
+            {
+                Success = true,
+                Path = path ?? string.Empty,
+            };
+        }
+
+        public Task<YandexDiskDownload> DownloadAsync(string? path, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskTextFileDto> GetTextFileAsync(string? path, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskOperationResultDto> SaveTextFileAsync(UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskCrmSyncSettingsDto> GetCrmSyncSettingsAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskCrmSyncSettingsDto> UpdateCrmSyncSettingsAsync(UpdateYandexDiskCrmSyncSettingsRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskCrmSyncPreviewDto> PreviewCrmSyncAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<YandexDiskOperationResultDto> UploadCrmDocumentAsync(YandexDiskCrmDocumentUpload upload, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+    }
+
+    private sealed class TestScope(string root, ServiceProvider provider, FakeS3StorageService s3, FakeYandexDiskService yandexDisk) : IAsyncDisposable
     {
         public ServiceProvider Provider { get; } = provider;
         public FakeS3StorageService S3 { get; } = s3;
+        public FakeYandexDiskService YandexDisk { get; } = yandexDisk;
 
         public async ValueTask DisposeAsync()
         {
