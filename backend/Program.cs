@@ -33,6 +33,7 @@ builder.Services.AddControllers(options =>
     options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 builder.Services.AddSignalR();
+builder.Services.AddDataProtection();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -116,6 +117,7 @@ builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaDa
 builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 builder.Services.AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService>();
 builder.Services.AddHttpClient<IYandexDiskService, YandexDiskService>();
+builder.Services.AddHttpClient<IGoogleCalendarSyncService, GoogleCalendarSyncService>();
 builder.Services.AddSingleton<IS3StorageClientFactory, S3StorageClientFactory>();
 builder.Services.AddScoped<IS3StorageService, S3StorageService>();
 builder.Services.AddScoped<ICourtSyncProvider, SudrfCourtSyncProvider>();
@@ -141,6 +143,8 @@ builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationDeliveryRetentionService>());
 builder.Services.AddSingleton<CalendarSyncSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncSchedulerService>());
+builder.Services.AddSingleton<GoogleCalendarBackgroundSyncService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<GoogleCalendarBackgroundSyncService>());
 builder.Services.AddSingleton<TaskJournalAutomationSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalAutomationSchedulerService>());
 builder.Services.AddHostedService<TelegramBotPollingService>();

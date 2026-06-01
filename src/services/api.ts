@@ -211,6 +211,82 @@ export interface UpdateCalendarSyncSettingsRequest {
   notes?: string;
 }
 
+export interface GoogleCalendarStartAuthResponseDto {
+  state: string;
+  authUrl: string;
+  pollIntervalMs: number;
+}
+
+export interface GoogleCalendarAuthStatusDto {
+  state: string;
+  status: string;
+  completed: boolean;
+  detail?: string | null;
+  returnUrl?: string | null;
+}
+
+export interface GoogleCalendarCalendarDto {
+  id: number;
+  ownerUserId?: number | null;
+  ownerName?: string | null;
+  googleCalendarId: string;
+  name: string;
+  lastSyncedAt?: string | null;
+  watchExpiresAt?: string | null;
+  lastError?: string | null;
+}
+
+export interface GoogleCalendarConnectionDto {
+  id: number;
+  googleEmail?: string | null;
+  displayName?: string | null;
+  isEnabled: boolean;
+  syncEnabled: boolean;
+  calendarMode: string;
+  conflictResolutionMode: string;
+  defaultCalendarId?: string | null;
+  defaultCalendarName?: string | null;
+  accessTokenExpiresAt?: string | null;
+  lastFullSyncAt?: string | null;
+  lastIncrementalSyncAt?: string | null;
+  lastError?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  calendars: GoogleCalendarCalendarDto[];
+}
+
+export interface GoogleCalendarSyncLogDto {
+  id: number;
+  taskJournalItemId?: number | null;
+  direction: string;
+  operation: string;
+  status: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface GoogleCalendarStatusDto {
+  googleOAuthReady: boolean;
+  callbackUrl: string;
+  connection?: GoogleCalendarConnectionDto | null;
+  recentLogs: GoogleCalendarSyncLogDto[];
+}
+
+export interface UpdateGoogleCalendarSettingsRequest {
+  isEnabled?: boolean;
+  syncEnabled?: boolean;
+  calendarMode?: string;
+  conflictResolutionMode?: string;
+}
+
+export interface GoogleCalendarSyncNowResultDto {
+  processedTasks: number;
+  importedEvents: number;
+  errorCount: number;
+  message: string;
+  status: GoogleCalendarStatusDto;
+}
+
 export interface YandexDiskSettingsDto {
   isConfigured: boolean;
   rootPath: string;
@@ -1669,6 +1745,40 @@ export class ApiService {
     return this.request<CalendarSyncSettingsDto>('/calendar-sync/settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async getGoogleCalendarStatus() {
+    return this.request<GoogleCalendarStatusDto>('/google-calendar/status');
+  }
+
+  async startGoogleCalendarAuth(returnUrl = '/?ppTab=profile') {
+    return this.request<GoogleCalendarStartAuthResponseDto>('/google-calendar/auth/start', {
+      method: 'POST',
+      body: JSON.stringify({ returnUrl }),
+    });
+  }
+
+  async getGoogleCalendarAuthStatus(state: string) {
+    return this.request<GoogleCalendarAuthStatusDto>(`/google-calendar/auth/status/${encodeURIComponent(state)}`);
+  }
+
+  async updateGoogleCalendarSettings(payload: UpdateGoogleCalendarSettingsRequest) {
+    return this.request<GoogleCalendarStatusDto>('/google-calendar/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async syncGoogleCalendarNow() {
+    return this.request<GoogleCalendarSyncNowResultDto>('/google-calendar/sync-now', {
+      method: 'POST',
+    });
+  }
+
+  async disconnectGoogleCalendar() {
+    return this.request<GoogleCalendarStatusDto>('/google-calendar/connection', {
+      method: 'DELETE',
     });
   }
 

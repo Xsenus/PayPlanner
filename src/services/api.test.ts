@@ -203,6 +203,81 @@ describe('apiService auth handling', () => {
     expect(JSON.parse(String(init?.body))).toEqual(payload);
   });
 
+  it('loads Google Calendar status from the backend', async () => {
+    const payload = {
+      googleOAuthReady: true,
+      callbackUrl: 'https://crm.example.com/api/google-calendar/auth/callback',
+      connection: {
+        id: 1,
+        googleEmail: 'user@example.com',
+        isEnabled: true,
+        syncEnabled: true,
+        calendarMode: 'personal',
+        conflictResolutionMode: 'latestWins',
+        createdAt: '2026-06-01T10:00:00Z',
+        updatedAt: '2026-06-01T10:00:00Z',
+        calendars: [],
+      },
+      recentLogs: [],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getGoogleCalendarStatus();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/google-calendar/status');
+  });
+
+  it('starts Google Calendar OAuth flow', async () => {
+    const payload = {
+      state: 'state-1',
+      authUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=state-1',
+      pollIntervalMs: 2000,
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.startGoogleCalendarAuth('/?ppTab=profile');
+
+    expect(result).toEqual(payload);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/google-calendar/auth/start');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ returnUrl: '/?ppTab=profile' });
+  });
+
+  it('runs Google Calendar sync now', async () => {
+    const payload = {
+      processedTasks: 2,
+      importedEvents: 1,
+      errorCount: 0,
+      message: 'Синхронизация выполнена.',
+      status: {
+        googleOAuthReady: true,
+        callbackUrl: 'https://crm.example.com/api/google-calendar/auth/callback',
+        connection: null,
+        recentLogs: [],
+      },
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.syncGoogleCalendarNow();
+
+    expect(result).toEqual(payload);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/google-calendar/sync-now');
+    expect(init?.method).toBe('POST');
+  });
+
   it('loads Yandex Disk settings from the backend', async () => {
     const payload = {
       isConfigured: true,

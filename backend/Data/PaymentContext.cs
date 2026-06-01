@@ -1953,6 +1953,156 @@ public class PaymentContext : DbContext
                 .HasDatabaseName("IX_ExternalAuthRequests_Provider_Status");
         });
 
+        modelBuilder.Entity<GoogleCalendarAuthRequest>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.State).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.ReturnUrl).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue("pending").IsRequired();
+            entity.Property(e => e.Error).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.State)
+                .IsUnique()
+                .HasDatabaseName("IX_GoogleCalendarAuthRequests_State");
+            entity.HasIndex(e => new { e.UserId, e.Status })
+                .HasDatabaseName("IX_GoogleCalendarAuthRequests_User_Status");
+        });
+
+        modelBuilder.Entity<GoogleCalendarConnection>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.GoogleUserId).HasMaxLength(128);
+            entity.Property(e => e.GoogleEmail).HasMaxLength(320);
+            entity.Property(e => e.DisplayName).HasMaxLength(256);
+            entity.Property(e => e.Scope).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.IsEnabled).HasDefaultValue(true);
+            entity.Property(e => e.SyncEnabled).HasDefaultValue(true);
+            entity.Property(e => e.CalendarMode).HasMaxLength(32).HasDefaultValue("personal").IsRequired();
+            entity.Property(e => e.ConflictResolutionMode).HasMaxLength(32).HasDefaultValue("latestWins").IsRequired();
+            entity.Property(e => e.DefaultCalendarId).HasMaxLength(256);
+            entity.Property(e => e.DefaultCalendarName).HasMaxLength(256);
+            entity.Property(e => e.LastError).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.UserId)
+                .IsUnique()
+                .HasDatabaseName("IX_GoogleCalendarConnections_UserId");
+            entity.HasIndex(e => e.GoogleUserId)
+                .HasDatabaseName("IX_GoogleCalendarConnections_GoogleUserId");
+        });
+
+        modelBuilder.Entity<GoogleCalendarSyncCalendar>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.GoogleCalendarId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WatchChannelId).HasMaxLength(128);
+            entity.Property(e => e.WatchResourceId).HasMaxLength(256);
+            entity.Property(e => e.WatchToken).HasMaxLength(128);
+            entity.Property(e => e.LastError).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Connection)
+                .WithMany(e => e.Calendars)
+                .HasForeignKey(e => e.ConnectionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.OwnerUser)
+                .WithMany()
+                .HasForeignKey(e => e.OwnerUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => new { e.ConnectionId, e.OwnerUserId })
+                .HasDatabaseName("IX_GoogleCalendarSyncCalendars_Connection_Owner");
+            entity.HasIndex(e => new { e.ConnectionId, e.GoogleCalendarId })
+                .IsUnique()
+                .HasDatabaseName("IX_GoogleCalendarSyncCalendars_Connection_GoogleCalendar");
+            entity.HasIndex(e => e.WatchChannelId)
+                .HasDatabaseName("IX_GoogleCalendarSyncCalendars_WatchChannelId");
+        });
+
+        modelBuilder.Entity<GoogleCalendarTaskLink>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.GoogleCalendarId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.GoogleEventId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.GoogleEtag).HasMaxLength(256);
+            entity.Property(e => e.LastCrmHash).HasMaxLength(128);
+            entity.Property(e => e.LastGoogleHash).HasMaxLength(128);
+            entity.Property(e => e.LastDirection).HasMaxLength(32);
+            entity.Property(e => e.SyncStatus).HasMaxLength(32).HasDefaultValue("active").IsRequired();
+            entity.Property(e => e.LastError).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Connection)
+                .WithMany(e => e.TaskLinks)
+                .HasForeignKey(e => e.ConnectionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.CalendarSyncCalendar)
+                .WithMany(e => e.TaskLinks)
+                .HasForeignKey(e => e.CalendarSyncCalendarId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany()
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.ConnectionId, e.TaskJournalItemId })
+                .IsUnique()
+                .HasDatabaseName("IX_GoogleCalendarTaskLinks_Connection_Task");
+            entity.HasIndex(e => new { e.GoogleCalendarId, e.GoogleEventId })
+                .HasDatabaseName("IX_GoogleCalendarTaskLinks_GoogleEvent");
+            entity.HasIndex(e => e.TaskJournalItemId)
+                .HasDatabaseName("IX_GoogleCalendarTaskLinks_TaskJournalItemId");
+        });
+
+        modelBuilder.Entity<GoogleCalendarSyncLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Direction).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Operation).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Message).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.DetailsJson).HasColumnType("text");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Connection)
+                .WithMany()
+                .HasForeignKey(e => e.ConnectionId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.CalendarSyncCalendar)
+                .WithMany()
+                .HasForeignKey(e => e.CalendarSyncCalendarId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany()
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => new { e.ConnectionId, e.CreatedAt })
+                .HasDatabaseName("IX_GoogleCalendarSyncLogs_Connection_CreatedAt");
+            entity.HasIndex(e => e.TaskJournalItemId)
+                .HasDatabaseName("IX_GoogleCalendarSyncLogs_TaskJournalItemId");
+        });
+
         modelBuilder.Entity<TelegramAuthRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -3092,6 +3242,11 @@ public class PaymentContext : DbContext
     public DbSet<UserExternalIdentity> UserExternalIdentities { get; set; }
     public DbSet<ExternalAuthRequest> ExternalAuthRequests { get; set; }
     public DbSet<TelegramAuthRequest> TelegramAuthRequests { get; set; }
+    public DbSet<GoogleCalendarAuthRequest> GoogleCalendarAuthRequests { get; set; }
+    public DbSet<GoogleCalendarConnection> GoogleCalendarConnections { get; set; }
+    public DbSet<GoogleCalendarSyncCalendar> GoogleCalendarSyncCalendars { get; set; }
+    public DbSet<GoogleCalendarTaskLink> GoogleCalendarTaskLinks { get; set; }
+    public DbSet<GoogleCalendarSyncLog> GoogleCalendarSyncLogs { get; set; }
 
     /// <summary>
     /// Пользователи системы.

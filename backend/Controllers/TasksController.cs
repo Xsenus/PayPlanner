@@ -82,6 +82,7 @@ public class TasksController : ControllerBase
     private readonly INotificationService _notificationService;
     private readonly ICaseDocumentStorage _caseDocumentStorage;
     private readonly IInvoiceDocumentPdfService? _pdfService;
+    private readonly IGoogleCalendarSyncService? _googleCalendarSyncService;
     private readonly string _taskFilesRoot;
 
     public TasksController(
@@ -89,12 +90,14 @@ public class TasksController : ControllerBase
         INotificationService notificationService,
         IWebHostEnvironment? environment = null,
         ICaseDocumentStorage? caseDocumentStorage = null,
-        IInvoiceDocumentPdfService? pdfService = null)
+        IInvoiceDocumentPdfService? pdfService = null,
+        IGoogleCalendarSyncService? googleCalendarSyncService = null)
     {
         _db = db;
         _notificationService = notificationService;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
         _pdfService = pdfService;
+        _googleCalendarSyncService = googleCalendarSyncService;
         _taskFilesRoot = Path.Combine(environment?.ContentRootPath ?? AppContext.BaseDirectory, "App_Data", "task-files");
     }
 
@@ -1455,6 +1458,7 @@ public class TasksController : ControllerBase
             await _notificationService.NotifyTaskApprovalRequestedAsync(entity, access.DisplayName, access.UserId, ct);
         }
         await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
+        await SafeSyncGoogleCalendarTaskAsync(entity.Id, ct);
         return Created($"/api/tasks/{entity.Id}", Map(entity, binding));
     }
 
@@ -1589,6 +1593,7 @@ public class TasksController : ControllerBase
             await _notificationService.NotifyTaskCompletedAsync(entity, ct);
         }
         await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
+        await SafeSyncGoogleCalendarTaskAsync(entity.Id, ct);
         return Ok(Map(entity, binding));
     }
 
@@ -1695,6 +1700,7 @@ public class TasksController : ControllerBase
         {
             await _notificationService.NotifyTaskCompletedAsync(entity, ct);
         }
+        await SafeSyncGoogleCalendarTaskAsync(entity.Id, ct);
         return Ok(Map(entity));
     }
 
@@ -1878,6 +1884,7 @@ public class TasksController : ControllerBase
             }
 
             await NotifyTaskScheduleConflictIfNeededAsync(notification.Task, access, ct);
+            await SafeSyncGoogleCalendarTaskAsync(notification.Task.Id, ct);
         }
 
         return Ok(new
@@ -2054,6 +2061,7 @@ public class TasksController : ControllerBase
             access.UserId,
             resolution,
             ct);
+        await SafeSyncGoogleCalendarTaskAsync(entity.Id, ct);
         return Ok(Map(entity));
     }
 
@@ -2101,6 +2109,23 @@ public class TasksController : ControllerBase
         }
 
         await _notificationService.NotifyTaskScheduleConflictAsync(entity, conflicts, access.DisplayName, access.UserId, ct);
+    }
+
+    private async Task SafeSyncGoogleCalendarTaskAsync(int taskId, CancellationToken ct)
+    {
+        if (_googleCalendarSyncService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _googleCalendarSyncService.SyncTaskForConnectedUsersAsync(taskId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Console.Error.WriteLine($"[GoogleCalendar] Task sync failed for task {taskId}: {ex.Message}");
+        }
     }
 
     private async Task<IReadOnlyList<TaskJournalItem>> FindTaskScheduleConflictsAsync(TaskJournalItem entity, CancellationToken ct)
