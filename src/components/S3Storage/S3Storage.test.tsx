@@ -151,6 +151,13 @@ describe('S3Storage', () => {
     expect(screen.getByRole('button', { name: /Логи/i })).toBeTruthy();
     expect(screen.getByText('AKIA...1234')).toBeTruthy();
     expect(screen.queryByDisplayValue('https://s3-nl.hostkey.com')).toBeNull();
+
+    const card = screen.getByText('HOSTKEY основной').closest('article')!;
+    const filesButton = within(card).getByRole('button', { name: /Файлы/i });
+    const editButton = within(card).getByRole('button', { name: /Изменить/i });
+    expect(filesButton.textContent?.trim()).toBe('');
+    expect(editButton.textContent?.trim()).toBe('');
+    expect(filesButton.getAttribute('title')).toBe('Открыть файлы подключения');
   });
 
   it('opens connection editing on a separate page', async () => {

@@ -162,6 +162,18 @@ function iconButtonClass(tone: 'default' | 'primary' | 'success' | 'danger' = 'd
   }
 }
 
+function cardIconButtonClass(tone: 'default' | 'success' | 'danger' = 'default') {
+  const base = 'inline-flex h-9 w-9 items-center justify-center rounded-lg border text-sm transition disabled:cursor-not-allowed disabled:opacity-55';
+  switch (tone) {
+    case 'success':
+      return `${base} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`;
+    case 'danger':
+      return `${base} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`;
+    default:
+      return `${base} border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-100`;
+  }
+}
+
 function statusBadge(connection: S3StorageConnectionDto) {
   if (!connection.isEnabled) {
     return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">Выключено</span>;
@@ -985,41 +997,41 @@ export function S3Storage() {
 
             <p className="mt-4 text-xs text-slate-500">Обновлено: {formatDate(connection.updatedAt)}</p>
 
-            <div className="mt-auto flex flex-wrap gap-2 pt-4">
+            <div className="mt-auto flex items-center justify-end gap-2 pt-4">
               <button
                 type="button"
                 onClick={() => openConnectionFiles(connection)}
-                className={iconButtonClass('success')}
-                title="Открыть файлы подключения">
+                className={cardIconButtonClass('success')}
+                title="Открыть файлы подключения"
+                aria-label="Файлы">
                 <Folder className="h-4 w-4" />
-                Файлы
               </button>
               <button
                 type="button"
                 onClick={() => openEditPage(connection)}
-                className={iconButtonClass()}
+                className={cardIconButtonClass()}
                 disabled={!canEdit}
-                title="Редактировать подключение">
+                title="Редактировать подключение"
+                aria-label="Изменить">
                 <Edit3 className="h-4 w-4" />
-                Изменить
               </button>
               <button
                 type="button"
                 onClick={() => void testConnection(connection)}
-                className={iconButtonClass()}
+                className={cardIconButtonClass()}
                 disabled={!canTestConnections || testingId === connection.id || !connection.isConfigured}
-                title="Проверить подключение">
+                title="Проверить подключение"
+                aria-label="Проверить">
                 {testingId === connection.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube2 className="h-4 w-4" />}
-                Проверить
               </button>
               <button
                 type="button"
                 onClick={() => void deleteConnection(connection)}
-                className={iconButtonClass('danger')}
+                className={cardIconButtonClass('danger')}
                 disabled={!canDelete || deletingId === connection.id}
-                title="Удалить подключение">
+                title="Удалить подключение"
+                aria-label="Удалить">
                 {deletingId === connection.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                Удалить
               </button>
             </div>
           </article>
