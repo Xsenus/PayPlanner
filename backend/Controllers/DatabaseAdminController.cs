@@ -65,6 +65,9 @@ public class DatabaseAdminController : ControllerBase
                 request.ScheduleLocal,
                 request.RetentionDays,
                 request.BackupFormat,
+                request.S3UploadEnabled,
+                request.S3ConnectionIds,
+                request.S3PrefixTemplate,
                 cancellationToken);
 
             return Ok(MapOverview(overview));
@@ -85,6 +88,7 @@ public class DatabaseAdminController : ControllerBase
             {
                 Backup = MapFile(result.Backup),
                 DownloadPath = result.DownloadPath,
+                S3UploadResults = result.S3UploadResults.Select(MapS3UploadResult).ToList(),
             });
         }
         catch (InvalidOperationException ex)
@@ -316,7 +320,32 @@ public class DatabaseAdminController : ControllerBase
             RootDirectory = overview.RootDirectory,
             TimeZone = overview.TimeZone,
             ToolCommand = overview.ToolCommand,
+            S3Upload = new DatabaseBackupS3UploadSettingsDto
+            {
+                Enabled = overview.S3Upload.Enabled,
+                ConnectionIds = overview.S3Upload.ConnectionIds.ToList(),
+                PrefixTemplate = overview.S3Upload.PrefixTemplate,
+            },
+            S3UploadResults = overview.S3UploadResults.Select(MapS3UploadResult).ToList(),
             Items = overview.Items.Select(MapFile).ToList(),
+        };
+    }
+
+    private static DatabaseBackupS3UploadResultDto MapS3UploadResult(DatabaseBackupS3UploadResult result)
+    {
+        return new DatabaseBackupS3UploadResultDto
+        {
+            Id = result.Id,
+            BackupRelativePath = result.BackupRelativePath,
+            BackupFileName = result.BackupFileName,
+            ConnectionId = result.ConnectionId,
+            Status = result.Status,
+            TargetPath = result.TargetPath,
+            TargetKey = result.TargetKey,
+            SizeBytes = result.SizeBytes,
+            Error = result.Error,
+            CreatedAt = result.CreatedAt,
+            UpdatedAt = result.UpdatedAt,
         };
     }
 

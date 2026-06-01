@@ -771,6 +771,26 @@ export interface DatabaseBackupFormatOptionDto {
   isDefault: boolean;
 }
 
+export interface DatabaseBackupS3UploadSettingsDto {
+  enabled: boolean;
+  connectionIds: string[];
+  prefixTemplate: string;
+}
+
+export interface DatabaseBackupS3UploadResultDto {
+  id: string;
+  backupRelativePath: string;
+  backupFileName: string;
+  connectionId: string;
+  status: string;
+  targetPath: string;
+  targetKey?: string | null;
+  sizeBytes: number;
+  error?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DatabaseBackupOverviewDto {
   provider: string;
   providerDisplayName: string;
@@ -784,6 +804,8 @@ export interface DatabaseBackupOverviewDto {
   rootDirectory: string;
   timeZone: string;
   toolCommand?: string | null;
+  s3Upload?: DatabaseBackupS3UploadSettingsDto;
+  s3UploadResults?: DatabaseBackupS3UploadResultDto[];
   items: DatabaseBackupFileDto[];
 }
 
@@ -827,6 +849,7 @@ export interface SystemJobManualRunResultDto {
 export interface DatabaseBackupCreateResultDto {
   backup: DatabaseBackupFileDto;
   downloadPath: string;
+  s3UploadResults?: DatabaseBackupS3UploadResultDto[];
 }
 
 export interface DatabaseBackupDeleteResultDto {
@@ -2305,6 +2328,9 @@ export class ApiService {
     scheduleLocal: string;
     retentionDays: number;
     backupFormat?: string;
+    s3UploadEnabled?: boolean;
+    s3ConnectionIds?: string[];
+    s3PrefixTemplate?: string;
   }) {
     return this.request<DatabaseBackupOverviewDto>('/database/backups/settings', {
       method: 'PUT',
