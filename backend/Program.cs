@@ -115,6 +115,7 @@ builder.Services.Configure<AppFeatureFlagsOptions>(
 builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaData"));
 builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 builder.Services.AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService>();
+builder.Services.AddHttpClient<IYandexDiskService, YandexDiskService>();
 builder.Services.AddScoped<ICourtSyncProvider, SudrfCourtSyncProvider>();
 builder.Services.AddScoped<ICourtSyncProviderRegistry, CourtSyncProviderRegistry>();
 
@@ -147,6 +148,8 @@ builder.Services.AddSingleton<ClientCaseCourtSyncSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ClientCaseCourtSyncSchedulerService>());
 builder.Services.AddSingleton<UserActivityRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UserActivityRetentionService>());
+builder.Services.AddSingleton<YandexDiskCrmSyncSchedulerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<YandexDiskCrmSyncSchedulerService>());
 
 builder.Services.AddCors(options =>
 {

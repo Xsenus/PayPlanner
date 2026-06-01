@@ -1997,6 +1997,54 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task UploadDocumentToYandexDisk_UploadsActDocumentAndWritesAudit()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var act = await CreateManualActAsync(db, client.Id, "ACT-YD-1", 15_000m, ActStatus.Created);
+        act.Title = "Акт по юридическим услугам";
+        await db.SaveChangesAsync();
+        var yandexDiskService = new RecordingYandexDiskService();
+        var controller = CreateAdminController(db, yandexDiskService);
+
+        var action = await controller.UploadDocumentToYandexDisk(
+            act.Id,
+            "word",
+            includeSignatureAndSeal: false,
+            overwrite: true,
+            CancellationToken.None);
+
+        var result = Assert.IsType<YandexDiskOperationResultDto>(action.Value);
+        Assert.True(result.Success);
+        Assert.Equal("/CRM/act-ACT-YD-1.doc", result.Path);
+        Assert.NotNull(yandexDiskService.Upload);
+        Assert.Equal("act", yandexDiskService.Upload.DocumentKind);
+        Assert.Equal("Акт", yandexDiskService.Upload.DocumentType);
+        Assert.Equal("ACT-YD-1", yandexDiskService.Upload.DocumentNumber);
+        Assert.Equal("Акт по юридическим услугам", yandexDiskService.Upload.DocumentTitle);
+        Assert.Equal("Тестовый клиент", yandexDiskService.Upload.ClientName);
+        Assert.Equal("act-ACT-YD-1.doc", yandexDiskService.Upload.OriginalFileName);
+        Assert.Equal("application/msword", yandexDiskService.Upload.ContentType);
+        Assert.True(yandexDiskService.Upload.OverwriteExisting);
+        Assert.NotEmpty(yandexDiskService.UploadBytes!);
+
+        var audit = await db.ObjectAuditEvents.AsNoTracking().SingleAsync(item =>
+            item.ObjectType == "act"
+            && item.ObjectId == act.Id
+            && item.Action == "YandexDiskUploaded");
+        Assert.Contains("отправлен на Яндекс.Диск", audit.Description);
+
+        var syncState = await db.YandexDiskCrmSyncStates.AsNoTracking().SingleAsync(item =>
+            item.DocumentKind == "act"
+            && item.ObjectType == "act"
+            && item.ObjectId == act.Id);
+        Assert.Equal(YandexDiskCrmSyncStatus.Success, syncState.Status);
+        Assert.Equal("/CRM/act-ACT-YD-1.doc", syncState.YandexDiskPath);
+        Assert.Equal("act-ACT-YD-1.doc", syncState.FileName);
+        Assert.Equal(1, syncState.AttemptCount);
+    }
+
+    [Fact]
     public async Task GetDocument_LoadsMainCompany_FromDefaultLegacyAndJsonSettings()
     {
         await using var db = await CreateContextAsync();
@@ -2692,6 +2740,30 @@ public class ActsControllerTests
         return user;
     }
 
+    private static ActsController CreateAdminController(PaymentContext db, IYandexDiskService? yandexDiskService = null)
+    {
+        var controller = new ActsController(
+            db,
+            new NoopFormRequirementsService(),
+            yandexDiskService: yandexDiskService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, "1"),
+                        new Claim(ClaimTypes.Name, "Администратор"),
+                        new Claim(ClaimTypes.Role, "admin"),
+                    ], "Test")),
+                },
+            },
+        };
+
+        return controller;
+    }
+
     private sealed class NoopFormRequirementsService : IFormRequirementsService
     {
         public Task<List<string>> GetRequiredFieldsAsync(string section, CancellationToken ct = default)
@@ -2750,6 +2822,66 @@ public class ActsControllerTests
             AttachmentBytes = attachmentBytes;
             AttachmentContentType = attachmentContentType;
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingYandexDiskService : IYandexDiskService
+    {
+        public YandexDiskCrmDocumentUpload? Upload { get; private set; }
+        public byte[]? UploadBytes { get; private set; }
+
+        public Task<YandexDiskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskSettingsDto { IsConfigured = true, RootPath = "/CRM" });
+
+        public Task<YandexDiskSettingsDto> UpdateSettingsAsync(UpdateYandexDiskSettingsRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskSettingsDto { IsConfigured = true, RootPath = request.RootPath ?? "/CRM" });
+
+        public Task<YandexDiskConnectionTestDto> TestConnectionAsync(TestYandexDiskConnectionRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskConnectionTestDto { Success = true, RootPath = "/CRM" });
+
+        public Task<YandexDiskListResponseDto> ListAsync(string? path, int limit, int offset, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskListResponseDto());
+
+        public Task<YandexDiskOperationResultDto> CreateFolderAsync(string? path, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = path ?? "/" });
+
+        public Task<YandexDiskOperationResultDto> CopyAsync(string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = toPath ?? "/" });
+
+        public Task<YandexDiskOperationResultDto> MoveAsync(string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = toPath ?? "/" });
+
+        public Task<YandexDiskOperationResultDto> DeleteAsync(string? path, bool permanently, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = path ?? "/" });
+
+        public Task<YandexDiskOperationResultDto> UploadAsync(string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = path ?? "/" });
+
+        public Task<YandexDiskDownload> DownloadAsync(string? path, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskDownload("file.txt", "text/plain", []));
+
+        public Task<YandexDiskTextFileDto> GetTextFileAsync(string? path, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskTextFileDto { Path = path ?? "/", Content = string.Empty });
+
+        public Task<YandexDiskOperationResultDto> SaveTextFileAsync(UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = request.Path ?? "/" });
+
+        public Task<YandexDiskCrmSyncSettingsDto> GetCrmSyncSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskCrmSyncSettingsDto());
+
+        public Task<YandexDiskCrmSyncSettingsDto> UpdateCrmSyncSettingsAsync(UpdateYandexDiskCrmSyncSettingsRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskCrmSyncSettingsDto());
+
+        public Task<YandexDiskCrmSyncPreviewDto> PreviewCrmSyncAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new YandexDiskCrmSyncPreviewDto());
+
+        public async Task<YandexDiskOperationResultDto> UploadCrmDocumentAsync(YandexDiskCrmDocumentUpload upload, CancellationToken cancellationToken = default)
+        {
+            Upload = upload;
+            using var memory = new MemoryStream();
+            await upload.Content.CopyToAsync(memory, cancellationToken);
+            UploadBytes = memory.ToArray();
+            return new YandexDiskOperationResultDto { Success = true, Path = $"/CRM/{upload.OriginalFileName}" };
         }
     }
 }

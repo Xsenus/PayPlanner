@@ -16,6 +16,7 @@ import {
   History,
   LayoutGrid,
   ListFilter,
+  Loader2,
   Mail,
   MessageSquare,
   MoreHorizontal,
@@ -28,6 +29,7 @@ import {
   Scale,
   TimerReset,
   Trash2,
+  UploadCloud,
   UsersRound,
   WalletCards,
   X,
@@ -4994,6 +4996,7 @@ function TaskModal({
   const [files, setFiles] = useState<TaskJournalFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [uploadingDocumentKey, setUploadingDocumentKey] = useState<string | null>(null);
+  const [sendingYandexFileId, setSendingYandexFileId] = useState<number | null>(null);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [quickPanel, setQuickPanel] = useState<'assignee' | 'observer' | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -5407,6 +5410,20 @@ function TaskModal({
       downloadBlob(response.fileName || file.originalFileName, response.blob);
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось скачать файл.'), 'Журнал задач');
+    }
+  };
+
+  const handleSendFileToYandexDisk = async (file: TaskJournalFile) => {
+    if (!taskId) return;
+
+    setSendingYandexFileId(file.id);
+    try {
+      const result = await apiService.uploadTaskJournalFileToYandexDisk(taskId, file.id);
+      toast.success(`Файл отправлен на Яндекс.Диск: ${result.path}.`, 'Я.Диск');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось отправить файл задачи на Яндекс.Диск.'), 'Я.Диск');
+    } finally {
+      setSendingYandexFileId(null);
     }
   };
 
@@ -6172,6 +6189,16 @@ function TaskModal({
                               aria-label="Скачать файл"
                             >
                               <Download className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleSendFileToYandexDisk(file)}
+                              disabled={sendingYandexFileId === file.id}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sky-600 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              title="Отправить на Я.Диск"
+                              aria-label="Отправить файл на Я.Диск"
+                            >
+                              {sendingYandexFileId === file.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
                             </button>
                             {canManageFiles ? (
                             <button

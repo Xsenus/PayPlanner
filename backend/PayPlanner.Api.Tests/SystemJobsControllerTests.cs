@@ -104,6 +104,18 @@ public class SystemJobsControllerTests
             Status = NotificationDeliveryStatus.Sent,
             CreatedAt = now.AddDays(-40),
         });
+        scope.Db.YandexDiskCrmSyncStates.Add(new YandexDiskCrmSyncState
+        {
+            DocumentKind = "contract",
+            ObjectType = "contract",
+            ObjectId = 10,
+            FileName = "contract-10.pdf",
+            Status = YandexDiskCrmSyncStatus.Failed,
+            LastError = "Temporary Yandex Disk error",
+            AttemptCount = 1,
+            CreatedAt = now.AddMinutes(-40),
+            UpdatedAt = now.AddMinutes(-30),
+        });
         scope.Db.ObjectAuditEvents.Add(new ObjectAuditEvent
         {
             ObjectType = "client-case",
@@ -166,10 +178,11 @@ public class SystemJobsControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
 
-        Assert.Equal(9, dto.Items.Count);
+        Assert.Equal(10, dto.Items.Count);
         Assert.Contains(dto.Items, item => item.Key == "database-backup" && item.Enabled && item.IntervalText.Contains("02:00"));
         Assert.Contains(dto.Items, item => item.Key == "task-reminders" && item.PendingCount == 1 && item.LastActivityDescription == "Reminder sent");
         Assert.Contains(dto.Items, item => item.Key == "notification-retry" && item.PendingCount == 1 && item.ManualRunEnabled);
+        Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.YandexDiskCrmSync && item.PendingCount == 1 && item.LastProcessedCount == 20 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "notification-delivery-retention" && item.PendingCount == 1 && item.LastProcessedCount == 25 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "external-calendar-sync" && item.Status == "warning" && item.LastProcessedCount == 50 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
@@ -317,6 +330,103 @@ public class SystemJobsControllerTests
         Assert.DoesNotContain("old-failed", eventKeys);
         Assert.Contains("old-pending", eventKeys);
         Assert.Contains("fresh-sent", eventKeys);
+    }
+
+    [Fact]
+    public async Task YandexDiskCrmSyncSchedulerService_CountsOnlyDueRetryItems()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting { Key = YandexDiskCrmSyncSchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = YandexDiskCrmSyncSchedulerService.DelayMinutesSettingKey, Value = "10", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = YandexDiskCrmSyncSchedulerService.MaxAttemptsSettingKey, Value = "3", CreatedAt = now, UpdatedAt = now });
+        scope.Db.YandexDiskCrmSyncStates.AddRange(
+            new YandexDiskCrmSyncState
+            {
+                DocumentKind = "contract",
+                ObjectType = "contract",
+                ObjectId = 1,
+                Status = YandexDiskCrmSyncStatus.Failed,
+                AttemptCount = 1,
+                CreatedAt = now.AddMinutes(-30),
+                UpdatedAt = now.AddMinutes(-20),
+            },
+            new YandexDiskCrmSyncState
+            {
+                DocumentKind = "invoice",
+                ObjectType = "payment",
+                ObjectId = 2,
+                Status = YandexDiskCrmSyncStatus.Failed,
+                AttemptCount = 1,
+                CreatedAt = now.AddMinutes(-30),
+                UpdatedAt = now.AddMinutes(-2),
+            },
+            new YandexDiskCrmSyncState
+            {
+                DocumentKind = "act",
+                ObjectType = "act",
+                ObjectId = 3,
+                Status = YandexDiskCrmSyncStatus.Failed,
+                AttemptCount = 3,
+                CreatedAt = now.AddMinutes(-30),
+                UpdatedAt = now.AddMinutes(-20),
+            },
+            new YandexDiskCrmSyncState
+            {
+                DocumentKind = "caseDocument",
+                ObjectType = "caseDocument",
+                ObjectId = 4,
+                Status = YandexDiskCrmSyncStatus.Success,
+                AttemptCount = 1,
+                CreatedAt = now.AddMinutes(-30),
+                UpdatedAt = now.AddMinutes(-20),
+            });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new YandexDiskCrmSyncSchedulerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<YandexDiskCrmSyncSchedulerService>.Instance);
+
+        Assert.Equal(1, await service.CountEligibleItemsAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task YandexDiskCrmSyncStateRecorder_RecordFailureUpsertsRetryState()
+    {
+        await using var scope = await CreateDbScopeAsync();
+
+        await YandexDiskCrmSyncStateRecorder.RecordFailureAsync(
+            scope.Db,
+            "contract",
+            "contract",
+            15,
+            "contract-15.pdf",
+            null,
+            new InvalidOperationException("Temporary network error"),
+            CancellationToken.None);
+        await scope.Db.SaveChangesAsync();
+
+        await YandexDiskCrmSyncStateRecorder.RecordFailureAsync(
+            scope.Db,
+            "contract",
+            "contract",
+            15,
+            "contract-15.pdf",
+            null,
+            new InvalidOperationException("Second temporary error"),
+            CancellationToken.None);
+        await scope.Db.SaveChangesAsync();
+
+        var state = await scope.Db.YandexDiskCrmSyncStates.AsNoTracking().SingleAsync();
+        Assert.Equal(YandexDiskCrmSyncStatus.Failed, state.Status);
+        Assert.Equal(2, state.AttemptCount);
+        Assert.Equal("Second temporary error", state.LastError);
+        Assert.Equal("contract-15.pdf", state.FileName);
     }
 
     [Fact]

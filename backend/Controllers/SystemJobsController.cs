@@ -41,6 +41,7 @@ public sealed class SystemJobsController : ControllerBase
     private readonly ClientCaseCourtSyncSchedulerService? _courtSyncRunner;
     private readonly MoneyBalanceReconciliationSchedulerService? _moneyBalanceRunner;
     private readonly UserActivityRetentionService? _userActivityRetentionRunner;
+    private readonly YandexDiskCrmSyncSchedulerService? _yandexDiskCrmSyncRunner;
 
     public SystemJobsController(
         PaymentContext db,
@@ -55,7 +56,8 @@ public sealed class SystemJobsController : ControllerBase
         TaskJournalAutomationSchedulerService? caseControlRunner = null,
         ClientCaseCourtSyncSchedulerService? courtSyncRunner = null,
         MoneyBalanceReconciliationSchedulerService? moneyBalanceRunner = null,
-        UserActivityRetentionService? userActivityRetentionRunner = null)
+        UserActivityRetentionService? userActivityRetentionRunner = null,
+        YandexDiskCrmSyncSchedulerService? yandexDiskCrmSyncRunner = null)
     {
         _db = db;
         _configuration = configuration;
@@ -70,6 +72,7 @@ public sealed class SystemJobsController : ControllerBase
         _courtSyncRunner = courtSyncRunner;
         _moneyBalanceRunner = moneyBalanceRunner;
         _userActivityRetentionRunner = userActivityRetentionRunner;
+        _yandexDiskCrmSyncRunner = yandexDiskCrmSyncRunner;
     }
 
     [HttpGet("diagnostics")]
@@ -86,6 +89,11 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == NotificationRetrySchedulerService.DelayMinutesSettingKey ||
                 item.Key == NotificationRetrySchedulerService.BatchSizeSettingKey ||
                 item.Key == NotificationRetrySchedulerService.MaxAttemptsSettingKey ||
+                item.Key == YandexDiskCrmSyncSchedulerService.EnabledSettingKey ||
+                item.Key == YandexDiskCrmSyncSchedulerService.IntervalMinutesSettingKey ||
+                item.Key == YandexDiskCrmSyncSchedulerService.DelayMinutesSettingKey ||
+                item.Key == YandexDiskCrmSyncSchedulerService.BatchSizeSettingKey ||
+                item.Key == YandexDiskCrmSyncSchedulerService.MaxAttemptsSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.EnabledSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.RetentionDaysSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.IntervalHoursSettingKey ||
@@ -108,6 +116,7 @@ public sealed class SystemJobsController : ControllerBase
             await BuildDatabaseBackupJobAsync(settings, ct),
             await BuildTaskReminderJobAsync(now, ct),
             await BuildNotificationRetryJobAsync(settings, ct),
+            await BuildYandexDiskCrmSyncJobAsync(settings, ct),
             await BuildNotificationDeliveryRetentionJobAsync(settings, ct),
             await BuildExternalCalendarSyncJobAsync(settings, ct),
             await BuildCaseControlJobAsync(settings, now, ct),
@@ -180,6 +189,18 @@ public sealed class SystemJobsController : ControllerBase
                             ? $"Повторно отправлены уведомления: {processedCount}, пропущено: {skippedCount}."
                             : "Проверка ошибок доставки выполнена, уведомлений для повтора не найдено."
                         : "Повторная отправка уведомлений выключена в настройках.";
+                    break;
+
+                case SystemJobKeys.YandexDiskCrmSync:
+                    EnsureRunner(_yandexDiskCrmSyncRunner);
+                    var yandexDiskCrmSyncResult = await _yandexDiskCrmSyncRunner!.RunOnceAsync(ct);
+                    processedCount = yandexDiskCrmSyncResult.SyncedCount;
+                    skippedCount = yandexDiskCrmSyncResult.SkippedCount;
+                    summary = yandexDiskCrmSyncResult.Enabled
+                        ? processedCount > 0
+                            ? $"Повторно отправлено CRM-документов на Я.Диск: {processedCount}, пропущено: {skippedCount}."
+                            : "Проверка очереди Я.Диска выполнена, документов для повторной отправки не найдено."
+                        : "Фоновая синхронизация CRM с Я.Диском выключена в настройках.";
                     break;
 
                 case SystemJobKeys.NotificationDeliveryRetention:
@@ -403,6 +424,61 @@ public sealed class SystemJobsController : ControllerBase
                 : "Автоматическая повторная отправка уведомлений выключена.",
             ManualRunEnabled = enabled,
             ManualRunHint = enabled ? "Можно вручную проверить ошибки доставки и повторить отправку." : "Ручной запуск недоступен, пока повторная отправка уведомлений выключена.",
+        };
+    }
+
+    private async Task<SystemJobDiagnosticsItemDto> BuildYandexDiskCrmSyncJobAsync(
+        IReadOnlyDictionary<string, string> settings,
+        CancellationToken ct)
+    {
+        var enabled = ParseBool(
+            settings.GetValueOrDefault(YandexDiskCrmSyncSchedulerService.EnabledSettingKey),
+            _configuration.GetValue("YandexDisk:CrmSync:Scheduler:Enabled", true));
+        var intervalMinutes = YandexDiskCrmSyncSchedulerService.NormalizeInterval(ParseInt(
+            settings.GetValueOrDefault(YandexDiskCrmSyncSchedulerService.IntervalMinutesSettingKey),
+            _configuration.GetValue("YandexDisk:CrmSync:Scheduler:IntervalMinutes", YandexDiskCrmSyncSchedulerService.DefaultIntervalMinutes)));
+        var delayMinutes = YandexDiskCrmSyncSchedulerService.NormalizeDelay(ParseInt(
+            settings.GetValueOrDefault(YandexDiskCrmSyncSchedulerService.DelayMinutesSettingKey),
+            _configuration.GetValue("YandexDisk:CrmSync:Scheduler:DelayMinutes", YandexDiskCrmSyncSchedulerService.DefaultDelayMinutes)));
+        var batchSize = YandexDiskCrmSyncSchedulerService.NormalizeBatchSize(ParseInt(
+            settings.GetValueOrDefault(YandexDiskCrmSyncSchedulerService.BatchSizeSettingKey),
+            _configuration.GetValue("YandexDisk:CrmSync:Scheduler:BatchSize", YandexDiskCrmSyncSchedulerService.DefaultBatchSize)));
+        var maxAttempts = YandexDiskCrmSyncSchedulerService.NormalizeMaxAttempts(ParseInt(
+            settings.GetValueOrDefault(YandexDiskCrmSyncSchedulerService.MaxAttemptsSettingKey),
+            _configuration.GetValue("YandexDisk:CrmSync:Scheduler:MaxAttempts", YandexDiskCrmSyncSchedulerService.DefaultMaxAttempts)));
+        var pendingCount = _yandexDiskCrmSyncRunner is null
+            ? await CountPendingYandexDiskCrmSyncItemsAsync(enabled, delayMinutes, maxAttempts, ct)
+            : await _yandexDiskCrmSyncRunner.CountEligibleItemsAsync(ct);
+
+        var lastSync = await _db.YandexDiskCrmSyncStates
+            .AsNoTracking()
+            .Where(item => item.LastSyncedAt != null || item.Status == YandexDiskCrmSyncStatus.Failed)
+            .OrderByDescending(item => item.UpdatedAt)
+            .Select(item => new { item.UpdatedAt, item.FileName, item.Status, item.LastError })
+            .FirstOrDefaultAsync(ct);
+
+        return new SystemJobDiagnosticsItemDto
+        {
+            Key = SystemJobKeys.YandexDiskCrmSync,
+            Name = "Синхронизация CRM с Я.Диском",
+            Description = "Повторяет отправку CRM-документов на Я.Диск, если предыдущая попытка завершилась ошибкой.",
+            Enabled = enabled,
+            Status = enabled ? "active" : "disabled",
+            StatusText = enabled ? "Включено" : "Выключено",
+            IntervalText = $"Каждые {intervalMinutes} мин., задержка перед повтором {delayMinutes} мин.",
+            PendingCount = pendingCount,
+            LastProcessedCount = batchSize,
+            LastActivityAt = lastSync?.UpdatedAt,
+            LastActivityDescription = lastSync is null
+                ? null
+                : lastSync.Status == YandexDiskCrmSyncStatus.Failed
+                    ? $"Последняя ошибка Я.Диска: {lastSync.LastError}"
+                    : $"Последний отправленный документ: {lastSync.FileName}",
+            NextRunHint = enabled
+                ? $"За один запуск обрабатывается до {batchSize} документов, максимум попыток: {maxAttempts}."
+                : "Фоновая отправка CRM-документов на Я.Диск выключена.",
+            ManualRunEnabled = enabled,
+            ManualRunHint = enabled ? "Можно вручную проверить очередь и повторить отправку CRM-документов на Я.Диск." : "Ручной запуск недоступен, пока фоновая синхронизация CRM с Я.Диском выключена.",
         };
     }
 
@@ -707,6 +783,11 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == NotificationRetrySchedulerService.DelayMinutesSettingKey ||
                 item.Key == NotificationRetrySchedulerService.BatchSizeSettingKey ||
                 item.Key == NotificationRetrySchedulerService.MaxAttemptsSettingKey ||
+                item.Key == YandexDiskCrmSyncSchedulerService.EnabledSettingKey ||
+                item.Key == YandexDiskCrmSyncSchedulerService.IntervalMinutesSettingKey ||
+                item.Key == YandexDiskCrmSyncSchedulerService.DelayMinutesSettingKey ||
+                item.Key == YandexDiskCrmSyncSchedulerService.BatchSizeSettingKey ||
+                item.Key == YandexDiskCrmSyncSchedulerService.MaxAttemptsSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.EnabledSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.RetentionDaysSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.IntervalHoursSettingKey ||
@@ -729,6 +810,7 @@ public sealed class SystemJobsController : ControllerBase
             SystemJobKeys.DatabaseBackup => await BuildDatabaseBackupJobAsync(settings, ct),
             SystemJobKeys.TaskReminders => await BuildTaskReminderJobAsync(DateTime.UtcNow, ct),
             SystemJobKeys.NotificationRetry => await BuildNotificationRetryJobAsync(settings, ct),
+            SystemJobKeys.YandexDiskCrmSync => await BuildYandexDiskCrmSyncJobAsync(settings, ct),
             SystemJobKeys.NotificationDeliveryRetention => await BuildNotificationDeliveryRetentionJobAsync(settings, ct),
             SystemJobKeys.ExternalCalendarSync => await BuildExternalCalendarSyncJobAsync(settings, ct),
             SystemJobKeys.CaseInactivityControl => await BuildCaseControlJobAsync(settings, DateTime.UtcNow, ct),
@@ -756,6 +838,27 @@ public sealed class SystemJobsController : ControllerBase
                 item.Status == NotificationDeliveryStatus.Failed &&
                 item.CreatedAt <= cutoff &&
                 (item.Channel == NotificationChannels.Email || item.Channel == NotificationChannels.Telegram),
+                ct);
+    }
+
+    private async Task<int> CountPendingYandexDiskCrmSyncItemsAsync(
+        bool enabled,
+        int delayMinutes,
+        int maxAttempts,
+        CancellationToken ct)
+    {
+        if (!enabled)
+        {
+            return 0;
+        }
+
+        var cutoff = DateTime.UtcNow.AddMinutes(-delayMinutes);
+        return await _db.YandexDiskCrmSyncStates
+            .AsNoTracking()
+            .CountAsync(item =>
+                (item.Status == YandexDiskCrmSyncStatus.Pending || item.Status == YandexDiskCrmSyncStatus.Failed)
+                && item.AttemptCount < maxAttempts
+                && item.UpdatedAt <= cutoff,
                 ct);
     }
 

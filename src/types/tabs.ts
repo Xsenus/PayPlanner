@@ -42,5 +42,6 @@ export type Tab =
   | 'roles'
   | 'audit'
   | 'userActivity'
+  | 'yandexDisk'
   | 'dictionaries'
   | 'settings';

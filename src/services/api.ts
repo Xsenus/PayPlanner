@@ -211,6 +211,139 @@ export interface UpdateCalendarSyncSettingsRequest {
   notes?: string;
 }
 
+export interface YandexDiskSettingsDto {
+  isConfigured: boolean;
+  rootPath: string;
+  tokenPreview?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface UpdateYandexDiskSettingsRequest {
+  oAuthToken?: string;
+  clearToken?: boolean;
+  rootPath?: string;
+}
+
+export interface YandexDiskResourceDto {
+  name: string;
+  path: string;
+  fullPath: string;
+  type: string;
+  mimeType?: string | null;
+  size?: number | null;
+  created?: string | null;
+  modified?: string | null;
+  publicUrl?: string | null;
+}
+
+export interface YandexDiskListResponseDto {
+  current: YandexDiskResourceDto;
+  items: YandexDiskResourceDto[];
+  limit: number;
+  offset: number;
+  total: number;
+}
+
+export interface YandexDiskOperationResultDto {
+  success: boolean;
+  path: string;
+}
+
+export interface YandexDiskConnectionTestStepDto {
+  key: string;
+  name: string;
+  success: boolean;
+  message: string;
+}
+
+export interface YandexDiskConnectionTestDto {
+  success: boolean;
+  rootPath: string;
+  testFolderPath: string;
+  testFilePath: string;
+  checkedAt: string;
+  steps: YandexDiskConnectionTestStepDto[];
+}
+
+export interface YandexDiskTextFileDto {
+  path: string;
+  content: string;
+}
+
+export interface YandexDiskCrmSyncSettingsDto {
+  enabled: boolean;
+  syncInvoices: boolean;
+  syncActs: boolean;
+  syncContracts: boolean;
+  syncCaseDocuments: boolean;
+  syncTaskFiles: boolean;
+  overwriteExisting: boolean;
+  conflictResolutionMode: string;
+  conflictResolutionModeText: string;
+  folderTemplate: string;
+  fileNameTemplate: string;
+  availableTokens: string[];
+  updatedAt?: string | null;
+}
+
+export interface YandexDiskCrmSyncPreviewItemDto {
+  documentKind: string;
+  documentType: string;
+  enabled: boolean;
+  originalFileName: string;
+  targetPath: string;
+  fullPath: string;
+  operation: string;
+  operationText: string;
+}
+
+export interface YandexDiskCrmSyncPreviewDto {
+  syncEnabled: boolean;
+  overwriteExisting: boolean;
+  conflictResolutionMode: string;
+  conflictResolutionModeText: string;
+  rootPath: string;
+  folderTemplate: string;
+  fileNameTemplate: string;
+  items: YandexDiskCrmSyncPreviewItemDto[];
+}
+
+export interface YandexDiskCrmSyncStatusItemDto {
+  documentKind: string;
+  objectType: string;
+  objectId: number;
+  parentObjectId?: number | null;
+  fileName?: string | null;
+  yandexDiskPath?: string | null;
+  status: string;
+  statusText: string;
+  lastError?: string | null;
+  attemptCount: number;
+  lastSyncedAt?: string | null;
+  updatedAt: string;
+}
+
+export interface YandexDiskCrmSyncStatusReportDto {
+  pendingCount: number;
+  failedCount: number;
+  successCount: number;
+  lastSuccessfulSyncAt?: string | null;
+  recentItems: YandexDiskCrmSyncStatusItemDto[];
+}
+
+export interface UpdateYandexDiskCrmSyncSettingsRequest {
+  enabled: boolean;
+  syncInvoices: boolean;
+  syncActs: boolean;
+  syncContracts: boolean;
+  syncCaseDocuments: boolean;
+  syncTaskFiles: boolean;
+  overwriteExisting: boolean;
+  conflictResolutionMode?: string;
+  folderTemplate?: string;
+  fileNameTemplate?: string;
+}
+
 export interface RolePermissionAuditRoleDto {
   roleId: number;
   roleName: string;
@@ -1385,6 +1518,131 @@ export class ApiService {
     });
   }
 
+  async getYandexDiskSettings() {
+    return this.request<YandexDiskSettingsDto>('/yandex-disk/settings');
+  }
+
+  async updateYandexDiskSettings(payload: UpdateYandexDiskSettingsRequest) {
+    return this.request<YandexDiskSettingsDto>('/yandex-disk/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async testYandexDiskConnection(testFolderPath?: string) {
+    return this.request<YandexDiskConnectionTestDto>('/yandex-disk/connection-test', {
+      method: 'POST',
+      body: JSON.stringify({ testFolderPath }),
+    });
+  }
+
+  async listYandexDiskResources(path = '/') {
+    return this.request<YandexDiskListResponseDto>(`/yandex-disk/resources?path=${encodeURIComponent(path)}`);
+  }
+
+  async createYandexDiskFolder(path: string) {
+    return this.request<YandexDiskOperationResultDto>('/yandex-disk/folders', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  }
+
+  async copyYandexDiskResource(fromPath: string, toPath: string, overwrite = false) {
+    return this.request<YandexDiskOperationResultDto>('/yandex-disk/copy', {
+      method: 'POST',
+      body: JSON.stringify({ fromPath, toPath, overwrite }),
+    });
+  }
+
+  async moveYandexDiskResource(fromPath: string, toPath: string, overwrite = false) {
+    return this.request<YandexDiskOperationResultDto>('/yandex-disk/move', {
+      method: 'POST',
+      body: JSON.stringify({ fromPath, toPath, overwrite }),
+    });
+  }
+
+  async deleteYandexDiskResource(path: string, permanently = false) {
+    return this.request<YandexDiskOperationResultDto>(
+      `/yandex-disk/resources?path=${encodeURIComponent(path)}&permanently=${permanently}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  async uploadYandexDiskFile(path: string, file: File, overwrite = true) {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('path', path);
+    form.append('overwrite', String(overwrite));
+    return this.request<YandexDiskOperationResultDto>('/yandex-disk/upload', {
+      method: 'POST',
+      body: form,
+    });
+  }
+
+  async downloadYandexDiskFile(path: string) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/yandex-disk/download?path=${encodeURIComponent(path)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        notifyAuthSessionExpired();
+      }
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(`HTTP ${response.status} ${response.statusText} - ${text}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || path.split('/').pop() || 'yandex-disk-file',
+    };
+  }
+
+  async getYandexDiskTextFile(path: string) {
+    return this.request<YandexDiskTextFileDto>(`/yandex-disk/text?path=${encodeURIComponent(path)}`);
+  }
+
+  async saveYandexDiskTextFile(path: string, content: string, overwrite = true) {
+    return this.request<YandexDiskOperationResultDto>('/yandex-disk/text', {
+      method: 'PUT',
+      body: JSON.stringify({ path, content, overwrite }),
+    });
+  }
+
+  async getYandexDiskCrmSyncSettings() {
+    return this.request<YandexDiskCrmSyncSettingsDto>('/yandex-disk/crm-sync/settings');
+  }
+
+  async getYandexDiskCrmSyncPreview() {
+    return this.request<YandexDiskCrmSyncPreviewDto>('/yandex-disk/crm-sync/preview');
+  }
+
+  async getYandexDiskCrmSyncStatus() {
+    return this.request<YandexDiskCrmSyncStatusReportDto>('/yandex-disk/crm-sync/status');
+  }
+
+  async updateYandexDiskCrmSyncSettings(payload: UpdateYandexDiskCrmSyncSettingsRequest) {
+    return this.request<YandexDiskCrmSyncSettingsDto>('/yandex-disk/crm-sync/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async uploadCaseDocumentToYandexDisk(documentId: number, overwrite?: boolean) {
+    const query = overwrite === undefined ? '' : `?overwrite=${overwrite}`;
+    return this.request<YandexDiskOperationResultDto>(`/yandex-disk/crm/case-documents/${documentId}/upload${query}`, {
+      method: 'POST',
+    });
+  }
+
+  async uploadTaskJournalFileToYandexDisk(taskId: number, fileId: number, overwrite?: boolean) {
+    const query = overwrite === undefined ? '' : `?overwrite=${overwrite}`;
+    return this.request<YandexDiskOperationResultDto>(`/yandex-disk/crm/tasks/${taskId}/files/${fileId}/upload${query}`, {
+      method: 'POST',
+    });
+  }
+
   // ===== Acts =====
   async getActs(params?: {
     from?: string;
@@ -1617,6 +1875,13 @@ export class ApiService {
     }
 
     return response.blob();
+  }
+
+  async uploadContractDocumentToYandexDisk(id: number, format: 'word' | 'pdf' = 'pdf', overwrite?: boolean) {
+    const query = buildQuery({ format, overwrite });
+    return this.request<YandexDiskOperationResultDto>(`/contracts/${id}/yandex-disk${query}`, {
+      method: 'POST',
+    });
   }
 
   async downloadContractTerminationAgreement(id: number, format: 'word' | 'pdf' | 'html' = 'word') {
@@ -2312,6 +2577,21 @@ export class ApiService {
     return response.blob();
   }
 
+  async uploadInvoiceDocumentToYandexDisk(
+    id: number,
+    format: 'word' | 'pdf' = 'pdf',
+    options?: { includeSignatureAndSeal?: boolean; overwrite?: boolean },
+  ) {
+    const query = buildQuery({
+      format,
+      includeSignatureAndSeal: options?.includeSignatureAndSeal,
+      overwrite: options?.overwrite,
+    });
+    return this.request<YandexDiskOperationResultDto>(`/invoices/${id}/yandex-disk${query}`, {
+      method: 'POST',
+    });
+  }
+
   async downloadActDocument(
     id: number,
     format: 'word' | 'pdf' | 'html' = 'word',
@@ -2333,6 +2613,21 @@ export class ApiService {
     }
 
     return response.blob();
+  }
+
+  async uploadActDocumentToYandexDisk(
+    id: number,
+    format: 'word' | 'pdf' = 'pdf',
+    options?: { includeSignatureAndSeal?: boolean; overwrite?: boolean },
+  ) {
+    const query = buildQuery({
+      format,
+      includeSignatureAndSeal: options?.includeSignatureAndSeal,
+      overwrite: options?.overwrite,
+    });
+    return this.request<YandexDiskOperationResultDto>(`/acts/${id}/yandex-disk${query}`, {
+      method: 'POST',
+    });
   }
 
   async sendInvoiceByEmail(

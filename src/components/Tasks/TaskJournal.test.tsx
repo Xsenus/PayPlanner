@@ -33,6 +33,7 @@ const apiMock = vi.hoisted(() => ({
   getTaskJournalFiles: vi.fn(),
   uploadTaskJournalFile: vi.fn(),
   downloadTaskJournalFile: vi.fn(),
+  uploadTaskJournalFileToYandexDisk: vi.fn(),
   deleteTaskJournalFile: vi.fn(),
   deleteTaskJournalItem: vi.fn(),
 }));
@@ -409,6 +410,7 @@ describe('TaskJournal', () => {
       isLatestVersion: true,
     });
     apiMock.downloadTaskJournalFile.mockResolvedValue({ blob: new Blob(['file']), fileName: 'document.pdf' });
+    apiMock.uploadTaskJournalFileToYandexDisk.mockResolvedValue({ success: true, path: '/CRM/document.pdf' });
     apiMock.deleteTaskJournalFile.mockResolvedValue(undefined);
     apiMock.deleteTaskJournalItem.mockResolvedValue(undefined);
   });
@@ -2115,6 +2117,9 @@ describe('TaskJournal', () => {
     await openFirstTaskForEdit();
     expect((await screen.findAllByText('document.pdf')).length).toBeGreaterThan(0);
     expect(await screen.findByText(/Документ дела #42/u)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить файл на Я.Диск' }));
+    await waitFor(() => expect(apiMock.uploadTaskJournalFileToYandexDisk).toHaveBeenCalledWith(101, 600));
 
     const fileInputs = document.querySelectorAll('input[type="file"]');
     fireEvent.change(fileInputs[1], {

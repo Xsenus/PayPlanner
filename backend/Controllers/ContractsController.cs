@@ -41,19 +41,22 @@ public class ContractsController : ControllerBase
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
     private readonly IEmailService? _emailService;
     private readonly INotificationService? _notificationService;
+    private readonly IYandexDiskService? _yandexDiskService;
 
     public ContractsController(
         PaymentContext db,
         IFormRequirementsService formRequirements,
         IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
         IEmailService? emailService = null,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        IYandexDiskService? yandexDiskService = null)
     {
         _db = db;
         _formRequirements = formRequirements;
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
         _emailService = emailService;
         _notificationService = notificationService;
+        _yandexDiskService = yandexDiskService;
     }
 
     private Task<DataVisibilityAccess?> ResolveContractsVisibilityAsync(CancellationToken ct)
@@ -205,6 +208,124 @@ public class ContractsController : ControllerBase
         }
 
         return File(Encoding.UTF8.GetBytes(documentHtml), "application/msword", fileName);
+    }
+
+    [HttpPost("{id:int}/yandex-disk")]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> UploadDocumentToYandexDisk(
+        int id,
+        [FromQuery] string? format = "pdf",
+        [FromQuery] string? templateKey = null,
+        [FromQuery] bool? overwrite = null,
+        CancellationToken ct = default)
+    {
+        if (_yandexDiskService is null)
+        {
+            return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: "Сервис Яндекс.Диска не зарегистрирован на сервере.");
+        }
+
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.YandexDisk, permission => permission.CanCreate, ct) is { } yandexForbidden)
+        {
+            return yandexForbidden;
+        }
+
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanExport, ct) is { } contractForbidden)
+        {
+            return contractForbidden;
+        }
+
+        var contract = await LoadContractForDocumentAsync(id, ct);
+        if (contract is null) return NotFound();
+
+        var mainCompany = await LoadMainCompanyAsync(ct);
+        var template = await GetContractDocumentTemplateAsync(templateKey, ct);
+        var documentHtml = ContractDocumentTemplateEngine.RenderHtml(template.Html, contract, mainCompany);
+        var normalizedFormat = NormalizeDocumentFormat(format);
+        if (normalizedFormat == "html")
+        {
+            normalizedFormat = "word";
+        }
+
+        byte[] bytes;
+        string fileName;
+        string contentType;
+        if (normalizedFormat == "pdf")
+        {
+            try
+            {
+                bytes = await RenderContractPdfAsync(documentHtml, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
+            }
+
+            fileName = $"contract-{SanitizeFilePart(contract.Number)}.pdf";
+            contentType = "application/pdf";
+        }
+        else
+        {
+            bytes = Encoding.UTF8.GetBytes(documentHtml);
+            fileName = $"contract-{SanitizeFilePart(contract.Number)}.doc";
+            contentType = "application/msword";
+        }
+
+        await using var stream = new MemoryStream(bytes);
+        try
+        {
+            var result = await _yandexDiskService.UploadCrmDocumentAsync(new YandexDiskCrmDocumentUpload(
+                stream,
+                contentType,
+                fileName,
+                "contract",
+                "Договор",
+                contract.Number,
+                contract.Date,
+                contract.Title ?? $"Договор {contract.Number}",
+                contract.ClientContracts.FirstOrDefault()?.Client?.Name ?? contract.Clients.FirstOrDefault()?.Name,
+                contract.LegalEntityContracts.FirstOrDefault()?.LegalEntity?.ShortName ?? contract.LegalEntities.FirstOrDefault()?.ShortName,
+                null,
+                contract.Title,
+                overwrite),
+                ct);
+
+            await YandexDiskCrmSyncStateRecorder.RecordSuccessAsync(
+                _db,
+                "contract",
+                "contract",
+                contract.Id,
+                fileName,
+                result.Path,
+                null,
+                ct);
+
+            _db.ObjectAuditEvents.Add(new ObjectAuditEvent
+            {
+                ObjectType = "contract",
+                ObjectId = contract.Id,
+                Action = "YandexDiskUploaded",
+                Description = $"Договор «{contract.Number}» отправлен на Яндекс.Диск.",
+                ActorUserId = User.GetUserId(),
+                ActorUserName = User.GetDisplayName(),
+                MetadataJson = JsonSerializer.Serialize(new { contract.Id, contract.Number, FileName = fileName, result.Path }),
+                CreatedAt = DateTime.UtcNow,
+            });
+            await _db.SaveChangesAsync(ct);
+            return result;
+        }
+        catch (YandexDiskOperationException ex)
+        {
+            await YandexDiskCrmSyncStateRecorder.RecordFailureAsync(
+                _db,
+                "contract",
+                "contract",
+                contract.Id,
+                fileName,
+                null,
+                ex,
+                ct);
+            await _db.SaveChangesAsync(ct);
+            return MapYandexDiskError(ex);
+        }
     }
 
     [HttpPost("{id:int}/send-email")]
@@ -1781,6 +1902,41 @@ public class ContractsController : ControllerBase
 
     private static List<int> NormalizeIds(IEnumerable<int>? ids) => ids?.Where(x => x > 0).Distinct().ToList() ?? [];
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<ActionResult?> RequireSectionPermissionAsync(
+        string section,
+        Func<RolePermission, bool> isAllowed,
+        CancellationToken ct)
+    {
+        if (User.IsInRole("admin"))
+        {
+            return null;
+        }
+
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return Forbid();
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, section, ct);
+        return permission is not null && permission.CanView && isAllowed(permission)
+            ? null
+            : Forbid();
+    }
+
+    private static ActionResult MapYandexDiskError(YandexDiskOperationException ex)
+    {
+        if (ex.StatusCode >= 400 && ex.StatusCode < 500)
+        {
+            return new BadRequestObjectResult(ex.Message);
+        }
+
+        return new ObjectResult(ex.Message)
+        {
+            StatusCode = StatusCodes.Status502BadGateway,
+        };
+    }
 
     private async Task<ActionResult?> ValidateFinancialActionReasonAsync(string? reason, string actionName, CancellationToken ct)
     {

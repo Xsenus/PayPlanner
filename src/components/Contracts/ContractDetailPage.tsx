@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, UploadCloud, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -879,6 +879,20 @@ export function ContractDetailPage({
     }
   };
 
+  const uploadContractToYandexDisk = async () => {
+    if (!contract || documentSaving) return;
+
+    setDocumentSaving(true);
+    try {
+      const result = await apiService.uploadContractDocumentToYandexDisk(contract.id, 'pdf');
+      toast.success(`Договор отправлен на Яндекс.Диск: ${result.path}.`, 'Я.Диск');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось отправить договор на Яндекс.Диск'), 'Я.Диск');
+    } finally {
+      setDocumentSaving(false);
+    }
+  };
+
   const executionMetrics = getContractExecutionMetrics(contract ?? {
     billingMode: 'Fixed',
     amount: null,
@@ -970,6 +984,15 @@ export function ContractDetailPage({
           >
             {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
             Email
+          </button>
+          <button
+            type="button"
+            onClick={() => void uploadContractToYandexDisk()}
+            disabled={documentSaving}
+            className="inline-flex items-center gap-2 rounded border border-sky-200 px-3 py-2 text-sm text-sky-700 disabled:opacity-60"
+          >
+            {documentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+            Я.Диск
           </button>
           <button
             type="button"

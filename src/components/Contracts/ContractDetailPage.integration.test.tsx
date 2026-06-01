@@ -92,6 +92,7 @@ vi.mock('../../services/api', () => ({
     downloadContractDocument: vi.fn(),
     downloadContractTerminationAgreement: vi.fn(),
     sendContractByEmail: vi.fn(),
+    uploadContractDocumentToYandexDisk: vi.fn(),
   },
 }));
 
@@ -142,6 +143,7 @@ describe('ContractDetailPage integration', () => {
     vi.mocked(apiService.downloadContractDocument).mockReset();
     vi.mocked(apiService.downloadContractTerminationAgreement).mockReset();
     vi.mocked(apiService.sendContractByEmail).mockReset();
+    vi.mocked(apiService.uploadContractDocumentToYandexDisk).mockReset();
 
     vi.mocked(apiService.getContract).mockResolvedValue(contractFixture);
     vi.mocked(apiService.getContractRulesSettings).mockResolvedValue({
@@ -176,6 +178,10 @@ describe('ContractDetailPage integration', () => {
       recipient: 'client@example.com',
       fileName: 'contract-CTR-77.pdf',
       format: 'pdf',
+    });
+    vi.mocked(apiService.uploadContractDocumentToYandexDisk).mockResolvedValue({
+      success: true,
+      path: '/CRM/contracts/contract.pdf',
     });
     Object.defineProperty(globalThis.URL, 'createObjectURL', {
       configurable: true,
@@ -354,6 +360,12 @@ describe('ContractDetailPage integration', () => {
         email: 'client@example.com',
         format: 'pdf',
       });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Я.Диск' }));
+
+    await waitFor(() => {
+      expect(apiService.uploadContractDocumentToYandexDisk).toHaveBeenCalledWith(77, 'pdf');
     });
 
     promptSpy.mockRestore();

@@ -6,6 +6,7 @@ import {
   Building2,
   Calculator,
   CalendarDays,
+  Cloud,
   FileCheck2,
   FileSignature,
   ListTodo,
@@ -158,6 +159,12 @@ const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
     description: 'Просмотр удалённых объектов и восстановление записей.',
     icon: ShieldCheck,
   },
+  yandexDisk: {
+    key: 'yandexDisk',
+    title: 'Я.Диск',
+    description: 'Доступ к подключению Яндекс.Диска и операциям с файлами в облачном хранилище.',
+    icon: Cloud,
+  },
 };
 
 const GROUPS: GroupConfig[] = [
@@ -183,7 +190,7 @@ const GROUPS: GroupConfig[] = [
     key: 'administration',
     title: 'Администрирование прав',
     description: 'Просмотр ролей, уведомлений и делегирование управления правилами.',
-    sections: ['notifications', 'roles', 'audit'],
+    sections: ['notifications', 'roles', 'audit', 'yandexDisk'],
   },
 ];
 

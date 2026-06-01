@@ -163,6 +163,7 @@ const MoneyOperations = lazy(() => import('./components/Money/MoneyOperations').
 const CompanyProfile = lazy(() => import('./components/CompanyProfile/CompanyProfile').then((module) => ({ default: module.CompanyProfile })));
 const AppSettings = lazy(() => import('./components/Settings/AppSettings').then((module) => ({ default: module.AppSettings })));
 const ProfilePage = lazy(() => import('./components/Profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
+const YandexDisk = lazy(() => import('./components/YandexDisk/YandexDisk').then((module) => ({ default: module.YandexDisk })));
 
 function ActiveTabContent({ render }: { render: () => ReactNode }) {
   return <>{render()}</>;
@@ -177,6 +178,7 @@ function AppContent() {
   const canManageRoles = isAdminRole || permissions.roles.canView;
   const canViewAudit = isAdminRole || permissions.audit.canView;
   const canViewSettings = canViewAudit || permissions.notifications.canView;
+  const canViewYandexDisk = isAdminRole || Boolean(permissions.yandexDisk?.canView);
 
   const tabNames: Record<string, string> = useMemo(
     () => ({
@@ -223,6 +225,7 @@ function AppContent() {
       roles: 'Роли',
       audit: 'Аудит объектов',
       userActivity: 'Контроль пользователей',
+      yandexDisk: 'Я.Диск',
       dictionaries: 'Справочники',
       settings: 'Настройки',
     }),
@@ -296,11 +299,12 @@ function AppContent() {
         { tab: 'users' as Tab, allowed: isAdminRole },
         { tab: 'roles' as Tab, allowed: canManageRoles },
         { tab: 'audit' as Tab, allowed: canViewAudit },
+        { tab: 'yandexDisk' as Tab, allowed: canViewYandexDisk },
         { tab: 'settings' as Tab, allowed: canViewSettings },
       ]
         .filter((entry) => entry.allowed)
         .map((entry) => entry.tab),
-    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings],
+    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk],
   );
 
   const canViewTab = useCallback(
@@ -369,6 +373,8 @@ function AppContent() {
           return isAdminRole;
         case 'audit':
           return canViewAudit;
+        case 'yandexDisk':
+          return canViewYandexDisk;
         case 'settings':
           return canViewSettings;
         case 'roles':
@@ -379,7 +385,7 @@ function AppContent() {
           return true;
       }
     },
-    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings],
+    [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk],
   );
 
   const handleOpenClient = useCallback(
@@ -1745,6 +1751,11 @@ function AppContent() {
         return isAdminRole
           ? <UserActivity />
           : renderNoAccess('Нужны права администратора.');
+
+      case 'yandexDisk':
+        return canViewYandexDisk
+          ? <YandexDisk />
+          : renderNoAccess('Недостаточно прав для доступа к разделу Я.Диск.');
 
       case 'dictionaries':
         return permissions.dictionaries.canView

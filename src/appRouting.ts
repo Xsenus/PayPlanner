@@ -46,6 +46,7 @@ const ALL_TABS: Tab[] = [
   'roles',
   'audit',
   'userActivity',
+  'yandexDisk',
   'dictionaries',
   'settings',
 ];

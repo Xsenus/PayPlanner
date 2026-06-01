@@ -309,6 +309,9 @@ public class RolePermissionsController : ControllerBase
                 case RolePermissionCatalog.Audit:
                     dto.Audit = ToSection(permission);
                     break;
+                case RolePermissionCatalog.YandexDisk:
+                    dto.YandexDisk = ToSection(permission);
+                    break;
             }
         }
 
@@ -496,7 +499,9 @@ public class RolePermissionsController : ControllerBase
             || (string.Equals(permission.Section, RolePermissionCatalog.Audit, StringComparison.OrdinalIgnoreCase)
                 && (permission.CanCreate || permission.CanDelete || permission.CanExport || permission.CanViewAnalytics))
             || (string.Equals(permission.Section, RolePermissionCatalog.Notifications, StringComparison.OrdinalIgnoreCase)
-                && (permission.CanCreate || permission.CanDelete || permission.CanExport || permission.CanViewAnalytics));
+                && (permission.CanCreate || permission.CanDelete || permission.CanExport || permission.CanViewAnalytics))
+            || (string.Equals(permission.Section, RolePermissionCatalog.YandexDisk, StringComparison.OrdinalIgnoreCase)
+                && permission.CanViewAnalytics);
 
     private static string FormatSectionScope(RolePermission permission)
         => $"{permission.Section}:{permission.ViewScope}";
@@ -519,6 +524,7 @@ public class RolePermissionsController : ControllerBase
             [RolePermissionCatalog.Notifications] = ToValues(dto.Notifications),
             [RolePermissionCatalog.Roles] = ToValues(dto.Roles),
             [RolePermissionCatalog.Audit] = ToValues(dto.Audit),
+            [RolePermissionCatalog.YandexDisk] = ToValues(dto.YandexDisk),
         };
 
     private void StampPermissionsAudit(Role role)

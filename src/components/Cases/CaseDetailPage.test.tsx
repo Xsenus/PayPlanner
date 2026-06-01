@@ -27,6 +27,7 @@ vi.mock('../../services/api', () => ({
     uploadCaseDocument: vi.fn(),
     uploadCaseDocumentVersion: vi.fn(),
     downloadCaseDocument: vi.fn(),
+    uploadCaseDocumentToYandexDisk: vi.fn(),
     updateCaseDocument: vi.fn(),
     deleteCaseDocument: vi.fn(),
     addCaseHistoryEntry: vi.fn(),
