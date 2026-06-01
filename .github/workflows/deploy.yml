@@ -18,6 +18,7 @@ jobs:
 
     env:
       BE_CSPROJ: backend/PayPlanner.Api.csproj
+      BE_SLN: backend/PayPlanner.Api.sln
       OUT_DIR: out
       TAR_NAME: payplanner_${{ github.sha }}.tar.gz
       FE_API_URL: https://api.elitpravo.com/api
@@ -32,7 +33,7 @@ jobs:
           dotnet-version: "9.0.x"
 
       - name: Restore backend
-        run: dotnet restore "${{ env.BE_CSPROJ }}"
+        run: dotnet restore "${{ env.BE_SLN }}"
 
       - name: Test backend
         run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore
