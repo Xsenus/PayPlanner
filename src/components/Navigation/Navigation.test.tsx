@@ -48,6 +48,7 @@ describe('Navigation links', () => {
     expect(screen.getByRole('link', { name: /Клиенты/i }).getAttribute('href')).toBe(getTabHref('clients'));
     expect(findLinkByHref(getTabHref('accountsIncome'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('moneyEMoney'))).toBeTruthy();
+    expect(findLinkByHref(getTabHref('s3Storage'))).toBeTruthy();
   });
 
   it('opens the task calendar submenu inside the single page app', () => {

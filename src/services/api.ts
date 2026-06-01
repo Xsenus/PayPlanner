@@ -344,6 +344,68 @@ export interface UpdateYandexDiskCrmSyncSettingsRequest {
   fileNameTemplate?: string;
 }
 
+export interface S3StorageProviderPresetDto {
+  key: string;
+  name: string;
+  endpoint: string;
+  region: string;
+  forcePathStyle: boolean;
+}
+
+export interface S3StorageConnectionDto {
+  id: string;
+  name: string;
+  provider: string;
+  providerName: string;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  rootPrefix: string;
+  isEnabled: boolean;
+  isConfigured: boolean;
+  accessKeyPreview?: string | null;
+  secretKeyPreview?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface S3StorageConnectionsOverviewDto {
+  providerPresets: S3StorageProviderPresetDto[];
+  connections: S3StorageConnectionDto[];
+}
+
+export interface UpsertS3StorageConnectionRequest {
+  id?: string | null;
+  name: string;
+  provider: string;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  rootPrefix: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  clearSecret: boolean;
+  isEnabled: boolean;
+}
+
+export interface S3StorageConnectionTestStepDto {
+  key: string;
+  name: string;
+  success: boolean;
+  message: string;
+}
+
+export interface S3StorageConnectionTestDto {
+  success: boolean;
+  connectionId: string;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  testKey: string;
+  checkedAt: string;
+  steps: S3StorageConnectionTestStepDto[];
+}
+
 export interface RolePermissionAuditRoleDto {
   roleId: number;
   roleName: string;
@@ -1626,6 +1688,30 @@ export class ApiService {
     return this.request<YandexDiskCrmSyncSettingsDto>('/yandex-disk/crm-sync/settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async getS3StorageConnections() {
+    return this.request<S3StorageConnectionsOverviewDto>('/s3-storages');
+  }
+
+  async upsertS3StorageConnection(payload: UpsertS3StorageConnectionRequest) {
+    return this.request<S3StorageConnectionDto>('/s3-storages', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteS3StorageConnection(id: string) {
+    return this.request<void>(`/s3-storages/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async testS3StorageConnection(id: string, testPrefix = '_payplanner-test') {
+    return this.request<S3StorageConnectionTestDto>(`/s3-storages/${encodeURIComponent(id)}/connection-test`, {
+      method: 'POST',
+      body: JSON.stringify({ testPrefix }),
     });
   }
 

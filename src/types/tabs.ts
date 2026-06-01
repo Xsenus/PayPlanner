@@ -43,5 +43,6 @@ export type Tab =
   | 'audit'
   | 'userActivity'
   | 'yandexDisk'
+  | 's3Storage'
   | 'dictionaries'
   | 'settings';
