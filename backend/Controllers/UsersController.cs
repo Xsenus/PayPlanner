@@ -74,6 +74,14 @@ public class UsersController : ControllerBase
         {
             return Conflict(new { message = "Системного администратора нельзя удалить." });
         }
+        catch (InvalidOperationException ex) when (ex.Message.StartsWith("GoogleCalendarCleanupFailed", StringComparison.Ordinal))
+        {
+            return Conflict(new
+            {
+                message = "Не удалось удалить календарь PayPlanner из Google Calendar. Пользователь не удален, повторите операцию после проверки подключения Google.",
+                detail = ex.Message
+            });
+        }
     }
 
     [HttpGet("roles")]
@@ -114,6 +122,14 @@ public class UsersController : ControllerBase
             || ex.Message == "ProtectedUserCannotBeDeleted")
         {
             return Conflict(new { message = "Системного администратора нельзя отклонить или удалить." });
+        }
+        catch (InvalidOperationException ex) when (ex.Message.StartsWith("GoogleCalendarCleanupFailed", StringComparison.Ordinal))
+        {
+            return Conflict(new
+            {
+                message = "Не удалось удалить календарь PayPlanner из Google Calendar. Пользователь не отклонен, повторите операцию после проверки подключения Google.",
+                detail = ex.Message
+            });
         }
     }
 

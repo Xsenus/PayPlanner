@@ -82,6 +82,131 @@ public class GoogleCalendarSyncServiceTests
             item.Name.Contains("Иван Петров", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task DeleteTaskForConnectedUsersAsync_RemovesLinkedGoogleEventAndWritesLog()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-delete@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var task = await CreateTaskAsync(db, user.Id, "Удалить из календаря");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-delete", "PayPlanner задачи");
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "event-delete",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.DeleteTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-delete/events/event-delete", StringComparison.Ordinal));
+        var link = await db.GoogleCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal("deleted", link.SyncStatus);
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
+            item.ConnectionId == connection.Id &&
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "delete-event" &&
+            item.Status == "success");
+    }
+
+    [Fact]
+    public async Task DeleteTaskForConnectedUsersAsync_WhenGoogleFails_WritesErrorLog()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-delete-error@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var task = await CreateTaskAsync(db, user.Id, "Удалить с ошибкой Google");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-delete-error", "PayPlanner задачи");
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "event-delete-error",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingGoogleHandler(HttpStatusCode.BadGateway)));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteTaskForConnectedUsersAsync(task.Id, CancellationToken.None));
+
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
+            item.ConnectionId == connection.Id &&
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "delete-event" &&
+            item.Status == "error");
+        var link = await db.GoogleCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.False(string.IsNullOrWhiteSpace(link.LastError));
+    }
+
+    [Fact]
+    public async Task CleanupDeletedUserAsync_RemovesOwnAndAdminCalendars()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "admin-cleanup@example.com", "admin");
+        var user = await CreateUserAsync(db, "employee-cleanup@example.com", "user", "Иван Петров");
+        await EnableGoogleSettingsAsync(db);
+        var userConnection = await CreateConnectionAsync(db, user.Id);
+        var adminConnection = await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        await CreateCalendarAsync(db, userConnection.Id, "calendar-user", "PayPlanner задачи");
+        await CreateCalendarAsync(db, adminConnection.Id, "calendar-admin-user", "PayPlanner - Иван Петров", user.Id);
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.CleanupDeletedUserAsync(user.Id, admin.Id, CancellationToken.None);
+
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-user", StringComparison.Ordinal));
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-admin-user", StringComparison.Ordinal));
+        Assert.False(await db.GoogleCalendarSyncCalendars.AnyAsync(item => item.GoogleCalendarId == "calendar-user"));
+        Assert.False(await db.GoogleCalendarSyncCalendars.AnyAsync(item => item.GoogleCalendarId == "calendar-admin-user"));
+        Assert.Equal(2, await db.GoogleCalendarSyncLogs.CountAsync(item => item.Operation == "delete-calendar" && item.Status == "success"));
+    }
+
+    [Fact]
+    public async Task AdminTelyatnikovScenario_SyncsTasksDeletesEventAndCleansEmployeeCalendar()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "telyatnikov@example.com", "admin", "Телятников Илья Александрович");
+        var employee = await CreateUserAsync(db, "employee-scenario@example.com", "user", "Иван Петров");
+        await EnableGoogleSettingsAsync(db);
+        await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        var employeeTask = await CreateTaskAsync(db, employee.Id, "Проверить документы сотрудника", employee.FullName);
+        await CreateTaskAsync(db, admin.Id, "Проверить общую задачу администратора", admin.FullName);
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(admin.Id, CreateHttpRequest(admin.Id, "admin"), CancellationToken.None);
+        await service.DeleteTaskForConnectedUsersAsync(employeeTask.Id, CancellationToken.None);
+        await service.CleanupDeletedUserAsync(employee.Id, admin.Id, CancellationToken.None);
+
+        Assert.Equal(2, result.ProcessedTasks);
+        Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/calendars", StringComparison.Ordinal));
+        Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Delete && request.RequestUri!.AbsolutePath.Contains("/events/", StringComparison.Ordinal));
+        Assert.Contains(handler.Requests, request => request.Method == HttpMethod.Delete && !request.RequestUri!.AbsolutePath.Contains("/events/", StringComparison.Ordinal));
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item => item.Operation == "create-event" && item.Status == "success");
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item => item.Operation == "delete-event" && item.Status == "success");
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item => item.Operation == "delete-calendar" && item.Status == "success");
+    }
+
     private static GoogleCalendarSyncService CreateService(PaymentContext db, IHttpClientFactory httpClientFactory)
     {
         return new GoogleCalendarSyncService(
@@ -133,10 +258,10 @@ public class GoogleCalendarSyncServiceTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task CreateConnectionAsync(PaymentContext db, int userId, string calendarMode = "personal")
+    private static async Task<GoogleCalendarConnection> CreateConnectionAsync(PaymentContext db, int userId, string calendarMode = "personal")
     {
         var protector = TestDataProtectionProvider.CreateProtector("PayPlanner.GoogleCalendar.Tokens.v1");
-        db.GoogleCalendarConnections.Add(new GoogleCalendarConnection
+        var connection = new GoogleCalendarConnection
         {
             UserId = userId,
             GoogleUserId = "google-user",
@@ -149,8 +274,31 @@ public class GoogleCalendarSyncServiceTests
             ConflictResolutionMode = "latestWins",
             IsEnabled = true,
             SyncEnabled = true,
-        });
+        };
+        db.GoogleCalendarConnections.Add(connection);
         await db.SaveChangesAsync();
+        return connection;
+    }
+
+    private static async Task<GoogleCalendarSyncCalendar> CreateCalendarAsync(
+        PaymentContext db,
+        int connectionId,
+        string googleCalendarId,
+        string name,
+        int? ownerUserId = null)
+    {
+        var calendar = new GoogleCalendarSyncCalendar
+        {
+            ConnectionId = connectionId,
+            OwnerUserId = ownerUserId,
+            GoogleCalendarId = googleCalendarId,
+            Name = name,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.GoogleCalendarSyncCalendars.Add(calendar);
+        await db.SaveChangesAsync();
+        return calendar;
     }
 
     private static async Task<TaskJournalItem> CreateTaskAsync(PaymentContext db, int assigneeUserId, string title, string assigneeName = "User")
@@ -198,6 +346,13 @@ public class GoogleCalendarSyncServiceTests
 
     private sealed class RecordingGoogleHandler : HttpMessageHandler
     {
+        private readonly HttpStatusCode _deleteStatusCode;
+
+        public RecordingGoogleHandler(HttpStatusCode deleteStatusCode = HttpStatusCode.NoContent)
+        {
+            _deleteStatusCode = deleteStatusCode;
+        }
+
         public List<HttpRequestMessage> Requests { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -228,6 +383,14 @@ public class GoogleCalendarSyncServiceTests
             if (path.Contains("/events", StringComparison.Ordinal) && request.Method == HttpMethod.Put)
             {
                 return Task.FromResult(Json(new { id = "event-1", etag = "\"etag-2\"" }));
+            }
+
+            if (request.Method == HttpMethod.Delete && path.Contains("/calendar/v3/calendars", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(_deleteStatusCode)
+                {
+                    Content = new StringContent("{\"error\":\"delete failed\"}", Encoding.UTF8, "application/json"),
+                });
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)

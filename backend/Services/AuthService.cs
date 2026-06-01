@@ -22,6 +22,7 @@ public partial class AuthService
     private readonly PaymentContext _context;
     private readonly IEmailService _emailService;
     private readonly IWebHostEnvironment _environment;
+    private readonly IGoogleCalendarSyncService? _googleCalendarSyncService;
     private readonly INotificationService? _notificationService;
     private readonly IPasswordHasher<User> _passwordHasher;
     private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
@@ -33,7 +34,8 @@ public partial class AuthService
         IEmailService emailService,
         IWebHostEnvironment environment,
         IPasswordHasher<User> passwordHasher,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        IGoogleCalendarSyncService? googleCalendarSyncService = null)
     {
         _context = context;
         _configuration = configuration;
@@ -41,6 +43,7 @@ public partial class AuthService
         _environment = environment;
         _passwordHasher = passwordHasher;
         _notificationService = notificationService;
+        _googleCalendarSyncService = googleCalendarSyncService;
     }
 
     private static string NormalizeEmail(string email)
@@ -385,6 +388,12 @@ public partial class AuthService
         {
             await _emailService.SendRegistrationRejectedEmailAsync(user.Email, user.FullName, reason);
         }
+
+        if (_googleCalendarSyncService is not null)
+        {
+            await _googleCalendarSyncService.CleanupDeletedUserAsync(userId, actorUserId);
+        }
+
         _context.Users.Remove(user);
         await _context.SaveChangesAsync();
         return true;
@@ -549,6 +558,11 @@ public partial class AuthService
         if (hasInvoiceUsage)
         {
             throw new InvalidOperationException("UserInUseAsResponsible");
+        }
+
+        if (_googleCalendarSyncService is not null)
+        {
+            await _googleCalendarSyncService.CleanupDeletedUserAsync(id, actorUserId);
         }
 
         _context.Users.Remove(user);

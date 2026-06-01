@@ -1932,6 +1932,21 @@ public class TasksController : ControllerBase
                 continue;
             }
 
+            if (_googleCalendarSyncService is not null)
+            {
+                try
+                {
+                    await _googleCalendarSyncService.DeleteTaskForConnectedUsersAsync(entity.Id, ct);
+                }
+                catch (InvalidOperationException ex) when (ex.Message == "GoogleCalendarTaskDeleteFailed")
+                {
+                    return Problem(
+                        title: "GoogleCalendarTaskDeleteFailed",
+                        detail: "Не удалось удалить связанное событие из Google Calendar. Задачи не удалены, проверьте журнал синхронизации и повторите операцию.",
+                        statusCode: 409);
+                }
+            }
+
             _db.TaskJournalItems.Remove(entity);
             deleted++;
         }
@@ -2088,6 +2103,21 @@ public class TasksController : ControllerBase
         if (!CanFullyModifyTask(entity, access, access.Permission?.CanDelete == true, await GetTaskJournalSettingsAsync(ct)))
         {
             return Forbid();
+        }
+
+        if (_googleCalendarSyncService is not null)
+        {
+            try
+            {
+                await _googleCalendarSyncService.DeleteTaskForConnectedUsersAsync(entity.Id, ct);
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "GoogleCalendarTaskDeleteFailed")
+            {
+                return Problem(
+                    title: "GoogleCalendarTaskDeleteFailed",
+                    detail: "Не удалось удалить связанное событие из Google Calendar. Задача не удалена, проверьте журнал синхронизации и повторите операцию.",
+                    statusCode: 409);
+            }
         }
 
         _db.TaskJournalItems.Remove(entity);

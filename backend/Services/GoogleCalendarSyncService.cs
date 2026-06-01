@@ -333,6 +333,113 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
     }
 
+    public async Task DeleteTaskForConnectedUsersAsync(int taskId, CancellationToken cancellationToken = default)
+    {
+        var links = await _db.GoogleCalendarTaskLinks
+            .Include(item => item.Connection)
+            .Include(item => item.CalendarSyncCalendar)
+            .Where(item => item.TaskJournalItemId == taskId && item.SyncStatus != "deleted")
+            .ToListAsync(cancellationToken);
+
+        foreach (var link in links)
+        {
+            if (link.Connection is null || string.IsNullOrWhiteSpace(link.GoogleCalendarId) || string.IsNullOrWhiteSpace(link.GoogleEventId))
+            {
+                continue;
+            }
+
+            try
+            {
+                var accessToken = await ResolveAccessTokenAsync(link.Connection, cancellationToken);
+                var deleted = await DeleteGoogleEventAsync(accessToken, link.GoogleCalendarId, link.GoogleEventId, cancellationToken);
+                link.SyncStatus = "deleted";
+                link.LastDirection = "crm-to-google";
+                link.LastSyncedAt = DateTime.UtcNow;
+                link.UpdatedAt = DateTime.UtcNow;
+                link.LastError = null;
+                await AddLogAsync(
+                    link.ConnectionId,
+                    link.CalendarSyncCalendarId,
+                    link.TaskJournalItemId,
+                    "crm-to-google",
+                    deleted ? "delete-event" : "delete-event-missing",
+                    "success",
+                    deleted
+                        ? "Событие удалено из Google Calendar после удаления задачи в CRM."
+                        : "Событие уже отсутствовало в Google Calendar при удалении задачи в CRM.",
+                    null,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                link.LastError = Trim(ex.Message, 2000);
+                link.UpdatedAt = DateTime.UtcNow;
+                await AddLogAsync(
+                    link.ConnectionId,
+                    link.CalendarSyncCalendarId,
+                    link.TaskJournalItemId,
+                    "crm-to-google",
+                    "delete-event",
+                    "error",
+                    "Не удалось удалить событие из Google Calendar после удаления задачи в CRM.",
+                    ex.Message,
+                    cancellationToken);
+                await _db.SaveChangesAsync(cancellationToken);
+                throw new InvalidOperationException("GoogleCalendarTaskDeleteFailed", ex);
+            }
+        }
+
+        if (links.Count > 0)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task CleanupDeletedUserAsync(int userId, int actorUserId, CancellationToken cancellationToken = default)
+    {
+        var failures = new List<string>();
+
+        var ownConnection = await LoadConnectionQuery()
+            .Include(item => item.TaskLinks)
+            .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+        if (ownConnection is not null)
+        {
+            await CleanupConnectionCalendarsAsync(
+                ownConnection,
+                ownConnection.Calendars.ToList(),
+                removeConnectionAfterCleanup: false,
+                $"Пользователь #{userId} удаляется из CRM администратором #{actorUserId}.",
+                failures,
+                cancellationToken);
+        }
+
+        var adminConnections = await LoadConnectionQuery()
+            .Include(item => item.TaskLinks)
+            .Where(item => item.UserId != userId && item.Calendars.Any(calendar => calendar.OwnerUserId == userId))
+            .ToListAsync(cancellationToken);
+        foreach (var connection in adminConnections)
+        {
+            var calendars = connection.Calendars
+                .Where(calendar => calendar.OwnerUserId == userId)
+                .ToList();
+            await CleanupConnectionCalendarsAsync(
+                connection,
+                calendars,
+                removeConnectionAfterCleanup: false,
+                $"Сотрудник #{userId} удаляется из CRM, календарь сотрудника убирается из админского Google Calendar.",
+                failures,
+                cancellationToken);
+        }
+
+        if (failures.Count > 0)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            throw new InvalidOperationException($"GoogleCalendarCleanupFailed: {string.Join("; ", failures)}");
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task HandleWebhookAsync(HttpRequest request, CancellationToken cancellationToken = default)
     {
         var channelId = request.Headers.TryGetValue("X-Goog-Channel-ID", out StringValues channelHeader)
@@ -434,6 +541,93 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         connection.LastIncrementalSyncAt = DateTime.UtcNow;
         connection.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task CleanupConnectionCalendarsAsync(
+        GoogleCalendarConnection connection,
+        IReadOnlyList<GoogleCalendarSyncCalendar> calendars,
+        bool removeConnectionAfterCleanup,
+        string reason,
+        List<string> failures,
+        CancellationToken cancellationToken)
+    {
+        if (calendars.Count == 0)
+        {
+            return;
+        }
+
+        string? accessToken = null;
+        try
+        {
+            accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            failures.Add($"подключение #{connection.Id}: {ex.Message}");
+            await AddLogAsync(
+                connection.Id,
+                null,
+                null,
+                "system",
+                "cleanup-user-calendars",
+                "error",
+                "Не удалось получить токен Google Calendar для очистки календарей удаляемого пользователя.",
+                ex.Message,
+                cancellationToken);
+            return;
+        }
+
+        foreach (var calendar in calendars)
+        {
+            try
+            {
+                var deleted = await DeleteGoogleCalendarAsync(accessToken, calendar.GoogleCalendarId, cancellationToken);
+                await AddLogAsync(
+                    connection.Id,
+                    calendar.Id,
+                    null,
+                    "system",
+                    deleted ? "delete-calendar" : "delete-calendar-missing",
+                    "success",
+                    deleted
+                        ? $"Календарь «{calendar.Name}» удален из Google Calendar."
+                        : $"Календарь «{calendar.Name}» уже отсутствовал в Google Calendar.",
+                    reason,
+                    cancellationToken);
+
+                foreach (var link in connection.TaskLinks.Where(item => item.CalendarSyncCalendarId == calendar.Id))
+                {
+                    link.SyncStatus = "deleted";
+                    link.LastDirection = "crm-to-google";
+                    link.LastSyncedAt = DateTime.UtcNow;
+                    link.UpdatedAt = DateTime.UtcNow;
+                    link.LastError = null;
+                }
+
+                _db.GoogleCalendarSyncCalendars.Remove(calendar);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failures.Add($"календарь {calendar.Name}: {ex.Message}");
+                calendar.LastError = Trim(ex.Message, 2000);
+                calendar.UpdatedAt = DateTime.UtcNow;
+                await AddLogAsync(
+                    connection.Id,
+                    calendar.Id,
+                    null,
+                    "system",
+                    "delete-calendar",
+                    "error",
+                    $"Не удалось удалить календарь «{calendar.Name}» из Google Calendar.",
+                    ex.Message,
+                    cancellationToken);
+            }
+        }
+
+        if (removeConnectionAfterCleanup)
+        {
+            _db.GoogleCalendarConnections.Remove(connection);
+        }
     }
 
     private async Task<int> ImportGoogleChangesAsync(GoogleCalendarConnection connection, bool forceFull, CancellationToken cancellationToken)
@@ -894,6 +1088,12 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         return new GoogleCalendarCreateResult(ReadString(document.RootElement, "id") ?? throw new InvalidOperationException("Google не вернул id календаря."));
     }
 
+    private async Task<bool> DeleteGoogleCalendarAsync(string accessToken, string calendarId, CancellationToken cancellationToken)
+    {
+        using var request = BuildGoogleRequest(HttpMethod.Delete, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}", accessToken);
+        return await SendGoogleDeleteAsync(request, cancellationToken);
+    }
+
     private async Task<GoogleEventWriteResult> CreateGoogleEventAsync(string accessToken, string calendarId, GoogleEventPayload payload, CancellationToken cancellationToken)
     {
         using var request = BuildGoogleRequest(HttpMethod.Post, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events", accessToken, JsonSerializer.Serialize(payload, JsonOptions));
@@ -910,6 +1110,12 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         return new GoogleEventWriteResult(
             ReadString(document.RootElement, "id") ?? eventId,
             ReadString(document.RootElement, "etag"));
+    }
+
+    private async Task<bool> DeleteGoogleEventAsync(string accessToken, string calendarId, string eventId, CancellationToken cancellationToken)
+    {
+        using var request = BuildGoogleRequest(HttpMethod.Delete, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events/{Uri.EscapeDataString(eventId)}", accessToken);
+        return await SendGoogleDeleteAsync(request, cancellationToken);
     }
 
     private async Task<GoogleEventsResponse> ListEventsAsync(
@@ -986,6 +1192,24 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
 
         return JsonDocument.Parse(payload);
+    }
+
+    private async Task<bool> SendGoogleDeleteAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.SendAsync(request, cancellationToken);
+        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
+        {
+            return false;
+        }
+
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Google Calendar API вернул ошибку при удалении.");
+        }
+
+        return true;
     }
 
     private static HttpRequestMessage BuildGoogleRequest(HttpMethod method, string url, string accessToken, string? jsonBody = null)

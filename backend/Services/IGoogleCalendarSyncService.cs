@@ -14,6 +14,8 @@ public interface IGoogleCalendarSyncService
     Task<GoogleCalendarSyncNowResultDto> SyncNowAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default);
     Task<GoogleCalendarSchedulerRunResult> SyncDueConnectionsAsync(int batchSize, CancellationToken cancellationToken = default);
     Task SyncTaskForConnectedUsersAsync(int taskId, CancellationToken cancellationToken = default);
+    Task DeleteTaskForConnectedUsersAsync(int taskId, CancellationToken cancellationToken = default);
+    Task CleanupDeletedUserAsync(int userId, int actorUserId, CancellationToken cancellationToken = default);
     Task HandleWebhookAsync(HttpRequest request, CancellationToken cancellationToken = default);
 }
 
