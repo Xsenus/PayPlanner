@@ -14,6 +14,32 @@ namespace PayPlanner.Api.Services;
 
 public interface IYandexDiskService
 {
+    Task<YandexDiskConnectionsOverviewDto> GetConnectionsOverviewAsync(CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskConnectionDto> UpsertConnectionAsync(UpsertYandexDiskConnectionRequest request, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task DeleteConnectionAsync(string id, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskConnectionTestDto> TestConnectionAsync(string id, TestYandexDiskConnectionRequest request, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskListResponseDto> ListAsync(string id, string? path, int limit, int offset, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskOperationResultDto> CreateFolderAsync(string id, string? path, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskOperationResultDto> CopyAsync(string id, string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskOperationResultDto> MoveAsync(string id, string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskOperationResultDto> DeleteAsync(string id, string? path, bool permanently, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskOperationResultDto> UploadAsync(string id, string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskDownload> DownloadAsync(string id, string? path, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskTextFileDto> GetTextFileAsync(string id, string? path, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskOperationResultDto> SaveTextFileAsync(string id, UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
     Task<YandexDiskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default);
     Task<YandexDiskSettingsDto> UpdateSettingsAsync(UpdateYandexDiskSettingsRequest request, CancellationToken cancellationToken = default);
     Task<YandexDiskConnectionTestDto> TestConnectionAsync(TestYandexDiskConnectionRequest request, CancellationToken cancellationToken = default);
@@ -64,8 +90,11 @@ public sealed class YandexDiskService : IYandexDiskService
 {
     private const string OAuthTokenSettingKey = "integrations.yandexDisk.oauthToken";
     private const string RootPathSettingKey = "integrations.yandexDisk.rootPath";
+    private const string ConnectionsSettingKey = "integrations.yandexDisk.connections";
     private const string CrmSyncSettingsKey = "integrations.yandexDisk.crmSync.settings";
     private const string DefaultRootPath = "disk:/PayPlanner";
+    private const string DefaultConnectionId = "default";
+    private const string DefaultConnectionName = "Яндекс.Диск";
     private const string DefaultConnectionTestFolderPath = "_payplanner-test";
     private const string DefaultFolderTemplate = "CRM/{clientName}/{caseNumber}/{documentType}";
     private const string DefaultFileNameTemplate = "{documentDate}-{documentNumber}-{documentTitle}";
@@ -102,23 +131,102 @@ public sealed class YandexDiskService : IYandexDiskService
         return BuildSettingsDto(settings);
     }
 
-    public async Task<YandexDiskSettingsDto> UpdateSettingsAsync(UpdateYandexDiskSettingsRequest request, CancellationToken cancellationToken = default)
+    public async Task<YandexDiskConnectionsOverviewDto> GetConnectionsOverviewAsync(CancellationToken cancellationToken = default)
+    {
+        var connections = await LoadConnectionsAsync(cancellationToken);
+        return new YandexDiskConnectionsOverviewDto
+        {
+            Connections = connections.Select(BuildConnectionDto).ToList(),
+        };
+    }
+
+    public async Task<YandexDiskConnectionDto> UpsertConnectionAsync(
+        UpsertYandexDiskConnectionRequest request,
+        CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        var rootPath = NormalizeRootPath(request.RootPath);
-        await UpsertSettingAsync(RootPathSettingKey, rootPath, now, cancellationToken);
+        var connections = await LoadConnectionsAsync(cancellationToken);
+        var id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString("N") : NormalizeConnectionId(request.Id);
+        var existing = connections.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
 
+        if (existing is null && !string.IsNullOrWhiteSpace(request.Id))
+        {
+            throw new YandexDiskOperationException(404, "Подключение Я.Диска не найдено.");
+        }
+
+        var token = existing?.OAuthToken;
         if (request.ClearToken)
         {
-            await RemoveSettingAsync(OAuthTokenSettingKey, cancellationToken);
+            token = null;
         }
         else if (!string.IsNullOrWhiteSpace(request.OAuthToken))
         {
-            await UpsertSettingAsync(OAuthTokenSettingKey, request.OAuthToken.Trim(), now, cancellationToken);
+            token = request.OAuthToken.Trim();
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        if (existing is null && string.IsNullOrWhiteSpace(token))
+        {
+            throw new YandexDiskOperationException(400, "Укажите OAuth-токен Я.Диска.");
+        }
+
+        var updated = new YandexDiskConnectionState(
+            id,
+            NormalizeConnectionName(request.Name, existing?.Name, connections.Count),
+            token,
+            NormalizeRootPath(request.RootPath ?? existing?.RootPath),
+            request.IsEnabled,
+            now);
+
+        if (existing is null)
+        {
+            connections.Add(updated);
+        }
+        else
+        {
+            var index = connections.FindIndex(item => string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
+            connections[index] = updated;
+        }
+
+        await SaveConnectionsAsync(connections, cancellationToken);
+        return BuildConnectionDto(updated);
+    }
+
+    public async Task DeleteConnectionAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var normalizedId = NormalizeConnectionId(id);
+        var connections = await LoadConnectionsAsync(cancellationToken);
+        var removed = connections.RemoveAll(item => string.Equals(item.Id, normalizedId, StringComparison.OrdinalIgnoreCase));
+        if (removed == 0)
+        {
+            throw new YandexDiskOperationException(404, "Подключение Я.Диска не найдено.");
+        }
+
+        await SaveConnectionsAsync(connections, cancellationToken);
+    }
+
+    public async Task<YandexDiskSettingsDto> UpdateSettingsAsync(UpdateYandexDiskSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        var connections = await LoadConnectionsAsync(cancellationToken);
+        var defaultConnection = ResolveDefaultConnection(connections);
+        await UpsertConnectionAsync(new UpsertYandexDiskConnectionRequest
+        {
+            Id = defaultConnection?.Id,
+            Name = defaultConnection?.Name ?? DefaultConnectionName,
+            OAuthToken = request.OAuthToken,
+            ClearToken = request.ClearToken,
+            RootPath = request.RootPath ?? defaultConnection?.RootPath,
+            IsEnabled = defaultConnection?.IsEnabled ?? true,
+        }, cancellationToken);
         return await GetSettingsAsync(cancellationToken);
+    }
+
+    public async Task<YandexDiskConnectionTestDto> TestConnectionAsync(
+        string id,
+        TestYandexDiskConnectionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadConfiguredConnectionAsync(id, cancellationToken);
+        return await TestConnectionAsync(settings, request, cancellationToken);
     }
 
     public async Task<YandexDiskConnectionTestDto> TestConnectionAsync(
@@ -126,6 +234,14 @@ public sealed class YandexDiskService : IYandexDiskService
         CancellationToken cancellationToken = default)
     {
         var settings = await LoadConfiguredSettingsAsync(cancellationToken);
+        return await TestConnectionAsync(settings, request, cancellationToken);
+    }
+
+    private async Task<YandexDiskConnectionTestDto> TestConnectionAsync(
+        YandexDiskSettingsState settings,
+        TestYandexDiskConnectionRequest request,
+        CancellationToken cancellationToken)
+    {
         var token = settings.OAuthToken!;
         var checkedAt = DateTime.UtcNow;
         var testFolderPath = NormalizeConnectionTestFolderPath(request.TestFolderPath);
@@ -232,6 +348,27 @@ public sealed class YandexDiskService : IYandexDiskService
     public async Task<YandexDiskListResponseDto> ListAsync(string? path, int limit, int offset, CancellationToken cancellationToken = default)
     {
         var settings = await LoadConfiguredSettingsAsync(cancellationToken);
+        return await ListAsync(settings, path, limit, offset, cancellationToken);
+    }
+
+    public async Task<YandexDiskListResponseDto> ListAsync(
+        string id,
+        string? path,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadConfiguredConnectionAsync(id, cancellationToken);
+        return await ListAsync(settings, path, limit, offset, cancellationToken);
+    }
+
+    private async Task<YandexDiskListResponseDto> ListAsync(
+        YandexDiskSettingsState settings,
+        string? path,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken)
+    {
         var normalizedLimit = Math.Clamp(limit <= 0 ? 100 : limit, 1, 500);
         var normalizedOffset = Math.Max(offset, 0);
         var fullPath = BuildFullPath(settings.RootPath, NormalizeRelativePath(path));
@@ -256,6 +393,20 @@ public sealed class YandexDiskService : IYandexDiskService
     public async Task<YandexDiskOperationResultDto> CreateFolderAsync(string? path, CancellationToken cancellationToken = default)
     {
         var settings = await LoadConfiguredSettingsAsync(cancellationToken);
+        return await CreateFolderAsync(settings, path, cancellationToken);
+    }
+
+    public async Task<YandexDiskOperationResultDto> CreateFolderAsync(string id, string? path, CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadConfiguredConnectionAsync(id, cancellationToken);
+        return await CreateFolderAsync(settings, path, cancellationToken);
+    }
+
+    private async Task<YandexDiskOperationResultDto> CreateFolderAsync(
+        YandexDiskSettingsState settings,
+        string? path,
+        CancellationToken cancellationToken)
+    {
         var relativePath = NormalizeRequiredRelativePath(path, "Укажите путь новой папки.");
         var fullPath = BuildFullPath(settings.RootPath, relativePath);
         var token = settings.OAuthToken!;
@@ -270,14 +421,35 @@ public sealed class YandexDiskService : IYandexDiskService
     }
 
     public Task<YandexDiskOperationResultDto> CopyAsync(string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
-        => CopyOrMoveAsync("copy", fromPath, toPath, overwrite, cancellationToken);
+        => CopyOrMoveAsync("copy", null, fromPath, toPath, overwrite, cancellationToken);
+
+    public Task<YandexDiskOperationResultDto> CopyAsync(string id, string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
+        => CopyOrMoveAsync("copy", id, fromPath, toPath, overwrite, cancellationToken);
 
     public Task<YandexDiskOperationResultDto> MoveAsync(string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
-        => CopyOrMoveAsync("move", fromPath, toPath, overwrite, cancellationToken);
+        => CopyOrMoveAsync("move", null, fromPath, toPath, overwrite, cancellationToken);
+
+    public Task<YandexDiskOperationResultDto> MoveAsync(string id, string? fromPath, string? toPath, bool overwrite, CancellationToken cancellationToken = default)
+        => CopyOrMoveAsync("move", id, fromPath, toPath, overwrite, cancellationToken);
 
     public async Task<YandexDiskOperationResultDto> DeleteAsync(string? path, bool permanently, CancellationToken cancellationToken = default)
     {
         var settings = await LoadConfiguredSettingsAsync(cancellationToken);
+        return await DeleteAsync(settings, path, permanently, cancellationToken);
+    }
+
+    public async Task<YandexDiskOperationResultDto> DeleteAsync(string id, string? path, bool permanently, CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadConfiguredConnectionAsync(id, cancellationToken);
+        return await DeleteAsync(settings, path, permanently, cancellationToken);
+    }
+
+    private async Task<YandexDiskOperationResultDto> DeleteAsync(
+        YandexDiskSettingsState settings,
+        string? path,
+        bool permanently,
+        CancellationToken cancellationToken)
+    {
         var relativePath = NormalizeRequiredRelativePath(path, "Выберите файл или папку для удаления.");
         var fullPath = BuildFullPath(settings.RootPath, relativePath);
         var token = settings.OAuthToken!;
@@ -299,6 +471,29 @@ public sealed class YandexDiskService : IYandexDiskService
         CancellationToken cancellationToken = default)
     {
         var settings = await LoadConfiguredSettingsAsync(cancellationToken);
+        return await UploadAsync(settings, path, content, contentType, overwrite, cancellationToken);
+    }
+
+    public async Task<YandexDiskOperationResultDto> UploadAsync(
+        string id,
+        string? path,
+        Stream content,
+        string? contentType,
+        bool overwrite,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadConfiguredConnectionAsync(id, cancellationToken);
+        return await UploadAsync(settings, path, content, contentType, overwrite, cancellationToken);
+    }
+
+    private async Task<YandexDiskOperationResultDto> UploadAsync(
+        YandexDiskSettingsState settings,
+        string? path,
+        Stream content,
+        string? contentType,
+        bool overwrite,
+        CancellationToken cancellationToken)
+    {
         var relativePath = NormalizeRequiredRelativePath(path, "Укажите путь файла для загрузки.");
         var fullPath = BuildFullPath(settings.RootPath, relativePath);
         var token = settings.OAuthToken!;
@@ -323,6 +518,20 @@ public sealed class YandexDiskService : IYandexDiskService
     public async Task<YandexDiskDownload> DownloadAsync(string? path, CancellationToken cancellationToken = default)
     {
         var settings = await LoadConfiguredSettingsAsync(cancellationToken);
+        return await DownloadAsync(settings, path, cancellationToken);
+    }
+
+    public async Task<YandexDiskDownload> DownloadAsync(string id, string? path, CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadConfiguredConnectionAsync(id, cancellationToken);
+        return await DownloadAsync(settings, path, cancellationToken);
+    }
+
+    private async Task<YandexDiskDownload> DownloadAsync(
+        YandexDiskSettingsState settings,
+        string? path,
+        CancellationToken cancellationToken)
+    {
         var relativePath = NormalizeRequiredRelativePath(path, "Выберите файл для скачивания.");
         var fullPath = BuildFullPath(settings.RootPath, relativePath);
         var token = settings.OAuthToken!;
@@ -361,11 +570,33 @@ public sealed class YandexDiskService : IYandexDiskService
         };
     }
 
+    public async Task<YandexDiskTextFileDto> GetTextFileAsync(string id, string? path, CancellationToken cancellationToken = default)
+    {
+        var download = await DownloadAsync(id, path, cancellationToken);
+        if (download.Content.Length > MaxTextFileBytes)
+        {
+            throw new YandexDiskOperationException(400, "Файл слишком большой для встроенного текстового редактора.");
+        }
+
+        return new YandexDiskTextFileDto
+        {
+            Path = NormalizeDisplayPath(path),
+            Content = DecodeText(download.Content),
+        };
+    }
+
     public async Task<YandexDiskOperationResultDto> SaveTextFileAsync(UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default)
     {
         var bytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(request.Content ?? string.Empty);
         await using var stream = new MemoryStream(bytes);
         return await UploadAsync(request.Path, stream, "text/plain; charset=utf-8", request.Overwrite, cancellationToken);
+    }
+
+    public async Task<YandexDiskOperationResultDto> SaveTextFileAsync(string id, UpdateYandexDiskTextFileRequest request, CancellationToken cancellationToken = default)
+    {
+        var bytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(request.Content ?? string.Empty);
+        await using var stream = new MemoryStream(bytes);
+        return await UploadAsync(id, request.Path, stream, "text/plain; charset=utf-8", request.Overwrite, cancellationToken);
     }
 
     public async Task<YandexDiskCrmSyncSettingsDto> GetCrmSyncSettingsAsync(CancellationToken cancellationToken = default)
@@ -480,12 +711,15 @@ public sealed class YandexDiskService : IYandexDiskService
 
     private async Task<YandexDiskOperationResultDto> CopyOrMoveAsync(
         string operation,
+        string? connectionId,
         string? fromPath,
         string? toPath,
         bool overwrite,
         CancellationToken cancellationToken)
     {
-        var settings = await LoadConfiguredSettingsAsync(cancellationToken);
+        var settings = string.IsNullOrWhiteSpace(connectionId)
+            ? await LoadConfiguredSettingsAsync(cancellationToken)
+            : await LoadConfiguredConnectionAsync(connectionId, cancellationToken);
         var fromRelative = NormalizeRequiredRelativePath(fromPath, "Выберите исходный файл или папку.");
         var toRelative = NormalizeRequiredRelativePath(toPath, "Укажите новый путь.");
         var fromFullPath = BuildFullPath(settings.RootPath, fromRelative);
@@ -512,7 +746,67 @@ public sealed class YandexDiskService : IYandexDiskService
         return settings;
     }
 
+    private async Task<YandexDiskSettingsState> LoadConfiguredConnectionAsync(string id, CancellationToken cancellationToken)
+    {
+        var normalizedId = NormalizeConnectionId(id);
+        var connections = await LoadConnectionsAsync(cancellationToken);
+        var settings = connections.FirstOrDefault(item => string.Equals(item.Id, normalizedId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new YandexDiskOperationException(404, "Подключение Я.Диска не найдено.");
+
+        if (!settings.IsEnabled)
+        {
+            throw new YandexDiskOperationException(400, "Подключение Я.Диска отключено.");
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.OAuthToken))
+        {
+            throw new YandexDiskOperationException(400, "Сначала сохраните OAuth-токен Я.Диска в подключении.");
+        }
+
+        return settings;
+    }
+
     private async Task<YandexDiskSettingsState> LoadSettingsAsync(CancellationToken cancellationToken)
+    {
+        var connections = await LoadConnectionsAsync(cancellationToken);
+        return ResolveDefaultConnection(connections)
+            ?? new YandexDiskConnectionState(DefaultConnectionId, DefaultConnectionName, null, DefaultRootPath, true, null);
+    }
+
+    private async Task<List<YandexDiskConnectionState>> LoadConnectionsAsync(CancellationToken cancellationToken)
+    {
+        var connectionSetting = await _db.SystemSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Key == ConnectionsSettingKey, cancellationToken);
+
+        if (connectionSetting is not null && !string.IsNullOrWhiteSpace(connectionSetting.Value))
+        {
+            try
+            {
+                var stored = JsonSerializer.Deserialize<List<YandexDiskConnectionState>>(connectionSetting.Value, JsonOptions) ?? [];
+                return stored
+                    .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+                    .Select(item => item with
+                    {
+                        Id = NormalizeConnectionId(item.Id),
+                        Name = NormalizeConnectionName(item.Name, null, 0),
+                        RootPath = NormalizeRootPath(item.RootPath),
+                    })
+                    .ToList();
+            }
+            catch (JsonException)
+            {
+                // Invalid JSON should not break the settings screen; fall back to legacy keys.
+            }
+        }
+
+        var legacy = await LoadLegacySettingsAsync(cancellationToken);
+        return string.IsNullOrWhiteSpace(legacy.OAuthToken) && legacy.RootPath == DefaultRootPath
+            ? []
+            : [legacy];
+    }
+
+    private async Task<YandexDiskConnectionState> LoadLegacySettingsAsync(CancellationToken cancellationToken)
     {
         var rows = await _db.SystemSettings
             .AsNoTracking()
@@ -521,10 +815,57 @@ public sealed class YandexDiskService : IYandexDiskService
 
         var tokenSetting = rows.FirstOrDefault(item => item.Key == OAuthTokenSettingKey);
         var rootSetting = rows.FirstOrDefault(item => item.Key == RootPathSettingKey);
-        return new YandexDiskSettingsState(
+        return new YandexDiskConnectionState(
+            DefaultConnectionId,
+            DefaultConnectionName,
             tokenSetting?.Value?.Trim(),
             NormalizeRootPath(rootSetting?.Value),
+            true,
             new[] { tokenSetting?.UpdatedAt, rootSetting?.UpdatedAt }.Where(value => value.HasValue).Max());
+    }
+
+    private async Task SaveConnectionsAsync(List<YandexDiskConnectionState> connections, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var normalized = connections
+            .Select(item => item with
+            {
+                Id = NormalizeConnectionId(item.Id),
+                Name = NormalizeConnectionName(item.Name, null, 0),
+                RootPath = NormalizeRootPath(item.RootPath),
+                UpdatedAt = item.UpdatedAt ?? now,
+            })
+            .ToList();
+
+        await UpsertSettingAsync(ConnectionsSettingKey, JsonSerializer.Serialize(normalized, JsonOptions), now, cancellationToken);
+        var defaultConnection = ResolveDefaultConnection(normalized);
+        if (defaultConnection is null)
+        {
+            await RemoveSettingAsync(OAuthTokenSettingKey, cancellationToken);
+            await RemoveSettingAsync(RootPathSettingKey, cancellationToken);
+        }
+        else
+        {
+            await UpsertSettingAsync(RootPathSettingKey, defaultConnection.RootPath, now, cancellationToken);
+            if (string.IsNullOrWhiteSpace(defaultConnection.OAuthToken))
+            {
+                await RemoveSettingAsync(OAuthTokenSettingKey, cancellationToken);
+            }
+            else
+            {
+                await UpsertSettingAsync(OAuthTokenSettingKey, defaultConnection.OAuthToken, now, cancellationToken);
+            }
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static YandexDiskConnectionState? ResolveDefaultConnection(IReadOnlyList<YandexDiskConnectionState> connections)
+    {
+        if (connections.Count == 0) return null;
+        return connections.FirstOrDefault(item => item.IsEnabled && !string.IsNullOrWhiteSpace(item.OAuthToken))
+            ?? connections.FirstOrDefault(item => item.IsEnabled)
+            ?? connections[0];
     }
 
     private async Task UpsertSettingAsync(string key, string value, DateTime now, CancellationToken cancellationToken)
@@ -663,6 +1004,38 @@ public sealed class YandexDiskService : IYandexDiskService
             TokenPreview = BuildTokenPreview(settings.OAuthToken),
             UpdatedAt = settings.UpdatedAt,
         };
+
+    private static YandexDiskConnectionDto BuildConnectionDto(YandexDiskConnectionState settings)
+        => new()
+        {
+            Id = settings.Id,
+            Name = settings.Name,
+            IsEnabled = settings.IsEnabled,
+            IsConfigured = !string.IsNullOrWhiteSpace(settings.OAuthToken),
+            RootPath = settings.RootPath,
+            TokenPreview = BuildTokenPreview(settings.OAuthToken),
+            UpdatedAt = settings.UpdatedAt,
+        };
+
+    private static string NormalizeConnectionId(string? value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value)
+            ? Guid.NewGuid().ToString("N")
+            : new string(value.Trim().Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_').ToArray());
+
+        return string.IsNullOrWhiteSpace(normalized) ? Guid.NewGuid().ToString("N") : normalized[..Math.Min(normalized.Length, 80)];
+    }
+
+    private static string NormalizeConnectionName(string? value, string? fallback, int existingCount)
+    {
+        var name = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = existingCount > 0 ? $"Яндекс.Диск {existingCount + 1}" : DefaultConnectionName;
+        }
+
+        return name.Length > 120 ? name[..120] : name;
+    }
 
     private static string? BuildTokenPreview(string? token)
     {
@@ -1131,7 +1504,21 @@ public sealed class YandexDiskService : IYandexDiskService
         return Encoding.UTF8.GetString(content);
     }
 
-    private sealed record YandexDiskSettingsState(string? OAuthToken, string RootPath, DateTime? UpdatedAt);
+    private abstract record YandexDiskSettingsState(
+        string Id,
+        string Name,
+        string? OAuthToken,
+        string RootPath,
+        bool IsEnabled,
+        DateTime? UpdatedAt);
+
+    private sealed record YandexDiskConnectionState(
+        string Id,
+        string Name,
+        string? OAuthToken,
+        string RootPath,
+        bool IsEnabled,
+        DateTime? UpdatedAt) : YandexDiskSettingsState(Id, Name, OAuthToken, RootPath, IsEnabled, UpdatedAt);
 
     private sealed class YandexDiskLinkPayload
     {

@@ -218,10 +218,30 @@ export interface YandexDiskSettingsDto {
   updatedAt?: string | null;
 }
 
+export interface YandexDiskConnectionDto {
+  id: string;
+  name: string;
+  isEnabled: boolean;
+  isConfigured: boolean;
+  rootPath: string;
+  tokenPreview?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface YandexDiskConnectionsOverviewDto {
+  connections: YandexDiskConnectionDto[];
+}
+
 export interface UpdateYandexDiskSettingsRequest {
   oAuthToken?: string;
   clearToken?: boolean;
   rootPath?: string;
+}
+
+export interface UpsertYandexDiskConnectionRequest extends UpdateYandexDiskSettingsRequest {
+  id?: string | null;
+  name?: string | null;
+  isEnabled?: boolean;
 }
 
 export interface YandexDiskResourceDto {
@@ -1656,6 +1676,23 @@ export class ApiService {
     return this.request<YandexDiskSettingsDto>('/yandex-disk/settings');
   }
 
+  async getYandexDiskConnections() {
+    return this.request<YandexDiskConnectionsOverviewDto>('/yandex-disk/connections');
+  }
+
+  async upsertYandexDiskConnection(payload: UpsertYandexDiskConnectionRequest) {
+    return this.request<YandexDiskConnectionDto>('/yandex-disk/connections', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteYandexDiskConnection(id: string) {
+    return this.request<void>(`/yandex-disk/connections/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
   async updateYandexDiskSettings(payload: UpdateYandexDiskSettingsRequest) {
     return this.request<YandexDiskSettingsDto>('/yandex-disk/settings', {
       method: 'PUT',
@@ -1670,52 +1707,72 @@ export class ApiService {
     });
   }
 
-  async listYandexDiskResources(path = '/') {
-    return this.request<YandexDiskListResponseDto>(`/yandex-disk/resources?path=${encodeURIComponent(path)}`);
+  async testYandexDiskConnectionById(id: string, testFolderPath?: string) {
+    return this.request<YandexDiskConnectionTestDto>(`/yandex-disk/connections/${encodeURIComponent(id)}/connection-test`, {
+      method: 'POST',
+      body: JSON.stringify({ testFolderPath }),
+    });
   }
 
-  async createYandexDiskFolder(path: string) {
-    return this.request<YandexDiskOperationResultDto>('/yandex-disk/folders', {
+  async listYandexDiskResources(path = '/', connectionId?: string | null) {
+    const base = connectionId
+      ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/resources`
+      : '/yandex-disk/resources';
+    return this.request<YandexDiskListResponseDto>(`${base}?path=${encodeURIComponent(path)}`);
+  }
+
+  async createYandexDiskFolder(path: string, connectionId?: string | null) {
+    const url = connectionId ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/folders` : '/yandex-disk/folders';
+    return this.request<YandexDiskOperationResultDto>(url, {
       method: 'POST',
       body: JSON.stringify({ path }),
     });
   }
 
-  async copyYandexDiskResource(fromPath: string, toPath: string, overwrite = false) {
-    return this.request<YandexDiskOperationResultDto>('/yandex-disk/copy', {
+  async copyYandexDiskResource(fromPath: string, toPath: string, overwrite = false, connectionId?: string | null) {
+    const url = connectionId ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/copy` : '/yandex-disk/copy';
+    return this.request<YandexDiskOperationResultDto>(url, {
       method: 'POST',
       body: JSON.stringify({ fromPath, toPath, overwrite }),
     });
   }
 
-  async moveYandexDiskResource(fromPath: string, toPath: string, overwrite = false) {
-    return this.request<YandexDiskOperationResultDto>('/yandex-disk/move', {
+  async moveYandexDiskResource(fromPath: string, toPath: string, overwrite = false, connectionId?: string | null) {
+    const url = connectionId ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/move` : '/yandex-disk/move';
+    return this.request<YandexDiskOperationResultDto>(url, {
       method: 'POST',
       body: JSON.stringify({ fromPath, toPath, overwrite }),
     });
   }
 
-  async deleteYandexDiskResource(path: string, permanently = false) {
+  async deleteYandexDiskResource(path: string, permanently = false, connectionId?: string | null) {
+    const base = connectionId
+      ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/resources`
+      : '/yandex-disk/resources';
     return this.request<YandexDiskOperationResultDto>(
-      `/yandex-disk/resources?path=${encodeURIComponent(path)}&permanently=${permanently}`,
+      `${base}?path=${encodeURIComponent(path)}&permanently=${permanently}`,
       { method: 'DELETE' },
     );
   }
 
-  async uploadYandexDiskFile(path: string, file: File, overwrite = true) {
+  async uploadYandexDiskFile(path: string, file: File, overwrite = true, connectionId?: string | null) {
     const form = new FormData();
     form.append('file', file);
     form.append('path', path);
     form.append('overwrite', String(overwrite));
-    return this.request<YandexDiskOperationResultDto>('/yandex-disk/upload', {
+    const url = connectionId ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/upload` : '/yandex-disk/upload';
+    return this.request<YandexDiskOperationResultDto>(url, {
       method: 'POST',
       body: form,
     });
   }
 
-  async downloadYandexDiskFile(path: string) {
+  async downloadYandexDiskFile(path: string, connectionId?: string | null) {
     const token = getAuthToken();
-    const response = await fetch(`${API_BASE_URL}/yandex-disk/download?path=${encodeURIComponent(path)}`, {
+    const base = connectionId
+      ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/download`
+      : '/yandex-disk/download';
+    const response = await fetch(`${API_BASE_URL}${base}?path=${encodeURIComponent(path)}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
 
@@ -1733,12 +1790,14 @@ export class ApiService {
     };
   }
 
-  async getYandexDiskTextFile(path: string) {
-    return this.request<YandexDiskTextFileDto>(`/yandex-disk/text?path=${encodeURIComponent(path)}`);
+  async getYandexDiskTextFile(path: string, connectionId?: string | null) {
+    const base = connectionId ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/text` : '/yandex-disk/text';
+    return this.request<YandexDiskTextFileDto>(`${base}?path=${encodeURIComponent(path)}`);
   }
 
-  async saveYandexDiskTextFile(path: string, content: string, overwrite = true) {
-    return this.request<YandexDiskOperationResultDto>('/yandex-disk/text', {
+  async saveYandexDiskTextFile(path: string, content: string, overwrite = true, connectionId?: string | null) {
+    const url = connectionId ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/text` : '/yandex-disk/text';
+    return this.request<YandexDiskOperationResultDto>(url, {
       method: 'PUT',
       body: JSON.stringify({ path, content, overwrite }),
     });

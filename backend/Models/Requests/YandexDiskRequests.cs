@@ -7,6 +7,16 @@ public sealed class UpdateYandexDiskSettingsRequest
     public string? RootPath { get; set; }
 }
 
+public sealed class UpsertYandexDiskConnectionRequest
+{
+    public string? Id { get; set; }
+    public string? Name { get; set; }
+    public string? OAuthToken { get; set; }
+    public bool ClearToken { get; set; }
+    public string? RootPath { get; set; }
+    public bool IsEnabled { get; set; } = true;
+}
+
 public sealed class TestYandexDiskConnectionRequest
 {
     public string? TestFolderPath { get; set; }

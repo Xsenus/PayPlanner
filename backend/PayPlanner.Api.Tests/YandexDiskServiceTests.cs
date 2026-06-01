@@ -81,6 +81,59 @@ public sealed class YandexDiskServiceTests
     }
 
     [Fact]
+    public async Task ConnectionEndpoints_SaveSeveralYandexDiskAccountsAndUseSelectedOneForFiles()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        HttpRequestMessage? captured = null;
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(request =>
+        {
+            captured = request;
+            return JsonResponse("""
+            {
+              "name": "Reports",
+              "path": "disk:/Archive/Reports",
+              "type": "dir",
+              "_embedded": {
+                "limit": 100,
+                "offset": 0,
+                "total": 0,
+                "items": []
+              }
+            }
+            """);
+        })));
+
+        var main = await service.UpsertConnectionAsync(new UpsertYandexDiskConnectionRequest
+        {
+            Name = "Я.Диск основной",
+            OAuthToken = "main-token",
+            RootPath = "disk:/PayPlanner",
+            IsEnabled = true,
+        }, CancellationToken.None);
+        var archive = await service.UpsertConnectionAsync(new UpsertYandexDiskConnectionRequest
+        {
+            Name = "Я.Диск архив",
+            OAuthToken = "archive-token",
+            RootPath = "/Archive",
+            IsEnabled = true,
+        }, CancellationToken.None);
+
+        var overview = await service.GetConnectionsOverviewAsync(CancellationToken.None);
+        Assert.Equal(2, overview.Connections.Count);
+        Assert.Contains(overview.Connections, item => item.Id == main.Id && item.TokenPreview == "main...oken");
+        Assert.Contains(overview.Connections, item => item.Id == archive.Id && item.RootPath == "disk:/Archive");
+
+        var result = await service.ListAsync(archive.Id, "/Reports", 100, 0, CancellationToken.None);
+
+        Assert.Equal("/Reports", result.Current.Path);
+        Assert.Equal("OAuth", captured?.Headers.Authorization?.Scheme);
+        Assert.Equal("archive-token", captured?.Headers.Authorization?.Parameter);
+        Assert.Contains("path=disk%3A%2FArchive%2FReports", captured?.RequestUri?.Query);
+        Assert.NotNull(await scope.Db.SystemSettings.SingleOrDefaultAsync(item => item.Key == "integrations.yandexDisk.connections"));
+        Assert.Equal("main-token", (await scope.Db.SystemSettings.SingleAsync(item => item.Key == "integrations.yandexDisk.oauthToken")).Value);
+    }
+
+    [Fact]
     public async Task TestConnectionAsync_CreatesUploadsReadsAndDeletesMarkerFile()
     {
         await using var scope = await CreateDbScopeAsync();

@@ -1,11 +1,11 @@
 import {
+  ArrowLeft,
   ArrowUp,
   CheckCircle2,
   Cloud,
   Copy,
   Download,
   Edit3,
-  Eye,
   File,
   Folder,
   KeyRound,
@@ -23,91 +23,46 @@ import {
 import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   apiService,
+  type UpsertYandexDiskConnectionRequest,
   type UpdateYandexDiskCrmSyncSettingsRequest,
+  type YandexDiskConnectionDto,
   type YandexDiskConnectionTestDto,
+  type YandexDiskConnectionsOverviewDto,
   type YandexDiskCrmSyncPreviewDto,
-  type YandexDiskCrmSyncSettingsDto,
   type YandexDiskCrmSyncStatusReportDto,
   type YandexDiskListResponseDto,
   type YandexDiskResourceDto,
-  type YandexDiskSettingsDto,
 } from '../../services/api';
-import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import { useToast } from '../../hooks/useToast';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useToast } from '../../hooks/useToast';
 import { defaultRestrictedMenuPermissions } from '../../types/permissions';
+import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { TextPromptModal } from '../ui/TextPromptModal';
 
-function joinPath(directory: string, name: string) {
-  const cleanName = name.trim().replace(/^\/+/, '');
-  if (!cleanName) return directory || '/';
-  if (!directory || directory === '/') return `/${cleanName}`;
-  return `${directory.replace(/\/+$/, '')}/${cleanName}`;
-}
+type YandexDiskProps = {
+  embedded?: boolean;
+};
 
-function parentPath(path: string) {
-  const normalized = path === '/' ? '/' : path.replace(/\/+$/, '');
-  const index = normalized.lastIndexOf('/');
-  return index <= 0 ? '/' : normalized.slice(0, index);
-}
+type YandexDiskTab = 'connections' | 'files' | 'sync' | 'logs';
+type YandexDiskMode = 'overview' | 'form';
+type PathDialogMode = 'folder' | 'copy' | 'move';
 
-function formatSize(size?: number | null) {
-  if (!size) return '0 Б';
-  const units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
-  let value = size;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toLocaleString('ru-RU', { maximumFractionDigits: unitIndex === 0 ? 0 : 1 })} ${units[unitIndex]}`;
-}
+type PathDialogState = {
+  mode: PathDialogMode;
+  item?: YandexDiskResourceDto;
+  value: string;
+  error?: string | null;
+};
 
-function formatDate(value?: string | null) {
-  return value ? new Date(value).toLocaleString('ru-RU') : '—';
-}
-
-function appendYandexDiskHint(message: string, hint: string) {
-  const normalized = message.toLowerCase();
-  const hintStart = hint.slice(0, 32).toLowerCase();
-  return normalized.includes(hintStart) ? message : `${message} ${hint}`;
-}
-
-function extractYandexDiskErrorMessage(error: unknown, fallback: string) {
-  const message = extractDisplayErrorMessage(error, fallback);
-  const raw = error instanceof Error ? error.message : String(error ?? '');
-  const normalized = `${message} ${raw}`.toLowerCase();
-
-  if (normalized.includes('oauth') || normalized.includes('токен') || normalized.includes('token')) {
-    return appendYandexDiskHint(message, 'Проверьте OAuth-токен в настройках раздела «Я.Диск» и сохраните его заново.');
-  }
-
-  if (
-    (normalized.includes('яндекс') || normalized.includes('yandex'))
-    && (normalized.includes('прав') || normalized.includes('forbidden') || normalized.includes('access'))
-  ) {
-    return appendYandexDiskHint(message, 'Проверьте, что токен выдан с доступом к Яндекс.Диску и нужным операциям с файлами.');
-  }
-
-  if (
-    normalized.includes('quota')
-    || normalized.includes('insufficient')
-    || normalized.includes('not enough')
-    || normalized.includes('no space')
-    || normalized.includes('не хватает')
-  ) {
-    return appendYandexDiskHint(message, 'Освободите место на Яндекс.Диске или подключите другой аккаунт.');
-  }
-
-  if (
-    (normalized.includes('яндекс') || normalized.includes('yandex'))
-    && (normalized.includes('недоступ') || normalized.includes('не ответил') || normalized.includes('timeout') || normalized.includes('502') || normalized.includes('503') || normalized.includes('504'))
-  ) {
-    return appendYandexDiskHint(message, 'Повторите операцию позже; если ошибка сохраняется, проверьте доступность Яндекс.Диска и сети.');
-  }
-
-  return message;
-}
+type ConnectionDraft = UpsertYandexDiskConnectionRequest & {
+  id?: string | null;
+  name: string;
+  rootPath: string;
+  oAuthToken: string;
+  isEnabled: boolean;
+};
 
 const defaultCrmSyncDraft: UpdateYandexDiskCrmSyncSettingsRequest = {
   enabled: false,
@@ -122,12 +77,148 @@ const defaultCrmSyncDraft: UpdateYandexDiskCrmSyncSettingsRequest = {
   fileNameTemplate: '{documentDate}-{documentNumber}-{documentTitle}',
 };
 
-type YandexDiskProps = {
-  embedded?: boolean;
-};
+function joinPath(directory: string, name: string) {
+  const cleanName = name.trim().replace(/^\/+/, '');
+  if (!cleanName) return directory || '/';
+  if (!directory || directory === '/') return `/${cleanName}`;
+  return `${directory.replace(/\/+$/, '')}/${cleanName}`;
+}
+
+function parentPath(path: string) {
+  const normalized = path === '/' ? '/' : path.replace(/\/+$/, '');
+  const index = normalized.lastIndexOf('/');
+  return index <= 0 ? '/' : normalized.slice(0, index);
+}
+
+function normalizeTargetPath(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+function formatSize(size?: number | null) {
+  if (!size) return '-';
+  const units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
+  let value = size;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toLocaleString('ru-RU', { maximumFractionDigits: unitIndex === 0 ? 0 : 1 })} ${units[unitIndex]}`;
+}
+
+function formatDate(value?: string | null) {
+  return value ? new Date(value).toLocaleString('ru-RU') : '-';
+}
+
+function appendYandexDiskHint(message: string, hint: string) {
+  const normalized = message.toLowerCase();
+  const hintStart = hint.slice(0, 32).toLowerCase();
+  return normalized.includes(hintStart) ? message : `${message} ${hint}`;
+}
+
+function extractYandexDiskErrorMessage(error: unknown, fallback: string) {
+  const message = extractDisplayErrorMessage(error, fallback);
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = `${message} ${raw}`.toLowerCase();
+
+  if (normalized.includes('oauth') || normalized.includes('unauthorized') || normalized.includes('401')) {
+    return appendYandexDiskHint(message, 'Проверьте OAuth-токен Я.Диска и сохраните подключение заново.');
+  }
+
+  if (normalized.includes('forbidden') || normalized.includes('403') || normalized.includes('доступ')) {
+    return appendYandexDiskHint(message, 'Проверьте права токена на операции с файлами Яндекс.Диска.');
+  }
+
+  if (normalized.includes('quota') || normalized.includes('insufficient') || normalized.includes('мест')) {
+    return appendYandexDiskHint(message, 'Освободите место на Яндекс.Диске или подключите другой аккаунт.');
+  }
+
+  return message;
+}
+
+function emptyDraft(): ConnectionDraft {
+  return {
+    id: null,
+    name: 'Яндекс.Диск',
+    rootPath: 'disk:/PayPlanner',
+    oAuthToken: '',
+    isEnabled: true,
+  };
+}
+
+function draftFromConnection(connection: YandexDiskConnectionDto): ConnectionDraft {
+  return {
+    id: connection.id,
+    name: connection.name,
+    rootPath: connection.rootPath || 'disk:/PayPlanner',
+    oAuthToken: '',
+    isEnabled: connection.isEnabled,
+  };
+}
+
+function statusBadge(connection: YandexDiskConnectionDto) {
+  if (!connection.isEnabled) {
+    return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">Выключено</span>;
+  }
+
+  if (!connection.isConfigured) {
+    return <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">Нужен токен</span>;
+  }
+
+  return <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Включено</span>;
+}
+
+function iconButtonClass(tone: 'default' | 'primary' | 'success' | 'danger' = 'default') {
+  const base = 'inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-55';
+  switch (tone) {
+    case 'primary':
+      return `${base} border-sky-600 bg-sky-600 text-white shadow-sm hover:bg-sky-700`;
+    case 'success':
+      return `${base} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`;
+    case 'danger':
+      return `${base} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`;
+    default:
+      return `${base} border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-100`;
+  }
+}
+
+function cardIconButtonClass(tone: 'default' | 'success' | 'danger' = 'default') {
+  const base = 'inline-flex h-9 w-9 items-center justify-center rounded-lg border text-sm transition disabled:cursor-not-allowed disabled:opacity-55';
+  switch (tone) {
+    case 'success':
+      return `${base} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`;
+    case 'danger':
+      return `${base} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`;
+    default:
+      return `${base} border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-100`;
+  }
+}
+
+function cardActionButton({
+  label,
+  icon,
+  onClick,
+  tone = 'default',
+  disabled = false,
+}: {
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  tone?: 'default' | 'success' | 'danger';
+  disabled?: boolean;
+}) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} title={label} aria-label={label} className={cardIconButtonClass(tone)}>
+      {icon}
+    </button>
+  );
+}
 
 export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
   const toast = useToast();
+  const { confirm } = useDialog();
   const { user } = useAuth();
   const rolePermissions = useRolePermissions(user?.role?.id);
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
@@ -138,153 +229,353 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
   const canDelete = isAdminRole || permissions.canDelete;
   const canExport = isAdminRole || permissions.canExport;
   const canTestConnection = canView && canEdit && canCreate && canDelete && canExport;
-  const shellClassName = embedded ? 'space-y-4' : 'space-y-4 p-4 lg:p-6';
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [settings, setSettings] = useState<YandexDiskSettingsDto | null>(null);
+  const [overview, setOverview] = useState<YandexDiskConnectionsOverviewDto | null>(null);
+  const [activeTab, setActiveTab] = useState<YandexDiskTab>('connections');
+  const [mode, setMode] = useState<YandexDiskMode>('overview');
+  const [draft, setDraft] = useState<ConnectionDraft>(() => emptyDraft());
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  const [currentPath, setCurrentPath] = useState('/');
+  const [listing, setListing] = useState<YandexDiskListResponseDto | null>(null);
   const [connectionTest, setConnectionTest] = useState<YandexDiskConnectionTestDto | null>(null);
-  const [crmSyncSettings, setCrmSyncSettings] = useState<YandexDiskCrmSyncSettingsDto | null>(null);
   const [crmSyncPreview, setCrmSyncPreview] = useState<YandexDiskCrmSyncPreviewDto | null>(null);
   const [crmSyncStatus, setCrmSyncStatus] = useState<YandexDiskCrmSyncStatusReportDto | null>(null);
   const [crmSyncDraft, setCrmSyncDraft] = useState<UpdateYandexDiskCrmSyncSettingsRequest>(defaultCrmSyncDraft);
-  const [tokenDraft, setTokenDraft] = useState('');
-  const [rootPathDraft, setRootPathDraft] = useState('disk:/PayPlanner');
-  const [currentPath, setCurrentPath] = useState('/');
-  const [listing, setListing] = useState<YandexDiskListResponseDto | null>(null);
-  const [newFolderName, setNewFolderName] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [savingCrmSync, setSavingCrmSync] = useState(false);
-  const [busyPath, setBusyPath] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [editorPath, setEditorPath] = useState<string | null>(null);
   const [editorContent, setEditorContent] = useState('');
-  const [editorLoading, setEditorLoading] = useState(false);
+  const [pathDialog, setPathDialog] = useState<PathDialogState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadingAction, setLoadingAction] = useState(false);
+  const [savingConnection, setSavingConnection] = useState(false);
+  const [savingSync, setSavingSync] = useState(false);
 
-  const sortedItems = useMemo(() => {
-    const items = listing?.items ?? [];
-    return [...items].sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
-      return a.name.localeCompare(b.name, 'ru');
-    });
-  }, [listing]);
+  const connections = useMemo(() => overview?.connections ?? [], [overview]);
+  const selectedConnection = useMemo(
+    () => connections.find((connection) => connection.id === selectedConnectionId) ?? connections[0] ?? null,
+    [connections, selectedConnectionId],
+  );
+  const shellClassName = embedded ? 'w-full' : 'min-h-screen w-full bg-slate-50 px-4 py-5 sm:px-6 lg:px-8';
 
-  const loadSettings = async () => {
-    const [loaded, loadedCrmSyncSettings, loadedCrmSyncPreview, loadedCrmSyncStatus] = await Promise.all([
-      apiService.getYandexDiskSettings(),
-      apiService.getYandexDiskCrmSyncSettings(),
-      apiService.getYandexDiskCrmSyncPreview(),
-      apiService.getYandexDiskCrmSyncStatus(),
-    ]);
-    setSettings(loaded);
-    setRootPathDraft(loaded.rootPath || 'disk:/PayPlanner');
-    setCrmSyncSettings(loadedCrmSyncSettings);
-    setCrmSyncPreview(loadedCrmSyncPreview);
-    setCrmSyncStatus(loadedCrmSyncStatus);
-    setCrmSyncDraft({
-      enabled: loadedCrmSyncSettings.enabled,
-      syncInvoices: loadedCrmSyncSettings.syncInvoices,
-      syncActs: loadedCrmSyncSettings.syncActs,
-      syncContracts: loadedCrmSyncSettings.syncContracts,
-      syncCaseDocuments: loadedCrmSyncSettings.syncCaseDocuments,
-      syncTaskFiles: loadedCrmSyncSettings.syncTaskFiles,
-      overwriteExisting: loadedCrmSyncSettings.overwriteExisting,
-      conflictResolutionMode: loadedCrmSyncSettings.conflictResolutionMode ?? 'yandexDiskMaster',
-      folderTemplate: loadedCrmSyncSettings.folderTemplate,
-      fileNameTemplate: loadedCrmSyncSettings.fileNameTemplate,
-    });
-    return loaded;
+  const showError = (message: string) => {
+    setError(message);
+    toast.error(message, 'Я.Диск');
   };
 
-  const loadListing = async (path = currentPath, silent = false) => {
+  const loadOverview = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const loaded = await apiService.getYandexDiskConnections();
+      setOverview(loaded);
+      setSelectedConnectionId((current) => {
+        if (current && loaded.connections.some((connection) => connection.id === current)) {
+          return current;
+        }
+        return loaded.connections.find((connection) => connection.isEnabled && connection.isConfigured)?.id
+          ?? loaded.connections[0]?.id
+          ?? null;
+      });
+    } catch (loadError) {
+      showError(extractYandexDiskErrorMessage(loadError, 'Не удалось загрузить подключения Я.Диска.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadSync = async () => {
+    try {
+      const [settings, preview, status] = await Promise.all([
+        apiService.getYandexDiskCrmSyncSettings(),
+        apiService.getYandexDiskCrmSyncPreview(),
+        apiService.getYandexDiskCrmSyncStatus(),
+      ]);
+      setCrmSyncPreview(preview);
+      setCrmSyncStatus(status);
+      setCrmSyncDraft({
+        enabled: settings.enabled,
+        syncInvoices: settings.syncInvoices,
+        syncActs: settings.syncActs,
+        syncContracts: settings.syncContracts,
+        syncCaseDocuments: settings.syncCaseDocuments,
+        syncTaskFiles: settings.syncTaskFiles,
+        overwriteExisting: settings.overwriteExisting,
+        conflictResolutionMode: settings.conflictResolutionMode ?? 'yandexDiskMaster',
+        folderTemplate: settings.folderTemplate,
+        fileNameTemplate: settings.fileNameTemplate,
+      });
+    } catch (syncError) {
+      showError(extractYandexDiskErrorMessage(syncError, 'Не удалось загрузить настройки синхронизации Я.Диска.'));
+    }
+  };
+
+  const loadObjects = async (path = currentPath, silent = false) => {
+    if (!selectedConnection?.id) return;
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const loadedSettings = settings ?? await loadSettings();
-      if (!loadedSettings.isConfigured) {
-        setListing(null);
-        return;
-      }
-      const data = await apiService.listYandexDiskResources(path);
+      const data = await apiService.listYandexDiskResources(path, selectedConnection.id);
       setListing(data);
       setCurrentPath(data.current.path || path || '/');
     } catch (loadError) {
-      setError(extractYandexDiskErrorMessage(loadError, 'Не удалось загрузить Яндекс.Диск.'));
+      showError(extractYandexDiskErrorMessage(loadError, 'Не удалось загрузить файлы Я.Диска.'));
     } finally {
       if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadSettings().then((loaded) => {
-      if (loaded.isConfigured) {
-        void loadListing('/');
-      }
-    });
-  }, []);
+    if (canView) {
+      void loadOverview();
+      void loadSync();
+    }
+    // Initial loading is tied to permission state; loaders are intentionally not dependencies.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canView]);
 
-  const saveSettings = async () => {
+  useEffect(() => {
+    if (activeTab === 'files' && selectedConnection?.id) {
+      void loadObjects('/');
+    }
+    // Opening the files tab or changing connection resets the browser to the root folder.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedConnection?.id]);
+
+  const openCreateForm = () => {
+    setDraft(emptyDraft());
+    setMode('form');
+  };
+
+  const openEditForm = (connection: YandexDiskConnectionDto) => {
+    setDraft(draftFromConnection(connection));
+    setMode('form');
+  };
+
+  const saveConnection = async () => {
     if (!canEdit) return;
-    setSavingSettings(true);
+    if (!draft.name.trim()) {
+      showError('Укажите название подключения Я.Диска.');
+      return;
+    }
+    if (!draft.id && !draft.oAuthToken.trim()) {
+      showError('Для нового подключения нужен OAuth-токен Я.Диска.');
+      return;
+    }
+
+    setSavingConnection(true);
     setError(null);
     try {
-      const updated = await apiService.updateYandexDiskSettings({
-        rootPath: rootPathDraft,
-        oAuthToken: tokenDraft.trim() || undefined,
+      const saved = await apiService.upsertYandexDiskConnection({
+        id: draft.id,
+        name: draft.name.trim(),
+        rootPath: draft.rootPath.trim() || 'disk:/PayPlanner',
+        oAuthToken: draft.oAuthToken.trim() || undefined,
+        isEnabled: draft.isEnabled,
       });
-      setSettings(updated);
-      setTokenDraft('');
-      toast.success('Настройки Яндекс.Диска сохранены.', 'Я.Диск');
-      if (updated.isConfigured) {
-        await loadListing('/');
-      }
+      toast.success(draft.id ? 'Подключение Я.Диска обновлено.' : 'Подключение Я.Диска создано.', 'Я.Диск');
+      await loadOverview();
+      setSelectedConnectionId(saved.id);
+      setMode('overview');
+      setActiveTab('connections');
     } catch (saveError) {
-      setError(extractYandexDiskErrorMessage(saveError, 'Не удалось сохранить настройки Яндекс.Диска.'));
+      showError(extractYandexDiskErrorMessage(saveError, 'Не удалось сохранить подключение Я.Диска.'));
     } finally {
-      setSavingSettings(false);
+      setSavingConnection(false);
     }
   };
 
   const clearToken = async () => {
-    if (!canEdit) return;
-    if (!window.confirm('Удалить сохраненный OAuth-токен Яндекс.Диска?')) return;
-    setSavingSettings(true);
+    if (!draft.id || !canEdit) return;
+    const approved = await confirm({
+      title: 'Очистить OAuth-токен?',
+      description: `Сохраненный токен подключения "${draft.name}" будет удален. Само подключение останется в списке.`,
+      confirmLabel: 'Очистить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    setSavingConnection(true);
     try {
-      const updated = await apiService.updateYandexDiskSettings({ rootPath: rootPathDraft, clearToken: true });
-      setSettings(updated);
-      setListing(null);
-      toast.success('OAuth-токен удален.', 'Я.Диск');
+      await apiService.upsertYandexDiskConnection({
+        id: draft.id,
+        name: draft.name,
+        rootPath: draft.rootPath,
+        clearToken: true,
+        isEnabled: draft.isEnabled,
+      });
+      setDraft((current) => ({ ...current, oAuthToken: '' }));
+      await loadOverview();
+      toast.success('OAuth-токен очищен.', 'Я.Диск');
     } catch (clearError) {
-      setError(extractYandexDiskErrorMessage(clearError, 'Не удалось удалить токен.'));
+      showError(extractYandexDiskErrorMessage(clearError, 'Не удалось очистить OAuth-токен.'));
     } finally {
-      setSavingSettings(false);
+      setSavingConnection(false);
     }
   };
 
-  const testConnection = async () => {
-    if (!canTestConnection) return;
-    setTestingConnection(true);
+  const deleteConnection = async (connection: YandexDiskConnectionDto) => {
+    if (!canDelete) return;
+    const approved = await confirm({
+      title: 'Удалить подключение Я.Диска?',
+      description: `Подключение "${connection.name}" будет удалено из настроек. Файлы в аккаунте Яндекс.Диска не удаляются.`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    setLoadingAction(true);
+    try {
+      await apiService.deleteYandexDiskConnection(connection.id);
+      toast.success('Подключение Я.Диска удалено.', 'Я.Диск');
+      await loadOverview();
+      if (selectedConnectionId === connection.id) {
+        setSelectedConnectionId(null);
+        setListing(null);
+      }
+    } catch (deleteError) {
+      showError(extractYandexDiskErrorMessage(deleteError, 'Не удалось удалить подключение Я.Диска.'));
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const testConnection = async (connection = selectedConnection) => {
+    if (!connection || !canTestConnection) return;
+    setLoadingAction(true);
     setError(null);
     try {
-      const result = await apiService.testYandexDiskConnection('/_payplanner-test');
+      const result = await apiService.testYandexDiskConnectionById(connection.id, '/_payplanner-test');
       setConnectionTest(result);
-      toast.success('Подключение к Яндекс.Диску проверено.', 'Я.Диск');
-      await loadListing(currentPath, true);
-    } catch (connectionError) {
-      setConnectionTest(null);
-      setError(extractYandexDiskErrorMessage(connectionError, 'Не удалось проверить подключение к Яндекс.Диску.'));
+      setActiveTab('logs');
+      toast.success('Подключение Я.Диска проверено.', 'Я.Диск');
+    } catch (testError) {
+      showError(extractYandexDiskErrorMessage(testError, 'Не удалось проверить подключение Я.Диска.'));
     } finally {
-      setTestingConnection(false);
+      setLoadingAction(false);
     }
   };
 
-  const saveCrmSyncSettings = async () => {
+  const submitPathDialog = async () => {
+    if (!pathDialog || !selectedConnection?.id) return;
+    const value = normalizeTargetPath(pathDialog.value);
+    if (!value) {
+      setPathDialog((dialog) => (dialog ? { ...dialog, error: 'Укажите путь.' } : dialog));
+      return;
+    }
+
+    setLoadingAction(true);
+    try {
+      if (pathDialog.mode === 'folder') {
+        await apiService.createYandexDiskFolder(joinPath(currentPath, value), selectedConnection.id);
+        toast.success('Папка создана.', 'Я.Диск');
+      } else if (pathDialog.mode === 'copy' && pathDialog.item) {
+        await apiService.copyYandexDiskResource(pathDialog.item.path, value, false, selectedConnection.id);
+        toast.success('Объект скопирован.', 'Я.Диск');
+      } else if (pathDialog.mode === 'move' && pathDialog.item) {
+        await apiService.moveYandexDiskResource(pathDialog.item.path, value, false, selectedConnection.id);
+        toast.success('Объект перемещен.', 'Я.Диск');
+      }
+      setPathDialog(null);
+      await loadObjects(currentPath, true);
+    } catch (dialogError) {
+      setPathDialog((dialog) => (dialog ? { ...dialog, error: extractYandexDiskErrorMessage(dialogError, 'Операция Я.Диска не выполнена.') } : dialog));
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const uploadFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !selectedConnection?.id || !canCreate) return;
+
+    setLoadingAction(true);
+    try {
+      await apiService.uploadYandexDiskFile(joinPath(currentPath, file.name), file, true, selectedConnection.id);
+      toast.success('Файл загружен.', 'Я.Диск');
+      await loadObjects(currentPath, true);
+    } catch (uploadError) {
+      showError(extractYandexDiskErrorMessage(uploadError, 'Не удалось загрузить файл.'));
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const downloadFile = async (item: YandexDiskResourceDto) => {
+    if (!selectedConnection?.id || !canExport) return;
+    try {
+      const result = await apiService.downloadYandexDiskFile(item.path, selectedConnection.id);
+      const url = URL.createObjectURL(result.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      showError(extractYandexDiskErrorMessage(downloadError, 'Не удалось скачать файл.'));
+    }
+  };
+
+  const deleteResource = async (item: YandexDiskResourceDto) => {
+    if (!selectedConnection?.id || !canDelete) return;
+    const approved = await confirm({
+      title: 'Удалить объект Я.Диска?',
+      description: `"${item.name}" будет удален из выбранного подключения.`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
+
+    setLoadingAction(true);
+    try {
+      await apiService.deleteYandexDiskResource(item.path, false, selectedConnection.id);
+      toast.success('Объект удален.', 'Я.Диск');
+      await loadObjects(currentPath, true);
+    } catch (deleteError) {
+      showError(extractYandexDiskErrorMessage(deleteError, 'Не удалось удалить объект.'));
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const openTextEditor = async (item: YandexDiskResourceDto) => {
+    if (!selectedConnection?.id || !canEdit || item.type !== 'file') return;
+    setLoadingAction(true);
+    try {
+      const file = await apiService.getYandexDiskTextFile(item.path, selectedConnection.id);
+      setEditorPath(file.path);
+      setEditorContent(file.content);
+    } catch (editorError) {
+      showError(extractYandexDiskErrorMessage(editorError, 'Не удалось открыть файл для редактирования.'));
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const saveTextEditor = async () => {
+    if (!selectedConnection?.id || !editorPath || !canEdit) return;
+    setLoadingAction(true);
+    try {
+      await apiService.saveYandexDiskTextFile(editorPath, editorContent, true, selectedConnection.id);
+      toast.success('Файл сохранен.', 'Я.Диск');
+      setEditorPath(null);
+      await loadObjects(currentPath, true);
+    } catch (editorError) {
+      showError(extractYandexDiskErrorMessage(editorError, 'Не удалось сохранить файл.'));
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const saveSyncSettings = async () => {
     if (!canEdit) return;
-    setSavingCrmSync(true);
-    setError(null);
+    setSavingSync(true);
     try {
       const updated = await apiService.updateYandexDiskCrmSyncSettings(crmSyncDraft);
-      setCrmSyncSettings(updated);
       setCrmSyncDraft({
         enabled: updated.enabled,
         syncInvoices: updated.syncInvoices,
@@ -298,681 +589,483 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
         fileNameTemplate: updated.fileNameTemplate,
       });
       setCrmSyncPreview(await apiService.getYandexDiskCrmSyncPreview());
-      toast.success('Правила синхронизации CRM сохранены.', 'Я.Диск');
-    } catch (saveError) {
-      setError(extractYandexDiskErrorMessage(saveError, 'Не удалось сохранить правила синхронизации CRM.'));
-    } finally {
-      setSavingCrmSync(false);
-    }
-  };
-
-  const refreshCrmSyncPreview = async () => {
-    try {
-      setCrmSyncPreview(await apiService.getYandexDiskCrmSyncPreview());
-    } catch (previewError) {
-      setError(extractYandexDiskErrorMessage(previewError, 'Не удалось обновить предпросмотр синхронизации CRM.'));
-    }
-  };
-
-  const refreshCrmSyncStatus = async () => {
-    try {
       setCrmSyncStatus(await apiService.getYandexDiskCrmSyncStatus());
-    } catch (statusError) {
-      setError(extractYandexDiskErrorMessage(statusError, 'Не удалось обновить отчет синхронизации CRM.'));
-    }
-  };
-
-  const createFolder = async () => {
-    if (!canCreate) return;
-    const name = newFolderName.trim();
-    if (!name) return;
-    setBusyPath(joinPath(currentPath, name));
-    try {
-      await apiService.createYandexDiskFolder(joinPath(currentPath, name));
-      setNewFolderName('');
-      toast.success('Папка создана.', 'Я.Диск');
-      await loadListing(currentPath, true);
-    } catch (createError) {
-      setError(extractYandexDiskErrorMessage(createError, 'Не удалось создать папку.'));
+      toast.success('Правила синхронизации сохранены.', 'Я.Диск');
+    } catch (syncError) {
+      showError(extractYandexDiskErrorMessage(syncError, 'Не удалось сохранить правила синхронизации.'));
     } finally {
-      setBusyPath(null);
+      setSavingSync(false);
     }
   };
 
-  const uploadFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    if (!canCreate) return;
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    const targetPath = joinPath(currentPath, file.name);
-    setBusyPath(targetPath);
-    try {
-      await apiService.uploadYandexDiskFile(targetPath, file, true);
-      toast.success('Файл загружен.', 'Я.Диск');
-      await loadListing(currentPath, true);
-    } catch (uploadError) {
-      setError(extractYandexDiskErrorMessage(uploadError, 'Не удалось загрузить файл.'));
-    } finally {
-      setBusyPath(null);
-    }
-  };
+  if (!canView) {
+    return (
+      <div className={embedded ? 'w-full' : 'p-6'}>
+        <div className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-700">
+          Недостаточно прав для просмотра Я.Диска.
+        </div>
+      </div>
+    );
+  }
 
-  const downloadFile = async (item: YandexDiskResourceDto) => {
-    if (!canExport) return;
-    setBusyPath(item.path);
-    try {
-      const result = await apiService.downloadYandexDiskFile(item.path);
-      const url = URL.createObjectURL(result.blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = result.fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (downloadError) {
-      setError(extractYandexDiskErrorMessage(downloadError, 'Не удалось скачать файл.'));
-    } finally {
-      setBusyPath(null);
-    }
-  };
-
-  const deleteResource = async (item: YandexDiskResourceDto) => {
-    if (!canDelete) return;
-    if (!window.confirm(`Удалить "${item.name}" с Яндекс.Диска?`)) return;
-    setBusyPath(item.path);
-    try {
-      await apiService.deleteYandexDiskResource(item.path, false);
-      toast.success('Ресурс удален.', 'Я.Диск');
-      await loadListing(currentPath, true);
-    } catch (deleteError) {
-      setError(extractYandexDiskErrorMessage(deleteError, 'Не удалось удалить ресурс.'));
-    } finally {
-      setBusyPath(null);
-    }
-  };
-
-  const copyResource = async (item: YandexDiskResourceDto) => {
-    if (!canCreate) return;
-    const target = window.prompt('Куда скопировать ресурс?', joinPath(parentPath(item.path), `copy-${item.name}`));
-    if (!target) return;
-    setBusyPath(item.path);
-    try {
-      await apiService.copyYandexDiskResource(item.path, target, false);
-      toast.success('Ресурс скопирован.', 'Я.Диск');
-      await loadListing(currentPath, true);
-    } catch (copyError) {
-      setError(extractYandexDiskErrorMessage(copyError, 'Не удалось скопировать ресурс.'));
-    } finally {
-      setBusyPath(null);
-    }
-  };
-
-  const moveResource = async (item: YandexDiskResourceDto) => {
-    if (!canEdit) return;
-    const target = window.prompt('Новый путь ресурса:', item.path);
-    if (!target || target === item.path) return;
-    setBusyPath(item.path);
-    try {
-      await apiService.moveYandexDiskResource(item.path, target, false);
-      toast.success('Ресурс перемещен.', 'Я.Диск');
-      await loadListing(currentPath, true);
-    } catch (moveError) {
-      setError(extractYandexDiskErrorMessage(moveError, 'Не удалось переместить ресурс.'));
-    } finally {
-      setBusyPath(null);
-    }
-  };
-
-  const openTextEditor = async (item: YandexDiskResourceDto) => {
-    if (!canEdit) return;
-    setEditorPath(item.path);
-    setEditorContent('');
-    setEditorLoading(true);
-    try {
-      const file = await apiService.getYandexDiskTextFile(item.path);
-      setEditorPath(file.path);
-      setEditorContent(file.content);
-    } catch (editorError) {
-      setEditorPath(null);
-      setError(extractYandexDiskErrorMessage(editorError, 'Не удалось открыть файл для редактирования.'));
-    } finally {
-      setEditorLoading(false);
-    }
-  };
-
-  const saveTextEditor = async () => {
-    if (!canEdit) return;
-    if (!editorPath) return;
-    setEditorLoading(true);
-    try {
-      await apiService.saveYandexDiskTextFile(editorPath, editorContent, true);
-      toast.success('Файл сохранен.', 'Я.Диск');
-      await loadListing(currentPath, true);
-      setEditorPath(null);
-    } catch (editorError) {
-      setError(extractYandexDiskErrorMessage(editorError, 'Не удалось сохранить файл.'));
-    } finally {
-      setEditorLoading(false);
-    }
-  };
-
-  return (
-    <div className={shellClassName}>
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-semibold text-sky-700">
-              <Cloud className="h-4 w-4" />
-              <span>Яндекс.Диск</span>
-            </div>
-            <h2 className="mt-1 text-xl font-semibold text-slate-900">Файлы и папки Я.Диска</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Статус: {settings?.isConfigured ? `подключен (${settings.tokenPreview ?? 'токен сохранен'})` : 'нужен OAuth-токен'}.
-            </p>
-          </div>
-
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[minmax(180px,280px)_minmax(180px,260px)_auto_auto_auto]">
-            <label className="block">
-              <span className="text-xs font-semibold text-slate-600">Корневая папка</span>
-              <input
-                value={rootPathDraft}
-                onChange={(event) => setRootPathDraft(event.target.value)}
-                disabled={!canEdit}
-                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-                placeholder="disk:/PayPlanner"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs font-semibold text-slate-600">OAuth-токен</span>
-              <div className="relative mt-1">
-                <KeyRound className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <input
-                  type="password"
-                  value={tokenDraft}
-                  onChange={(event) => setTokenDraft(event.target.value)}
-                  disabled={!canEdit}
-                  className="h-10 w-full rounded-lg border border-slate-300 pl-9 pr-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-                  placeholder="Новый токен"
-                />
+  if (mode === 'form') {
+    return (
+      <div className={shellClassName}>
+        <div className="flex w-full flex-col gap-5">
+          <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <button type="button" onClick={() => setMode('overview')} className={iconButtonClass()} title="Вернуться к подключениям">
+                <ArrowLeft className="h-4 w-4" />
+                К подключениям
+              </button>
+              <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-sky-700">
+                <Cloud className="h-4 w-4" />
+                <span>{draft.id ? 'Редактирование подключения' : 'Новое подключение'}</span>
               </div>
-            </label>
-            <button
-              type="button"
-              onClick={() => void saveSettings()}
-              disabled={savingSettings || !canEdit}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {savingSettings ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              <h2 className="mt-1 text-2xl font-semibold text-slate-900">{draft.id ? draft.name : 'Создание подключения Я.Диска'}</h2>
+            </div>
+            <button type="button" onClick={saveConnection} disabled={savingConnection || !canEdit} className={iconButtonClass('primary')} title="Сохранить">
+              {savingConnection ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Сохранить
             </button>
-            <button
-              type="button"
-              onClick={() => void clearToken()}
-              disabled={savingSettings || !settings?.isConfigured || !canEdit}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <X className="h-4 w-4" />
-              Сбросить
-            </button>
-            <button
-              type="button"
-              onClick={() => void testConnection()}
-              disabled={testingConnection || !settings?.isConfigured || !canTestConnection}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-300 px-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
-              title="Создает служебный файл в тестовой папке, проверяет чтение и удаляет файл"
-            >
-              {testingConnection ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube2 className="h-4 w-4" />}
-              Проверить
-            </button>
-          </div>
-        </div>
-      </section>
+          </header>
 
-      {connectionTest ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 font-semibold">
-                <CheckCircle2 className="h-4 w-4" />
-                Подключение к Яндекс.Диску проверено
-              </div>
-              <div className="mt-1 text-emerald-700">
-                Тестовая папка: <span className="font-mono">{connectionTest.testFolderPath}</span>. Проверено: {formatDate(connectionTest.checkedAt)}.
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {connectionTest.steps.map((step) => (
-                <span key={step.key} className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-emerald-700 shadow-sm" title={step.message}>
-                  {step.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : null}
+          {error ? <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
 
-      {error ? (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
-      ) : null}
-
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div className="min-w-0 xl:max-w-sm">
-            <div className="flex items-center gap-2 text-sm font-semibold text-sky-700">
-              <SlidersHorizontal className="h-4 w-4" />
-              <span>Синхронизация CRM</span>
-            </div>
-            <h3 className="mt-1 text-lg font-semibold text-slate-900">Правила для документов</h3>
-            <p className="mt-1 text-sm text-slate-600">
-              Настройте, какие CRM-документы будут отправляться на Яндекс.Диск и по какому шаблону формировать папки.
-            </p>
-            {crmSyncSettings?.updatedAt ? (
-              <p className="mt-2 text-xs text-slate-500">Обновлено: {formatDate(crmSyncSettings.updatedAt)}</p>
-            ) : null}
-          </div>
-
-          <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(260px,1fr)_minmax(260px,1fr)]">
-            <div className="space-y-3">
-              <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={crmSyncDraft.enabled}
-                  onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, enabled: event.target.checked }))}
-                  disabled={!canEdit}
-                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                />
-                Включить правила синхронизации
-              </label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {[
-                  ['syncInvoices', 'Счета'],
-                  ['syncActs', 'Акты'],
-                  ['syncContracts', 'Договоры'],
-                  ['syncCaseDocuments', 'Документы дел'],
-                  ['syncTaskFiles', 'Файлы задач'],
-                ].map(([field, label]) => (
-                  <label key={field} className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(crmSyncDraft[field as keyof UpdateYandexDiskCrmSyncSettingsRequest])}
-                      onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, [field]: event.target.checked }))}
-                      disabled={!canEdit}
-                      className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <label className="block">
-                <span className="text-xs font-semibold text-slate-600">Правило конфликтов</span>
-                <select
-                  value={crmSyncDraft.conflictResolutionMode ?? 'yandexDiskMaster'}
-                  onChange={(event) => setCrmSyncDraft((draft) => ({
-                    ...draft,
-                    conflictResolutionMode: event.target.value,
-                    overwriteExisting: event.target.value === 'crmMaster',
-                  }))}
-                  disabled={!canEdit}
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-                >
-                  <option value="yandexDiskMaster">Яндекс.Диск главный</option>
-                  <option value="crmMaster">CRM главная</option>
-                  <option value="manualConfirmation">Ручное подтверждение</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="text-xs font-semibold text-slate-600">Шаблон папки</span>
-                <input
-                  value={crmSyncDraft.folderTemplate ?? ''}
-                  onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, folderTemplate: event.target.value }))}
-                  disabled={!canEdit}
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-                  placeholder="CRM/{clientName}/{caseNumber}/{documentType}"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs font-semibold text-slate-600">Шаблон имени файла</span>
-                <input
-                  value={crmSyncDraft.fileNameTemplate ?? ''}
-                  onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, fileNameTemplate: event.target.value }))}
-                  disabled={!canEdit}
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-                  placeholder="{documentDate}-{documentNumber}-{documentTitle}"
-                />
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {(crmSyncSettings?.availableTokens ?? []).map((token) => (
-                  <span key={token} className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-600">
-                    {'{'}{token}{'}'}
-                  </span>
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={() => void saveCrmSyncSettings()}
-                disabled={savingCrmSync || !canEdit}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {savingCrmSync ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Сохранить правила
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-slate-100 pb-3 md:flex-row md:items-center md:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-semibold text-sky-700">
-              <RefreshCw className="h-4 w-4" />
-              <span>Мониторинг CRM</span>
-            </div>
-            <h3 className="mt-1 text-lg font-semibold text-slate-900">Состояние синхронизации</h3>
-          </div>
-          <button
-            type="button"
-            onClick={() => void refreshCrmSyncStatus()}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          <form
+            className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+            autoComplete="off"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveConnection();
+            }}
           >
-            <RefreshCw className="h-4 w-4" />
-            Обновить
-          </button>
-        </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-4">
-          {[
-            ['Ожидают', crmSyncStatus?.pendingCount ?? 0],
-            ['Ошибки', crmSyncStatus?.failedCount ?? 0],
-            ['Успешно', crmSyncStatus?.successCount ?? 0],
-            ['Последний обмен', crmSyncStatus?.lastSuccessfulSyncAt ? formatDate(crmSyncStatus.lastSuccessfulSyncAt) : '—'],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-              <div className="mt-1 truncate text-base font-semibold text-slate-900">{value}</div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-3 py-2 text-left font-semibold">Документ</th>
-                <th className="px-3 py-2 text-left font-semibold">Статус</th>
-                <th className="px-3 py-2 text-left font-semibold">Путь</th>
-                <th className="px-3 py-2 text-left font-semibold">Обновлено</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {(crmSyncStatus?.recentItems ?? []).map((item) => (
-                <tr key={`${item.documentKind}-${item.objectType}-${item.objectId}`}>
-                  <td className="px-3 py-2">
-                    <div className="font-medium text-slate-800">{item.fileName ?? item.documentKind}</div>
-                    {item.lastError ? <div className="mt-1 max-w-[360px] truncate text-xs text-rose-600" title={item.lastError}>{item.lastError}</div> : null}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2">{item.statusText}</td>
-                  <td className="max-w-[460px] px-3 py-2">
-                    <div className="truncate font-mono text-xs text-slate-700" title={item.yandexDiskPath ?? undefined}>{item.yandexDiskPath ?? '—'}</div>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2">{formatDate(item.updatedAt)}</td>
-                </tr>
-              ))}
-              {!crmSyncStatus?.recentItems?.length ? (
-                <tr>
-                  <td colSpan={4} className="px-3 py-6 text-center text-sm text-slate-500">История синхронизации пока пуста.</td>
-                </tr>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-sm font-semibold text-slate-700">Название</span>
+                <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-semibold text-slate-700">Рабочая папка</span>
+                <input value={draft.rootPath} onChange={(event) => setDraft((current) => ({ ...current, rootPath: event.target.value }))} placeholder="disk:/PayPlanner" autoComplete="off" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+              <label className="space-y-1 lg:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">OAuth-токен</span>
+                <div className="relative">
+                  <KeyRound className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="password"
+                    value={draft.oAuthToken}
+                    onChange={(event) => setDraft((current) => ({ ...current, oAuthToken: event.target.value }))}
+                    placeholder={draft.id ? 'Оставьте пустым, чтобы не менять сохраненный токен' : 'Вставьте OAuth-токен Я.Диска'}
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm"
+                  />
+                </div>
+              </label>
+              {draft.id ? (
+                <button type="button" onClick={clearToken} disabled={savingConnection || !canEdit} className={iconButtonClass('danger')} title="Очистить сохраненный токен">
+                  <X className="h-4 w-4" />
+                  Очистить токен
+                </button>
               ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-slate-100 pb-3 md:flex-row md:items-center md:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-semibold text-sky-700">
-              <Eye className="h-4 w-4" />
-              <span>Dry-run CRM</span>
+              <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                <input type="checkbox" checked={draft.isEnabled} onChange={(event) => setDraft((current) => ({ ...current, isEnabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
+                Включить подключение
+              </label>
             </div>
-            <h3 className="mt-1 text-lg font-semibold text-slate-900">Предпросмотр путей синхронизации</h3>
-          </div>
-          <button
-            type="button"
-            onClick={() => void refreshCrmSyncPreview()}
-            disabled={savingCrmSync}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Обновить
-          </button>
+          </form>
         </div>
-        <div className="mt-3 overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-3 py-2 text-left font-semibold">Тип</th>
-                <th className="px-3 py-2 text-left font-semibold">Статус</th>
-                <th className="px-3 py-2 text-left font-semibold">Путь</th>
-                <th className="px-3 py-2 text-left font-semibold">Действие</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {(crmSyncPreview?.items ?? []).map((item) => (
-                <tr key={item.documentKind} className={item.enabled ? 'bg-white' : 'bg-slate-50 text-slate-500'}>
-                  <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-800">{item.documentType}</td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    {item.enabled ? 'Будет отправляться' : 'Отключено'}
-                  </td>
-                  <td className="max-w-[520px] px-3 py-2">
-                    <div className="truncate font-mono text-xs text-slate-700" title={item.fullPath}>{item.fullPath}</div>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2">{item.operationText}</td>
-                </tr>
-              ))}
-              {!crmSyncPreview?.items?.length ? (
-                <tr>
-                  <td colSpan={4} className="px-3 py-6 text-center text-sm text-slate-500">Предпросмотр пока не загружен.</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      </div>
+    );
+  }
 
+  function renderTabs() {
+    const tabs = [
+      { id: 'connections' as const, label: 'Подключения', icon: Cloud },
+      { id: 'files' as const, label: 'Файлы', icon: Folder },
+      { id: 'sync' as const, label: 'Синхронизация', icon: SlidersHorizontal },
+      { id: 'logs' as const, label: 'Логи', icon: CheckCircle2 },
+    ];
+
+    return (
+      <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const active = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition ${
+                active ? 'bg-sky-100 text-sky-800' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderConnectionsTab() {
+    if (loading) {
+      return <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-500">Загружаем подключения...</div>;
+    }
+
+    if (!connections.length) {
+      return (
+        <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-500">
+          Подключений пока нет. Создайте первое подключение Я.Диска.
+        </div>
+      );
+    }
+
+    return (
+      <section className="grid w-full gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        {connections.map((connection) => (
+          <article key={connection.id} className="flex min-h-[17rem] flex-col rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-base font-semibold text-slate-900">{connection.name}</h3>
+                <div className="mt-2 flex flex-wrap gap-2">{statusBadge(connection)}</div>
+              </div>
+              <Cloud className="h-5 w-5 text-sky-600" />
+            </div>
+
+            <div className="mt-4 grid gap-3 text-xs text-slate-600">
+              <div>
+                <div className="font-semibold uppercase text-slate-400">Рабочая папка</div>
+                <div className="mt-1 break-all font-mono text-slate-800">{connection.rootPath || 'disk:/'}</div>
+              </div>
+              <div>
+                <div className="font-semibold uppercase text-slate-400">OAuth-токен</div>
+                <div className="mt-1 font-mono text-slate-800">{connection.tokenPreview ?? 'Не сохранен'}</div>
+              </div>
+              <div>
+                <div className="font-semibold uppercase text-slate-400">Обновлено</div>
+                <div className="mt-1 text-slate-800">{formatDate(connection.updatedAt)}</div>
+              </div>
+            </div>
+
+            <div className="mt-auto flex justify-end gap-2 pt-4">
+              {cardActionButton({ label: 'Открыть файлы', icon: <Folder className="h-4 w-4" />, tone: 'success', onClick: () => { setSelectedConnectionId(connection.id); setActiveTab('files'); } })}
+              {cardActionButton({ label: 'Изменить', icon: <Edit3 className="h-4 w-4" />, onClick: () => openEditForm(connection), disabled: !canEdit })}
+              {cardActionButton({ label: 'Проверить', icon: <TestTube2 className="h-4 w-4" />, onClick: () => void testConnection(connection), disabled: !canTestConnection })}
+              {cardActionButton({ label: 'Удалить', icon: <Trash2 className="h-4 w-4" />, tone: 'danger', onClick: () => void deleteConnection(connection), disabled: !canDelete || loadingAction })}
+            </div>
+          </article>
+        ))}
+      </section>
+    );
+  }
+
+  function renderFilesTab() {
+    return (
       <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Текущая папка</div>
-            <div className="mt-1 truncate text-lg font-semibold text-slate-900">{currentPath}</div>
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">Файлы Я.Диска</h3>
+            <p className="mt-1 text-sm text-slate-500">{selectedConnection ? `${selectedConnection.name}: ${currentPath}` : 'Выберите подключение'}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void loadListing(currentPath)}
-              disabled={loading || !settings?.isConfigured}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              Обновить
-            </button>
-            <button
-              type="button"
-              onClick={() => void loadListing(parentPath(currentPath))}
-              disabled={currentPath === '/' || loading}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
+            <select value={selectedConnection?.id ?? ''} onChange={(event) => { setSelectedConnectionId(event.target.value || null); setCurrentPath('/'); }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+              {connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}
+            </select>
+            <button type="button" onClick={() => void loadObjects(parentPath(currentPath))} disabled={!selectedConnection || currentPath === '/'} className={iconButtonClass()} title="Вверх">
               <ArrowUp className="h-4 w-4" />
               Вверх
             </button>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!settings?.isConfigured || !canCreate}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
+            <button type="button" onClick={() => setPathDialog({ mode: 'folder', value: '' })} disabled={!selectedConnection || !canCreate} className={iconButtonClass()} title="Создать папку">
+              <Folder className="h-4 w-4" />
+              Папка
+            </button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={!selectedConnection || !canCreate} className={iconButtonClass('primary')} title="Загрузить файл">
               <UploadCloud className="h-4 w-4" />
               Загрузить
+            </button>
+            <button type="button" onClick={() => void loadObjects(currentPath)} disabled={!selectedConnection} className={iconButtonClass()} title="Обновить">
+              <RefreshCw className="h-4 w-4" />
+              Обновить
             </button>
             <input ref={fileInputRef} type="file" className="hidden" onChange={uploadFile} />
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 border-b border-slate-200 p-4 md:flex-row md:items-center">
-          <input
-            value={newFolderName}
-            onChange={(event) => setNewFolderName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void createFolder();
-            }}
-            className="h-10 min-w-0 flex-1 rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-            placeholder="Название новой папки"
-            disabled={!settings?.isConfigured || !canCreate}
-          />
-          <button
-            type="button"
-            onClick={() => void createFolder()}
-            disabled={!newFolderName.trim() || !settings?.isConfigured || !canCreate}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Plus className="h-4 w-4" />
-            Создать папку
-          </button>
-        </div>
-
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3">Имя</th>
-                <th className="px-4 py-3">Тип</th>
+                <th className="px-4 py-3">Название</th>
                 <th className="px-4 py-3">Размер</th>
                 <th className="px-4 py-3">Изменено</th>
                 <th className="px-4 py-3 text-right">Действия</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
-                    <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
-                    Загружаем Яндекс.Диск
+              {listing?.items.map((item) => (
+                <tr key={item.fullPath || item.path} className="hover:bg-slate-50">
+                  <td className="px-4 py-3">
+                    <button type="button" onClick={() => item.type === 'dir' ? void loadObjects(item.path) : undefined} className="inline-flex items-center gap-2 text-left font-semibold text-sky-700">
+                      {item.type === 'dir' ? <Folder className="h-4 w-4" /> : <File className="h-4 w-4" />}
+                      <span>{item.name}</span>
+                    </button>
+                    <div className="mt-1 font-mono text-xs text-slate-400">{item.path}</div>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{item.type === 'dir' ? '-' : formatSize(item.size)}</td>
+                  <td className="px-4 py-3 text-slate-600">{formatDate(item.modified)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-2">
+                      {item.type === 'file' && cardActionButton({ label: 'Скачать', icon: <Download className="h-4 w-4" />, onClick: () => void downloadFile(item), disabled: !canExport })}
+                      {item.type === 'file' && cardActionButton({ label: 'Редактировать', icon: <Edit3 className="h-4 w-4" />, onClick: () => void openTextEditor(item), disabled: !canEdit })}
+                      {cardActionButton({ label: 'Копировать', icon: <Copy className="h-4 w-4" />, onClick: () => setPathDialog({ mode: 'copy', item, value: joinPath(parentPath(item.path), `copy-${item.name}`) }), disabled: !canCreate })}
+                      {cardActionButton({ label: 'Переместить', icon: <MoveRight className="h-4 w-4" />, onClick: () => setPathDialog({ mode: 'move', item, value: item.path }), disabled: !canEdit })}
+                      {cardActionButton({ label: 'Удалить', icon: <Trash2 className="h-4 w-4" />, tone: 'danger', onClick: () => void deleteResource(item), disabled: !canDelete })}
+                    </div>
                   </td>
                 </tr>
-              ) : sortedItems.length === 0 ? (
+              ))}
+              {!listing?.items.length ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
-                    {settings?.isConfigured ? 'В папке пока нет файлов.' : 'Сохраните OAuth-токен, чтобы открыть Яндекс.Диск.'}
+                  <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-500">
+                    {selectedConnection ? 'В папке пока нет файлов.' : 'Выберите подключение Я.Диска.'}
                   </td>
                 </tr>
-              ) : (
-                sortedItems.map((item) => {
-                  const isFolder = item.type === 'dir';
-                  const isBusy = busyPath === item.path;
-                  return (
-                    <tr key={item.fullPath || item.path} className="hover:bg-slate-50">
-                      <td className="max-w-[360px] px-4 py-3">
-                        <button
-                          type="button"
-                          onClick={() => isFolder ? void loadListing(item.path) : undefined}
-                          className={`inline-flex max-w-full items-center gap-2 text-left font-medium ${isFolder ? 'text-sky-700 hover:text-sky-900' : 'text-slate-800'}`}
-                        >
-                          {isFolder ? <Folder className="h-4 w-4 shrink-0" /> : <File className="h-4 w-4 shrink-0" />}
-                          <span className="truncate">{item.name}</span>
-                        </button>
-                        <div className="mt-0.5 truncate text-xs text-slate-500">{item.path}</div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">{isFolder ? 'Папка' : item.mimeType || 'Файл'}</td>
-                      <td className="px-4 py-3 text-slate-600">{isFolder ? '—' : formatSize(item.size)}</td>
-                      <td className="px-4 py-3 text-slate-600">{formatDate(item.modified)}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end gap-1">
-                          {isBusy ? <Loader2 className="h-8 w-8 animate-spin rounded-lg p-2 text-slate-500" /> : null}
-                          {!isFolder ? (
-                            <>
-                              {canExport ? <IconButton label="Скачать" onClick={() => void downloadFile(item)} icon={<Download className="h-4 w-4" />} /> : null}
-                              {canEdit ? <IconButton label="Редактировать текст" onClick={() => void openTextEditor(item)} icon={<Edit3 className="h-4 w-4" />} /> : null}
-                            </>
-                          ) : null}
-                          {canCreate ? <IconButton label="Копировать" onClick={() => void copyResource(item)} icon={<Copy className="h-4 w-4" />} /> : null}
-                          {canEdit ? <IconButton label="Переместить" onClick={() => void moveResource(item)} icon={<MoveRight className="h-4 w-4" />} /> : null}
-                          {canDelete ? <IconButton label="Удалить" danger onClick={() => void deleteResource(item)} icon={<Trash2 className="h-4 w-4" />} /> : null}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
+              ) : null}
             </tbody>
           </table>
         </div>
       </section>
+    );
+  }
+
+  function renderSyncTab() {
+    return (
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">Синхронизация CRM-документов</h3>
+            <p className="mt-1 text-sm text-slate-500">Автоматическая отправка документов использует первое включенное и настроенное подключение Я.Диска.</p>
+          </div>
+          <button type="button" onClick={saveSyncSettings} disabled={!canEdit || savingSync} className={iconButtonClass('primary')} title="Сохранить правила синхронизации">
+            {savingSync ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Сохранить
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+            <input type="checkbox" checked={crmSyncDraft.enabled} onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, enabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
+            Включить синхронизацию CRM-документов
+          </label>
+          {[
+            ['syncInvoices', 'Счета'],
+            ['syncActs', 'Акты'],
+            ['syncContracts', 'Договоры'],
+            ['syncCaseDocuments', 'Документы дел'],
+            ['syncTaskFiles', 'Файлы задач'],
+          ].map(([field, label]) => (
+            <label key={field} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={Boolean(crmSyncDraft[field as keyof UpdateYandexDiskCrmSyncSettingsRequest])}
+                onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, [field]: event.target.checked }))}
+                className="h-4 w-4 rounded border-slate-300 text-sky-600"
+              />
+              {label}
+            </label>
+          ))}
+          <label className="space-y-1 lg:col-span-2">
+            <span className="text-sm font-semibold text-slate-700">Шаблон папки</span>
+            <input value={crmSyncDraft.folderTemplate ?? ''} onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, folderTemplate: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="space-y-1 lg:col-span-2">
+            <span className="text-sm font-semibold text-slate-700">Шаблон имени файла</span>
+            <input value={crmSyncDraft.fileNameTemplate ?? ''} onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, fileNameTemplate: event.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+        </div>
+
+        {crmSyncPreview ? (
+          <div className="mt-5 rounded-lg border border-slate-200">
+            <div className="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">Предпросмотр путей</div>
+            <div className="divide-y divide-slate-100">
+              {crmSyncPreview.items.slice(0, 5).map((item) => (
+                <div key={item.documentKind} className="px-4 py-3 text-sm">
+                  <div className="font-semibold text-slate-900">{item.documentType}</div>
+                  <div className="mt-1 break-all font-mono text-xs text-slate-500">{item.fullPath}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  function renderLogsTab() {
+    return (
+      <div className="space-y-4">
+        {connectionTest ? (
+          <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Результат проверки</h3>
+                <p className="text-sm text-slate-500">{formatDate(connectionTest.checkedAt)}</p>
+              </div>
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Успешно</span>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {connectionTest.steps.map((step) => (
+                <div key={step.key} className="flex items-start justify-between gap-3 px-4 py-3 text-sm">
+                  <div>
+                    <div className="font-semibold text-slate-900">{step.name}</div>
+                    <div className="mt-1 text-slate-500">{step.message}</div>
+                  </div>
+                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">OK</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-4 py-3">
+            <h3 className="text-base font-semibold text-slate-900">Журнал синхронизации CRM</h3>
+            <p className="text-sm text-slate-500">Последние операции отправки документов на Я.Диск.</p>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {crmSyncStatus?.recentItems.length ? crmSyncStatus.recentItems.map((item) => (
+              <div key={`${item.documentKind}-${item.objectType}-${item.objectId}`} className="px-4 py-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-semibold text-slate-900">{item.fileName ?? item.documentKind}</div>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${item.status === 'success' ? 'bg-emerald-50 text-emerald-700' : item.status === 'failed' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                    {item.statusText}
+                  </span>
+                </div>
+                <div className="mt-1 break-all font-mono text-xs text-slate-500">{item.yandexDiskPath ?? '-'}</div>
+                {item.lastError ? <div className="mt-1 text-xs text-rose-600">{item.lastError}</div> : null}
+              </div>
+            )) : (
+              <div className="px-4 py-8 text-center text-sm text-slate-500">Событий пока нет.</div>
+            )}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  function renderPathDialog() {
+    if (!pathDialog) return null;
+    const options = {
+      folder: {
+        title: 'Создать папку на Я.Диске',
+        description: `Папка будет создана внутри ${currentPath}.`,
+        label: 'Название или путь папки',
+        confirmLabel: 'Создать',
+        placeholder: 'Новая папка',
+      },
+      copy: {
+        title: 'Копировать объект Я.Диска',
+        description: pathDialog.item ? `Исходный объект "${pathDialog.item.name}" останется на месте.` : undefined,
+        label: 'Новый путь копии',
+        confirmLabel: 'Копировать',
+        placeholder: '/copy-file.txt',
+      },
+      move: {
+        title: 'Переместить объект Я.Диска',
+        description: pathDialog.item ? `Объект "${pathDialog.item.name}" будет перенесен на новый путь.` : undefined,
+        label: 'Новый путь объекта',
+        confirmLabel: 'Переместить',
+        placeholder: '/archive/file.txt',
+      },
+    }[pathDialog.mode];
+
+    return (
+      <TextPromptModal
+        open
+        title={options.title}
+        description={options.description}
+        label={options.label}
+        value={pathDialog.value}
+        onValueChange={(value) => setPathDialog((dialog) => (dialog ? { ...dialog, value, error: null } : dialog))}
+        onCancel={() => {
+          if (!loadingAction) setPathDialog(null);
+        }}
+        onConfirm={submitPathDialog}
+        confirmLabel={options.confirmLabel}
+        cancelLabel="Отмена"
+        placeholder={options.placeholder}
+        error={pathDialog.error ?? undefined}
+        loading={loadingAction}
+      />
+    );
+  }
+
+  return (
+    <div className={shellClassName}>
+      <div className="flex w-full flex-col gap-5">
+        <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-sky-700">
+              <Cloud className="h-4 w-4" />
+              <span>Я.Диск</span>
+            </div>
+            <h2 className="mt-1 text-2xl font-semibold text-slate-900">Управление Я.Диском</h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => void loadOverview()} className={iconButtonClass()} title="Обновить">
+              <RefreshCw className="h-4 w-4" />
+              Обновить
+            </button>
+            <button type="button" onClick={openCreateForm} disabled={!canEdit} className={iconButtonClass('primary')} title="Новое подключение">
+              <Plus className="h-4 w-4" />
+              Новое
+            </button>
+          </div>
+        </header>
+
+        {error ? <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+
+        {renderTabs()}
+        {activeTab === 'connections' ? renderConnectionsTab() : null}
+        {activeTab === 'files' ? renderFilesTab() : null}
+        {activeTab === 'sync' ? renderSyncTab() : null}
+        {activeTab === 'logs' ? renderLogsTab() : null}
+      </div>
 
       {editorPath ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="flex max-h-[88vh] w-full max-w-4xl flex-col rounded-lg bg-white shadow-xl">
+        <div className="fixed inset-0 z-[2100] flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-lg bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <div className="min-w-0">
-                <h3 className="truncate text-base font-semibold text-slate-900">Редактирование файла</h3>
-                <p className="truncate text-xs text-slate-500">{editorPath}</p>
+              <div>
+                <h3 className="font-semibold text-slate-900">Редактирование файла</h3>
+                <p className="text-xs text-slate-500">{editorPath}</p>
               </div>
-              <button type="button" onClick={() => setEditorPath(null)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Закрыть">
+              <button type="button" onClick={() => setEditorPath(null)} className={cardIconButtonClass()} aria-label="Закрыть">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <textarea
-              value={editorContent}
-              onChange={(event) => setEditorContent(event.target.value)}
-              className="min-h-[360px] flex-1 resize-none border-0 p-4 font-mono text-sm outline-none"
-              disabled={editorLoading}
-            />
+            <textarea value={editorContent} onChange={(event) => setEditorContent(event.target.value)} className="min-h-[50vh] flex-1 resize-none border-0 p-4 font-mono text-sm outline-none" />
             <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3">
-              <button type="button" onClick={() => setEditorPath(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                Отмена
-              </button>
-              <button
-                type="button"
-                onClick={() => void saveTextEditor()}
-                disabled={editorLoading}
-                className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {editorLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              <button type="button" onClick={() => setEditorPath(null)} className={iconButtonClass()}>Отмена</button>
+              <button type="button" onClick={() => void saveTextEditor()} disabled={loadingAction} className={iconButtonClass('primary')}>
+                <Save className="h-4 w-4" />
                 Сохранить
               </button>
             </div>
           </div>
         </div>
       ) : null}
+
+      {renderPathDialog()}
     </div>
   );
 }
 
-function IconButton({
-  label,
-  icon,
-  onClick,
-  danger = false,
-}: {
-  label: string;
-  icon: ReactNode;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border text-sm ${
-        danger
-          ? 'border-rose-200 text-rose-600 hover:bg-rose-50'
-          : 'border-slate-200 text-slate-600 hover:bg-slate-100'
-      }`}
-    >
-      {icon}
-    </button>
-  );
-}
+export default YandexDisk;

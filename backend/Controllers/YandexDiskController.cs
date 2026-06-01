@@ -31,6 +31,82 @@ public sealed class YandexDiskController : ControllerBase
         _taskFilesRoot = Path.Combine(environment?.ContentRootPath ?? AppContext.BaseDirectory, "App_Data", "task-files");
     }
 
+    [HttpGet("connections")]
+    public async Task<ActionResult<YandexDiskConnectionsOverviewDto>> GetConnections(CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanView, ct);
+        if (forbidden is not null) return forbidden;
+
+        return Ok(await _service.GetConnectionsOverviewAsync(ct));
+    }
+
+    [HttpPut("connections")]
+    public async Task<ActionResult<YandexDiskConnectionDto>> UpsertConnection(
+        [FromBody] UpsertYandexDiskConnectionRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanEdit, ct);
+        if (forbidden is not null) return forbidden;
+
+        var isNew = string.IsNullOrWhiteSpace(request.Id);
+        var result = await ExecuteAsync(() => _service.UpsertConnectionAsync(request, ct));
+        if (result.Result is null && result.Value is { } value)
+        {
+            await AddAuditAsync(
+                isNew ? "ConnectionCreated" : "ConnectionUpdated",
+                isNew ? "Создано подключение Я.Диска." : "Обновлено подключение Я.Диска.",
+                new { value.Id, value.Name, value.RootPath, value.IsEnabled, value.IsConfigured, request.ClearToken },
+                ct);
+        }
+
+        return result;
+    }
+
+    [HttpDelete("connections/{id}")]
+    public async Task<IActionResult> DeleteConnection(string id, CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanDelete, ct);
+        if (forbidden is not null) return forbidden;
+
+        try
+        {
+            await _service.DeleteConnectionAsync(id, ct);
+            await AddAuditAsync(
+                "ConnectionDeleted",
+                "Удалено подключение Я.Диска.",
+                new { Id = id },
+                ct);
+            return NoContent();
+        }
+        catch (YandexDiskOperationException ex)
+        {
+            return MapError(ex);
+        }
+    }
+
+    [HttpPost("connections/{id}/connection-test")]
+    public async Task<ActionResult<YandexDiskConnectionTestDto>> TestConnection(
+        string id,
+        [FromBody] TestYandexDiskConnectionRequest? request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission =>
+            permission.CanEdit && permission.CanCreate && permission.CanDelete && permission.CanExport, ct);
+        if (forbidden is not null) return forbidden;
+
+        var result = await ExecuteAsync(() => _service.TestConnectionAsync(id, request ?? new TestYandexDiskConnectionRequest(), ct));
+        if (result.Result is null && result.Value is { } value)
+        {
+            await AddAuditAsync(
+                "ConnectionTested",
+                "Проверено подключение к Я.Диску через тестовую папку.",
+                new { Id = id, value.RootPath, value.TestFolderPath, value.Success },
+                ct);
+        }
+
+        return result;
+    }
+
     [HttpGet("settings")]
     public async Task<ActionResult<YandexDiskSettingsDto>> GetSettings(CancellationToken ct)
     {
@@ -192,6 +268,20 @@ public sealed class YandexDiskController : ControllerBase
         return await ExecuteAsync(() => _service.ListAsync(path, limit, offset, ct));
     }
 
+    [HttpGet("connections/{id}/resources")]
+    public async Task<ActionResult<YandexDiskListResponseDto>> List(
+        string id,
+        [FromQuery] string? path,
+        [FromQuery] int limit = 100,
+        [FromQuery] int offset = 0,
+        CancellationToken ct = default)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanView, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAsync(() => _service.ListAsync(id, path, limit, offset, ct));
+    }
+
     [HttpPost("folders")]
     public async Task<ActionResult<YandexDiskOperationResultDto>> CreateFolder(
         [FromBody] CreateYandexDiskFolderRequest request,
@@ -205,6 +295,24 @@ public sealed class YandexDiskController : ControllerBase
             "FolderCreated",
             "Создана папка на Яндекс.Диске.",
             new { request.Path },
+            null,
+            ct);
+    }
+
+    [HttpPost("connections/{id}/folders")]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> CreateFolder(
+        string id,
+        [FromBody] CreateYandexDiskFolderRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAndAuditAsync(
+            () => _service.CreateFolderAsync(id, request.Path, ct),
+            "FolderCreated",
+            "Создана папка на Я.Диске.",
+            new { Id = id, request.Path },
             null,
             ct);
     }
@@ -226,6 +334,24 @@ public sealed class YandexDiskController : ControllerBase
             ct);
     }
 
+    [HttpPost("connections/{id}/copy")]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> Copy(
+        string id,
+        [FromBody] YandexDiskResourceOperationRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAndAuditAsync(
+            () => _service.CopyAsync(id, request.FromPath, request.ToPath, request.Overwrite, ct),
+            "Copied",
+            "Ресурс скопирован на Я.Диске.",
+            new { Id = id, request.FromPath, request.ToPath, request.Overwrite },
+            null,
+            ct);
+    }
+
     [HttpPost("move")]
     public async Task<ActionResult<YandexDiskOperationResultDto>> Move(
         [FromBody] YandexDiskResourceOperationRequest request,
@@ -239,6 +365,24 @@ public sealed class YandexDiskController : ControllerBase
             "Moved",
             "Ресурс перемещен или переименован на Яндекс.Диске.",
             new { request.FromPath, request.ToPath, request.Overwrite },
+            null,
+            ct);
+    }
+
+    [HttpPost("connections/{id}/move")]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> Move(
+        string id,
+        [FromBody] YandexDiskResourceOperationRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanEdit, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAndAuditAsync(
+            () => _service.MoveAsync(id, request.FromPath, request.ToPath, request.Overwrite, ct),
+            "Moved",
+            "Ресурс перемещен или переименован на Я.Диске.",
+            new { Id = id, request.FromPath, request.ToPath, request.Overwrite },
             null,
             ct);
     }
@@ -259,6 +403,27 @@ public sealed class YandexDiskController : ControllerBase
                 ? "Ресурс окончательно удален с Яндекс.Диска."
                 : "Ресурс удален с Яндекс.Диска.",
             new { Path = path, Permanently = permanently },
+            null,
+            ct);
+    }
+
+    [HttpDelete("connections/{id}/resources")]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> Delete(
+        string id,
+        [FromQuery] string? path,
+        [FromQuery] bool permanently = false,
+        CancellationToken ct = default)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanDelete, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAndAuditAsync(
+            () => _service.DeleteAsync(id, path, permanently, ct),
+            "Deleted",
+            permanently
+                ? "Ресурс окончательно удален с Я.Диска."
+                : "Ресурс удален с Я.Диска.",
+            new { Id = id, Path = path, Permanently = permanently },
             null,
             ct);
     }
@@ -289,6 +454,33 @@ public sealed class YandexDiskController : ControllerBase
             ct);
     }
 
+    [HttpPost("connections/{id}/upload")]
+    [RequestSizeLimit(50L * 1024 * 1024 * 1024)]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> Upload(
+        string id,
+        [FromForm] IFormFile? file,
+        [FromForm] string? path,
+        [FromForm] bool overwrite = true,
+        CancellationToken ct = default)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
+        if (forbidden is not null) return forbidden;
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest("Выберите файл для загрузки.");
+        }
+
+        await using var stream = file.OpenReadStream();
+        return await ExecuteAndAuditAsync(
+            () => _service.UploadAsync(id, path, stream, file.ContentType, overwrite, ct),
+            "Uploaded",
+            "Файл загружен на Я.Диск.",
+            new { Id = id, Path = path, file.FileName, file.Length, file.ContentType, Overwrite = overwrite },
+            null,
+            ct);
+    }
+
     [HttpGet("download")]
     public async Task<IActionResult> Download([FromQuery] string? path, CancellationToken ct)
     {
@@ -311,6 +503,28 @@ public sealed class YandexDiskController : ControllerBase
         }
     }
 
+    [HttpGet("connections/{id}/download")]
+    public async Task<IActionResult> Download(string id, [FromQuery] string? path, CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanExport, ct);
+        if (forbidden is not null) return forbidden;
+
+        try
+        {
+            var file = await _service.DownloadAsync(id, path, ct);
+            await AddAuditAsync(
+                "Downloaded",
+                "Файл скачан с Я.Диска.",
+                new { Id = id, Path = path, file.FileName, Size = file.Content.Length },
+                ct);
+            return File(file.Content, file.ContentType, file.FileName);
+        }
+        catch (YandexDiskOperationException ex)
+        {
+            return MapError(ex);
+        }
+    }
+
     [HttpGet("text")]
     public async Task<ActionResult<YandexDiskTextFileDto>> GetText([FromQuery] string? path, CancellationToken ct)
     {
@@ -318,6 +532,15 @@ public sealed class YandexDiskController : ControllerBase
         if (forbidden is not null) return forbidden;
 
         return await ExecuteAsync(() => _service.GetTextFileAsync(path, ct));
+    }
+
+    [HttpGet("connections/{id}/text")]
+    public async Task<ActionResult<YandexDiskTextFileDto>> GetText(string id, [FromQuery] string? path, CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanEdit, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAsync(() => _service.GetTextFileAsync(id, path, ct));
     }
 
     [HttpPut("text")]
@@ -333,6 +556,24 @@ public sealed class YandexDiskController : ControllerBase
             "TextUpdated",
             "Текстовый файл обновлен на Яндекс.Диске.",
             new { request.Path, ContentLength = request.Content?.Length ?? 0, request.Overwrite },
+            null,
+            ct);
+    }
+
+    [HttpPut("connections/{id}/text")]
+    public async Task<ActionResult<YandexDiskOperationResultDto>> SaveText(
+        string id,
+        [FromBody] UpdateYandexDiskTextFileRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanEdit, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAndAuditAsync(
+            () => _service.SaveTextFileAsync(id, request, ct),
+            "TextUpdated",
+            "Текстовый файл обновлен на Я.Диске.",
+            new { Id = id, request.Path, ContentLength = request.Content?.Length ?? 0, request.Overwrite },
             null,
             ct);
     }

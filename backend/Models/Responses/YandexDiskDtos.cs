@@ -8,6 +8,22 @@ public sealed class YandexDiskSettingsDto
     public DateTime? UpdatedAt { get; set; }
 }
 
+public sealed class YandexDiskConnectionDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; }
+    public bool IsConfigured { get; set; }
+    public string RootPath { get; set; } = string.Empty;
+    public string? TokenPreview { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public sealed class YandexDiskConnectionsOverviewDto
+{
+    public IReadOnlyList<YandexDiskConnectionDto> Connections { get; set; } = Array.Empty<YandexDiskConnectionDto>();
+}
+
 public sealed class YandexDiskResourceDto
 {
     public string Name { get; set; } = string.Empty;
