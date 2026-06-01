@@ -36,8 +36,10 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
+import { useDialog } from '../../hooks/useDialog';
 import { defaultRestrictedMenuPermissions } from '../../types/permissions';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { TextPromptModal } from '../ui/TextPromptModal';
 
 type S3StorageDraft = UpsertS3StorageConnectionRequest;
 type S3StorageTab = 'connections' | 'files' | 'logs';
@@ -49,6 +51,13 @@ type S3StorageLogEntry = {
   description: string;
   createdAt: string;
   tone: 'success' | 'error' | 'info';
+};
+
+type S3PathDialogState = {
+  mode: 'create-folder' | 'copy' | 'move';
+  item: S3StorageObjectDto | null;
+  value: string;
+  error: string | null;
 };
 
 const defaultDraft: S3StorageDraft = {
@@ -108,6 +117,16 @@ function parentPath(path: string) {
   const normalized = path === '/' ? '/' : path.replace(/\/+$/, '');
   const index = normalized.lastIndexOf('/');
   return index <= 0 ? '/' : normalized.slice(0, index);
+}
+
+function normalizeDialogTargetPath(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+function buildCopyTargetPath(item: S3StorageObjectDto) {
+  return joinPath(parentPath(item.path), `copy-${item.name}`);
 }
 
 function appendS3Hint(message: string, hint: string) {
@@ -194,6 +213,7 @@ function logToneClass(tone: S3StorageLogEntry['tone']) {
 
 export function S3Storage() {
   const toast = useToast();
+  const { confirm } = useDialog();
   const { user } = useAuth();
   const rolePermissions = useRolePermissions(user?.role?.id);
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
@@ -224,6 +244,7 @@ export function S3Storage() {
   const [editorContent, setEditorContent] = useState('');
   const [editorSaving, setEditorSaving] = useState(false);
   const [logs, setLogs] = useState<S3StorageLogEntry[]>([]);
+  const [pathDialog, setPathDialog] = useState<S3PathDialogState | null>(null);
 
   const presets = useMemo(() => overview?.providerPresets ?? [], [overview]);
   const connections = useMemo(() => overview?.connections ?? [], [overview]);
@@ -425,7 +446,14 @@ export function S3Storage() {
       return;
     }
 
-    if (!window.confirm(`Удалить подключение "${connection.name}"?`)) {
+    const approved = await confirm({
+      title: 'Удалить S3-подключение?',
+      description: `Подключение "${connection.name}" будет удалено из настроек. Файлы в самом bucket не удаляются.`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) {
       return;
     }
 
@@ -458,27 +486,46 @@ export function S3Storage() {
     }
   };
 
-  const createFolder = async () => {
+  const openCreateFolderDialog = () => {
     if (!selectedConnectionId || !canCreate) {
       showError('Недостаточно прав для создания папки.');
       return;
     }
 
-    const name = window.prompt('Название новой папки');
-    if (!name?.trim()) return;
+    setPathDialog({
+      mode: 'create-folder',
+      item: null,
+      value: '',
+      error: null,
+    });
+  };
 
-    setObjectActionKey('create-folder');
-    setError(null);
-    try {
-      await apiService.createS3StorageFolder(selectedConnectionId, joinPath(currentPath, name));
-      toast.success('Папка создана.', 'S3');
-      addLog({ title: 'Папка создана', description: joinPath(currentPath, name), tone: 'success' });
-      await loadObjects();
-    } catch (createError) {
-      showError(extractS3StorageErrorMessage(createError, 'Не удалось создать папку S3.'));
-    } finally {
-      setObjectActionKey(null);
+  const openCopyDialog = (item: S3StorageObjectDto) => {
+    if (!selectedConnectionId || !canCreate) {
+      showError('Недостаточно прав для копирования объекта.');
+      return;
     }
+
+    setPathDialog({
+      mode: 'copy',
+      item,
+      value: buildCopyTargetPath(item),
+      error: null,
+    });
+  };
+
+  const openMoveDialog = (item: S3StorageObjectDto) => {
+    if (!selectedConnectionId || !canEdit) {
+      showError('Недостаточно прав для перемещения объекта.');
+      return;
+    }
+
+    setPathDialog({
+      mode: 'move',
+      item,
+      value: item.path,
+      error: null,
+    });
   };
 
   const uploadFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -535,7 +582,14 @@ export function S3Storage() {
       return;
     }
 
-    if (!window.confirm(`Удалить "${item.name}" из S3-хранилища?`)) return;
+    const approved = await confirm({
+      title: 'Удалить объект S3?',
+      description: `Объект "${item.name}" будет удален из S3-хранилища. Это действие нельзя отменить.`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
 
     setObjectActionKey(`delete:${item.path}`);
     setError(null);
@@ -551,47 +605,59 @@ export function S3Storage() {
     }
   };
 
-  const copyObject = async (item: S3StorageObjectDto) => {
-    if (!selectedConnectionId || !canCreate) {
-      showError('Недостаточно прав для копирования объекта.');
+  const submitPathDialog = async () => {
+    if (!pathDialog || !selectedConnectionId) return;
+
+    const currentDialog = pathDialog;
+    const trimmedValue = currentDialog.value.trim();
+    if (!trimmedValue) {
+      setPathDialog((dialog) => (dialog ? { ...dialog, error: 'Укажите путь или название.' } : dialog));
       return;
     }
 
-    const target = window.prompt('Куда скопировать объект?', item.path);
-    if (!target?.trim() || target.trim() === item.path) return;
-
-    setObjectActionKey(`copy:${item.path}`);
-    setError(null);
-    try {
-      await apiService.copyS3StorageObject(selectedConnectionId, item.path, target, false);
-      toast.success('Объект скопирован.', 'S3');
-      addLog({ title: 'Объект скопирован', description: `${item.path} -> ${target}`, tone: 'success' });
-      await loadObjects();
-    } catch (copyError) {
-      showError(extractS3StorageErrorMessage(copyError, 'Не удалось скопировать объект S3.'));
-    } finally {
-      setObjectActionKey(null);
-    }
-  };
-
-  const moveObject = async (item: S3StorageObjectDto) => {
-    if (!selectedConnectionId || !canEdit) {
-      showError('Недостаточно прав для перемещения объекта.');
+    if (currentDialog.mode === 'create-folder') {
+      const targetPath = joinPath(currentPath, trimmedValue);
+      setObjectActionKey('create-folder');
+      setError(null);
+      try {
+        await apiService.createS3StorageFolder(selectedConnectionId, targetPath);
+        toast.success('Папка создана.', 'S3');
+        addLog({ title: 'Папка создана', description: targetPath, tone: 'success' });
+        setPathDialog(null);
+        await loadObjects();
+      } catch (createError) {
+        showError(extractS3StorageErrorMessage(createError, 'Не удалось создать папку S3.'));
+      } finally {
+        setObjectActionKey(null);
+      }
       return;
     }
 
-    const target = window.prompt('Куда переместить объект?', item.path);
-    if (!target?.trim() || target.trim() === item.path) return;
+    if (!currentDialog.item) return;
 
-    setObjectActionKey(`move:${item.path}`);
+    const target = normalizeDialogTargetPath(trimmedValue);
+    if (target === currentDialog.item.path) {
+      setPathDialog((dialog) => (dialog ? { ...dialog, error: 'Укажите путь, который отличается от текущего.' } : dialog));
+      return;
+    }
+
+    const isCopy = currentDialog.mode === 'copy';
+    setObjectActionKey(`${currentDialog.mode}:${currentDialog.item.path}`);
     setError(null);
     try {
-      await apiService.moveS3StorageObject(selectedConnectionId, item.path, target, false);
-      toast.success('Объект перемещен.', 'S3');
-      addLog({ title: 'Объект перемещен', description: `${item.path} -> ${target}`, tone: 'success' });
+      if (isCopy) {
+        await apiService.copyS3StorageObject(selectedConnectionId, currentDialog.item.path, target, false);
+        toast.success('Объект скопирован.', 'S3');
+        addLog({ title: 'Объект скопирован', description: `${currentDialog.item.path} -> ${target}`, tone: 'success' });
+      } else {
+        await apiService.moveS3StorageObject(selectedConnectionId, currentDialog.item.path, target, false);
+        toast.success('Объект перемещен.', 'S3');
+        addLog({ title: 'Объект перемещен', description: `${currentDialog.item.path} -> ${target}`, tone: 'success' });
+      }
+      setPathDialog(null);
       await loadObjects();
-    } catch (moveError) {
-      showError(extractS3StorageErrorMessage(moveError, 'Не удалось переместить объект S3.'));
+    } catch (operationError) {
+      showError(extractS3StorageErrorMessage(operationError, isCopy ? 'Не удалось скопировать объект S3.' : 'Не удалось переместить объект S3.'));
     } finally {
       setObjectActionKey(null);
     }
@@ -926,8 +992,68 @@ export function S3Storage() {
         {activeTab === 'files' ? renderFilesTab() : null}
         {activeTab === 'logs' ? renderLogsTab() : null}
       </div>
+      {renderPathDialog()}
     </div>
   );
+
+  function renderPathDialog() {
+    if (!pathDialog) return null;
+
+    const loadingAction = pathDialog.mode === 'create-folder'
+      ? objectActionKey === 'create-folder'
+      : objectActionKey === `${pathDialog.mode}:${pathDialog.item?.path}`;
+
+    const copyDescription = pathDialog.item
+      ? `Будет создана копия "${pathDialog.item.name}". Исходный объект останется на месте.`
+      : 'Будет создана копия объекта. Исходный объект останется на месте.';
+    const moveDescription = pathDialog.item
+      ? `Объект "${pathDialog.item.name}" будет перенесен по новому пути. Старый путь исчезнет.`
+      : 'Объект будет перенесен по новому пути. Старый путь исчезнет.';
+
+    const options = {
+      'create-folder': {
+        title: 'Создать папку в S3',
+        description: `Папка будет создана внутри текущего пути: ${currentPath}.`,
+        label: 'Название папки',
+        confirmLabel: 'Создать',
+        placeholder: 'Например backups',
+      },
+      copy: {
+        title: 'Копировать объект S3',
+        description: copyDescription,
+        label: 'Новый путь копии',
+        confirmLabel: 'Копировать',
+        placeholder: '/backups-copy',
+      },
+      move: {
+        title: 'Переместить объект S3',
+        description: moveDescription,
+        label: 'Новый путь объекта',
+        confirmLabel: 'Переместить',
+        placeholder: '/archive/backups',
+      },
+    }[pathDialog.mode];
+
+    return (
+      <TextPromptModal
+        open
+        title={options.title}
+        description={options.description}
+        label={options.label}
+        value={pathDialog.value}
+        onValueChange={(value) => setPathDialog((dialog) => (dialog ? { ...dialog, value, error: null } : dialog))}
+        onCancel={() => {
+          if (!loadingAction) setPathDialog(null);
+        }}
+        onConfirm={submitPathDialog}
+        confirmLabel={options.confirmLabel}
+        cancelLabel="Отмена"
+        placeholder={options.placeholder}
+        error={pathDialog.error ?? undefined}
+        loading={loadingAction}
+      />
+    );
+  }
 
   function renderConnectionsTab() {
     if (loading) {
@@ -1064,7 +1190,7 @@ export function S3Storage() {
               <ArrowUp className="h-4 w-4" />
               Вверх
             </button>
-            <button type="button" onClick={() => void createFolder()} className={iconButtonClass()} disabled={!selectedConnectionId || !canCreate || objectActionKey === 'create-folder'} title="Создать папку">
+            <button type="button" onClick={openCreateFolderDialog} className={iconButtonClass()} disabled={!selectedConnectionId || !canCreate || objectActionKey === 'create-folder'} title="Создать папку">
               {objectActionKey === 'create-folder' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Folder className="h-4 w-4" />}
               Папка
             </button>
@@ -1126,11 +1252,11 @@ export function S3Storage() {
                               </button>
                             </>
                           ) : null}
-                          <button type="button" onClick={() => void copyObject(item)} className={iconButtonClass()} title="Копировать объект" aria-label={`Копировать ${item.name}`} disabled={!canCreate || actionInProgress}>
+                          <button type="button" onClick={() => openCopyDialog(item)} className={iconButtonClass()} title="Создать копию объекта. Исходный объект останется на месте" aria-label={`Копировать ${item.name}`} disabled={!canCreate || actionInProgress}>
                             <Copy className="h-4 w-4" />
                             Копировать
                           </button>
-                          <button type="button" onClick={() => void moveObject(item)} className={iconButtonClass()} title="Переместить объект" aria-label={`Переместить ${item.name}`} disabled={!canEdit || actionInProgress}>
+                          <button type="button" onClick={() => openMoveDialog(item)} className={iconButtonClass()} title="Перенести объект по новому пути. Старый путь будет удален" aria-label={`Переместить ${item.name}`} disabled={!canEdit || actionInProgress}>
                             <MoveRight className="h-4 w-4" />
                             Переместить
                           </button>

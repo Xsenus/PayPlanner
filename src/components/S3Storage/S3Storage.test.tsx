@@ -5,6 +5,7 @@ import { S3Storage } from './S3Storage';
 const mocks = vi.hoisted(() => ({
   toastSuccessMock: vi.fn(),
   toastErrorMock: vi.fn(),
+  confirmMock: vi.fn(),
   getS3StorageConnectionsMock: vi.fn(),
   upsertS3StorageConnectionMock: vi.fn(),
   deleteS3StorageConnectionMock: vi.fn(),
@@ -43,6 +44,13 @@ vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({
     success: mocks.toastSuccessMock,
     error: mocks.toastErrorMock,
+  }),
+}));
+
+vi.mock('../../hooks/useDialog', () => ({
+  useDialog: () => ({
+    confirm: mocks.confirmMock,
+    alert: vi.fn(),
   }),
 }));
 
@@ -102,6 +110,7 @@ function buildOverview(connections = [buildConnection()]) {
 describe('S3Storage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.confirmMock.mockResolvedValue(true);
     mocks.getS3StorageConnectionsMock.mockResolvedValue(buildOverview());
     mocks.upsertS3StorageConnectionMock.mockResolvedValue(buildConnection({ name: 'HOSTKEY backup', rootPrefix: '' }));
     mocks.deleteS3StorageConnectionMock.mockResolvedValue(undefined);
@@ -241,6 +250,26 @@ describe('S3Storage', () => {
 
     await waitFor(() => expect(mocks.listS3StorageObjectsMock).toHaveBeenCalledWith('hostkey-main', '/docs'));
     expect(await screen.findByText('note.txt')).toBeTruthy();
+  });
+
+  it('opens a clear dialog before copying an S3 object', async () => {
+    render(<S3Storage />);
+
+    const card = (await screen.findByText('HOSTKEY основной')).closest('article')!;
+    fireEvent.click(within(card).getByRole('button', { name: /Файлы/i }));
+    await screen.findByText('readme.txt');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Копировать readme.txt' }));
+
+    expect(await screen.findByText('Копировать объект S3')).toBeTruthy();
+    expect(screen.getByText(/Исходный объект останется на месте/i)).toBeTruthy();
+
+    const targetInput = screen.getByLabelText('Новый путь копии');
+    expect((targetInput as HTMLInputElement).value).toBe('/copy-readme.txt');
+    fireEvent.change(targetInput, { target: { value: '/archive/readme-copy.txt' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Копировать$/i }));
+
+    await waitFor(() => expect(mocks.copyS3StorageObjectMock).toHaveBeenCalledWith('hostkey-main', '/readme.txt', '/archive/readme-copy.txt', false));
   });
 
   it('opens and saves a text file in S3', async () => {
