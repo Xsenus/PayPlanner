@@ -211,7 +211,11 @@ function logToneClass(tone: S3StorageLogEntry['tone']) {
   return 'border-sky-200 bg-sky-50 text-sky-800';
 }
 
-export function S3Storage() {
+type S3StorageProps = {
+  embedded?: boolean;
+};
+
+export function S3Storage({ embedded = false }: S3StorageProps = {}) {
   const toast = useToast();
   const { confirm } = useDialog();
   const { user } = useAuth();
@@ -223,6 +227,7 @@ export function S3Storage() {
   const canEdit = isAdminRole || permissions.canEdit;
   const canDelete = isAdminRole || permissions.canDelete;
   const canExport = isAdminRole || permissions.canExport;
+  const shellClassName = embedded ? 'w-full' : 'min-h-screen w-full bg-slate-50 px-4 py-5 sm:px-6 lg:px-8';
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [overview, setOverview] = useState<S3StorageConnectionsOverviewDto | null>(null);
@@ -704,7 +709,7 @@ export function S3Storage() {
 
   if (!canView) {
     return (
-      <div className="p-6">
+      <div className={embedded ? 'w-full' : 'p-6'}>
         <div className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-700">
           Недостаточно прав для просмотра S3-хранилищ.
         </div>
@@ -714,7 +719,7 @@ export function S3Storage() {
 
   if (mode === 'form') {
     return (
-      <div className="min-h-screen w-full bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
+      <div className={shellClassName}>
         <div className="flex w-full flex-col gap-5">
           <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -926,7 +931,7 @@ export function S3Storage() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
+    <div className={shellClassName}>
       <div className="flex w-full flex-col gap-5">
         <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>

@@ -257,6 +257,34 @@ const DEFAULT_PERMISSION_META: PermissionMeta[] = [
   },
 ];
 
+const STORAGE_PERMISSION_META: PermissionMeta[] = [
+  {
+    key: 'canView',
+    label: 'Просмотр',
+    description: 'Открывать раздел в настройках, видеть подключения, файлы, папки и журналы операций.',
+  },
+  {
+    key: 'canCreate',
+    label: 'Создание, загрузка и копирование',
+    description: 'Добавлять подключения, создавать папки, загружать файлы и создавать копии объектов.',
+  },
+  {
+    key: 'canEdit',
+    label: 'Редактирование и перемещение',
+    description: 'Менять настройки подключений, редактировать текстовые файлы и перемещать объекты.',
+  },
+  {
+    key: 'canDelete',
+    label: 'Удаление',
+    description: 'Удалять подключения, файлы и папки в хранилище.',
+  },
+  {
+    key: 'canExport',
+    label: 'Скачивание',
+    description: 'Скачивать файлы и использовать действия выгрузки из хранилища.',
+  },
+];
+
 const ROLES_PERMISSION_META: PermissionMeta[] = [
   {
     key: 'canView',
@@ -814,7 +842,9 @@ export function RolePermissionsModal({
                         ? AUDIT_PERMISSION_META
                         : sectionKey === 'notifications'
                           ? NOTIFICATION_PERMISSION_META
-                          : DEFAULT_PERMISSION_META;
+                          : sectionKey === 'yandexDisk' || sectionKey === 's3Storage'
+                            ? STORAGE_PERMISSION_META
+                            : DEFAULT_PERMISSION_META;
                   const Icon = sectionConfig.icon;
                   const enabledPermissionCount = getEnabledPermissionCount(sectionKey, permissions);
                   const totalPermissionCount = getTotalPermissionCount(sectionKey);

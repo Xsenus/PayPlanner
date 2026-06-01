@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bell, ClipboardList, Database, History, Save, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
+import { Bell, ClipboardList, Cloud, Database, History, Save, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -26,6 +26,8 @@ import { SpreadsheetImportSettings } from './SpreadsheetImportSettings';
 import { TaskJournalSettings } from './TaskJournalSettings';
 import { UserOnlineSettings } from './UserOnlineSettings';
 import { UserMergeSettings } from './UserMergeSettings';
+import { S3Storage } from '../S3Storage/S3Storage';
+import { YandexDisk } from '../YandexDisk/YandexDisk';
 import type {
   ContractNumberingSettingsDto,
   ContractRulesSettingsDto,
@@ -44,6 +46,8 @@ type SettingsSection =
   | 'general'
   | 'integrations'
   | 'notifications'
+  | 'yandex-disk'
+  | 's3-storage'
   | 'users-online'
   | 'app-releases'
   | 'auth-providers'
@@ -65,6 +69,8 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'general',
   'integrations',
   'notifications',
+  'yandex-disk',
+  's3-storage',
   'users-online',
   'app-releases',
   'auth-providers',
@@ -98,12 +104,16 @@ function pushSettingsSectionToUrl(section: SettingsSection) {
   window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
-export function AppSettings() {
+type AppSettingsProps = {
+  initialSection?: SettingsSection;
+};
+
+export function AppSettings({ initialSection }: AppSettingsProps = {}) {
   const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const { confirm } = useDialog();
   const toast = useToast();
-  const [activeSection, setActiveSection] = useState<SettingsSection>(() => readSettingsSectionFromUrl());
+  const [activeSection, setActiveSection] = useState<SettingsSection>(() => initialSection ?? readSettingsSectionFromUrl());
   const [activeFinancialRulesSubsection, setActiveFinancialRulesSubsection] = useState<FinancialRulesSubsection>('invoices');
   const [activeDatabaseOperationsSubsection, setActiveDatabaseOperationsSubsection] = useState<DatabaseOperationsSubsection>('invoices');
   const [loading, setLoading] = useState(false);
@@ -160,6 +170,8 @@ export function AppSettings() {
   const canViewNotificationSettings = isAdminRole || permissions.notifications.canView;
   const canEditNotificationSettings = isAdminRole || permissions.notifications.canEdit;
   const canViewMaintenanceSettings = isAdminRole || permissions.audit.canView;
+  const canViewYandexDiskSettings = isAdminRole || Boolean(permissions.yandexDisk?.canView);
+  const canViewS3StorageSettings = isAdminRole || Boolean(permissions.s3Storage?.canView);
   const restrictedSettingsMode = !isAdminRole;
 
   const selectSection = useCallback((section: SettingsSection) => {
@@ -179,6 +191,8 @@ export function AppSettings() {
     if (activeSection === 'general') return 'Финансовые правила';
     if (activeSection === 'integrations') return 'Ключи и внешние сервисы';
     if (activeSection === 'notifications') return 'Уведомления';
+    if (activeSection === 'yandex-disk') return 'Я.Диск';
+    if (activeSection === 's3-storage') return 'S3-хранилища';
     if (activeSection === 'users-online') return 'Пользователи онлайн';
     if (activeSection === 'app-releases') return 'Версия приложения и обновления';
     if (activeSection === 'auth-providers') return 'Внешняя авторизация';
@@ -189,23 +203,29 @@ export function AppSettings() {
     return 'Финансовые правила';
   }, [activeSection]);
 
+  const restrictedAllowedSections = useMemo<SettingsSection[]>(() => {
+    if (!restrictedSettingsMode) return SETTINGS_SECTIONS;
+
+    const allowed: SettingsSection[] = [];
+    if (canViewNotificationSettings) allowed.push('notifications');
+    if (canViewMaintenanceSettings) allowed.push('db-maintenance');
+    if (canViewYandexDiskSettings) allowed.push('yandex-disk');
+    if (canViewS3StorageSettings) allowed.push('s3-storage');
+    return allowed;
+  }, [
+    canViewMaintenanceSettings,
+    canViewNotificationSettings,
+    canViewS3StorageSettings,
+    canViewYandexDiskSettings,
+    restrictedSettingsMode,
+  ]);
+
   useEffect(() => {
-    if (!restrictedSettingsMode) return;
-
-    if (canViewNotificationSettings && activeSection !== 'notifications' && !canViewMaintenanceSettings) {
-      selectSection('notifications');
-      return;
+    if (!restrictedSettingsMode || restrictedAllowedSections.length === 0) return;
+    if (!restrictedAllowedSections.includes(activeSection)) {
+      selectSection(restrictedAllowedSections[0]);
     }
-
-    if (canViewMaintenanceSettings && activeSection !== 'db-maintenance' && !canViewNotificationSettings) {
-      selectSection('db-maintenance');
-      return;
-    }
-
-    if (activeSection !== 'notifications' && activeSection !== 'db-maintenance') {
-      selectSection(canViewNotificationSettings ? 'notifications' : 'db-maintenance');
-    }
-  }, [activeSection, canViewMaintenanceSettings, canViewNotificationSettings, restrictedSettingsMode, selectSection]);
+  }, [activeSection, restrictedAllowedSections, restrictedSettingsMode, selectSection]);
 
   const migrationDetails = useMemo(() => result?.details ?? [], [result]);
   const migrationDetailsTotalPages = useMemo(
@@ -779,7 +799,7 @@ export function AppSettings() {
               </div>
               )}
 
-              {(canViewNotificationSettings || !restrictedSettingsMode) && (
+              {(!restrictedSettingsMode || canViewNotificationSettings || canViewYandexDiskSettings || canViewS3StorageSettings) && (
               <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3 shadow-sm">
                 <div className="flex items-center gap-3 rounded-xl border border-violet-100 bg-white/90 px-3 py-3 shadow-sm">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
@@ -791,6 +811,7 @@ export function AppSettings() {
                   </div>
                 </div>
                 <div className="mt-3 space-y-2">
+                  {!restrictedSettingsMode && (
                   <button
                     type="button"
                     onClick={() => selectSection('integrations')}
@@ -802,6 +823,8 @@ export function AppSettings() {
                   >
                     Ключи интеграций
                   </button>
+                  )}
+                  {(canViewNotificationSettings || !restrictedSettingsMode) && (
                   <button
                     type="button"
                     onClick={() => selectSection('notifications')}
@@ -816,6 +839,41 @@ export function AppSettings() {
                       Уведомления
                     </span>
                   </button>
+                  )}
+                  {(canViewYandexDiskSettings || !restrictedSettingsMode) && (
+                  <button
+                    type="button"
+                    onClick={() => selectSection('yandex-disk')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 'yandex-disk'
+                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Cloud className="h-4 w-4" />
+                      Я.Диск
+                    </span>
+                  </button>
+                  )}
+                  {(canViewS3StorageSettings || !restrictedSettingsMode) && (
+                  <button
+                    type="button"
+                    onClick={() => selectSection('s3-storage')}
+                    className={`w-full rounded-xl border px-3 py-3 text-left text-sm font-semibold transition ${
+                      activeSection === 's3-storage'
+                        ? 'border-violet-200 bg-violet-100 text-violet-900 shadow-sm'
+                        : 'border-transparent bg-white text-gray-700 hover:border-violet-100 hover:bg-violet-50/60'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Cloud className="h-4 w-4" />
+                      S3-хранилища
+                    </span>
+                  </button>
+                  )}
+                  {!restrictedSettingsMode && (
+                  <>
                   <button
                     type="button"
                     onClick={() => selectSection('app-releases')}
@@ -841,6 +899,8 @@ export function AppSettings() {
                   >
                     Авторизация и вход
                   </button>
+                  </>
+                  )}
                   {!restrictedSettingsMode && (
                     <button
                       type="button"
@@ -861,6 +921,7 @@ export function AppSettings() {
               </div>
               )}
 
+              {(!restrictedSettingsMode || canViewMaintenanceSettings) && (
               <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-3 shadow-sm">
                 <div className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-white/90 px-3 py-3 shadow-sm">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
@@ -911,6 +972,7 @@ export function AppSettings() {
                   )}
                 </div>
               </div>
+              )}
             </nav>
           </aside>
 
@@ -1259,14 +1321,17 @@ export function AppSettings() {
 
             {activeSection === 'users-online' && !restrictedSettingsMode && <UserOnlineSettings />}
 
-            {activeSection === 'app-releases' && <AppVersionSettings />}
+            {activeSection === 'app-releases' && !restrictedSettingsMode && <AppVersionSettings />}
 
-            {activeSection === 'auth-providers' && <AuthProviderSettings />}
+            {activeSection === 'auth-providers' && !restrictedSettingsMode && <AuthProviderSettings />}
 
+            {activeSection === 'yandex-disk' && canViewYandexDiskSettings && <YandexDisk embedded />}
+
+            {activeSection === 's3-storage' && canViewS3StorageSettings && <S3Storage embedded />}
 
             {activeSection === 'db-maintenance' && canViewMaintenanceSettings && <DatabaseMaintenanceSettings />}
 
-            {activeSection === 'db-import' && <SpreadsheetImportSettings />}
+            {activeSection === 'db-import' && !restrictedSettingsMode && <SpreadsheetImportSettings />}
 
             {SHOW_LEGACY_SQLITE_IMPORT && activeSection === 'db-import' && (
               <div className="space-y-6">
@@ -1409,7 +1474,7 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'db-operations' && (
+            {activeSection === 'db-operations' && !restrictedSettingsMode && (
               <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -1460,7 +1525,7 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'db-operations' && activeDatabaseOperationsSubsection === 'invoices' && (
+            {activeSection === 'db-operations' && !restrictedSettingsMode && activeDatabaseOperationsSubsection === 'invoices' && (
               <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                 <div>
                   <h4 className="text-base font-semibold text-gray-900">Счета</h4>
@@ -1514,7 +1579,7 @@ export function AppSettings() {
             )}
 
 
-            {activeSection === 'integrations' && (
+            {activeSection === 'integrations' && !restrictedSettingsMode && (
               <div className="space-y-6">
                 <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
                   <div className="flex flex-wrap gap-2">
@@ -1590,7 +1655,7 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'form-requirements' && (
+            {activeSection === 'form-requirements' && !restrictedSettingsMode && (
               <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-5">
                 {formRequirementSections.length === 0 && !requirementsLoading && (
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -1657,7 +1722,7 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'db-operations' && activeDatabaseOperationsSubsection === 'addresses' && (
+            {activeSection === 'db-operations' && !restrictedSettingsMode && activeDatabaseOperationsSubsection === 'addresses' && (
               <>
                 <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                   <label className="flex items-start gap-3 text-sm text-gray-700">
@@ -1800,7 +1865,7 @@ export function AppSettings() {
               </>
             )}
 
-            {activeSection === 'db-operations' && activeDatabaseOperationsSubsection === 'dictionary-merge' && (
+            {activeSection === 'db-operations' && !restrictedSettingsMode && activeDatabaseOperationsSubsection === 'dictionary-merge' && (
               <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                 <div className="grid gap-4 md:grid-cols-3">
                   <label className="text-sm text-gray-700">
@@ -1894,7 +1959,7 @@ export function AppSettings() {
               </div>
             )}
 
-            {activeSection === 'db-operations' && activeDatabaseOperationsSubsection === 'users-merge' && (
+            {activeSection === 'db-operations' && !restrictedSettingsMode && activeDatabaseOperationsSubsection === 'users-merge' && (
               <UserMergeSettings />
             )}
           </section>
@@ -1903,4 +1968,3 @@ export function AppSettings() {
     </div>
   );
 }
-

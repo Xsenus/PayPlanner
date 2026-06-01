@@ -122,7 +122,11 @@ const defaultCrmSyncDraft: UpdateYandexDiskCrmSyncSettingsRequest = {
   fileNameTemplate: '{documentDate}-{documentNumber}-{documentTitle}',
 };
 
-export function YandexDisk() {
+type YandexDiskProps = {
+  embedded?: boolean;
+};
+
+export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
   const toast = useToast();
   const { user } = useAuth();
   const rolePermissions = useRolePermissions(user?.role?.id);
@@ -134,6 +138,7 @@ export function YandexDisk() {
   const canDelete = isAdminRole || permissions.canDelete;
   const canExport = isAdminRole || permissions.canExport;
   const canTestConnection = canView && canEdit && canCreate && canDelete && canExport;
+  const shellClassName = embedded ? 'space-y-4' : 'space-y-4 p-4 lg:p-6';
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [settings, setSettings] = useState<YandexDiskSettingsDto | null>(null);
   const [connectionTest, setConnectionTest] = useState<YandexDiskConnectionTestDto | null>(null);
@@ -453,7 +458,7 @@ export function YandexDisk() {
   };
 
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className={shellClassName}>
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
