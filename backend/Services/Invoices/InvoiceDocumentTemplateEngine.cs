@@ -1178,14 +1178,29 @@ public static class InvoiceDocumentTemplateEngine
         }
 
         return LegacyManagedStandardTemplateFingerprints.Contains(actualFingerprint)
+            || LooksLikeLegacyManagedStandardTemplateLayout(templateHtml)
             ? actualFingerprint
             : null;
     }
 
     private static string ComputeTemplateFingerprint(string templateHtml)
     {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(templateHtml.Trim()));
+        var normalizedHtml = templateHtml
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Trim();
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalizedHtml));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    private static bool LooksLikeLegacyManagedStandardTemplateLayout(string templateHtml)
+    {
+        return templateHtml.Contains(".brand-column", StringComparison.Ordinal)
+            && templateHtml.Contains("class=\"brand-column\" rowspan=\"2\"", StringComparison.Ordinal)
+            && templateHtml.Contains("class=\"brand-stack\"", StringComparison.Ordinal)
+            && templateHtml.Contains("class=\"qr-wrap\"", StringComparison.Ordinal)
+            && templateHtml.Contains("{{seller.logoHtml}}", StringComparison.Ordinal)
+            && templateHtml.Contains("{{invoice.qrCodeHtml}}", StringComparison.Ordinal);
     }
 
     private static string Encode(string? value)
