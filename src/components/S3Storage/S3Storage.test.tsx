@@ -8,6 +8,15 @@ const mocks = vi.hoisted(() => ({
   upsertS3StorageConnectionMock: vi.fn(),
   deleteS3StorageConnectionMock: vi.fn(),
   testS3StorageConnectionMock: vi.fn(),
+  listS3StorageObjectsMock: vi.fn(),
+  createS3StorageFolderMock: vi.fn(),
+  uploadS3StorageFileMock: vi.fn(),
+  downloadS3StorageFileMock: vi.fn(),
+  deleteS3StorageObjectMock: vi.fn(),
+  copyS3StorageObjectMock: vi.fn(),
+  moveS3StorageObjectMock: vi.fn(),
+  getS3StorageTextFileMock: vi.fn(),
+  saveS3StorageTextFileMock: vi.fn(),
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -42,6 +51,15 @@ vi.mock('../../services/api', () => ({
     upsertS3StorageConnection: mocks.upsertS3StorageConnectionMock,
     deleteS3StorageConnection: mocks.deleteS3StorageConnectionMock,
     testS3StorageConnection: mocks.testS3StorageConnectionMock,
+    listS3StorageObjects: mocks.listS3StorageObjectsMock,
+    createS3StorageFolder: mocks.createS3StorageFolderMock,
+    uploadS3StorageFile: mocks.uploadS3StorageFileMock,
+    downloadS3StorageFile: mocks.downloadS3StorageFileMock,
+    deleteS3StorageObject: mocks.deleteS3StorageObjectMock,
+    copyS3StorageObject: mocks.copyS3StorageObjectMock,
+    moveS3StorageObject: mocks.moveS3StorageObjectMock,
+    getS3StorageTextFile: mocks.getS3StorageTextFileMock,
+    saveS3StorageTextFile: mocks.saveS3StorageTextFileMock,
   },
 }));
 
@@ -83,6 +101,28 @@ describe('S3Storage', () => {
     mocks.getS3StorageConnectionsMock.mockResolvedValue(buildOverview());
     mocks.upsertS3StorageConnectionMock.mockResolvedValue(buildOverview().connections[0]);
     mocks.deleteS3StorageConnectionMock.mockResolvedValue(undefined);
+    mocks.listS3StorageObjectsMock.mockImplementation((_id: string, path: string) => Promise.resolve({
+      current: { name: path === '/' ? 'S3' : 'docs', path, key: path === '/' ? 'payplanner' : 'payplanner/docs', type: 'folder' },
+      items: path === '/'
+        ? [
+            { name: 'docs', path: '/docs', key: 'payplanner/docs', type: 'folder' },
+            { name: 'readme.txt', path: '/readme.txt', key: 'payplanner/readme.txt', type: 'file', size: 12, lastModified: '2026-06-01T12:00:00+07:00' },
+          ]
+        : [
+            { name: 'note.txt', path: '/docs/note.txt', key: 'payplanner/docs/note.txt', type: 'file', size: 5, lastModified: '2026-06-01T12:10:00+07:00' },
+          ],
+      limit: 100,
+      offset: 0,
+      total: path === '/' ? 2 : 1,
+    }));
+    mocks.createS3StorageFolderMock.mockResolvedValue({ success: true, path: '/new-folder', key: 'payplanner/new-folder' });
+    mocks.uploadS3StorageFileMock.mockResolvedValue({ success: true, path: '/file.txt', key: 'payplanner/file.txt' });
+    mocks.downloadS3StorageFileMock.mockResolvedValue({ blob: new Blob(['hello'], { type: 'text/plain' }), fileName: 'readme.txt' });
+    mocks.deleteS3StorageObjectMock.mockResolvedValue({ success: true, path: '/readme.txt', key: 'payplanner/readme.txt' });
+    mocks.copyS3StorageObjectMock.mockResolvedValue({ success: true, path: '/copy.txt', key: 'payplanner/copy.txt' });
+    mocks.moveS3StorageObjectMock.mockResolvedValue({ success: true, path: '/moved.txt', key: 'payplanner/moved.txt' });
+    mocks.getS3StorageTextFileMock.mockResolvedValue({ path: '/readme.txt', content: 'hello' });
+    mocks.saveS3StorageTextFileMock.mockResolvedValue({ success: true, path: '/readme.txt', key: 'payplanner/readme.txt' });
     mocks.testS3StorageConnectionMock.mockResolvedValue({
       success: true,
       connectionId: 'hostkey-main',
@@ -133,5 +173,31 @@ describe('S3Storage', () => {
       secretAccessKey: '',
       clearSecret: false,
     }));
+  });
+
+  it('loads object list and opens S3 folders', async () => {
+    render(<S3Storage />);
+
+    expect(await screen.findByText('Файлы S3')).toBeTruthy();
+    expect(await screen.findByText('readme.txt')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /^docs$/i }));
+
+    await waitFor(() => expect(mocks.listS3StorageObjectsMock).toHaveBeenCalledWith('hostkey-main', '/docs'));
+    expect(await screen.findByText('note.txt')).toBeTruthy();
+  });
+
+  it('opens and saves a text file in S3', async () => {
+    render(<S3Storage />);
+
+    await screen.findByText('readme.txt');
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать readme.txt' }));
+
+    const editor = await screen.findByDisplayValue('hello');
+    fireEvent.change(editor, { target: { value: 'updated' } });
+    const saveButtons = screen.getAllByRole('button', { name: /^Сохранить$/i });
+    fireEvent.click(saveButtons[saveButtons.length - 1]);
+
+    await waitFor(() => expect(mocks.saveS3StorageTextFileMock).toHaveBeenCalledWith('hostkey-main', '/readme.txt', 'updated', true));
   });
 });
