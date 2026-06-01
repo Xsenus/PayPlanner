@@ -73,6 +73,43 @@ public sealed class DatabaseBackupServiceS3Tests
         Assert.Contains("S3 unavailable", upload.Error);
     }
 
+    [Fact]
+    public async Task RetryS3UploadAsync_ReuploadsFailedBackupAndUpdatesStoredResult()
+    {
+        await using var scope = await CreateScopeAsync();
+        scope.S3.ThrowOnUpload = true;
+        var service = scope.Provider.GetRequiredService<DatabaseBackupService>();
+        await service.UpdateSettingsAsync(
+            automaticEnabled: true,
+            scheduleLocal: "03:00",
+            retentionDays: 14,
+            backupFormat: "sqlite",
+            s3UploadEnabled: true,
+            s3ConnectionIds: ["s3-main"],
+            s3PrefixTemplate: "backups/database/{yyyy}/{MM}",
+            CancellationToken.None);
+
+        var failedResult = await service.CreateManualBackupAsync(CancellationToken.None);
+        var failedUpload = Assert.Single(failedResult.S3UploadResults);
+        Assert.Equal("failed", failedUpload.Status);
+
+        scope.S3.ThrowOnUpload = false;
+
+        var retry = await service.RetryS3UploadAsync(failedUpload.Id, CancellationToken.None);
+
+        Assert.Equal(failedUpload.Id, retry.Id);
+        Assert.Equal("success", retry.Status);
+        Assert.Null(retry.Error);
+        Assert.Equal(failedUpload.TargetPath, retry.TargetPath);
+        Assert.Equal(failedResult.Backup.SizeBytes, retry.SizeBytes);
+        Assert.True(scope.S3.UploadedBytes > 0);
+
+        var overview = await service.GetOverviewAsync(CancellationToken.None);
+        var stored = Assert.Single(overview.S3UploadResults);
+        Assert.Equal(failedUpload.Id, stored.Id);
+        Assert.Equal("success", stored.Status);
+    }
+
     private static async Task<TestScope> CreateScopeAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), $"payplanner-backup-s3-{Guid.NewGuid():N}");

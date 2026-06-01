@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getUserActivityMaintenanceMock: vi.fn(),
   getDatabaseBackupOverviewMock: vi.fn(),
   getS3StorageConnectionsMock: vi.fn(),
+  retryDatabaseBackupS3UploadMock: vi.fn(),
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -55,6 +56,7 @@ vi.mock('../../services/api', () => ({
     getDatabaseBackupOverview: mocks.getDatabaseBackupOverviewMock,
     getS3StorageConnections: mocks.getS3StorageConnectionsMock,
     updateDatabaseBackupSettings: mocks.updateDatabaseBackupSettingsMock,
+    retryDatabaseBackupS3Upload: mocks.retryDatabaseBackupS3UploadMock,
   },
 }));
 
@@ -143,6 +145,7 @@ describe('DatabaseMaintenanceSettings', () => {
         prefixTemplate: 'backup-db/{yyyy}/',
       },
     });
+    mocks.retryDatabaseBackupS3UploadMock.mockResolvedValue(buildBackupOverview());
   });
 
   it('saves S3 upload settings for database backups', async () => {
@@ -165,5 +168,51 @@ describe('DatabaseMaintenanceSettings', () => {
       s3ConnectionIds: ['hostkey-main'],
       s3PrefixTemplate: 'backup-db/{yyyy}/',
     })));
+  });
+
+  it('retries failed S3 upload for database backup', async () => {
+    const failedOverview = {
+      ...buildBackupOverview(),
+      s3Upload: {
+        enabled: true,
+        connectionIds: ['hostkey-main'],
+        prefixTemplate: 'backups/database/{yyyy}/{MM}/',
+      },
+      s3UploadResults: [
+        {
+          id: 'failed-result',
+          backupRelativePath: '2026/06/backup.zip',
+          backupFileName: 'backup.zip',
+          connectionId: 'hostkey-main',
+          status: 'failed',
+          targetPath: '/backups/database/2026/06/backup.zip',
+          targetKey: null,
+          sizeBytes: 1024,
+          error: 'S3 unavailable',
+          createdAt: '2026-06-01T10:00:00+07:00',
+          updatedAt: '2026-06-01T10:01:00+07:00',
+        },
+      ],
+    };
+    mocks.getDatabaseBackupOverviewMock.mockResolvedValue(failedOverview);
+    mocks.retryDatabaseBackupS3UploadMock.mockResolvedValue({
+      ...failedOverview,
+      s3UploadResults: [
+        {
+          ...failedOverview.s3UploadResults[0],
+          status: 'success',
+          error: null,
+        },
+      ],
+    });
+
+    render(<DatabaseMaintenanceSettings />);
+
+    await waitFor(() => expect(mocks.getDatabaseBackupOverviewMock).toHaveBeenCalled());
+    fireEvent.click(screen.getAllByRole('button')[4]);
+    fireEvent.click(await screen.findByRole('button', { name: /Повторить/i }));
+
+    await waitFor(() => expect(mocks.retryDatabaseBackupS3UploadMock).toHaveBeenCalledWith('failed-result'));
+    expect(await screen.findByText('S3-выгрузка резервной копии повторена.')).toBeTruthy();
   });
 });

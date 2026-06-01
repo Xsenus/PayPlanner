@@ -2344,6 +2344,12 @@ export class ApiService {
     });
   }
 
+  async retryDatabaseBackupS3Upload(uploadResultId: string) {
+    return this.request<DatabaseBackupOverviewDto>(`/database/backups/s3-uploads/${encodeURIComponent(uploadResultId)}/retry`, {
+      method: 'POST',
+    });
+  }
+
   async deleteDatabaseBackup(relativePath: string) {
     return this.request<DatabaseBackupDeleteResultDto>(`/database/backups/file?relativePath=${encodeURIComponent(relativePath)}`, {
       method: 'DELETE',

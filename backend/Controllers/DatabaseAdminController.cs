@@ -97,6 +97,27 @@ public class DatabaseAdminController : ControllerBase
         }
     }
 
+    [HttpPost("backups/s3-uploads/{uploadResultId}/retry")]
+    public async Task<ActionResult<DatabaseBackupOverviewDto>> RetryBackupS3UploadAsync(
+        string uploadResultId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _databaseBackupService.RetryS3UploadAsync(uploadResultId, cancellationToken);
+            var overview = await _databaseBackupService.GetOverviewAsync(cancellationToken);
+            return Ok(MapOverview(overview));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+    }
+
     [HttpDelete("backups/file")]
     public async Task<ActionResult<DatabaseBackupDeleteResultDto>> DeleteBackupAsync(
         [FromQuery] string? relativePath,

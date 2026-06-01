@@ -215,6 +215,50 @@ public sealed class DatabaseBackupService
             s3UploadResults);
     }
 
+    public async Task<DatabaseBackupS3UploadResult> RetryS3UploadAsync(string? uploadResultId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(uploadResultId))
+        {
+            throw new ArgumentException("Укажите S3-выгрузку для повторной отправки.");
+        }
+
+        var storedResults = await LoadS3UploadResultsAsync(cancellationToken);
+        var storedResult = storedResults.FirstOrDefault(result =>
+            string.Equals(result.Id, uploadResultId.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (storedResult is null)
+        {
+            throw new FileNotFoundException("S3-выгрузка резервной копии не найдена.");
+        }
+
+        if (!string.Equals(storedResult.Status, "failed", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Повторить можно только S3-выгрузку, которая завершилась ошибкой.");
+        }
+
+        var resolvedPath = ResolveBackupPath(storedResult.BackupRelativePath);
+        if (string.IsNullOrWhiteSpace(resolvedPath))
+        {
+            throw new FileNotFoundException("Локальная резервная копия для повторной отправки не найдена.");
+        }
+
+        var fileInfo = new FileInfo(resolvedPath);
+        var pendingResult = storedResult with
+        {
+            Status = "pending",
+            TargetPath = string.IsNullOrWhiteSpace(storedResult.TargetPath) ? storedResult.BackupFileName : storedResult.TargetPath,
+            TargetKey = null,
+            SizeBytes = fileInfo.Length,
+            Error = null,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        await SaveS3UploadResultAsync(pendingResult, cancellationToken);
+
+        var completedResult = await UploadBackupFileToS3Async(pendingResult, resolvedPath, cancellationToken);
+        await SaveS3UploadResultAsync(completedResult, cancellationToken);
+
+        return completedResult;
+    }
+
     public Task<DatabaseBackupDeleteResult> DeleteBackupAsync(string? relativePath, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -577,8 +621,6 @@ public sealed class DatabaseBackupService
             return [];
         }
 
-        using var scope = _scopeFactory.CreateScope();
-        var s3StorageService = scope.ServiceProvider.GetRequiredService<IS3StorageService>();
         var results = new List<DatabaseBackupS3UploadResult>();
 
         foreach (var connectionId in settings.ConnectionIds)
@@ -602,42 +644,53 @@ public sealed class DatabaseBackupService
 
             await SaveS3UploadResultAsync(result, cancellationToken);
 
-            try
-            {
-                await using var stream = File.OpenRead(resolvedPath);
-                var upload = await s3StorageService.UploadAsync(
-                    connectionId,
-                    targetPath,
-                    stream,
-                    "application/octet-stream",
-                    overwrite: true,
-                    cancellationToken);
-
-                result = result with
-                {
-                    Status = "success",
-                    TargetPath = upload.Path,
-                    TargetKey = upload.Key,
-                    Error = null,
-                    UpdatedAt = DateTime.UtcNow,
-                };
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Failed to upload database backup {BackupPath} to S3 connection {ConnectionId}.", backup.RelativePath, connectionId);
-                result = result with
-                {
-                    Status = "failed",
-                    Error = ex.Message,
-                    UpdatedAt = DateTime.UtcNow,
-                };
-            }
+            result = await UploadBackupFileToS3Async(result, resolvedPath, cancellationToken);
 
             await SaveS3UploadResultAsync(result, cancellationToken);
             results.Add(result);
         }
 
         return results;
+    }
+
+    private async Task<DatabaseBackupS3UploadResult> UploadBackupFileToS3Async(
+        DatabaseBackupS3UploadResult result,
+        string resolvedPath,
+        CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var s3StorageService = scope.ServiceProvider.GetRequiredService<IS3StorageService>();
+
+        try
+        {
+            await using var stream = File.OpenRead(resolvedPath);
+            var upload = await s3StorageService.UploadAsync(
+                result.ConnectionId,
+                result.TargetPath,
+                stream,
+                "application/octet-stream",
+                overwrite: true,
+                cancellationToken);
+
+            return result with
+            {
+                Status = "success",
+                TargetPath = upload.Path,
+                TargetKey = upload.Key,
+                Error = null,
+                UpdatedAt = DateTime.UtcNow,
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to upload database backup {BackupPath} to S3 connection {ConnectionId}.", result.BackupRelativePath, result.ConnectionId);
+            return result with
+            {
+                Status = "failed",
+                Error = ex.Message,
+                UpdatedAt = DateTime.UtcNow,
+            };
+        }
     }
 
     private async Task<IReadOnlyList<DatabaseBackupS3UploadResult>> LoadS3UploadResultsAsync(CancellationToken cancellationToken)

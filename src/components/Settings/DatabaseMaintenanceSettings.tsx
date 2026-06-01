@@ -150,6 +150,7 @@ export function DatabaseMaintenanceSettings() {
   const [databaseBackupS3PrefixTemplate, setDatabaseBackupS3PrefixTemplate] = useState(DEFAULT_DATABASE_BACKUP_S3_PREFIX);
   const [databaseBackupSaving, setDatabaseBackupSaving] = useState(false);
   const [databaseBackupCreating, setDatabaseBackupCreating] = useState(false);
+  const [databaseBackupS3RetryingId, setDatabaseBackupS3RetryingId] = useState<string | null>(null);
   const [databaseBackupDeleting, setDatabaseBackupDeleting] = useState<string | null>(null);
   const [databaseBackupClearing, setDatabaseBackupClearing] = useState(false);
   const [databaseBackupMessage, setDatabaseBackupMessage] = useState<string | null>(null);
@@ -436,6 +437,21 @@ export function DatabaseMaintenanceSettings() {
       setDatabaseBackupError(getErrorMessage(error, 'Не удалось создать резервную копию.'));
     } finally {
       setDatabaseBackupCreating(false);
+    }
+  };
+
+  const retryDatabaseBackupS3Upload = async (uploadResultId: string) => {
+    setDatabaseBackupS3RetryingId(uploadResultId);
+    setDatabaseBackupError(null);
+    setDatabaseBackupMessage(null);
+    try {
+      const overview = await apiService.retryDatabaseBackupS3Upload(uploadResultId);
+      applyDatabaseBackupOverview(overview);
+      setDatabaseBackupMessage('S3-выгрузка резервной копии повторена.');
+    } catch (error) {
+      setDatabaseBackupError(getErrorMessage(error, 'Не удалось повторить S3-выгрузку резервной копии.'));
+    } finally {
+      setDatabaseBackupS3RetryingId(null);
     }
   };
 
@@ -1078,7 +1094,20 @@ export function DatabaseMaintenanceSettings() {
                         <div key={result.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="min-w-0 truncate font-medium text-slate-900">{result.backupFileName}</span>
-                            <StatusBadge value={getS3UploadStatusLabel(result.status)} tone={getS3UploadStatusTone(result.status)} />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <StatusBadge value={getS3UploadStatusLabel(result.status)} tone={getS3UploadStatusTone(result.status)} />
+                              {result.status === 'failed' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void retryDatabaseBackupS3Upload(result.id)}
+                                  disabled={databaseBackupS3RetryingId === result.id}
+                                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
+                                >
+                                  {databaseBackupS3RetryingId === result.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                                  Повторить
+                                </button>
+                              ) : null}
+                            </div>
                           </div>
                           <div className="mt-1 break-all text-xs text-slate-500">{result.targetPath}</div>
                           <div className="mt-1 text-xs text-slate-500">{formatDateTime(result.updatedAt)} · {formatBytes(result.sizeBytes)}</div>
