@@ -406,6 +406,35 @@ export interface S3StorageConnectionTestDto {
   steps: S3StorageConnectionTestStepDto[];
 }
 
+export interface S3StorageObjectDto {
+  name: string;
+  path: string;
+  key: string;
+  type: string;
+  contentType?: string | null;
+  size?: number | null;
+  lastModified?: string | null;
+}
+
+export interface S3StorageListResponseDto {
+  current: S3StorageObjectDto;
+  items: S3StorageObjectDto[];
+  limit: number;
+  offset: number;
+  total: number;
+}
+
+export interface S3StorageOperationResultDto {
+  success: boolean;
+  path: string;
+  key: string;
+}
+
+export interface S3StorageTextFileDto {
+  path: string;
+  content: string;
+}
+
 export interface RolePermissionAuditRoleDto {
   roleId: number;
   roleName: string;
@@ -1712,6 +1741,85 @@ export class ApiService {
     return this.request<S3StorageConnectionTestDto>(`/s3-storages/${encodeURIComponent(id)}/connection-test`, {
       method: 'POST',
       body: JSON.stringify({ testPrefix }),
+    });
+  }
+
+  async listS3StorageObjects(id: string, path = '/', limit = 100, offset = 0) {
+    const query = new URLSearchParams({
+      path,
+      limit: String(limit),
+      offset: String(offset),
+    });
+    return this.request<S3StorageListResponseDto>(`/s3-storages/${encodeURIComponent(id)}/objects?${query}`);
+  }
+
+  async createS3StorageFolder(id: string, path: string) {
+    return this.request<S3StorageOperationResultDto>(`/s3-storages/${encodeURIComponent(id)}/folders`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  }
+
+  async uploadS3StorageFile(id: string, path: string, file: File, overwrite = true) {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('path', path);
+    form.append('overwrite', String(overwrite));
+    return this.request<S3StorageOperationResultDto>(`/s3-storages/${encodeURIComponent(id)}/upload`, {
+      method: 'POST',
+      body: form,
+    });
+  }
+
+  async downloadS3StorageFile(id: string, path: string) {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/s3-storages/${encodeURIComponent(id)}/download?path=${encodeURIComponent(path)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        notifyAuthSessionExpired();
+      }
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(`HTTP ${response.status} ${response.statusText} - ${text}`);
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(response.headers.get('content-disposition')) || path.split('/').pop() || 's3-file',
+    };
+  }
+
+  async deleteS3StorageObject(id: string, path: string, recursive = false) {
+    return this.request<S3StorageOperationResultDto>(
+      `/s3-storages/${encodeURIComponent(id)}/objects?path=${encodeURIComponent(path)}&recursive=${recursive}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  async copyS3StorageObject(id: string, fromPath: string, toPath: string, overwrite = false) {
+    return this.request<S3StorageOperationResultDto>(`/s3-storages/${encodeURIComponent(id)}/copy`, {
+      method: 'POST',
+      body: JSON.stringify({ fromPath, toPath, overwrite }),
+    });
+  }
+
+  async moveS3StorageObject(id: string, fromPath: string, toPath: string, overwrite = false) {
+    return this.request<S3StorageOperationResultDto>(`/s3-storages/${encodeURIComponent(id)}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ fromPath, toPath, overwrite }),
+    });
+  }
+
+  async getS3StorageTextFile(id: string, path: string) {
+    return this.request<S3StorageTextFileDto>(`/s3-storages/${encodeURIComponent(id)}/text?path=${encodeURIComponent(path)}`);
+  }
+
+  async saveS3StorageTextFile(id: string, path: string, content: string, overwrite = true) {
+    return this.request<S3StorageOperationResultDto>(`/s3-storages/${encodeURIComponent(id)}/text`, {
+      method: 'PUT',
+      body: JSON.stringify({ path, content, overwrite }),
     });
   }
 

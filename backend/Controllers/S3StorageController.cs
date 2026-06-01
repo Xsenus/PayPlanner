@@ -102,6 +102,175 @@ public sealed class S3StorageController : ControllerBase
         return result;
     }
 
+    [HttpGet("{id}/objects")]
+    public async Task<ActionResult<S3StorageListResponseDto>> ListObjects(
+        [FromRoute] string id,
+        [FromQuery] string? path,
+        [FromQuery] int limit = 100,
+        [FromQuery] int offset = 0,
+        CancellationToken ct = default)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanView, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAsync(() => _service.ListObjectsAsync(id, path, limit, offset, ct));
+    }
+
+    [HttpPost("{id}/folders")]
+    public async Task<ActionResult<S3StorageOperationResultDto>> CreateFolder(
+        [FromRoute] string id,
+        [FromBody] CreateS3StorageFolderRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAndAuditAsync(
+            () => _service.CreateFolderAsync(id, request, ct),
+            "FolderCreated",
+            "Создана папка в S3-хранилище.",
+            new { ConnectionId = id, request.Path },
+            ct);
+    }
+
+    [HttpPost("{id}/upload")]
+    [RequestSizeLimit(50L * 1024 * 1024 * 1024)]
+    public async Task<ActionResult<S3StorageOperationResultDto>> Upload(
+        [FromRoute] string id,
+        [FromForm] IFormFile? file,
+        [FromForm] string? path,
+        [FromForm] bool overwrite = true,
+        CancellationToken ct = default)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
+        if (forbidden is not null) return forbidden;
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest("Выберите файл для загрузки.");
+        }
+
+        var targetPath = string.IsNullOrWhiteSpace(path)
+            ? file.FileName
+            : path.Trim().EndsWith("/", StringComparison.Ordinal)
+                ? $"{path.Trim()}{file.FileName}"
+                : path;
+        await using var stream = file.OpenReadStream();
+
+        return await ExecuteAndAuditAsync(
+            () => _service.UploadAsync(id, targetPath, stream, file.ContentType, overwrite, ct),
+            "Uploaded",
+            "Файл загружен в S3-хранилище.",
+            new { ConnectionId = id, Path = targetPath, file.FileName, file.Length, file.ContentType, Overwrite = overwrite },
+            ct);
+    }
+
+    [HttpGet("{id}/download")]
+    public async Task<IActionResult> Download(
+        [FromRoute] string id,
+        [FromQuery] string? path,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanExport, ct);
+        if (forbidden is not null) return forbidden;
+
+        try
+        {
+            var file = await _service.DownloadAsync(id, path, ct);
+            await AddAuditAsync(
+                "Downloaded",
+                "Файл скачан из S3-хранилища.",
+                new { ConnectionId = id, file.Path, file.Key, Size = file.Content.Length },
+                ct);
+            return File(file.Content, file.ContentType, file.FileName);
+        }
+        catch (S3StorageOperationException ex)
+        {
+            return MapError(ex);
+        }
+    }
+
+    [HttpDelete("{id}/objects")]
+    public async Task<ActionResult<S3StorageOperationResultDto>> DeleteObject(
+        [FromRoute] string id,
+        [FromQuery] string? path,
+        [FromQuery] bool recursive = false,
+        CancellationToken ct = default)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanDelete, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAndAuditAsync(
+            () => _service.DeleteObjectAsync(id, path, recursive, ct),
+            "Deleted",
+            "Объект удален из S3-хранилища.",
+            new { ConnectionId = id, Path = path, Recursive = recursive },
+            ct);
+    }
+
+    [HttpPost("{id}/copy")]
+    public async Task<ActionResult<S3StorageOperationResultDto>> CopyObject(
+        [FromRoute] string id,
+        [FromBody] S3StorageObjectOperationRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAndAuditAsync(
+            () => _service.CopyObjectAsync(id, request, ct),
+            "Copied",
+            "Объект скопирован в S3-хранилище.",
+            new { ConnectionId = id, request.FromPath, request.ToPath, request.Overwrite },
+            ct);
+    }
+
+    [HttpPost("{id}/move")]
+    public async Task<ActionResult<S3StorageOperationResultDto>> MoveObject(
+        [FromRoute] string id,
+        [FromBody] S3StorageObjectOperationRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanEdit, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAndAuditAsync(
+            () => _service.MoveObjectAsync(id, request, ct),
+            "Moved",
+            "Объект перемещен в S3-хранилище.",
+            new { ConnectionId = id, request.FromPath, request.ToPath, request.Overwrite },
+            ct);
+    }
+
+    [HttpGet("{id}/text")]
+    public async Task<ActionResult<S3StorageTextFileDto>> GetTextFile(
+        [FromRoute] string id,
+        [FromQuery] string? path,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanEdit, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAsync(() => _service.GetTextFileAsync(id, path, ct));
+    }
+
+    [HttpPut("{id}/text")]
+    public async Task<ActionResult<S3StorageOperationResultDto>> SaveTextFile(
+        [FromRoute] string id,
+        [FromBody] UpdateS3StorageTextFileRequest request,
+        CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanEdit, ct);
+        if (forbidden is not null) return forbidden;
+
+        return await ExecuteAndAuditAsync(
+            () => _service.SaveTextFileAsync(id, request, ct),
+            "TextUpdated",
+            "Текстовый файл обновлен в S3-хранилище.",
+            new { ConnectionId = id, request.Path, ContentLength = request.Content?.Length ?? 0, request.Overwrite },
+            ct);
+    }
+
     private async Task<ActionResult?> RequirePermissionAsync(Func<RolePermission, bool> isAllowed, CancellationToken ct)
     {
         var userId = User.GetUserId();
@@ -134,6 +303,22 @@ public sealed class S3StorageController : ControllerBase
         {
             return MapError(ex);
         }
+    }
+
+    private async Task<ActionResult<T>> ExecuteAndAuditAsync<T>(
+        Func<Task<T>> action,
+        string auditAction,
+        string description,
+        object metadata,
+        CancellationToken ct)
+    {
+        var result = await ExecuteAsync(action);
+        if (result.Result is null)
+        {
+            await AddAuditAsync(auditAction, description, metadata, ct);
+        }
+
+        return result;
     }
 
     private async Task AddAuditAsync(string action, string description, object metadata, CancellationToken ct)

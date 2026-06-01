@@ -19,3 +19,22 @@ public class TestS3StorageConnectionRequest
 {
     public string TestPrefix { get; init; } = "_payplanner-test";
 }
+
+public class CreateS3StorageFolderRequest
+{
+    public string Path { get; init; } = string.Empty;
+}
+
+public class S3StorageObjectOperationRequest
+{
+    public string FromPath { get; init; } = string.Empty;
+    public string ToPath { get; init; } = string.Empty;
+    public bool Overwrite { get; init; }
+}
+
+public class UpdateS3StorageTextFileRequest
+{
+    public string Path { get; init; } = string.Empty;
+    public string Content { get; init; } = string.Empty;
+    public bool Overwrite { get; init; } = true;
+}

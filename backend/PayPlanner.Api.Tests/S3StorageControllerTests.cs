@@ -121,6 +121,38 @@ public sealed class S3StorageControllerTests
         Assert.Contains("payplanner-backups", audit.MetadataJson);
     }
 
+    [Fact]
+    public async Task CreateFolder_AllowsCreatePermissionAndWritesAudit()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanCreate = true });
+        var service = new FakeS3StorageService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.CreateFolder("s3-1", new CreateS3StorageFolderRequest { Path = "/docs" }, CancellationToken.None);
+
+        var result = Assert.IsType<S3StorageOperationResultDto>(response.Value);
+        Assert.Equal("/docs", result.Path);
+        Assert.True(service.CreateFolderCalled);
+        var audit = Assert.Single(scope.Db.ObjectAuditEvents);
+        Assert.Equal("FolderCreated", audit.Action);
+        Assert.Contains("/docs", audit.MetadataJson);
+    }
+
+    [Fact]
+    public async Task Download_RequiresExportPermission()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanExport = false });
+        var service = new FakeS3StorageService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.Download("s3-1", "/docs/readme.txt", CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response);
+        Assert.False(service.DownloadCalled);
+    }
+
     private static S3StorageController CreateController(PaymentContext db, IS3StorageService service, ClaimsPrincipal user)
         => new(service, db)
         {
@@ -197,6 +229,8 @@ public sealed class S3StorageControllerTests
         public bool GetOverviewCalled { get; private set; }
         public bool UpsertCalled { get; private set; }
         public bool TestConnectionCalled { get; private set; }
+        public bool CreateFolderCalled { get; private set; }
+        public bool DownloadCalled { get; private set; }
 
         public Task<S3StorageConnectionsOverviewDto> GetOverviewAsync(CancellationToken cancellationToken = default)
         {
@@ -253,6 +287,59 @@ public sealed class S3StorageControllerTests
                 TestKey = "payplanner/_payplanner-test/file.txt",
             });
         }
+
+        public Task<S3StorageListResponseDto> ListObjectsAsync(string id, string? path, int limit, int offset, CancellationToken cancellationToken = default)
+            => Task.FromResult(new S3StorageListResponseDto
+            {
+                Current = new S3StorageObjectDto { Name = "S3", Path = "/", Type = "folder" },
+                Items =
+                [
+                    new S3StorageObjectDto { Name = "readme.txt", Path = "/docs/readme.txt", Key = "payplanner/docs/readme.txt", Type = "file" },
+                ],
+                Limit = limit,
+                Offset = offset,
+                Total = 1,
+            });
+
+        public Task<S3StorageOperationResultDto> CreateFolderAsync(string id, CreateS3StorageFolderRequest request, CancellationToken cancellationToken = default)
+        {
+            CreateFolderCalled = true;
+            return Task.FromResult(new S3StorageOperationResultDto
+            {
+                Success = true,
+                Path = request.Path,
+                Key = $"payplanner{request.Path}",
+            });
+        }
+
+        public Task<S3StorageOperationResultDto> UploadAsync(string id, string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default)
+            => Task.FromResult(new S3StorageOperationResultDto { Success = true, Path = path ?? "/file.txt", Key = $"payplanner/{path}" });
+
+        public Task<S3StorageDownloadResult> DownloadAsync(string id, string? path, CancellationToken cancellationToken = default)
+        {
+            DownloadCalled = true;
+            return Task.FromResult(new S3StorageDownloadResult(
+                new MemoryStream("hello"u8.ToArray()),
+                "text/plain",
+                "readme.txt",
+                path ?? "/docs/readme.txt",
+                "payplanner/docs/readme.txt"));
+        }
+
+        public Task<S3StorageOperationResultDto> DeleteObjectAsync(string id, string? path, bool recursive, CancellationToken cancellationToken = default)
+            => Task.FromResult(new S3StorageOperationResultDto { Success = true, Path = path ?? "/", Key = "payplanner/docs/readme.txt" });
+
+        public Task<S3StorageOperationResultDto> CopyObjectAsync(string id, S3StorageObjectOperationRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new S3StorageOperationResultDto { Success = true, Path = request.ToPath, Key = $"payplanner/{request.ToPath}" });
+
+        public Task<S3StorageOperationResultDto> MoveObjectAsync(string id, S3StorageObjectOperationRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new S3StorageOperationResultDto { Success = true, Path = request.ToPath, Key = $"payplanner/{request.ToPath}" });
+
+        public Task<S3StorageTextFileDto> GetTextFileAsync(string id, string? path, CancellationToken cancellationToken = default)
+            => Task.FromResult(new S3StorageTextFileDto { Path = path ?? "/docs/readme.txt", Content = "hello" });
+
+        public Task<S3StorageOperationResultDto> SaveTextFileAsync(string id, UpdateS3StorageTextFileRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new S3StorageOperationResultDto { Success = true, Path = request.Path, Key = $"payplanner/{request.Path}" });
     }
 
     private sealed class TestDbScope(SqliteConnection connection, PaymentContext db) : IAsyncDisposable

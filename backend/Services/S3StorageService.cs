@@ -4,6 +4,7 @@ using System.Text.Json;
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -18,6 +19,15 @@ public interface IS3StorageService
     Task<S3StorageConnectionDto> UpsertConnectionAsync(UpsertS3StorageConnectionRequest request, CancellationToken cancellationToken = default);
     Task DeleteConnectionAsync(string id, CancellationToken cancellationToken = default);
     Task<S3StorageConnectionTestDto> TestConnectionAsync(string id, TestS3StorageConnectionRequest request, CancellationToken cancellationToken = default);
+    Task<S3StorageListResponseDto> ListObjectsAsync(string id, string? path, int limit, int offset, CancellationToken cancellationToken = default);
+    Task<S3StorageOperationResultDto> CreateFolderAsync(string id, CreateS3StorageFolderRequest request, CancellationToken cancellationToken = default);
+    Task<S3StorageOperationResultDto> UploadAsync(string id, string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default);
+    Task<S3StorageDownloadResult> DownloadAsync(string id, string? path, CancellationToken cancellationToken = default);
+    Task<S3StorageOperationResultDto> DeleteObjectAsync(string id, string? path, bool recursive, CancellationToken cancellationToken = default);
+    Task<S3StorageOperationResultDto> CopyObjectAsync(string id, S3StorageObjectOperationRequest request, CancellationToken cancellationToken = default);
+    Task<S3StorageOperationResultDto> MoveObjectAsync(string id, S3StorageObjectOperationRequest request, CancellationToken cancellationToken = default);
+    Task<S3StorageTextFileDto> GetTextFileAsync(string id, string? path, CancellationToken cancellationToken = default);
+    Task<S3StorageOperationResultDto> SaveTextFileAsync(string id, UpdateS3StorageTextFileRequest request, CancellationToken cancellationToken = default);
 }
 
 public interface IS3StorageClientFactory
@@ -28,10 +38,38 @@ public interface IS3StorageClientFactory
 public interface IS3StorageClient : IAsyncDisposable
 {
     Task ListAsync(string bucket, string prefix, CancellationToken cancellationToken);
+    Task<S3StorageClientListResult> ListObjectsAsync(string bucket, string prefix, string delimiter, CancellationToken cancellationToken);
+    Task<List<string>> ListKeysAsync(string bucket, string prefix, CancellationToken cancellationToken);
+    Task<bool> ExistsAsync(string bucket, string key, CancellationToken cancellationToken);
+    Task PutAsync(string bucket, string key, Stream content, string contentType, CancellationToken cancellationToken);
     Task PutTextAsync(string bucket, string key, string content, CancellationToken cancellationToken);
-    Task<string> GetTextAsync(string bucket, string key, CancellationToken cancellationToken);
+    Task<S3StorageDownloadedObject> GetAsync(string bucket, string key, CancellationToken cancellationToken);
     Task DeleteAsync(string bucket, string key, CancellationToken cancellationToken);
+    Task DeleteManyAsync(string bucket, IReadOnlyCollection<string> keys, CancellationToken cancellationToken);
+    Task CopyAsync(string bucket, string fromKey, string toKey, CancellationToken cancellationToken);
 }
+
+public sealed record S3StorageClientObject(
+    string Key,
+    long Size,
+    DateTime? LastModified,
+    string? ContentType);
+
+public sealed record S3StorageClientListResult(
+    IReadOnlyList<string> CommonPrefixes,
+    IReadOnlyList<S3StorageClientObject> Objects);
+
+public sealed record S3StorageDownloadedObject(
+    MemoryStream Content,
+    string ContentType,
+    string FileName);
+
+public sealed record S3StorageDownloadResult(
+    MemoryStream Content,
+    string ContentType,
+    string FileName,
+    string Path,
+    string Key);
 
 public sealed class S3StorageOperationException : Exception
 {
@@ -198,8 +236,10 @@ public sealed class S3StorageService : IS3StorageService
             "Служебный файл скачан и проверен.",
             async () =>
             {
-                var downloaded = await client.GetTextAsync(connection.Bucket, testKey, cancellationToken);
-                if (!string.Equals(downloaded, markerText, StringComparison.Ordinal))
+                var downloaded = await client.GetAsync(connection.Bucket, testKey, cancellationToken);
+                using var reader = new StreamReader(downloaded.Content, Encoding.UTF8);
+                var text = await reader.ReadToEndAsync(cancellationToken);
+                if (!string.Equals(text, markerText, StringComparison.Ordinal))
                 {
                     throw new S3StorageOperationException(502, "S3-хранилище вернуло служебный файл с неожиданным содержимым.");
                 }
@@ -225,6 +265,236 @@ public sealed class S3StorageService : IS3StorageService
         };
     }
 
+    public async Task<S3StorageListResponseDto> ListObjectsAsync(
+        string id,
+        string? path,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken = default)
+    {
+        var connection = await GetEnabledConnectionAsync(id, cancellationToken);
+        var relativePath = NormalizeRelativePath(path, allowEmpty: true);
+        var prefix = EnsureTrailingSlash(CombineKeys(connection.RootPrefix, relativePath));
+        var safeLimit = Math.Clamp(limit <= 0 ? 100 : limit, 1, 500);
+        var safeOffset = Math.Max(0, offset);
+
+        await using var client = _clientFactory.Create(connection);
+        var result = await client.ListObjectsAsync(connection.Bucket, prefix, "/", cancellationToken);
+        var items = result.CommonPrefixes
+            .Select(prefixKey => BuildFolderDto(connection.RootPrefix, prefixKey))
+            .Concat(result.Objects
+                .Where(item => !string.Equals(item.Key, prefix, StringComparison.Ordinal) && !item.Key.EndsWith("/", StringComparison.Ordinal))
+                .Select(item => BuildFileDto(connection.RootPrefix, item)))
+            .OrderBy(item => item.Type == "folder" ? 0 : 1)
+            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new S3StorageListResponseDto
+        {
+            Current = new S3StorageObjectDto
+            {
+                Name = string.IsNullOrWhiteSpace(relativePath) ? "S3" : Path.GetFileName(relativePath),
+                Path = ToDisplayPath(relativePath),
+                Key = prefix.TrimEnd('/'),
+                Type = "folder",
+            },
+            Items = items.Skip(safeOffset).Take(safeLimit).ToList(),
+            Limit = safeLimit,
+            Offset = safeOffset,
+            Total = items.Count,
+        };
+    }
+
+    public async Task<S3StorageOperationResultDto> CreateFolderAsync(
+        string id,
+        CreateS3StorageFolderRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var connection = await GetEnabledConnectionAsync(id, cancellationToken);
+        var relativePath = NormalizeRelativePath(request.Path, allowEmpty: false);
+        var key = EnsureTrailingSlash(CombineKeys(connection.RootPrefix, relativePath));
+
+        await using var client = _clientFactory.Create(connection);
+        if (await client.ExistsAsync(connection.Bucket, key, cancellationToken))
+        {
+            throw new S3StorageOperationException(409, "Папка S3 уже существует.");
+        }
+
+        await using var stream = new MemoryStream(Array.Empty<byte>());
+        await client.PutAsync(connection.Bucket, key, stream, "application/x-directory", cancellationToken);
+        return BuildOperationResult(connection.RootPrefix, key);
+    }
+
+    public async Task<S3StorageOperationResultDto> UploadAsync(
+        string id,
+        string? path,
+        Stream content,
+        string? contentType,
+        bool overwrite,
+        CancellationToken cancellationToken = default)
+    {
+        var connection = await GetEnabledConnectionAsync(id, cancellationToken);
+        var relativePath = NormalizeRelativePath(path, allowEmpty: false);
+        if (relativePath.EndsWith("/", StringComparison.Ordinal))
+        {
+            throw new S3StorageOperationException(400, "Укажите имя файла для загрузки в S3.");
+        }
+
+        var key = CombineKeys(connection.RootPrefix, relativePath);
+        await using var client = _clientFactory.Create(connection);
+        if (!overwrite && await client.ExistsAsync(connection.Bucket, key, cancellationToken))
+        {
+            throw new S3StorageOperationException(409, "Файл S3 уже существует.");
+        }
+
+        await client.PutAsync(connection.Bucket, key, content, NormalizeContentType(contentType, relativePath), cancellationToken);
+        return BuildOperationResult(connection.RootPrefix, key);
+    }
+
+    public async Task<S3StorageDownloadResult> DownloadAsync(string id, string? path, CancellationToken cancellationToken = default)
+    {
+        var connection = await GetEnabledConnectionAsync(id, cancellationToken);
+        var relativePath = NormalizeRelativePath(path, allowEmpty: false);
+        var key = CombineKeys(connection.RootPrefix, relativePath);
+
+        await using var client = _clientFactory.Create(connection);
+        var downloaded = await client.GetAsync(connection.Bucket, key, cancellationToken);
+        return new S3StorageDownloadResult(
+            downloaded.Content,
+            downloaded.ContentType,
+            string.IsNullOrWhiteSpace(downloaded.FileName) ? Path.GetFileName(relativePath) : downloaded.FileName,
+            ToDisplayPath(relativePath),
+            key);
+    }
+
+    public async Task<S3StorageOperationResultDto> DeleteObjectAsync(
+        string id,
+        string? path,
+        bool recursive,
+        CancellationToken cancellationToken = default)
+    {
+        var connection = await GetEnabledConnectionAsync(id, cancellationToken);
+        var relativePath = NormalizeRelativePath(path, allowEmpty: false);
+        var key = CombineKeys(connection.RootPrefix, relativePath);
+
+        await using var client = _clientFactory.Create(connection);
+        if (await client.ExistsAsync(connection.Bucket, key, cancellationToken))
+        {
+            await client.DeleteAsync(connection.Bucket, key, cancellationToken);
+            return BuildOperationResult(connection.RootPrefix, key);
+        }
+
+        var prefix = EnsureTrailingSlash(key);
+        var keys = await client.ListKeysAsync(connection.Bucket, prefix, cancellationToken);
+        if (keys.Count == 0)
+        {
+            throw new S3StorageOperationException(404, "Объект S3 не найден.");
+        }
+
+        if (!recursive)
+        {
+            throw new S3StorageOperationException(409, "Папка S3 не пустая. Подтвердите рекурсивное удаление.");
+        }
+
+        await client.DeleteManyAsync(connection.Bucket, keys, cancellationToken);
+        return BuildOperationResult(connection.RootPrefix, prefix);
+    }
+
+    public Task<S3StorageOperationResultDto> CopyObjectAsync(
+        string id,
+        S3StorageObjectOperationRequest request,
+        CancellationToken cancellationToken = default)
+        => CopyOrMoveObjectAsync(id, request, move: false, cancellationToken);
+
+    public Task<S3StorageOperationResultDto> MoveObjectAsync(
+        string id,
+        S3StorageObjectOperationRequest request,
+        CancellationToken cancellationToken = default)
+        => CopyOrMoveObjectAsync(id, request, move: true, cancellationToken);
+
+    public async Task<S3StorageTextFileDto> GetTextFileAsync(string id, string? path, CancellationToken cancellationToken = default)
+    {
+        var file = await DownloadAsync(id, path, cancellationToken);
+        using var reader = new StreamReader(file.Content, Encoding.UTF8);
+        return new S3StorageTextFileDto
+        {
+            Path = file.Path,
+            Content = await reader.ReadToEndAsync(cancellationToken),
+        };
+    }
+
+    public async Task<S3StorageOperationResultDto> SaveTextFileAsync(
+        string id,
+        UpdateS3StorageTextFileRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var content = Encoding.UTF8.GetBytes(request.Content ?? string.Empty);
+        await using var stream = new MemoryStream(content);
+        return await UploadAsync(id, request.Path, stream, "text/plain; charset=utf-8", request.Overwrite, cancellationToken);
+    }
+
+    private async Task<S3StorageOperationResultDto> CopyOrMoveObjectAsync(
+        string id,
+        S3StorageObjectOperationRequest request,
+        bool move,
+        CancellationToken cancellationToken)
+    {
+        var connection = await GetEnabledConnectionAsync(id, cancellationToken);
+        var fromPath = NormalizeRelativePath(request.FromPath, allowEmpty: false);
+        var toPath = NormalizeRelativePath(request.ToPath, allowEmpty: false);
+        var fromKey = CombineKeys(connection.RootPrefix, fromPath);
+        var toKey = CombineKeys(connection.RootPrefix, toPath);
+
+        await using var client = _clientFactory.Create(connection);
+        if (await client.ExistsAsync(connection.Bucket, fromKey, cancellationToken))
+        {
+            if (!request.Overwrite && await client.ExistsAsync(connection.Bucket, toKey, cancellationToken))
+            {
+                throw new S3StorageOperationException(409, "Целевой объект S3 уже существует.");
+            }
+
+            await client.CopyAsync(connection.Bucket, fromKey, toKey, cancellationToken);
+            if (move)
+            {
+                await client.DeleteAsync(connection.Bucket, fromKey, cancellationToken);
+            }
+
+            return BuildOperationResult(connection.RootPrefix, toKey);
+        }
+
+        var fromPrefix = EnsureTrailingSlash(fromKey);
+        var toPrefix = EnsureTrailingSlash(toKey);
+        var keys = await client.ListKeysAsync(connection.Bucket, fromPrefix, cancellationToken);
+        if (keys.Count == 0)
+        {
+            throw new S3StorageOperationException(404, "Объект S3 не найден.");
+        }
+
+        if (!request.Overwrite)
+        {
+            foreach (var key in keys)
+            {
+                var destination = toPrefix + key[fromPrefix.Length..];
+                if (await client.ExistsAsync(connection.Bucket, destination, cancellationToken))
+                {
+                    throw new S3StorageOperationException(409, "В целевой папке S3 уже есть объект с таким именем.");
+                }
+            }
+        }
+
+        foreach (var key in keys)
+        {
+            await client.CopyAsync(connection.Bucket, key, toPrefix + key[fromPrefix.Length..], cancellationToken);
+        }
+
+        if (move)
+        {
+            await client.DeleteManyAsync(connection.Bucket, keys, cancellationToken);
+        }
+
+        return BuildOperationResult(connection.RootPrefix, toPrefix);
+    }
+
     private static async Task RunS3StepAsync(
         List<S3StorageConnectionTestStepDto> steps,
         string key,
@@ -241,6 +511,57 @@ public sealed class S3StorageService : IS3StorageService
             Message = successMessage,
         });
     }
+
+    private async Task<S3StorageConnectionSettings> GetEnabledConnectionAsync(string id, CancellationToken cancellationToken)
+    {
+        var normalizedId = NormalizeRequiredId(id);
+        var connections = await LoadConnectionsAsync(cancellationToken);
+        var connection = connections.FirstOrDefault(item => string.Equals(item.Id, normalizedId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new S3StorageOperationException(404, "S3-подключение не найдено.");
+
+        if (!connection.IsEnabled)
+        {
+            throw new S3StorageOperationException(400, "S3-подключение отключено.");
+        }
+
+        EnsureConfigured(connection);
+        return connection;
+    }
+
+    private static S3StorageObjectDto BuildFolderDto(string rootPrefix, string key)
+    {
+        var relativePath = StripRootPrefix(rootPrefix, key).Trim('/');
+        return new S3StorageObjectDto
+        {
+            Name = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "Папка",
+            Path = ToDisplayPath(relativePath),
+            Key = key.TrimEnd('/'),
+            Type = "folder",
+        };
+    }
+
+    private static S3StorageObjectDto BuildFileDto(string rootPrefix, S3StorageClientObject item)
+    {
+        var relativePath = StripRootPrefix(rootPrefix, item.Key);
+        return new S3StorageObjectDto
+        {
+            Name = Path.GetFileName(relativePath),
+            Path = ToDisplayPath(relativePath),
+            Key = item.Key,
+            Type = "file",
+            ContentType = item.ContentType ?? NormalizeContentType(null, relativePath),
+            Size = item.Size,
+            LastModified = item.LastModified,
+        };
+    }
+
+    private static S3StorageOperationResultDto BuildOperationResult(string rootPrefix, string key)
+        => new()
+        {
+            Success = true,
+            Path = ToDisplayPath(StripRootPrefix(rootPrefix, key).Trim('/')),
+            Key = key.TrimEnd('/'),
+        };
 
     private async Task<List<S3StorageConnectionSettings>> LoadConnectionsAsync(CancellationToken cancellationToken)
     {
@@ -440,10 +761,69 @@ public sealed class S3StorageService : IS3StorageService
             : string.Join('/', parts);
     }
 
+    private static string NormalizeRelativePath(string? value, bool allowEmpty)
+    {
+        var path = (value ?? string.Empty).Trim().Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            if (allowEmpty)
+            {
+                return string.Empty;
+            }
+
+            throw new S3StorageOperationException(400, "Укажите путь объекта S3.");
+        }
+
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Any(part => part == "." || part == ".."))
+        {
+            throw new S3StorageOperationException(400, "Путь S3 не должен содержать переходы между каталогами.");
+        }
+
+        return string.Join('/', parts);
+    }
+
     private static string CombineKeys(params string?[] parts)
         => string.Join('/', parts
             .Select(part => NormalizeOptionalPrefix(part, string.Empty))
             .Where(part => !string.IsNullOrWhiteSpace(part)));
+
+    private static string EnsureTrailingSlash(string value)
+        => string.IsNullOrWhiteSpace(value) || value.EndsWith("/", StringComparison.Ordinal)
+            ? value
+            : $"{value}/";
+
+    private static string StripRootPrefix(string rootPrefix, string key)
+    {
+        var normalizedRoot = NormalizeOptionalPrefix(rootPrefix, string.Empty);
+        var normalizedKey = key.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalizedRoot))
+        {
+            return normalizedKey;
+        }
+
+        return normalizedKey.StartsWith($"{normalizedRoot}/", StringComparison.Ordinal)
+            ? normalizedKey[(normalizedRoot.Length + 1)..]
+            : string.Equals(normalizedKey, normalizedRoot, StringComparison.Ordinal)
+                ? string.Empty
+                : normalizedKey;
+    }
+
+    private static string ToDisplayPath(string relativePath)
+        => string.IsNullOrWhiteSpace(relativePath) ? "/" : $"/{relativePath.Trim('/')}";
+
+    private static string NormalizeContentType(string? contentType, string path)
+    {
+        if (!string.IsNullOrWhiteSpace(contentType))
+        {
+            return contentType.Trim();
+        }
+
+        var provider = new FileExtensionContentTypeProvider();
+        return provider.TryGetContentType(path, out var detected)
+            ? detected
+            : "application/octet-stream";
+    }
 
     private static string? BuildSecretPreview(string? value)
     {
@@ -499,6 +879,101 @@ public sealed class AwsS3StorageClient : IS3StorageClient
         }
     }
 
+    public async Task<S3StorageClientListResult> ListObjectsAsync(string bucket, string prefix, string delimiter, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await _client.ListObjectsV2Async(new ListObjectsV2Request
+            {
+                BucketName = bucket,
+                Prefix = prefix,
+                Delimiter = delimiter,
+                MaxKeys = 1000,
+            }, cancellationToken);
+
+            return new S3StorageClientListResult(
+                response.CommonPrefixes ?? [],
+                (response.S3Objects ?? [])
+                    .Select(item => new S3StorageClientObject(
+                        item.Key,
+                        item.Size ?? 0,
+                        item.LastModified,
+                        null))
+                    .ToList());
+        }
+        catch (AmazonS3Exception ex)
+        {
+            throw MapException(ex);
+        }
+    }
+
+    public async Task<List<string>> ListKeysAsync(string bucket, string prefix, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var keys = new List<string>();
+            string? token = null;
+            do
+            {
+                var response = await _client.ListObjectsV2Async(new ListObjectsV2Request
+                {
+                    BucketName = bucket,
+                    Prefix = prefix,
+                    ContinuationToken = token,
+                }, cancellationToken);
+
+                keys.AddRange((response.S3Objects ?? []).Select(item => item.Key));
+                token = response.IsTruncated == true ? response.NextContinuationToken : null;
+            }
+            while (!string.IsNullOrWhiteSpace(token));
+
+            return keys;
+        }
+        catch (AmazonS3Exception ex)
+        {
+            throw MapException(ex);
+        }
+    }
+
+    public async Task<bool> ExistsAsync(string bucket, string key, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _client.GetObjectMetadataAsync(new GetObjectMetadataRequest
+            {
+                BucketName = bucket,
+                Key = key,
+            }, cancellationToken);
+            return true;
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+        catch (AmazonS3Exception ex)
+        {
+            throw MapException(ex);
+        }
+    }
+
+    public async Task PutAsync(string bucket, string key, Stream content, string contentType, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _client.PutObjectAsync(new PutObjectRequest
+            {
+                BucketName = bucket,
+                Key = key,
+                InputStream = content,
+                ContentType = contentType,
+            }, cancellationToken);
+        }
+        catch (AmazonS3Exception ex)
+        {
+            throw MapException(ex);
+        }
+    }
+
     public async Task PutTextAsync(string bucket, string key, string content, CancellationToken cancellationToken)
     {
         try
@@ -517,7 +992,7 @@ public sealed class AwsS3StorageClient : IS3StorageClient
         }
     }
 
-    public async Task<string> GetTextAsync(string bucket, string key, CancellationToken cancellationToken)
+    public async Task<S3StorageDownloadedObject> GetAsync(string bucket, string key, CancellationToken cancellationToken)
     {
         try
         {
@@ -526,8 +1001,13 @@ public sealed class AwsS3StorageClient : IS3StorageClient
                 BucketName = bucket,
                 Key = key,
             }, cancellationToken);
-            using var reader = new StreamReader(response.ResponseStream, Encoding.UTF8);
-            return await reader.ReadToEndAsync(cancellationToken);
+            var memory = new MemoryStream();
+            await response.ResponseStream.CopyToAsync(memory, cancellationToken);
+            memory.Position = 0;
+            return new S3StorageDownloadedObject(
+                memory,
+                string.IsNullOrWhiteSpace(response.Headers.ContentType) ? "application/octet-stream" : response.Headers.ContentType,
+                Path.GetFileName(key));
         }
         catch (AmazonS3Exception ex)
         {
@@ -543,6 +1023,48 @@ public sealed class AwsS3StorageClient : IS3StorageClient
             {
                 BucketName = bucket,
                 Key = key,
+            }, cancellationToken);
+        }
+        catch (AmazonS3Exception ex)
+        {
+            throw MapException(ex);
+        }
+    }
+
+    public async Task DeleteManyAsync(string bucket, IReadOnlyCollection<string> keys, CancellationToken cancellationToken)
+    {
+        if (keys.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var chunk in keys.Chunk(1000))
+            {
+                await _client.DeleteObjectsAsync(new DeleteObjectsRequest
+                {
+                    BucketName = bucket,
+                    Objects = chunk.Select(key => new KeyVersion { Key = key }).ToList(),
+                }, cancellationToken);
+            }
+        }
+        catch (AmazonS3Exception ex)
+        {
+            throw MapException(ex);
+        }
+    }
+
+    public async Task CopyAsync(string bucket, string fromKey, string toKey, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _client.CopyObjectAsync(new CopyObjectRequest
+            {
+                SourceBucket = bucket,
+                SourceKey = fromKey,
+                DestinationBucket = bucket,
+                DestinationKey = toKey,
             }, cancellationToken);
         }
         catch (AmazonS3Exception ex)
