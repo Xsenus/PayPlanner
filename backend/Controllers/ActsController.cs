@@ -1332,12 +1332,25 @@ public class ActsController : ControllerBase
             return "export";
         }
 
+        var sanitized = value.Trim();
         foreach (var invalid in Path.GetInvalidFileNameChars())
         {
-            value = value.Replace(invalid, '-');
+            sanitized = sanitized.Replace(invalid, '-');
         }
 
-        return value.Trim();
+        foreach (var invalid in "<>:\"/\\|?*")
+        {
+            sanitized = sanitized.Replace(invalid, '-');
+        }
+
+        var builder = new StringBuilder(sanitized.Length);
+        foreach (var character in sanitized)
+        {
+            builder.Append(char.IsControl(character) ? '-' : character);
+        }
+
+        sanitized = builder.ToString().Trim(' ', '.');
+        return string.IsNullOrWhiteSpace(sanitized) ? "export" : sanitized;
     }
 
     private ActionResult ValidationError(string field, string message)

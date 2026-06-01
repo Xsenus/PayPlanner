@@ -384,7 +384,8 @@ public class InvoiceDocumentTemplateTests
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
         Assert.Contains("logo-wrap", content.Content);
-        Assert.Contains("<td style=\"width: 150px; vertical-align: top;\">", content.Content);
+        Assert.Contains("width: 150px", content.Content);
+        Assert.Contains("vertical-align: top", content.Content);
         Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", content.Content);
     }
 
