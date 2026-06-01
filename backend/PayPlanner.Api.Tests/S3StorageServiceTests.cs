@@ -29,7 +29,7 @@ public sealed class S3StorageServiceTests
         Assert.Equal(S3StorageService.HostkeyEndpoint, result.Endpoint);
         Assert.Equal(S3StorageService.HostkeyRegion, result.Region);
         Assert.Equal("payplanner-backups", result.Bucket);
-        Assert.Equal("payplanner", result.RootPrefix);
+        Assert.Equal(string.Empty, result.RootPrefix);
         Assert.True(result.IsConfigured);
         Assert.Equal("s3ui...7890", result.AccessKeyPreview);
         Assert.Equal("secr...7890", result.SecretKeyPreview);

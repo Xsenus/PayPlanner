@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { S3Storage } from './S3Storage';
 
 const mocks = vi.hoisted(() => ({
   toastSuccessMock: vi.fn(),
+  toastErrorMock: vi.fn(),
   getS3StorageConnectionsMock: vi.fn(),
   upsertS3StorageConnectionMock: vi.fn(),
   deleteS3StorageConnectionMock: vi.fn(),
@@ -41,7 +42,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({
     success: mocks.toastSuccessMock,
-    error: vi.fn(),
+    error: mocks.toastErrorMock,
   }),
 }));
 
@@ -63,7 +64,27 @@ vi.mock('../../services/api', () => ({
   },
 }));
 
-function buildOverview() {
+function buildConnection(overrides = {}) {
+  return {
+    id: 'hostkey-main',
+    name: 'HOSTKEY основной',
+    provider: 'hostkey',
+    providerName: 'HOSTKEY S3',
+    endpoint: 'https://s3-nl.hostkey.com',
+    region: 'nl',
+    bucket: 'payplanner',
+    rootPrefix: 'payplanner',
+    isEnabled: true,
+    isConfigured: true,
+    accessKeyPreview: 'AKIA...1234',
+    secretKeyPreview: '****5678',
+    createdAt: '2026-06-01T10:00:00+07:00',
+    updatedAt: '2026-06-01T11:00:00+07:00',
+    ...overrides,
+  };
+}
+
+function buildOverview(connections = [buildConnection()]) {
   return {
     providerPresets: [
       {
@@ -74,24 +95,7 @@ function buildOverview() {
         forcePathStyle: true,
       },
     ],
-    connections: [
-      {
-        id: 'hostkey-main',
-        name: 'HOSTKEY основной',
-        provider: 'hostkey',
-        providerName: 'HOSTKEY S3',
-        endpoint: 'https://s3-nl.hostkey.com',
-        region: 'nl',
-        bucket: 'payplanner',
-        rootPrefix: 'payplanner',
-        isEnabled: true,
-        isConfigured: true,
-        accessKeyPreview: 'AKIA...1234',
-        secretKeyPreview: '****5678',
-        createdAt: '2026-06-01T10:00:00+07:00',
-        updatedAt: '2026-06-01T11:00:00+07:00',
-      },
-    ],
+    connections,
   };
 }
 
@@ -99,7 +103,7 @@ describe('S3Storage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getS3StorageConnectionsMock.mockResolvedValue(buildOverview());
-    mocks.upsertS3StorageConnectionMock.mockResolvedValue(buildOverview().connections[0]);
+    mocks.upsertS3StorageConnectionMock.mockResolvedValue(buildConnection({ name: 'HOSTKEY backup', rootPrefix: '' }));
     mocks.deleteS3StorageConnectionMock.mockResolvedValue(undefined);
     mocks.listS3StorageObjectsMock.mockImplementation((_id: string, path: string) => Promise.resolve({
       current: { name: path === '/' ? 'S3' : 'docs', path, key: path === '/' ? 'payplanner' : 'payplanner/docs', type: 'folder' },
@@ -138,49 +142,86 @@ describe('S3Storage', () => {
     });
   });
 
-  it('renders S3 connections and HOSTKEY defaults', async () => {
+  it('renders S3 connection cards and main tabs', async () => {
     render(<S3Storage />);
 
     expect(await screen.findByText('HOSTKEY основной')).toBeTruthy();
-    expect(screen.getByDisplayValue('https://s3-nl.hostkey.com')).toBeTruthy();
-    expect(screen.getByDisplayValue('nl')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Подключения/i })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /Файлы/i }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /Логи/i })).toBeTruthy();
     expect(screen.getByText('AKIA...1234')).toBeTruthy();
+    expect(screen.queryByDisplayValue('https://s3-nl.hostkey.com')).toBeNull();
   });
 
-  it('runs connection test from the list', async () => {
+  it('opens connection editing on a separate page', async () => {
     render(<S3Storage />);
 
-    await screen.findByText('HOSTKEY основной');
-    fireEvent.click(screen.getByRole('button', { name: /Проверить/i }));
+    const card = (await screen.findByText('HOSTKEY основной')).closest('article')!;
+    fireEvent.click(within(card).getByRole('button', { name: /Изменить/i }));
 
-    await waitFor(() => expect(mocks.testS3StorageConnectionMock).toHaveBeenCalledWith('hostkey-main'));
-    expect(await screen.findByText('Результат проверки')).toBeTruthy();
-    expect(screen.getByText('Список объектов')).toBeTruthy();
+    expect(await screen.findByText('Редактирование подключения')).toBeTruthy();
+    expect(screen.getByDisplayValue('https://s3-nl.hostkey.com')).toBeTruthy();
+    expect(screen.getByLabelText(/Рабочая папка/i)).toBeTruthy();
   });
 
   it('saves edited connection without exposing existing secret', async () => {
     render(<S3Storage />);
 
-    await screen.findByText('HOSTKEY основной');
-    fireEvent.click(screen.getByRole('button', { name: /Изменить/i }));
-    fireEvent.change(screen.getByLabelText('Название'), { target: { value: 'HOSTKEY backup' } });
+    const card = (await screen.findByText('HOSTKEY основной')).closest('article')!;
+    fireEvent.click(within(card).getByRole('button', { name: /Изменить/i }));
+    fireEvent.change(await screen.findByLabelText('Название'), { target: { value: 'HOSTKEY backup' } });
+    fireEvent.change(screen.getByLabelText(/Рабочая папка/i), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/i }));
 
     await waitFor(() => expect(mocks.upsertS3StorageConnectionMock).toHaveBeenCalled());
     expect(mocks.upsertS3StorageConnectionMock).toHaveBeenCalledWith(expect.objectContaining({
       id: 'hostkey-main',
       name: 'HOSTKEY backup',
+      rootPrefix: '',
       secretAccessKey: '',
       clearSecret: false,
     }));
+    expect(mocks.toastSuccessMock).toHaveBeenCalledWith('Подключение S3 обновлено.', 'S3');
   });
 
-  it('loads object list and opens S3 folders', async () => {
+  it('creates connection with optional empty root prefix', async () => {
+    mocks.getS3StorageConnectionsMock.mockResolvedValue(buildOverview([]));
+    mocks.upsertS3StorageConnectionMock.mockResolvedValue(buildConnection({ id: 'new-s3', name: 'HOSTKEY S3', rootPrefix: '' }));
+
     render(<S3Storage />);
 
-    expect(await screen.findByText('Файлы S3')).toBeTruthy();
-    expect(await screen.findByText('readme.txt')).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: /Новое подключение/i }));
+    fireEvent.change(screen.getByLabelText('Bucket'), { target: { value: 'new-bucket' } });
+    fireEvent.change(screen.getByLabelText('Access Key'), { target: { value: 'access-key' } });
+    fireEvent.change(screen.getByLabelText('Secret Key'), { target: { value: 'secret-key' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/i }));
 
+    await waitFor(() => expect(mocks.upsertS3StorageConnectionMock).toHaveBeenCalledWith(expect.objectContaining({
+      bucket: 'new-bucket',
+      rootPrefix: '',
+      accessKeyId: 'access-key',
+      secretAccessKey: 'secret-key',
+    })));
+  });
+
+  it('runs connection test and shows it in logs', async () => {
+    render(<S3Storage />);
+
+    const card = (await screen.findByText('HOSTKEY основной')).closest('article')!;
+    fireEvent.click(within(card).getByRole('button', { name: /Проверить/i }));
+
+    await waitFor(() => expect(mocks.testS3StorageConnectionMock).toHaveBeenCalledWith('hostkey-main'));
+    expect(await screen.findByText('Последняя проверка')).toBeTruthy();
+    expect(screen.getByText('Список объектов')).toBeTruthy();
+  });
+
+  it('loads object list and opens S3 folders from files tab', async () => {
+    render(<S3Storage />);
+
+    const card = (await screen.findByText('HOSTKEY основной')).closest('article')!;
+    fireEvent.click(within(card).getByRole('button', { name: /Файлы/i }));
+
+    expect(await screen.findByText('readme.txt')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /^docs$/i }));
 
     await waitFor(() => expect(mocks.listS3StorageObjectsMock).toHaveBeenCalledWith('hostkey-main', '/docs'));
@@ -190,6 +231,8 @@ describe('S3Storage', () => {
   it('opens and saves a text file in S3', async () => {
     render(<S3Storage />);
 
+    const card = (await screen.findByText('HOSTKEY основной')).closest('article')!;
+    fireEvent.click(within(card).getByRole('button', { name: /Файлы/i }));
     await screen.findByText('readme.txt');
     fireEvent.click(screen.getByRole('button', { name: 'Редактировать readme.txt' }));
 

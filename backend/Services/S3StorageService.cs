@@ -90,7 +90,7 @@ public sealed class S3StorageService : IS3StorageService
 
     private const string ConnectionsSettingKey = "integrations.s3.connections";
     private const string DefaultProviderKey = HostkeyProviderKey;
-    private const string DefaultRootPrefix = "payplanner";
+    private const string DefaultRootPrefix = "";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly PaymentContext _db;
