@@ -1,5 +1,28 @@
 [
   {
+    "releaseId": "2026-06-01-s3-storage-hostkey-connections",
+    "version": "1.13.140",
+    "releasedAt": "2026-06-01T19:00:00+07:00",
+    "title": "Добавлена основа подключения S3-хранилищ",
+    "summary": "В системе появилась backend-основа для нескольких S3-совместимых хранилищ, включая HOSTKEY S3.",
+    "isActive": true,
+    "source": "agent",
+    "items": [
+      {
+        "type": "new",
+        "text": "Подготовлено подключение нескольких S3-хранилищ с отдельными настройками endpoint, региона, bucket и рабочей папки."
+      },
+      {
+        "type": "new",
+        "text": "Для HOSTKEY S3 добавлены стандартные параметры подключения: endpoint https://s3-nl.hostkey.com и регион nl."
+      },
+      {
+        "type": "important",
+        "text": "Secret Key не возвращается из API обратно в интерфейс: программа показывает только безопасную маску ключа."
+      }
+    ]
+  },
+  {
     "releaseId": "2026-06-01-yandex-disk-connection-test-empty-request",
     "version": "1.13.139",
     "releasedAt": "2026-06-01T18:00:00+07:00",
