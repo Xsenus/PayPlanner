@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Archive, Database, Download, Loader2, RefreshCw, Save, ShieldAlert, Trash2 } from 'lucide-react';
+import { Archive, Database, Download, Loader2, RefreshCw, Save, ShieldAlert, Trash2, UploadCloud } from 'lucide-react';
 import { apiService } from '../../services/api';
 import type {
   DatabaseBackupOverviewDto,
   DatabaseStatusDto,
   InvoiceCounterpartyCleanupResultDto,
   InvoiceOrphanCleanupResultDto,
+  S3StorageConnectionDto,
   UserActivityCleanupResultDto,
   UserActivityCompactionResultDto,
   UserActivityMaintenanceDto,
@@ -19,6 +20,8 @@ import { ObjectAuditDeletedObjectsSettings } from './ObjectAuditDeletedObjectsSe
 import { SystemJobDiagnosticsSettings } from './SystemJobDiagnosticsSettings';
 
 type MaintenanceTab = 'overview' | 'activity' | 'operations' | 'backups' | 'jobs' | 'deleted';
+
+const DEFAULT_DATABASE_BACKUP_S3_PREFIX = 'backups/database/{yyyy}/{MM}/';
 
 const TABS: Array<{ id: MaintenanceTab; label: string }> = [
   { id: 'overview', label: 'Обзор' },
@@ -60,6 +63,35 @@ function formatDateTime(value?: string | null) {
 
 function getErrorMessage(error: unknown, fallback: string) {
   return extractDisplayErrorMessage(error, fallback);
+}
+
+function buildIdSetKey(ids?: string[] | null) {
+  return [...new Set(ids ?? [])].sort((left, right) => left.localeCompare(right)).join('|');
+}
+
+function getS3UploadStatusLabel(status: string) {
+  switch (status) {
+    case 'success':
+      return 'Загружено';
+    case 'failed':
+      return 'Ошибка';
+    case 'pending':
+      return 'Ожидает загрузки';
+    default:
+      return status || '—';
+  }
+}
+
+function getS3UploadStatusTone(status: string): 'success' | 'warning' | 'muted' {
+  if (status === 'success') {
+    return 'success';
+  }
+
+  if (status === 'failed' || status === 'pending') {
+    return 'warning';
+  }
+
+  return 'muted';
 }
 
 function StatusBadge({ value, tone }: { value: string; tone: 'success' | 'warning' | 'muted' }) {
@@ -112,6 +144,10 @@ export function DatabaseMaintenanceSettings() {
   const [databaseBackupScheduleLocal, setDatabaseBackupScheduleLocal] = useState('00:00,06:00,12:00,18:00');
   const [databaseBackupRetentionDays, setDatabaseBackupRetentionDays] = useState(8);
   const [databaseBackupFormat, setDatabaseBackupFormat] = useState('');
+  const [s3StorageConnections, setS3StorageConnections] = useState<S3StorageConnectionDto[]>([]);
+  const [databaseBackupS3UploadEnabled, setDatabaseBackupS3UploadEnabled] = useState(false);
+  const [databaseBackupS3ConnectionIds, setDatabaseBackupS3ConnectionIds] = useState<string[]>([]);
+  const [databaseBackupS3PrefixTemplate, setDatabaseBackupS3PrefixTemplate] = useState(DEFAULT_DATABASE_BACKUP_S3_PREFIX);
   const [databaseBackupSaving, setDatabaseBackupSaving] = useState(false);
   const [databaseBackupCreating, setDatabaseBackupCreating] = useState(false);
   const [databaseBackupDeleting, setDatabaseBackupDeleting] = useState<string | null>(null);
@@ -131,6 +167,9 @@ export function DatabaseMaintenanceSettings() {
     setDatabaseBackupScheduleLocal(overview?.scheduleLocal ?? '00:00,06:00,12:00,18:00');
     setDatabaseBackupRetentionDays(Math.max(1, Number(overview?.retentionDays ?? 8) || 8));
     setDatabaseBackupFormat(overview?.selectedFormat ?? overview?.availableFormats[0]?.key ?? '');
+    setDatabaseBackupS3UploadEnabled(overview?.s3Upload?.enabled ?? false);
+    setDatabaseBackupS3ConnectionIds(overview?.s3Upload?.connectionIds ?? []);
+    setDatabaseBackupS3PrefixTemplate(overview?.s3Upload?.prefixTemplate ?? DEFAULT_DATABASE_BACKUP_S3_PREFIX);
   };
 
   const refreshAll = useCallback(async (silent = false) => {
@@ -141,14 +180,16 @@ export function DatabaseMaintenanceSettings() {
     }
 
     try {
-      const [status, maintenance, backups] = await Promise.all([
+      const [status, maintenance, backups, s3Overview] = await Promise.all([
         apiService.getDatabaseStatus(),
         apiService.getUserActivityMaintenance(),
         apiService.getDatabaseBackupOverview(),
+        apiService.getS3StorageConnections().catch(() => null),
       ]);
 
       setDatabaseStatus(status);
       setUserActivityMaintenance(maintenance);
+      setS3StorageConnections(s3Overview?.connections ?? []);
       setUserActivityLoggingEnabled(maintenance.isEnabled);
       setUserActivityRetentionDays(Math.max(0, Number(maintenance.retentionDays ?? 0) || 0));
       applyDatabaseBackupOverview(backups);
@@ -193,12 +234,18 @@ export function DatabaseMaintenanceSettings() {
         || databaseBackupScheduleLocal.trim() !== databaseBackupOverview.scheduleLocal.trim()
         || databaseBackupRetentionDays !== Math.max(1, Number(databaseBackupOverview.retentionDays ?? 0) || 1)
         || databaseBackupFormat !== databaseBackupOverview.selectedFormat
+        || databaseBackupS3UploadEnabled !== (databaseBackupOverview.s3Upload?.enabled ?? false)
+        || buildIdSetKey(databaseBackupS3ConnectionIds) !== buildIdSetKey(databaseBackupOverview.s3Upload?.connectionIds)
+        || databaseBackupS3PrefixTemplate.trim() !== (databaseBackupOverview.s3Upload?.prefixTemplate ?? DEFAULT_DATABASE_BACKUP_S3_PREFIX).trim()
       ),
     [
       databaseBackupAutomaticEnabled,
       databaseBackupFormat,
       databaseBackupOverview,
       databaseBackupRetentionDays,
+      databaseBackupS3ConnectionIds,
+      databaseBackupS3PrefixTemplate,
+      databaseBackupS3UploadEnabled,
       databaseBackupScheduleLocal,
     ],
   );
@@ -326,16 +373,34 @@ export function DatabaseMaintenanceSettings() {
     }
   };
 
+  const toggleDatabaseBackupS3Connection = (connectionId: string, checked: boolean) => {
+    setDatabaseBackupS3ConnectionIds((current) => {
+      if (checked) {
+        return current.includes(connectionId) ? current : [...current, connectionId];
+      }
+
+      return current.filter((id) => id !== connectionId);
+    });
+  };
+
   const saveDatabaseBackupSettings = async () => {
     setDatabaseBackupSaving(true);
     setDatabaseBackupError(null);
     setDatabaseBackupMessage(null);
     try {
+      if (databaseBackupS3UploadEnabled && databaseBackupS3ConnectionIds.length === 0) {
+        setDatabaseBackupError('Выберите хотя бы одно S3-хранилище для отправки резервных копий.');
+        return;
+      }
+
       const overview = await apiService.updateDatabaseBackupSettings({
         automaticEnabled: databaseBackupAutomaticEnabled,
         scheduleLocal: databaseBackupScheduleLocal.trim(),
         retentionDays: Math.max(1, Math.floor(Number(databaseBackupRetentionDays) || 1)),
         backupFormat: databaseBackupFormat,
+        s3UploadEnabled: databaseBackupS3UploadEnabled,
+        s3ConnectionIds: databaseBackupS3ConnectionIds,
+        s3PrefixTemplate: databaseBackupS3PrefixTemplate.trim() || DEFAULT_DATABASE_BACKUP_S3_PREFIX,
       });
       applyDatabaseBackupOverview(overview);
       setDatabaseBackupMessage('Настройки резервного копирования сохранены.');
@@ -881,6 +946,87 @@ export function DatabaseMaintenanceSettings() {
                   </label>
                 </div>
 
+                <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h5 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <UploadCloud size={16} />
+                        Отправка backup в S3
+                      </h5>
+                      <p className="mt-1 text-sm text-slate-600">
+                        После создания локальной резервной копии система может дополнительно загрузить файл в одно или несколько подключенных S3-хранилищ.
+                      </p>
+                    </div>
+                    <StatusBadge
+                      value={databaseBackupS3UploadEnabled ? 'S3 включен' : 'S3 выключен'}
+                      tone={databaseBackupS3UploadEnabled ? 'success' : 'muted'}
+                    />
+                  </div>
+
+                  <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={databaseBackupS3UploadEnabled}
+                      onChange={(event) => setDatabaseBackupS3UploadEnabled(event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>
+                      <span className="block font-medium text-slate-900">Загружать новые резервные копии в S3</span>
+                      <span className="mt-1 block text-slate-600">Локальный файл все равно сохраняется в обычном каталоге backup.</span>
+                    </span>
+                  </label>
+
+                  <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr),minmax(260px,0.8fr)]">
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">Хранилища</div>
+                      {s3StorageConnections.length ? (
+                        <div className="mt-2 space-y-2">
+                          {s3StorageConnections.map((connection) => {
+                            const disabled = !connection.isEnabled || !connection.isConfigured;
+                            return (
+                              <label
+                                key={connection.id}
+                                className={`flex items-start gap-3 rounded-xl border bg-white px-3 py-2 text-sm ${disabled ? 'border-slate-200 opacity-60' : 'border-slate-200'}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={databaseBackupS3ConnectionIds.includes(connection.id)}
+                                  disabled={disabled}
+                                  onChange={(event) => toggleDatabaseBackupS3Connection(connection.id, event.target.checked)}
+                                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="min-w-0">
+                                  <span className="block truncate font-medium text-slate-900">{connection.name}</span>
+                                  <span className="mt-1 block break-all text-xs text-slate-500">
+                                    {connection.providerName} · {connection.bucket}{connection.rootPrefix ? `/${connection.rootPrefix}` : ''}
+                                  </span>
+                                  {disabled ? (
+                                    <span className="mt-1 block text-xs text-amber-700">Подключение выключено или заполнено не полностью.</span>
+                                  ) : null}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="mt-2 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
+                          S3-хранилища пока не добавлены. Добавьте подключение в разделе «S3-хранилища», затем выберите его здесь.
+                        </div>
+                      )}
+                    </div>
+
+                    <label className="text-sm text-slate-700">
+                      <span className="block font-medium text-slate-900">Папка в S3</span>
+                      <span className="mt-1 block text-slate-600">Можно использовать {`{yyyy}`}, {`{MM}`} и {`{dd}`} для даты создания backup.</span>
+                      <input
+                        value={databaseBackupS3PrefixTemplate}
+                        onChange={(event) => setDatabaseBackupS3PrefixTemplate(event.target.value)}
+                        className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                      />
+                    </label>
+                  </div>
+                </div>
+
                 <div className="mt-4 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
@@ -915,6 +1061,37 @@ export function DatabaseMaintenanceSettings() {
                     <p>Для PostgreSQL используется: {databaseBackupOverview.toolCommand || 'pg_dump'}.</p>
                   ) : (
                     <p>Для SQLite резервная копия строится из консистентной копии файла базы данных.</p>
+                  )}
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h5 className="text-sm font-semibold text-slate-900">Последние выгрузки в S3</h5>
+                    <StatusBadge
+                      value={databaseBackupOverview?.s3Upload?.enabled ? 'S3 активен' : 'S3 не используется'}
+                      tone={databaseBackupOverview?.s3Upload?.enabled ? 'success' : 'muted'}
+                    />
+                  </div>
+                  {databaseBackupOverview?.s3UploadResults?.length ? (
+                    <div className="mt-3 space-y-2">
+                      {databaseBackupOverview.s3UploadResults.slice(0, 5).map((result) => (
+                        <div key={result.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="min-w-0 truncate font-medium text-slate-900">{result.backupFileName}</span>
+                            <StatusBadge value={getS3UploadStatusLabel(result.status)} tone={getS3UploadStatusTone(result.status)} />
+                          </div>
+                          <div className="mt-1 break-all text-xs text-slate-500">{result.targetPath}</div>
+                          <div className="mt-1 text-xs text-slate-500">{formatDateTime(result.updatedAt)} · {formatBytes(result.sizeBytes)}</div>
+                          {result.error ? (
+                            <div className="mt-1 text-xs text-red-700">{result.error}</div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-600">
+                      История S3-выгрузок появится после создания резервной копии с включенной отправкой в S3.
+                    </p>
                   )}
                 </div>
 
