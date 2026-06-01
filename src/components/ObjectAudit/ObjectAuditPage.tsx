@@ -42,10 +42,31 @@ const OBJECT_TYPE_OPTIONS = [
   'cash-inventory',
   'user',
   'role',
+  's3-storage',
+  'yandex-disk',
   'task-journal-item',
 ] as const;
 
-const ACTION_OPTIONS = ['all', 'created', 'updated', 'deleted', 'restored', 'downloaded', 'exported', 'datarepair'] as const;
+const ACTION_OPTIONS = [
+  'all',
+  'created',
+  'updated',
+  'deleted',
+  'restored',
+  'downloaded',
+  'exported',
+  'datarepair',
+  'ConnectionCreated',
+  'ConnectionUpdated',
+  'ConnectionTested',
+  'ObjectCreated',
+  'ObjectUploaded',
+  'ObjectDeleted',
+  'ObjectCopied',
+  'ObjectMoved',
+  'ObjectDownloaded',
+  'TextFileUpdated',
+] as const;
 
 function formatDateTime(value?: string | null) {
   if (!value) {

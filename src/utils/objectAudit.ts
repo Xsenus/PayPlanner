@@ -239,6 +239,38 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     Name: 'Название роли',
     Description: 'Описание роли',
   },
+  's3-storage': {
+    Name: 'Название подключения',
+    Provider: 'Провайдер',
+    Endpoint: 'Endpoint',
+    Region: 'Регион',
+    Bucket: 'Bucket',
+    RootPath: 'Рабочая папка',
+    AccessKey: 'Access Key',
+    SecretKey: 'Secret Key',
+    IsEnabled: 'Подключение включено',
+  },
+  's3 storage': {
+    Name: 'Название подключения',
+    Provider: 'Провайдер',
+    Endpoint: 'Endpoint',
+    Region: 'Регион',
+    Bucket: 'Bucket',
+    RootPath: 'Рабочая папка',
+    AccessKey: 'Access Key',
+    SecretKey: 'Secret Key',
+    IsEnabled: 'Подключение включено',
+  },
+  'yandex-disk': {
+    RootPath: 'Рабочая папка',
+    OAuthToken: 'OAuth-токен',
+    IsConfigured: 'Подключение настроено',
+  },
+  'yandex disk': {
+    RootPath: 'Рабочая папка',
+    OAuthToken: 'OAuth-токен',
+    IsConfigured: 'Подключение настроено',
+  },
   'task-journal-item': {
     Title: 'Заголовок задачи',
     Description: 'Описание задачи',
@@ -284,6 +316,10 @@ const OBJECT_TYPE_LABELS: Record<string, string> = {
   'money-operation': 'Денежная операция',
   user: 'Пользователь',
   role: 'Роль',
+  's3-storage': 'S3-хранилище',
+  's3 storage': 'S3-хранилище',
+  'yandex-disk': 'Я.Диск',
+  'yandex disk': 'Я.Диск',
   'task-journal-item': 'Задача',
 };
 
@@ -456,6 +492,25 @@ function translateTechnicalWords(value: string): string {
     .replace(/\bPayment Status\b/gi, 'Статус платежа')
     .replace(/\bClient Case Reference\b/gi, 'Дело')
     .replace(/\bDataRepair\b/gi, 'Исправление данных')
+    .replace(/\bConnectionCreated\b/gi, 'Подключение создано')
+    .replace(/\bConnectionUpdated\b/gi, 'Подключение обновлено')
+    .replace(/\bConnectionTested\b/gi, 'Подключение проверено')
+    .replace(/\bObjectCreated\b/gi, 'Объект создан')
+    .replace(/\bObjectUploaded\b/gi, 'Объект загружен')
+    .replace(/\bObjectDeleted\b/gi, 'Объект удален')
+    .replace(/\bObjectCopied\b/gi, 'Объект скопирован')
+    .replace(/\bObjectMoved\b/gi, 'Объект перемещен')
+    .replace(/\bObjectDownloaded\b/gi, 'Объект скачан')
+    .replace(/\bTextFileUpdated\b/gi, 'Текстовый файл обновлен')
+    .replace(/\bfor s3 storage\b/gi, 'для S3-хранилища')
+    .replace(/\bfor s3-storage\b/gi, 'для S3-хранилища')
+    .replace(/\bfor yandex disk\b/gi, 'для Я.Диска')
+    .replace(/\bfor yandex-disk\b/gi, 'для Я.Диска')
+    .replace(/\bfor\b/gi, 'для')
+    .replace(/\bs3 storage\b/gi, 'S3-хранилище')
+    .replace(/\bs3-storage\b/gi, 'S3-хранилище')
+    .replace(/\byandex disk\b/gi, 'Я.Диск')
+    .replace(/\byandex-disk\b/gi, 'Я.Диск')
     .replace(/\bTask Journal Item\b/gi, 'Задача')
     .replace(/\btask journal item\b/gi, 'Задача')
     .replace(/\bupdated\b/gi, 'изменил')
@@ -483,6 +538,26 @@ export function getObjectAuditActionLabel(action?: string | null): string {
       return 'Удаление';
     case 'downloaded':
       return 'Скачивание';
+    case 'connectioncreated':
+      return 'Создание подключения';
+    case 'connectionupdated':
+      return 'Обновление подключения';
+    case 'connectiontested':
+      return 'Проверка подключения';
+    case 'objectcreated':
+      return 'Создание объекта';
+    case 'objectuploaded':
+      return 'Загрузка объекта';
+    case 'objectdeleted':
+      return 'Удаление объекта';
+    case 'objectcopied':
+      return 'Копирование объекта';
+    case 'objectmoved':
+      return 'Перемещение объекта';
+    case 'objectdownloaded':
+      return 'Скачивание объекта';
+    case 'textfileupdated':
+      return 'Редактирование файла';
     case 'exported':
       return 'Экспорт';
     case 'restored':
@@ -506,7 +581,20 @@ export function getObjectAuditActionTone(action?: string | null): string {
     case 'deleted':
       return 'border-rose-200 bg-rose-50 text-rose-700';
     case 'downloaded':
+    case 'objectdownloaded':
       return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+    case 'connectioncreated':
+    case 'objectcreated':
+    case 'objectuploaded':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'connectionupdated':
+    case 'connectiontested':
+    case 'objectcopied':
+    case 'objectmoved':
+    case 'textfileupdated':
+      return 'border-blue-200 bg-blue-50 text-blue-700';
+    case 'objectdeleted':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
     case 'exported':
       return 'border-indigo-200 bg-indigo-50 text-indigo-700';
     case 'restored':

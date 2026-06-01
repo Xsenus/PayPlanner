@@ -105,6 +105,12 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditActionLabel('Automation')).toBe('Автоконтроль');
     expect(getObjectAuditActionLabel('Downloaded')).toBe('Скачивание');
     expect(getObjectAuditActionLabel('Exported')).toBe('Экспорт');
+    expect(getObjectAuditActionLabel('ConnectionTested')).toBe('Проверка подключения');
+    expect(getObjectAuditActionLabel('ConnectionUpdated')).toBe('Обновление подключения');
+    expect(getObjectAuditActionLabel('ObjectMoved')).toBe('Перемещение объекта');
+    expect(getObjectAuditTypeLabel('s3 storage')).toBe('S3-хранилище');
+    expect(getObjectAuditTypeLabel('s3-storage')).toBe('S3-хранилище');
+    expect(getObjectAuditTypeLabel('yandex-disk')).toBe('Я.Диск');
     expect(getObjectAuditTypeLabel('task-journal-item')).toBe('Задача');
     expect(getObjectAuditTypeLabel('calendar-sync')).toBe('Синхронизация календаря');
     expect(getObjectAuditTypeLabel('invoice-line-item')).toBe('Позиция счета');
@@ -121,5 +127,6 @@ describe('objectAudit utilities', () => {
     expect(formatObjectAuditText('Codex maintenance updated System Notes')).toBe(
       'Администратор изменил Служебные заметки',
     );
+    expect(formatObjectAuditText('ConnectionUpdated for s3 storage')).toBe('Подключение обновлено для S3-хранилища');
   });
 });
