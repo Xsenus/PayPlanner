@@ -611,7 +611,10 @@ public sealed class SystemJobsController : ControllerBase
             ? new CalendarSyncSchedulerState(
                 schedulerEnabled,
                 externalCalendarSyncEnabled,
-                CalendarSyncProviderRegistry.BuildReadiness(externalCalendarSyncEnabled, calendarSettings),
+                CalendarSyncProviderRegistry.BuildReadiness(
+                    calendarSettings.GoogleCalendarSyncEnabled == true,
+                    calendarSettings.YandexCalendarSyncEnabled == true,
+                    calendarSettings),
                 0,
                 null,
                 intervalMinutes,

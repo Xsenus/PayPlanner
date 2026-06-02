@@ -157,7 +157,10 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
     {
         var calendarSettings = await LoadCalendarSyncSettingsAsync(cancellationToken);
         var featureEnabled = calendarSettings.ExternalCalendarSyncEnabled == true;
-        var readiness = CalendarSyncProviderRegistry.BuildReadiness(featureEnabled, calendarSettings);
+        var readiness = CalendarSyncProviderRegistry.BuildReadiness(
+            calendarSettings.GoogleCalendarSyncEnabled == true,
+            calendarSettings.YandexCalendarSyncEnabled == true,
+            calendarSettings);
         var candidateCount = schedulerSettings.Enabled && featureEnabled
             ? await CountCandidateEventsAsync(schedulerSettings, cancellationToken)
             : 0;

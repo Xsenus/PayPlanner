@@ -158,9 +158,12 @@ public class AppFeatureFlagsTests
         var readiness = CalendarSyncProviderRegistry.BuildReadiness(externalCalendarSyncEnabled: true);
 
         Assert.True(readiness.ExternalCalendarSyncEnabled);
+        Assert.True(readiness.GoogleCalendarSyncEnabled);
+        Assert.True(readiness.YandexCalendarSyncEnabled);
         Assert.False(readiness.ReadyToConnect);
         Assert.Contains(readiness.Items, item => item.Key == "ics-fallback" && item.IsReady && !item.IsRequired);
-        Assert.Contains(readiness.Items, item => item.Key == "feature-flag" && item.IsReady && item.IsRequired);
+        Assert.Contains(readiness.Items, item => item.Key == "google-admin-toggle" && item.IsReady && item.IsRequired);
+        Assert.Contains(readiness.Items, item => item.Key == "yandex-admin-toggle" && item.IsReady && item.IsRequired);
         Assert.Contains(readiness.Items, item => item.Key == "google-oauth" && !item.IsReady && item.IsRequired);
         Assert.Contains(readiness.Items, item => item.Key == "conflict-policy" && !item.IsReady && item.IsRequired);
         Assert.All(readiness.Items, item =>
@@ -188,8 +191,11 @@ public class AppFeatureFlagsTests
         var readiness = Assert.IsType<CalendarSyncReadinessDto>(ok.Value);
 
         Assert.False(readiness.ExternalCalendarSyncEnabled);
+        Assert.False(readiness.GoogleCalendarSyncEnabled);
+        Assert.False(readiness.YandexCalendarSyncEnabled);
         Assert.False(readiness.ReadyToConnect);
-        Assert.Contains(readiness.Items, item => item.Key == "feature-flag" && item.Status == "disabled");
+        Assert.Contains(readiness.Items, item => item.Key == "google-admin-toggle" && item.Status == "disabled" && !item.IsRequired);
+        Assert.Contains(readiness.Items, item => item.Key == "yandex-admin-toggle" && item.Status == "disabled" && !item.IsRequired);
     }
 
     [Fact]
@@ -219,6 +225,8 @@ public class AppFeatureFlagsTests
         var updated = Assert.IsType<CalendarSyncSettingsDto>(Assert.IsType<OkObjectResult>(update.Result).Value);
 
         Assert.True(updated.ExternalCalendarSyncEnabled);
+        Assert.True(updated.GoogleCalendarSyncEnabled);
+        Assert.True(updated.YandexCalendarSyncEnabled);
         Assert.Equal("hybrid", updated.SyncMode);
         Assert.Equal("manualConfirmation", updated.ConflictResolutionMode);
         Assert.Equal("adminManaged", updated.UserControlMode);
@@ -233,6 +241,8 @@ public class AppFeatureFlagsTests
         Assert.Contains("гибридная модель", auditEvent.Description);
         Assert.Contains("SyncMode", auditEvent.MetadataJson);
         Assert.Contains("externalCalendarSyncEnabled", auditEvent.MetadataJson);
+        Assert.Contains("googleCalendarSyncEnabled", auditEvent.MetadataJson);
+        Assert.Contains("yandexCalendarSyncEnabled", auditEvent.MetadataJson);
         Assert.Contains("DryRunConfirmed", auditEvent.MetadataJson);
 
         var readinessResult = await controller.GetReadiness(CancellationToken.None);
@@ -240,6 +250,8 @@ public class AppFeatureFlagsTests
 
         Assert.False(readiness.ReadyToConnect);
         Assert.True(readiness.ExternalCalendarSyncEnabled);
+        Assert.True(readiness.GoogleCalendarSyncEnabled);
+        Assert.True(readiness.YandexCalendarSyncEnabled);
         Assert.Contains(readiness.Items, item => item.Key == "conflict-policy" && item.IsReady && item.Status == "ready");
         Assert.Contains(readiness.Items, item => item.Key == "dry-run" && item.IsReady && item.Status == "ready");
         Assert.Contains(readiness.Items, item => item.Key == "google-oauth" && !item.IsReady);
@@ -277,7 +289,54 @@ public class AppFeatureFlagsTests
         var readiness = Assert.IsType<CalendarSyncReadinessDto>(Assert.IsType<OkObjectResult>(readinessResult.Result).Value);
 
         Assert.True(readiness.ExternalCalendarSyncEnabled);
-        Assert.Contains(readiness.Items, item => item.Key == "feature-flag" && item.IsReady && item.Status == "ready");
+        Assert.True(readiness.GoogleCalendarSyncEnabled);
+        Assert.True(readiness.YandexCalendarSyncEnabled);
+        Assert.Contains(readiness.Items, item => item.Key == "google-admin-toggle" && item.IsReady && item.Status == "ready");
+        Assert.Contains(readiness.Items, item => item.Key == "yandex-admin-toggle" && item.IsReady && item.Status == "ready");
+    }
+
+    [Fact]
+    public async Task CalendarSyncController_AllowsEnablingGoogleAndYandexSeparately()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions
+        {
+            Legal = new LegalFeatureFlagsOptions
+            {
+                ExternalCalendarSync = false,
+            },
+        }), scope.Db);
+
+        var update = await controller.UpdateSettings(new UpdateCalendarSyncSettingsRequest
+        {
+            GoogleCalendarSyncEnabled = true,
+            YandexCalendarSyncEnabled = false,
+            SyncMode = "crmMaster",
+            ConflictResolutionMode = "crmWins",
+            RequireManualConfirmation = false,
+            DryRunConfirmed = true,
+        }, CancellationToken.None);
+        var updated = Assert.IsType<CalendarSyncSettingsDto>(Assert.IsType<OkObjectResult>(update.Result).Value);
+
+        Assert.True(updated.ExternalCalendarSyncEnabled);
+        Assert.True(updated.GoogleCalendarSyncEnabled);
+        Assert.False(updated.YandexCalendarSyncEnabled);
+
+        var providersResult = await controller.GetProviders(CancellationToken.None);
+        var providers = Assert.IsAssignableFrom<IReadOnlyList<CalendarSyncProviderDto>>(
+            Assert.IsType<OkObjectResult>(providersResult.Result).Value);
+
+        Assert.Contains(providers, item => item.Key == "google-calendar" && item.FeatureFlagEnabled && item.Status == "requires-setup");
+        Assert.Contains(providers, item => item.Key == "yandex-calendar" && !item.FeatureFlagEnabled && item.Status == "disabled");
+
+        var readinessResult = await controller.GetReadiness(CancellationToken.None);
+        var readiness = Assert.IsType<CalendarSyncReadinessDto>(Assert.IsType<OkObjectResult>(readinessResult.Result).Value);
+
+        Assert.True(readiness.ExternalCalendarSyncEnabled);
+        Assert.True(readiness.GoogleCalendarSyncEnabled);
+        Assert.False(readiness.YandexCalendarSyncEnabled);
+        Assert.Contains(readiness.Items, item => item.Key == "google-oauth" && item.IsRequired && !item.IsReady);
+        Assert.Contains(readiness.Items, item => item.Key == "yandex-oauth" && !item.IsRequired && item.Status == "disabled");
     }
 
     [Fact]

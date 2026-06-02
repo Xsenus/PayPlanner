@@ -61,6 +61,8 @@ public static class CalendarExportAudit
                 settings = new
                 {
                     nextSettings.ExternalCalendarSyncEnabled,
+                    nextSettings.GoogleCalendarSyncEnabled,
+                    nextSettings.YandexCalendarSyncEnabled,
                     nextSettings.SyncMode,
                     nextSettings.ConflictResolutionMode,
                     nextSettings.UserControlMode,
@@ -82,6 +84,8 @@ public static class CalendarExportAudit
         var changes = new List<CalendarSyncSettingsChange>();
 
         AddIfChanged(changes, "ExternalCalendarSyncEnabled", previousSettings.ExternalCalendarSyncEnabled?.ToString(), nextSettings.ExternalCalendarSyncEnabled?.ToString());
+        AddIfChanged(changes, "GoogleCalendarSyncEnabled", previousSettings.GoogleCalendarSyncEnabled?.ToString(), nextSettings.GoogleCalendarSyncEnabled?.ToString());
+        AddIfChanged(changes, "YandexCalendarSyncEnabled", previousSettings.YandexCalendarSyncEnabled?.ToString(), nextSettings.YandexCalendarSyncEnabled?.ToString());
         AddIfChanged(changes, "SyncMode", previousSettings.SyncMode, nextSettings.SyncMode);
         AddIfChanged(changes, "ConflictResolutionMode", previousSettings.ConflictResolutionMode, nextSettings.ConflictResolutionMode);
         AddIfChanged(changes, "UserControlMode", previousSettings.UserControlMode, nextSettings.UserControlMode);

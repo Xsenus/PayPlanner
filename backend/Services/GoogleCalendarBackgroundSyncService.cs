@@ -94,7 +94,7 @@ public sealed class GoogleCalendarBackgroundSyncService : BackgroundService
             var settings = JsonSerializer.Deserialize<CalendarSyncSettingsDto>(setting.Value, JsonOptions);
             return CalendarSyncProviderRegistry
                 .NormalizeSettings(settings, _featureFlags.CurrentValue.Legal.ExternalCalendarSync)
-                .ExternalCalendarSyncEnabled == true;
+                .GoogleCalendarSyncEnabled == true;
         }
         catch (JsonException)
         {

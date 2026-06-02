@@ -135,6 +135,8 @@ describe('apiService auth handling', () => {
     const payload = {
       generatedAt: '2026-05-26T16:00:00Z',
       externalCalendarSyncEnabled: true,
+      googleCalendarSyncEnabled: true,
+      yandexCalendarSyncEnabled: false,
       readyToConnect: false,
       items: [
         {
@@ -163,6 +165,8 @@ describe('apiService auth handling', () => {
   it('loads calendar sync settings from the backend', async () => {
     const payload = {
       externalCalendarSyncEnabled: true,
+      googleCalendarSyncEnabled: true,
+      yandexCalendarSyncEnabled: false,
       syncMode: 'hybrid',
       conflictResolutionMode: 'manualConfirmation',
       requireManualConfirmation: true,
@@ -185,6 +189,8 @@ describe('apiService auth handling', () => {
   it('updates calendar sync settings', async () => {
     const payload = {
       externalCalendarSyncEnabled: true,
+      googleCalendarSyncEnabled: true,
+      yandexCalendarSyncEnabled: false,
       syncMode: 'crmMaster',
       conflictResolutionMode: 'crmWins',
       requireManualConfirmation: false,

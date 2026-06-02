@@ -51,6 +51,8 @@ describe('CalendarSyncProviderSettings', () => {
     apiMock.getCalendarSyncReadiness.mockResolvedValue({
       generatedAt: '2026-05-26T16:00:00Z',
       externalCalendarSyncEnabled: true,
+      googleCalendarSyncEnabled: true,
+      yandexCalendarSyncEnabled: false,
       readyToConnect: false,
       items: [
         {
@@ -64,7 +66,7 @@ describe('CalendarSyncProviderSettings', () => {
         },
         {
           key: 'feature-flag',
-          label: 'Внешние календари в админке',
+          label: 'Google Calendar в админке',
           status: 'ready',
           isReady: true,
           isRequired: true,
@@ -84,6 +86,8 @@ describe('CalendarSyncProviderSettings', () => {
     });
     apiMock.getCalendarSyncSettings.mockResolvedValue({
       externalCalendarSyncEnabled: false,
+      googleCalendarSyncEnabled: false,
+      yandexCalendarSyncEnabled: false,
       syncMode: 'notConfigured',
       conflictResolutionMode: 'manualConfirmation',
       userControlMode: 'userManaged',
@@ -117,7 +121,9 @@ describe('CalendarSyncProviderSettings', () => {
       pageSize: 50,
     });
     apiMock.updateCalendarSyncSettings.mockImplementation(async (payload) => ({
-      externalCalendarSyncEnabled: payload.externalCalendarSyncEnabled,
+      externalCalendarSyncEnabled: payload.googleCalendarSyncEnabled || payload.yandexCalendarSyncEnabled,
+      googleCalendarSyncEnabled: payload.googleCalendarSyncEnabled,
+      yandexCalendarSyncEnabled: payload.yandexCalendarSyncEnabled,
       syncMode: payload.syncMode,
       conflictResolutionMode: payload.conflictResolutionMode,
       userControlMode: payload.userControlMode,
@@ -147,14 +153,15 @@ describe('CalendarSyncProviderSettings', () => {
     render(<CalendarSyncProviderSettings />);
 
     await screen.findByText('Модель синхронизации и конфликты');
-    fireEvent.click(screen.getByLabelText(/Включить Google Calendar и Яндекс Календарь/i));
+    fireEvent.click(screen.getByLabelText(/Включить Google Calendar/i));
     fireEvent.change(screen.getByLabelText('Главный источник событий'), { target: { value: 'hybrid' } });
     fireEvent.click(screen.getByLabelText('Dry-run на копии базы выполнен'));
     fireEvent.change(screen.getByLabelText('Комментарий к решению'), { target: { value: 'Согласовано с руководителем.' } });
     fireEvent.click(screen.getByRole('button', { name: /Сохранить/i }));
 
     await waitFor(() => expect(apiMock.updateCalendarSyncSettings).toHaveBeenCalledWith({
-      externalCalendarSyncEnabled: true,
+      googleCalendarSyncEnabled: true,
+      yandexCalendarSyncEnabled: false,
       syncMode: 'hybrid',
       conflictResolutionMode: 'manualConfirmation',
       userControlMode: 'userManaged',

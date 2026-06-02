@@ -79,7 +79,8 @@ export function CalendarSyncProviderSettings() {
     setSaveMessage(null);
     try {
       const updated = await apiService.updateCalendarSyncSettings({
-        externalCalendarSyncEnabled: draft.externalCalendarSyncEnabled === true,
+        googleCalendarSyncEnabled: draft.googleCalendarSyncEnabled === true,
+        yandexCalendarSyncEnabled: draft.yandexCalendarSyncEnabled === true,
         syncMode: draft.syncMode,
         conflictResolutionMode: draft.conflictResolutionMode,
         userControlMode: draft.userControlMode,
@@ -181,23 +182,20 @@ export function CalendarSyncProviderSettings() {
             </button>
           </div>
 
-          <label className={`mt-4 flex items-start gap-3 rounded-2xl border px-4 py-4 ${draft.externalCalendarSyncEnabled ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-            <input
-              type="checkbox"
-              checked={draft.externalCalendarSyncEnabled === true}
-              onChange={(event) => updateDraft({ externalCalendarSyncEnabled: event.target.checked })}
-              className="mt-1 h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <ProviderToggle
+              checked={draft.googleCalendarSyncEnabled === true}
+              label="Включить Google Calendar"
+              description="Google Calendar перейдет из состояния «Выключен» в подготовку подключения. После этого нужно заполнить OAuth Google и закрыть чек-лист готовности."
+              onChange={(checked) => updateDraft({ googleCalendarSyncEnabled: checked })}
             />
-            <span className="min-w-0">
-              <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-                <Power className="h-4 w-4 text-sky-700" />
-                Включить Google Calendar и Яндекс Календарь
-              </span>
-              <span className="mt-1 block text-xs leading-5 text-gray-600">
-                Это главный переключатель из админки. После сохранения карточки провайдеров перейдут из состояния «Выключен» в подготовку подключения; затем нужно заполнить OAuth в разделе внешней авторизации и закрыть чек-лист готовности.
-              </span>
-            </span>
-          </label>
+            <ProviderToggle
+              checked={draft.yandexCalendarSyncEnabled === true}
+              label="Включить Яндекс Календарь"
+              description="Яндекс Календарь перейдет из состояния «Выключен» в подготовку подключения. После этого нужно заполнить OAuth Яндекса и закрыть чек-лист готовности."
+              onChange={(checked) => updateDraft({ yandexCalendarSyncEnabled: checked })}
+            />
+          </div>
 
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             <label className="block">
@@ -456,6 +454,36 @@ function Capability({ enabled, label }: { enabled: boolean; label: string }) {
     <span className={`rounded-xl px-2 py-1 font-medium ${enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
       {label}
     </span>
+  );
+}
+
+function ProviderToggle({
+  checked,
+  label,
+  description,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  description: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className={`flex items-start gap-3 rounded-2xl border px-4 py-4 ${checked ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-1 h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+      />
+      <span className="min-w-0">
+        <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+          <Power className="h-4 w-4 text-sky-700" />
+          {label}
+        </span>
+        <span className="mt-1 block text-xs leading-5 text-gray-600">{description}</span>
+      </span>
+    </label>
   );
 }
 

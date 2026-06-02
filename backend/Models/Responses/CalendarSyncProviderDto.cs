@@ -20,6 +20,8 @@ public sealed class CalendarSyncReadinessDto
 {
     public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
     public bool ExternalCalendarSyncEnabled { get; set; }
+    public bool GoogleCalendarSyncEnabled { get; set; }
+    public bool YandexCalendarSyncEnabled { get; set; }
     public bool ReadyToConnect { get; set; }
     public List<CalendarSyncReadinessItemDto> Items { get; set; } = [];
 }
@@ -38,6 +40,8 @@ public sealed class CalendarSyncReadinessItemDto
 public sealed class CalendarSyncSettingsDto
 {
     public bool? ExternalCalendarSyncEnabled { get; set; }
+    public bool? GoogleCalendarSyncEnabled { get; set; }
+    public bool? YandexCalendarSyncEnabled { get; set; }
     public string SyncMode { get; set; } = "notConfigured";
     public string ConflictResolutionMode { get; set; } = "manualConfirmation";
     public string UserControlMode { get; set; } = "userManaged";

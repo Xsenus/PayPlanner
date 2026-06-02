@@ -94,7 +94,7 @@ public sealed class YandexCalendarBackgroundSyncService : BackgroundService
             var settings = JsonSerializer.Deserialize<CalendarSyncSettingsDto>(setting.Value, JsonOptions);
             return CalendarSyncProviderRegistry
                 .NormalizeSettings(settings, _featureFlags.CurrentValue.Legal.ExternalCalendarSync)
-                .ExternalCalendarSyncEnabled == true;
+                .YandexCalendarSyncEnabled == true;
         }
         catch (JsonException)
         {

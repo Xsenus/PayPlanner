@@ -8,6 +8,8 @@ public static class CalendarSyncProviderRegistry
         => new()
         {
             ExternalCalendarSyncEnabled = externalCalendarSyncEnabled,
+            GoogleCalendarSyncEnabled = externalCalendarSyncEnabled,
+            YandexCalendarSyncEnabled = externalCalendarSyncEnabled,
             SyncMode = "notConfigured",
             ConflictResolutionMode = "manualConfirmation",
             UserControlMode = "userManaged",
@@ -40,10 +42,15 @@ public static class CalendarSyncProviderRegistry
             "cleanupExternalData",
             ["cleanupExternalData", "disableSyncOnly", "keepConnection"]);
         var requireManualConfirmation = source.RequireManualConfirmation || conflictResolutionMode == "manualConfirmation";
+        var legacyExternalCalendarSyncEnabled = source.ExternalCalendarSyncEnabled ?? externalCalendarSyncEnabledFallback;
+        var googleCalendarSyncEnabled = source.GoogleCalendarSyncEnabled ?? legacyExternalCalendarSyncEnabled;
+        var yandexCalendarSyncEnabled = source.YandexCalendarSyncEnabled ?? legacyExternalCalendarSyncEnabled;
 
         return new CalendarSyncSettingsDto
         {
-            ExternalCalendarSyncEnabled = source.ExternalCalendarSyncEnabled ?? externalCalendarSyncEnabledFallback,
+            ExternalCalendarSyncEnabled = googleCalendarSyncEnabled || yandexCalendarSyncEnabled,
+            GoogleCalendarSyncEnabled = googleCalendarSyncEnabled,
+            YandexCalendarSyncEnabled = yandexCalendarSyncEnabled,
             SyncMode = syncMode,
             ConflictResolutionMode = conflictResolutionMode,
             UserControlMode = userControlMode,
@@ -57,11 +64,14 @@ public static class CalendarSyncProviderRegistry
     }
 
     public static IReadOnlyList<CalendarSyncProviderDto> BuildProviders(bool externalCalendarSyncEnabled)
+        => BuildProviders(externalCalendarSyncEnabled, externalCalendarSyncEnabled);
+
+    public static IReadOnlyList<CalendarSyncProviderDto> BuildProviders(
+        bool googleCalendarSyncEnabled,
+        bool yandexCalendarSyncEnabled)
     {
-        var externalStatus = externalCalendarSyncEnabled ? "requires-setup" : "disabled";
-        var externalMessage = externalCalendarSyncEnabled
-            ? "Контур включен администратором. Перед запуском нужна настройка OAuth, dry-run и подтверждение модели конфликтов."
-            : "Интеграция с внешним календарем выключена в админских настройках.";
+        var googleStatus = BuildProviderStatus(googleCalendarSyncEnabled);
+        var yandexStatus = BuildProviderStatus(yandexCalendarSyncEnabled);
 
         return
         [
@@ -85,30 +95,30 @@ public static class CalendarSyncProviderRegistry
                 Key = "google-calendar",
                 Label = "Google Calendar",
                 Kind = "google",
-                Status = externalStatus,
+                Status = googleStatus,
                 IsAvailable = false,
-                FeatureFlagEnabled = externalCalendarSyncEnabled,
+                FeatureFlagEnabled = googleCalendarSyncEnabled,
                 RequiresOAuth = true,
                 SupportsManualExport = false,
                 SupportsBackgroundSync = true,
                 SupportsTwoWaySync = true,
                 SupportedTargets = ["Календарь задач", "Календарь дел"],
-                Message = externalMessage,
+                Message = BuildProviderMessage("Google Calendar", googleCalendarSyncEnabled),
             },
             new CalendarSyncProviderDto
             {
                 Key = "yandex-calendar",
                 Label = "Яндекс Календарь",
                 Kind = "yandex",
-                Status = externalStatus,
+                Status = yandexStatus,
                 IsAvailable = false,
-                FeatureFlagEnabled = externalCalendarSyncEnabled,
+                FeatureFlagEnabled = yandexCalendarSyncEnabled,
                 RequiresOAuth = true,
                 SupportsManualExport = false,
                 SupportsBackgroundSync = true,
                 SupportsTwoWaySync = true,
                 SupportedTargets = ["Календарь задач", "Календарь дел"],
-                Message = externalMessage,
+                Message = BuildProviderMessage("Яндекс Календарь", yandexCalendarSyncEnabled),
             },
         ];
     }
@@ -116,15 +126,23 @@ public static class CalendarSyncProviderRegistry
     public static CalendarSyncReadinessDto BuildReadiness(
         bool externalCalendarSyncEnabled,
         CalendarSyncSettingsDto? settings = null)
+        => BuildReadiness(externalCalendarSyncEnabled, externalCalendarSyncEnabled, settings);
+
+    public static CalendarSyncReadinessDto BuildReadiness(
+        bool googleCalendarSyncEnabled,
+        bool yandexCalendarSyncEnabled,
+        CalendarSyncSettingsDto? settings = null)
     {
-        var normalizedSettings = NormalizeSettings(settings);
+        var normalizedSettings = NormalizeSettings(settings, googleCalendarSyncEnabled || yandexCalendarSyncEnabled);
+        googleCalendarSyncEnabled = normalizedSettings.GoogleCalendarSyncEnabled ?? googleCalendarSyncEnabled;
+        yandexCalendarSyncEnabled = normalizedSettings.YandexCalendarSyncEnabled ?? yandexCalendarSyncEnabled;
+        var externalCalendarSyncEnabled = googleCalendarSyncEnabled || yandexCalendarSyncEnabled;
         var conflictPolicyReady = normalizedSettings.SyncMode != "notConfigured";
         var dryRunReady = normalizedSettings.DryRunConfirmed;
-        var externalBlockedStatus = externalCalendarSyncEnabled ? "pending" : "disabled";
-        var externalBlockedSeverity = externalCalendarSyncEnabled ? "warning" : "info";
-        var externalBlockedPrefix = externalCalendarSyncEnabled
-            ? "Внешний календарный контур включен, но перед подключением нужно "
-            : "Внешний календарный контур выключен. Перед подключением нужно ";
+        var googleStatus = googleCalendarSyncEnabled ? "pending" : "disabled";
+        var yandexStatus = yandexCalendarSyncEnabled ? "pending" : "disabled";
+        var googleSeverity = googleCalendarSyncEnabled ? "warning" : "info";
+        var yandexSeverity = yandexCalendarSyncEnabled ? "warning" : "info";
 
         var items = new List<CalendarSyncReadinessItemDto>
         {
@@ -140,35 +158,51 @@ public static class CalendarSyncProviderRegistry
             },
             new()
             {
-                Key = "feature-flag",
-                Label = "Внешние календари в админке",
-                Status = externalCalendarSyncEnabled ? "ready" : "disabled",
-                IsReady = externalCalendarSyncEnabled,
-                IsRequired = true,
-                Severity = externalCalendarSyncEnabled ? "success" : "warning",
-                Message = externalCalendarSyncEnabled
-                    ? "Внешний календарный контур включен для диагностики и подготовки подключения."
-                    : "Google Calendar и Яндекс Календарь остаются выключенными, пока администратор не включит внешний календарный контур.",
+                Key = "google-admin-toggle",
+                Label = "Google Calendar в админке",
+                Status = googleCalendarSyncEnabled ? "ready" : "disabled",
+                IsReady = googleCalendarSyncEnabled,
+                IsRequired = googleCalendarSyncEnabled,
+                Severity = googleCalendarSyncEnabled ? "success" : "info",
+                Message = googleCalendarSyncEnabled
+                    ? "Google Calendar включен администратором для диагностики и подготовки подключения."
+                    : "Google Calendar выключен в админских настройках и не блокирует подключение других провайдеров.",
+            },
+            new()
+            {
+                Key = "yandex-admin-toggle",
+                Label = "Яндекс Календарь в админке",
+                Status = yandexCalendarSyncEnabled ? "ready" : "disabled",
+                IsReady = yandexCalendarSyncEnabled,
+                IsRequired = yandexCalendarSyncEnabled,
+                Severity = yandexCalendarSyncEnabled ? "success" : "info",
+                Message = yandexCalendarSyncEnabled
+                    ? "Яндекс Календарь включен администратором для диагностики и подготовки подключения."
+                    : "Яндекс Календарь выключен в админских настройках и не блокирует подключение других провайдеров.",
             },
             new()
             {
                 Key = "google-oauth",
                 Label = "Google Calendar OAuth",
-                Status = externalBlockedStatus,
+                Status = googleStatus,
                 IsReady = false,
-                IsRequired = true,
-                Severity = externalBlockedSeverity,
-                Message = externalBlockedPrefix + "утвердить OAuth-приложение Google Calendar, redirect URI и набор разрешений.",
+                IsRequired = googleCalendarSyncEnabled,
+                Severity = googleSeverity,
+                Message = googleCalendarSyncEnabled
+                    ? "Google Calendar включен, но перед подключением нужно утвердить OAuth-приложение, redirect URI и набор разрешений."
+                    : "Проверка OAuth Google Calendar пропущена, пока провайдер выключен в админке.",
             },
             new()
             {
                 Key = "yandex-oauth",
                 Label = "Яндекс Календарь OAuth",
-                Status = externalBlockedStatus,
+                Status = yandexStatus,
                 IsReady = false,
-                IsRequired = true,
-                Severity = externalBlockedSeverity,
-                Message = externalBlockedPrefix + "утвердить OAuth-приложение Яндекс Календаря, redirect URI и набор разрешений.",
+                IsRequired = yandexCalendarSyncEnabled,
+                Severity = yandexSeverity,
+                Message = yandexCalendarSyncEnabled
+                    ? "Яндекс Календарь включен, но перед подключением нужно утвердить OAuth-приложение, redirect URI и набор разрешений."
+                    : "Проверка OAuth Яндекс Календаря пропущена, пока провайдер выключен в админке.",
             },
             new()
             {
@@ -176,7 +210,7 @@ public static class CalendarSyncProviderRegistry
                 Label = "Правила конфликтов",
                 Status = conflictPolicyReady ? "ready" : "pending",
                 IsReady = conflictPolicyReady,
-                IsRequired = true,
+                IsRequired = externalCalendarSyncEnabled,
                 Severity = conflictPolicyReady ? "success" : "warning",
                 Message = conflictPolicyReady
                     ? BuildConflictPolicyReadyMessage(normalizedSettings)
@@ -188,7 +222,7 @@ public static class CalendarSyncProviderRegistry
                 Label = "Dry-run на копии базы",
                 Status = dryRunReady ? "ready" : "pending",
                 IsReady = dryRunReady,
-                IsRequired = true,
+                IsRequired = externalCalendarSyncEnabled,
                 Severity = dryRunReady ? "success" : "warning",
                 Message = dryRunReady
                     ? "Dry-run на копии базы отмечен как выполненный. Перед боевым запуском все равно проверьте OAuth и ограничения доступа."
@@ -200,10 +234,20 @@ public static class CalendarSyncProviderRegistry
         {
             GeneratedAt = DateTime.UtcNow,
             ExternalCalendarSyncEnabled = externalCalendarSyncEnabled,
-            ReadyToConnect = items.Where(item => item.IsRequired).All(item => item.IsReady),
+            GoogleCalendarSyncEnabled = googleCalendarSyncEnabled,
+            YandexCalendarSyncEnabled = yandexCalendarSyncEnabled,
+            ReadyToConnect = externalCalendarSyncEnabled && items.Where(item => item.IsRequired).All(item => item.IsReady),
             Items = items,
         };
     }
+
+    private static string BuildProviderStatus(bool enabled)
+        => enabled ? "requires-setup" : "disabled";
+
+    private static string BuildProviderMessage(string providerName, bool enabled)
+        => enabled
+            ? $"{providerName} включен администратором. Перед запуском нужна настройка OAuth, dry-run и подтверждение модели конфликтов."
+            : $"{providerName} выключен в админских настройках.";
 
     private static string NormalizeKnownValue(string? value, string fallback, IReadOnlyCollection<string> allowedValues)
     {

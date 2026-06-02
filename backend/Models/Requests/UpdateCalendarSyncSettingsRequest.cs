@@ -3,6 +3,8 @@ namespace PayPlanner.Api.Models.Requests;
 public sealed class UpdateCalendarSyncSettingsRequest
 {
     public bool? ExternalCalendarSyncEnabled { get; set; }
+    public bool? GoogleCalendarSyncEnabled { get; set; }
+    public bool? YandexCalendarSyncEnabled { get; set; }
     public string? SyncMode { get; set; }
     public string? ConflictResolutionMode { get; set; }
     public string? UserControlMode { get; set; }

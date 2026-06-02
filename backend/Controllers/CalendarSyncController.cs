@@ -34,14 +34,19 @@ public sealed class CalendarSyncController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<CalendarSyncProviderDto>>> GetProviders(CancellationToken ct)
     {
         var settings = await GetSettingsAsync(ct);
-        return Ok(CalendarSyncProviderRegistry.BuildProviders(settings.ExternalCalendarSyncEnabled == true));
+        return Ok(CalendarSyncProviderRegistry.BuildProviders(
+            settings.GoogleCalendarSyncEnabled == true,
+            settings.YandexCalendarSyncEnabled == true));
     }
 
     [HttpGet("readiness")]
     public async Task<ActionResult<CalendarSyncReadinessDto>> GetReadiness(CancellationToken ct)
     {
         var settings = await GetSettingsAsync(ct);
-        return Ok(CalendarSyncProviderRegistry.BuildReadiness(settings.ExternalCalendarSyncEnabled == true, settings));
+        return Ok(CalendarSyncProviderRegistry.BuildReadiness(
+            settings.GoogleCalendarSyncEnabled == true,
+            settings.YandexCalendarSyncEnabled == true,
+            settings));
     }
 
     [HttpGet("settings")]
@@ -55,9 +60,14 @@ public sealed class CalendarSyncController : ControllerBase
         CancellationToken ct)
     {
         var previousSettings = await GetSettingsAsync(ct);
+        var googleCalendarSyncEnabled = request.GoogleCalendarSyncEnabled
+            ?? (request.ExternalCalendarSyncEnabled.HasValue ? request.ExternalCalendarSyncEnabled.Value : previousSettings.GoogleCalendarSyncEnabled);
+        var yandexCalendarSyncEnabled = request.YandexCalendarSyncEnabled
+            ?? (request.ExternalCalendarSyncEnabled.HasValue ? request.ExternalCalendarSyncEnabled.Value : previousSettings.YandexCalendarSyncEnabled);
         var normalized = CalendarSyncProviderRegistry.NormalizeSettings(new CalendarSyncSettingsDto
         {
-            ExternalCalendarSyncEnabled = request.ExternalCalendarSyncEnabled ?? previousSettings.ExternalCalendarSyncEnabled,
+            GoogleCalendarSyncEnabled = googleCalendarSyncEnabled,
+            YandexCalendarSyncEnabled = yandexCalendarSyncEnabled,
             SyncMode = request.SyncMode ?? string.Empty,
             ConflictResolutionMode = request.ConflictResolutionMode ?? string.Empty,
             UserControlMode = request.UserControlMode ?? string.Empty,
