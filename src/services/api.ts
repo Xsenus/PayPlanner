@@ -249,6 +249,7 @@ export interface GoogleCalendarConnectionDto {
   accessTokenExpiresAt?: string | null;
   lastFullSyncAt?: string | null;
   lastIncrementalSyncAt?: string | null;
+  syncFromDate?: string | null;
   lastError?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -277,6 +278,7 @@ export interface UpdateGoogleCalendarSettingsRequest {
   syncEnabled?: boolean;
   calendarMode?: string;
   conflictResolutionMode?: string;
+  syncFromDate?: string | null;
 }
 
 export interface GoogleCalendarSyncNowResultDto {
@@ -324,6 +326,7 @@ export interface YandexCalendarConnectionDto {
   accessTokenExpiresAt?: string | null;
   lastFullSyncAt?: string | null;
   lastIncrementalSyncAt?: string | null;
+  syncFromDate?: string | null;
   lastError?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -352,6 +355,7 @@ export interface UpdateYandexCalendarSettingsRequest {
   syncEnabled?: boolean;
   calendarMode?: string;
   conflictResolutionMode?: string;
+  syncFromDate?: string | null;
 }
 
 export interface YandexCalendarSyncNowResultDto {

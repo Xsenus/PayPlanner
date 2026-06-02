@@ -25,6 +25,8 @@ const formatDateTime = (value?: string | null) => {
   }).format(new Date(value));
 };
 
+const toDateInputValue = (value?: string | null) => (value ? value.slice(0, 10) : '');
+
 export function YandexCalendarPanel({ isAdmin = false }: Props) {
   const toast = useToast();
   const { confirm } = useDialog();
@@ -40,6 +42,7 @@ export function YandexCalendarPanel({ isAdmin = false }: Props) {
     syncEnabled: true,
     calendarMode: 'personal',
     conflictResolutionMode: 'latestWins',
+    syncFromDate: null,
   });
 
   const loadStatus = useCallback(async () => {
@@ -51,6 +54,7 @@ export function YandexCalendarPanel({ isAdmin = false }: Props) {
         syncEnabled: next.connection.syncEnabled,
         calendarMode: next.connection.calendarMode,
         conflictResolutionMode: next.connection.conflictResolutionMode,
+        syncFromDate: toDateInputValue(next.connection.syncFromDate) || null,
       });
     }
     return next;
@@ -286,6 +290,16 @@ export function YandexCalendarPanel({ isAdmin = false }: Props) {
                 <option value="crmWins">CRM главная</option>
                 <option value="yandexWins">Яндекс.Календарь главный</option>
               </select>
+            </label>
+            <label className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+              <span className="font-semibold text-slate-700">Синхронизировать задачи с даты</span>
+              <input
+                type="date"
+                value={form.syncFromDate ?? ''}
+                onChange={(event) => setForm((current) => ({ ...current, syncFromDate: event.target.value || null }))}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+              <span className="mt-1 block text-xs text-slate-500">Пустое поле оставляет стандартный диапазон синхронизации.</span>
             </label>
           </div>
 

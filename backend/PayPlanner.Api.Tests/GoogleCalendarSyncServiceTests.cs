@@ -92,6 +92,27 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_UsesSyncFromDateToSkipOlderTasks()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-sync-from@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var syncFromDate = DateTime.UtcNow.Date.AddDays(1);
+        await CreateConnectionAsync(db, user.Id, syncFromDate: syncFromDate);
+        var oldTask = await CreateTaskAsync(db, user.Id, "Старая задача", dueAt: syncFromDate.AddDays(-1).AddHours(10));
+        var newTask = await CreateTaskAsync(db, user.Id, "Новая задача", dueAt: syncFromDate.AddDays(1).AddHours(10));
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        Assert.False(await db.GoogleCalendarTaskLinks.AnyAsync(item => item.TaskJournalItemId == oldTask.Id));
+        Assert.True(await db.GoogleCalendarTaskLinks.AnyAsync(item => item.TaskJournalItemId == newTask.Id));
+        Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SyncNowAsync_AdminConnectionCreatesCalendarByAssignee()
     {
         await using var db = await CreateContextAsync();
@@ -180,6 +201,40 @@ public class GoogleCalendarSyncServiceTests
             item.Status == "error");
         var link = await db.GoogleCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id);
         Assert.False(string.IsNullOrWhiteSpace(link.LastError));
+    }
+
+    [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_WhenTaskBeforeSyncFromDateDeletesExistingGoogleEvent()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-sync-from-delete@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var syncFromDate = DateTime.UtcNow.Date.AddDays(1);
+        var connection = await CreateConnectionAsync(db, user.Id, syncFromDate: syncFromDate);
+        var task = await CreateTaskAsync(db, user.Id, "Убрать из календаря", dueAt: syncFromDate.AddDays(-1).AddHours(10));
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-sync-from-delete", "PayPlanner задачи");
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "event-sync-from-delete",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-sync-from-delete/events/event-sync-from-delete", StringComparison.Ordinal));
+        var link = await db.GoogleCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal("deleted", link.SyncStatus);
     }
 
     [Fact]
@@ -345,7 +400,7 @@ public class GoogleCalendarSyncServiceTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task<GoogleCalendarConnection> CreateConnectionAsync(PaymentContext db, int userId, string calendarMode = "personal")
+    private static async Task<GoogleCalendarConnection> CreateConnectionAsync(PaymentContext db, int userId, string calendarMode = "personal", DateTime? syncFromDate = null)
     {
         var protector = TestDataProtectionProvider.CreateProtector("PayPlanner.GoogleCalendar.Tokens.v1");
         var connection = new GoogleCalendarConnection
@@ -359,6 +414,7 @@ public class GoogleCalendarSyncServiceTests
             Scope = "openid email profile https://www.googleapis.com/auth/calendar",
             CalendarMode = calendarMode,
             ConflictResolutionMode = "latestWins",
+            SyncFromDate = syncFromDate,
             IsEnabled = true,
             SyncEnabled = true,
         };
@@ -388,7 +444,7 @@ public class GoogleCalendarSyncServiceTests
         return calendar;
     }
 
-    private static async Task<TaskJournalItem> CreateTaskAsync(PaymentContext db, int assigneeUserId, string title, string assigneeName = "User")
+    private static async Task<TaskJournalItem> CreateTaskAsync(PaymentContext db, int assigneeUserId, string title, string assigneeName = "User", DateTime? dueAt = null)
     {
         var task = new TaskJournalItem
         {
@@ -396,7 +452,7 @@ public class GoogleCalendarSyncServiceTests
             Title = title,
             AssigneeUserId = assigneeUserId,
             AssigneeName = assigneeName,
-            DueAt = DateTime.UtcNow.AddDays(1),
+            DueAt = dueAt ?? DateTime.UtcNow.AddDays(1),
             PlannedDurationMinutes = 60,
             Status = "new",
             Priority = "normal",

@@ -77,6 +77,40 @@ public class YandexCalendarSyncServiceTests
             item.Status == "error");
     }
 
+    [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_WhenTaskBeforeSyncFromDateDeletesExistingYandexEvent()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-sync-from-delete@example.com", "user");
+        var syncFromDate = DateTime.UtcNow.Date.AddDays(1);
+        var connection = await CreateConnectionAsync(db, user.Id, syncFromDate);
+        var task = await CreateTaskAsync(db, user.Id, "Убрать из Яндекс.Календаря", syncFromDate.AddDays(-1).AddHours(10));
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-yandex-sync-from-delete", "PayPlanner задачи");
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = "event-yandex-sync-from-delete",
+            YandexEventUrl = $"{calendar.CalendarUrl}event-yandex-sync-from-delete.ics",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsoluteUri == "https://caldav.yandex.ru/calendars/user/payplanner/event-yandex-sync-from-delete.ics");
+        var link = await db.YandexCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal("deleted", link.SyncStatus);
+    }
+
     private static YandexCalendarSyncService CreateService(PaymentContext db, IHttpClientFactory httpClientFactory)
     {
         return new YandexCalendarSyncService(
@@ -118,7 +152,7 @@ public class YandexCalendarSyncServiceTests
         return user;
     }
 
-    private static async Task<YandexCalendarConnection> CreateConnectionAsync(PaymentContext db, int userId)
+    private static async Task<YandexCalendarConnection> CreateConnectionAsync(PaymentContext db, int userId, DateTime? syncFromDate = null)
     {
         var protector = TestDataProtectionProvider.CreateProtector("PayPlanner.YandexCalendar.Tokens.v1");
         var connection = new YandexCalendarConnection
@@ -132,6 +166,7 @@ public class YandexCalendarSyncServiceTests
             Scope = "login:email calendar:all",
             CalendarMode = "personal",
             ConflictResolutionMode = "latestWins",
+            SyncFromDate = syncFromDate,
             IsEnabled = true,
             SyncEnabled = true,
         };
@@ -160,7 +195,7 @@ public class YandexCalendarSyncServiceTests
         return calendar;
     }
 
-    private static async Task<TaskJournalItem> CreateTaskAsync(PaymentContext db, int assigneeUserId, string title)
+    private static async Task<TaskJournalItem> CreateTaskAsync(PaymentContext db, int assigneeUserId, string title, DateTime? dueAt = null)
     {
         var task = new TaskJournalItem
         {
@@ -168,7 +203,7 @@ public class YandexCalendarSyncServiceTests
             Title = title,
             AssigneeUserId = assigneeUserId,
             AssigneeName = "User",
-            DueAt = DateTime.UtcNow.AddDays(1),
+            DueAt = dueAt ?? DateTime.UtcNow.AddDays(1),
             PlannedDurationMinutes = 60,
             Status = "new",
             Priority = "normal",

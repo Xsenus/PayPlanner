@@ -38,6 +38,7 @@ public sealed class YandexCalendarConnectionDto
     public DateTime? AccessTokenExpiresAt { get; set; }
     public DateTime? LastFullSyncAt { get; set; }
     public DateTime? LastIncrementalSyncAt { get; set; }
+    public DateTime? SyncFromDate { get; set; }
     public string? LastError { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

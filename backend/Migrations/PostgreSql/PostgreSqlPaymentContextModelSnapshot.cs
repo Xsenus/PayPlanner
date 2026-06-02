@@ -3585,6 +3585,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("boolean")
                         .HasDefaultValue(true);
 
+                    b.Property<DateTime?>("SyncFromDate")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp without time zone")
@@ -7530,6 +7533,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(true);
+
+                    b.Property<DateTime?>("SyncFromDate")
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()

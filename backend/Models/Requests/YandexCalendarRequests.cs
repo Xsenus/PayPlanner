@@ -11,4 +11,5 @@ public sealed class UpdateYandexCalendarSettingsRequest
     public bool? SyncEnabled { get; set; }
     public string? CalendarMode { get; set; }
     public string? ConflictResolutionMode { get; set; }
+    public DateTime? SyncFromDate { get; set; }
 }

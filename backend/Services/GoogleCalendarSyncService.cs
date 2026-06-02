@@ -238,6 +238,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         connection.SyncEnabled = request.SyncEnabled ?? connection.SyncEnabled;
         connection.CalendarMode = NormalizeKnownValue(request.CalendarMode, connection.CalendarMode, ["personal", "adminByAssignee"]);
         connection.ConflictResolutionMode = NormalizeKnownValue(request.ConflictResolutionMode, connection.ConflictResolutionMode, ["crmWins", "googleWins", "latestWins"]);
+        connection.SyncFromDate = NormalizeSyncFromDate(request.SyncFromDate);
         connection.UpdatedAt = DateTime.UtcNow;
         await AddLogAsync(connection.Id, null, null, "system", "settings-updated", "success", "Настройки Google Calendar сохранены.", null, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
@@ -518,6 +519,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             await AddLogAsync(connection.Id, null, null, "google-to-crm", "import", "error", "Не удалось загрузить изменения из Google Calendar.", ex.Message, cancellationToken);
         }
 
+        errors += await DeleteLinksOutsideSyncWindowAsync(connection, cancellationToken);
+
         var tasks = await LoadTasksForConnectionAsync(connection, cancellationToken);
         var processedTasks = 0;
         foreach (var task in tasks)
@@ -564,6 +567,15 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             .FirstOrDefaultAsync(item => item.Id == taskId, cancellationToken);
         if (task is null)
         {
+            return;
+        }
+
+        if (IsBeforeSyncFromDate(connection, task))
+        {
+            await DeleteTaskLinkOutsideSyncWindowAsync(connection, task.Id, cancellationToken);
+            connection.LastIncrementalSyncAt = DateTime.UtcNow;
+            connection.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
             return;
         }
 
@@ -894,7 +906,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     {
         var isAdmin = await IsAdminConnectionAsync(connection.UserId, cancellationToken);
         var now = DateTime.UtcNow;
-        var from = now.AddDays(-30);
+        var from = ResolveSyncFromDate(connection) ?? now.AddDays(-30);
         var to = now.AddDays(365);
         var query = _db.TaskJournalItems
             .Include(item => item.Participants)
@@ -911,6 +923,94 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             .OrderBy(item => item.DueAt)
             .Take(500)
             .ToListAsync(cancellationToken);
+    }
+
+    private async Task<int> DeleteLinksOutsideSyncWindowAsync(GoogleCalendarConnection connection, CancellationToken cancellationToken)
+    {
+        var syncFromDate = ResolveSyncFromDate(connection);
+        if (!syncFromDate.HasValue)
+        {
+            return 0;
+        }
+
+        var links = await _db.GoogleCalendarTaskLinks
+            .Include(item => item.TaskJournalItem)
+            .Where(item =>
+                item.ConnectionId == connection.Id &&
+                item.SyncStatus == "active" &&
+                item.TaskJournalItem.DueAt < syncFromDate.Value)
+            .ToListAsync(cancellationToken);
+        if (links.Count == 0)
+        {
+            return 0;
+        }
+
+        var errors = 0;
+        var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
+        foreach (var link in links)
+        {
+            try
+            {
+                var deleted = await DeleteGoogleEventAsync(accessToken, link.GoogleCalendarId, link.GoogleEventId, cancellationToken);
+                MarkGoogleLinkDeleted(link);
+                await AddLogAsync(
+                    connection.Id,
+                    link.CalendarSyncCalendarId,
+                    link.TaskJournalItemId,
+                    "crm-to-google",
+                    deleted ? "delete-event" : "delete-event-missing",
+                    "success",
+                    deleted
+                        ? "Событие удалено из Google Calendar, потому что задача раньше даты начала синхронизации."
+                        : "Событие уже отсутствовало в Google Calendar при очистке задач раньше даты начала синхронизации.",
+                    null,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                errors++;
+                link.LastError = Trim(ex.Message, 2000);
+                link.UpdatedAt = DateTime.UtcNow;
+                await AddLogAsync(connection.Id, link.CalendarSyncCalendarId, link.TaskJournalItemId, "crm-to-google", "delete-event", "error", "Не удалось удалить событие Google Calendar для задачи раньше даты начала синхронизации.", ex.Message, cancellationToken);
+            }
+        }
+
+        return errors;
+    }
+
+    private async Task DeleteTaskLinkOutsideSyncWindowAsync(GoogleCalendarConnection connection, int taskId, CancellationToken cancellationToken)
+    {
+        if (!ResolveSyncFromDate(connection).HasValue)
+        {
+            return;
+        }
+
+        var link = await _db.GoogleCalendarTaskLinks
+            .FirstOrDefaultAsync(item =>
+                item.ConnectionId == connection.Id &&
+                item.TaskJournalItemId == taskId &&
+                item.SyncStatus == "active",
+                cancellationToken);
+        if (link is null)
+        {
+            return;
+        }
+
+        var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
+        var deleted = await DeleteGoogleEventAsync(accessToken, link.GoogleCalendarId, link.GoogleEventId, cancellationToken);
+        MarkGoogleLinkDeleted(link);
+        await AddLogAsync(
+            connection.Id,
+            link.CalendarSyncCalendarId,
+            link.TaskJournalItemId,
+            "crm-to-google",
+            deleted ? "delete-event" : "delete-event-missing",
+            "success",
+            deleted
+                ? "Событие удалено из Google Calendar, потому что задача раньше даты начала синхронизации."
+                : "Событие уже отсутствовало в Google Calendar при очистке задачи раньше даты начала синхронизации.",
+            null,
+            cancellationToken);
     }
 
     private IQueryable<GoogleCalendarConnection> LoadConnectionQuery()
@@ -969,6 +1069,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             AccessTokenExpiresAt = connection.AccessTokenExpiresAt,
             LastFullSyncAt = connection.LastFullSyncAt,
             LastIncrementalSyncAt = connection.LastIncrementalSyncAt,
+            SyncFromDate = connection.SyncFromDate,
             LastError = connection.LastError,
             CreatedAt = connection.CreatedAt,
             UpdatedAt = connection.UpdatedAt,
@@ -1368,6 +1469,27 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
     private static bool TaskBelongsToUser(TaskJournalItem task, int userId)
         => task.AssigneeUserId == userId || task.Participants.Any(item => item.UserId == userId);
+
+    private static DateTime? NormalizeSyncFromDate(DateTime? value)
+        => value?.Date;
+
+    private static DateTime? ResolveSyncFromDate(GoogleCalendarConnection connection)
+        => connection.SyncFromDate?.Date;
+
+    private static bool IsBeforeSyncFromDate(GoogleCalendarConnection connection, TaskJournalItem task)
+    {
+        var syncFromDate = ResolveSyncFromDate(connection);
+        return syncFromDate.HasValue && task.DueAt < syncFromDate.Value;
+    }
+
+    private static void MarkGoogleLinkDeleted(GoogleCalendarTaskLink link)
+    {
+        link.SyncStatus = "deleted";
+        link.LastDirection = "crm-to-google";
+        link.LastSyncedAt = DateTime.UtcNow;
+        link.UpdatedAt = DateTime.UtcNow;
+        link.LastError = null;
+    }
 
     private async Task<GoogleSettings> ResolveGoogleSettingsAsync(CancellationToken cancellationToken)
     {

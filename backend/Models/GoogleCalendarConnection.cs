@@ -42,6 +42,7 @@ public class GoogleCalendarConnection
 
     public DateTime? LastFullSyncAt { get; set; }
     public DateTime? LastIncrementalSyncAt { get; set; }
+    public DateTime? SyncFromDate { get; set; }
 
     [MaxLength(2000)]
     public string? LastError { get; set; }
