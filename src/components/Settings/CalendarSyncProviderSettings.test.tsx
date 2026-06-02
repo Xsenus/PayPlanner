@@ -111,7 +111,10 @@ describe('CalendarSyncProviderSettings', () => {
           taskJournalItemId: 42,
           taskTitle: 'Проверить документы',
           taskObjectName: 'Дело клиента',
+          taskAssigneeName: 'Иван Исполнитель',
           calendarName: 'PayPlanner - Тестовый пользователь',
+          calendarOwnerName: 'Тестовый пользователь',
+          calendarOwnerEmail: 'owner@example.com',
           targetType: 'task',
           targetLabel: 'Задача: Проверить документы',
           direction: 'crm-to-google',
@@ -155,6 +158,8 @@ describe('CalendarSyncProviderSettings', () => {
     expect(screen.getByText('Правила конфликтов')).toBeTruthy();
     expect(screen.getByText('Нужна подготовка')).toBeTruthy();
     expect(screen.getByText('Задача: Проверить документы')).toBeTruthy();
+    expect(screen.getByText('Исполнитель задачи: Иван Исполнитель')).toBeTruthy();
+    expect(screen.getByText('Календарь сотрудника: Тестовый пользователь')).toBeTruthy();
     expect(screen.getByText('Дело клиента')).toBeTruthy();
   });
 
@@ -220,7 +225,10 @@ describe('CalendarSyncProviderSettings', () => {
           taskJournalItemId: 42,
           taskTitle: page === 2 ? 'Вторая страница' : 'Первая страница',
           taskObjectName: 'Дело клиента',
+          taskAssigneeName: 'Тестовый пользователь',
           calendarName: 'PayPlanner - Тестовый пользователь',
+          calendarOwnerName: 'Тестовый пользователь',
+          calendarOwnerEmail: 'owner@example.com',
           targetType: 'task',
           targetLabel: page === 2 ? 'Задача: Вторая страница' : 'Задача: Первая страница',
           direction: 'crm-to-google',

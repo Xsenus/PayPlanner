@@ -203,18 +203,22 @@ public sealed class CalendarSyncController : ControllerBase
         var details = ParseCalendarSyncDetails(item.DetailsJson);
         var taskTitle = FirstNonEmpty(item.TaskTitle, details.GetValueOrDefault("taskTitle"));
         var taskObjectName = FirstNonEmpty(item.TaskObjectName, details.GetValueOrDefault("taskObjectName"));
+        var taskAssigneeName = FirstNonEmpty(item.TaskAssigneeName, details.GetValueOrDefault("taskAssigneeName"));
         var calendarName = FirstNonEmpty(item.CalendarName, details.GetValueOrDefault("calendarName"), ExtractQuotedValue(item.Message));
+        var calendarOwnerName = FirstNonEmpty(
+            item.CalendarOwnerName,
+            details.GetValueOrDefault("calendarOwnerName"),
+            InferCalendarOwnerName(calendarName));
+        var calendarOwnerEmail = FirstNonEmpty(item.CalendarOwnerEmail, details.GetValueOrDefault("calendarOwnerEmail"));
         var userName = FirstNonEmpty(
             item.UserName,
-            item.CalendarOwnerName,
             details.GetValueOrDefault("userName"),
-            details.GetValueOrDefault("calendarOwnerName"),
-            details.GetValueOrDefault("taskAssigneeName"));
+            calendarOwnerName,
+            taskAssigneeName);
         var userEmail = FirstNonEmpty(
             item.UserEmail,
-            item.CalendarOwnerEmail,
             details.GetValueOrDefault("userEmail"),
-            details.GetValueOrDefault("calendarOwnerEmail"));
+            calendarOwnerEmail);
 
         var targetType = ResolveTargetType(item.Operation, taskTitle, calendarName);
         var targetLabel = targetType switch
@@ -237,7 +241,10 @@ public sealed class CalendarSyncController : ControllerBase
             TaskJournalItemId = item.TaskJournalItemId,
             TaskTitle = taskTitle,
             TaskObjectName = taskObjectName,
+            TaskAssigneeName = taskAssigneeName,
             CalendarName = calendarName,
+            CalendarOwnerName = calendarOwnerName,
+            CalendarOwnerEmail = calendarOwnerEmail,
             TargetType = targetType,
             TargetLabel = targetLabel,
             Direction = item.Direction,
@@ -304,6 +311,20 @@ public sealed class CalendarSyncController : ControllerBase
         var end = value.IndexOf('»', start + 1);
         return start >= 0 && end > start
             ? value.Substring(start + 1, end - start - 1)
+            : string.Empty;
+    }
+
+    private static string InferCalendarOwnerName(string calendarName)
+    {
+        const string calendarPrefix = "PayPlanner - ";
+        if (string.IsNullOrWhiteSpace(calendarName))
+        {
+            return string.Empty;
+        }
+
+        var normalized = calendarName.Trim().Trim('«', '»', '"');
+        return normalized.StartsWith(calendarPrefix, StringComparison.OrdinalIgnoreCase)
+            ? normalized[calendarPrefix.Length..].Trim()
             : string.Empty;
     }
 

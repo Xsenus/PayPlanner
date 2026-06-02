@@ -236,7 +236,10 @@ export interface CalendarSyncLogEntryDto {
   taskJournalItemId?: number | null;
   taskTitle: string;
   taskObjectName: string;
+  taskAssigneeName: string;
   calendarName: string;
+  calendarOwnerName: string;
+  calendarOwnerEmail: string;
   targetType: string;
   targetLabel: string;
   direction: string;

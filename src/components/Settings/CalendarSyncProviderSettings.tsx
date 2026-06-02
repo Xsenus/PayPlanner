@@ -461,15 +461,20 @@ export function CalendarSyncProviderSettings() {
             <tbody className="divide-y divide-gray-100">
               {logs?.items.length ? logs.items.map((item) => (
                 <tr key={`${item.provider}-${item.id}`} className="align-top">
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-600">{new Date(item.createdAt).toLocaleString('ru-RU')}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-gray-600">{formatCalendarSyncLogDateTime(item.createdAt)}</td>
                   <td className="whitespace-nowrap px-3 py-2 font-medium text-gray-800">{item.providerLabel}</td>
                   <td className="px-3 py-2 text-gray-700">
-                    <div className="font-medium">{item.userName || 'Система'}</div>
-                    {item.userEmail ? <div className="text-[11px] text-gray-500">{item.userEmail}</div> : null}
+                    <div className="font-medium">{getCalendarLogEmployeeName(item)}</div>
+                    {getCalendarLogEmployeeEmail(item) ? <div className="text-[11px] text-gray-500">{getCalendarLogEmployeeEmail(item)}</div> : null}
+                    {item.calendarOwnerName && item.calendarOwnerName !== getCalendarLogEmployeeName(item) ? (
+                      <div className="text-[11px] text-gray-500">Владелец календаря: {item.calendarOwnerName}</div>
+                    ) : null}
                   </td>
                   <td className="min-w-[220px] px-3 py-2 text-gray-700">
                     <div className="font-medium">{getCalendarLogTargetLabel(item)}</div>
-                    {item.taskObjectName ? <div className="text-[11px] text-gray-500">{item.taskObjectName}</div> : null}
+                    {getCalendarLogTargetDetails(item).map((detail) => (
+                      <div key={detail} className="text-[11px] text-gray-500">{detail}</div>
+                    ))}
                     {item.details ? <div className="mt-1 text-[11px] leading-4 text-gray-500">Детали: {item.details}</div> : null}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-700">{getCalendarLogOperationLabel(item.operation)}</td>
@@ -913,11 +918,49 @@ function formatDateInputValue(value?: string | null) {
   return value.slice(0, 10);
 }
 
+function formatCalendarSyncLogDateTime(value: string) {
+  const normalizedValue = /(?:z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
+  const date = new Date(normalizedValue);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(date);
+}
+
+function getCalendarLogEmployeeName(item: CalendarSyncLogEntryDto) {
+  return firstDisplayValue(item.userName, item.calendarOwnerName, item.taskAssigneeName, 'Система');
+}
+
+function getCalendarLogEmployeeEmail(item: CalendarSyncLogEntryDto) {
+  return firstDisplayValue(item.userEmail, item.calendarOwnerEmail);
+}
+
+function getCalendarLogTargetDetails(item: CalendarSyncLogEntryDto) {
+  const details = [
+    item.targetType === 'calendar' && item.calendarOwnerName ? `Владелец календаря: ${item.calendarOwnerName}` : '',
+    item.targetType === 'task' && item.taskAssigneeName ? `Исполнитель задачи: ${item.taskAssigneeName}` : '',
+    item.targetType === 'task' && item.calendarOwnerName && item.calendarOwnerName !== item.taskAssigneeName ? `Календарь сотрудника: ${item.calendarOwnerName}` : '',
+    item.taskObjectName,
+  ];
+
+  return Array.from(new Set(details.map((detail) => detail.trim()).filter(Boolean)));
+}
+
+function firstDisplayValue(...values: Array<string | undefined | null>) {
+  return values.find((value) => value?.trim())?.trim() ?? '';
+}
+
 function getCalendarLogTargetLabel(item: CalendarSyncLogEntryDto) {
   if (item.targetLabel) return item.targetLabel;
   if (item.taskTitle) return `Задача: ${item.taskTitle}`;
   if (item.calendarName) return `Календарь: ${item.calendarName}`;
-  if (item.userName) return `Подключение: ${item.userName}`;
+  if (getCalendarLogEmployeeName(item) !== 'Система') return `Подключение: ${getCalendarLogEmployeeName(item)}`;
   if (item.taskJournalItemId) return `Задача #${item.taskJournalItemId}`;
   return 'Системное действие';
 }
@@ -943,7 +986,10 @@ function getCalendarLogOperationLabel(operation: string) {
     'create-event': 'Создание события',
     'update-event': 'Обновление события',
     'delete-event': 'Удаление события',
+    'create-calendar': 'Создание календаря',
     'delete-calendar': 'Удаление календаря',
+    'delete-calendar-missing': 'Календарь уже отсутствует',
+    'cleanup-user-calendars': 'Очистка календарей сотрудника',
     'settings-updated': 'Настройки изменены',
     'disable-sync': 'Синхронизация отключена',
     'sync-now': 'Ручной запуск',

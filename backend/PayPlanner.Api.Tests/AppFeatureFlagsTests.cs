@@ -464,10 +464,39 @@ public class AppFeatureFlagsTests
         Assert.Equal(task.Id, item.TaskJournalItemId);
         Assert.Equal(task.Title, item.TaskTitle);
         Assert.Equal(task.ObjectName, item.TaskObjectName);
+        Assert.Equal(task.AssigneeName, item.TaskAssigneeName);
         Assert.Equal(calendar.Name, item.CalendarName);
+        Assert.Equal(user.FullName, item.CalendarOwnerName);
+        Assert.Equal(user.Email, item.CalendarOwnerEmail);
         Assert.Equal("task", item.TargetType);
         Assert.Equal($"Задача: {task.Title}", item.TargetLabel);
         Assert.Equal("dry-run verified", item.Details);
+    }
+
+    [Fact]
+    public async Task CalendarSyncController_GetLogs_InfersCalendarOwnerFromDeletedCalendarName()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
+        {
+            Direction = "system",
+            Operation = "delete-calendar",
+            Status = "success",
+            Message = "Календарь «PayPlanner - Иван Иванов» удален из Google Calendar.",
+            CreatedAt = new DateTime(2026, 6, 2, 7, 0, 0, DateTimeKind.Utc),
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()), scope.Db);
+
+        var result = await controller.GetLogs("google-calendar", null, null, null, pageSize: 10, ct: CancellationToken.None);
+        var page = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+        var item = Assert.Single(page.Items);
+
+        Assert.Equal("PayPlanner - Иван Иванов", item.CalendarName);
+        Assert.Equal("Иван Иванов", item.CalendarOwnerName);
+        Assert.Equal("Иван Иванов", item.UserName);
+        Assert.Equal("calendar", item.TargetType);
     }
 
     private sealed class TestOptionsSnapshot<T> : IOptionsSnapshot<T>
