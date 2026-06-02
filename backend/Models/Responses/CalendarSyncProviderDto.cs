@@ -37,6 +37,7 @@ public sealed class CalendarSyncReadinessItemDto
 
 public sealed class CalendarSyncSettingsDto
 {
+    public bool? ExternalCalendarSyncEnabled { get; set; }
     public string SyncMode { get; set; } = "notConfigured";
     public string ConflictResolutionMode { get; set; } = "manualConfirmation";
     public string UserControlMode { get; set; } = "userManaged";

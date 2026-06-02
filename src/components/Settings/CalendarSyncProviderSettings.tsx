@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, CalendarDays, CheckCircle2, RefreshCw, Save, ShieldCheck } from 'lucide-react';
+import { Activity, AlertTriangle, CalendarDays, CheckCircle2, Power, RefreshCw, Save, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   apiService,
@@ -79,6 +79,7 @@ export function CalendarSyncProviderSettings() {
     setSaveMessage(null);
     try {
       const updated = await apiService.updateCalendarSyncSettings({
+        externalCalendarSyncEnabled: draft.externalCalendarSyncEnabled === true,
         syncMode: draft.syncMode,
         conflictResolutionMode: draft.conflictResolutionMode,
         userControlMode: draft.userControlMode,
@@ -88,8 +89,13 @@ export function CalendarSyncProviderSettings() {
         dryRunConfirmed: draft.dryRunConfirmed,
         notes: draft.notes,
       });
+      const [loadedProviders, loadedReadiness] = await Promise.all([
+        apiService.getCalendarSyncProviders(),
+        apiService.getCalendarSyncReadiness(),
+      ]);
       applyLoadedSettings(updated);
-      setReadiness(await apiService.getCalendarSyncReadiness());
+      setProviders(loadedProviders);
+      setReadiness(loadedReadiness);
       setSaveMessage('Настройки внешних календарей сохранены.');
     } catch (saveError) {
       setError(extractDisplayErrorMessage(saveError, 'Не удалось сохранить настройки внешних календарей.'));
@@ -152,7 +158,7 @@ export function CalendarSyncProviderSettings() {
       </div>
 
       <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-        Доступно сейчас: {availableCount} из {providers.length || 0}. Google и Яндекс не запускаются автоматически, пока внешний календарный feature flag и OAuth-настройки не будут приняты отдельно.
+        Доступно сейчас: {availableCount} из {providers.length || 0}. Google и Яндекс запускаются только после включения внешнего календарного контура и настройки OAuth.
       </div>
 
       {draft ? (
@@ -174,6 +180,24 @@ export function CalendarSyncProviderSettings() {
               <span>{saving ? 'Сохраняем' : 'Сохранить'}</span>
             </button>
           </div>
+
+          <label className={`mt-4 flex items-start gap-3 rounded-2xl border px-4 py-4 ${draft.externalCalendarSyncEnabled ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+            <input
+              type="checkbox"
+              checked={draft.externalCalendarSyncEnabled === true}
+              onChange={(event) => updateDraft({ externalCalendarSyncEnabled: event.target.checked })}
+              className="mt-1 h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+            />
+            <span className="min-w-0">
+              <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                <Power className="h-4 w-4 text-sky-700" />
+                Включить Google Calendar и Яндекс Календарь
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-gray-600">
+                Это главный переключатель из админки. После сохранения карточки провайдеров перейдут из состояния «Выключен» в подготовку подключения; затем нужно заполнить OAuth в разделе внешней авторизации и закрыть чек-лист готовности.
+              </span>
+            </span>
+          </label>
 
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             <label className="block">

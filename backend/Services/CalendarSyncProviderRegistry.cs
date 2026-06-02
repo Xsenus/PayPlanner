@@ -4,9 +4,10 @@ namespace PayPlanner.Api.Services;
 
 public static class CalendarSyncProviderRegistry
 {
-    public static CalendarSyncSettingsDto BuildDefaultSettings()
+    public static CalendarSyncSettingsDto BuildDefaultSettings(bool externalCalendarSyncEnabled = false)
         => new()
         {
+            ExternalCalendarSyncEnabled = externalCalendarSyncEnabled,
             SyncMode = "notConfigured",
             ConflictResolutionMode = "manualConfirmation",
             UserControlMode = "userManaged",
@@ -17,9 +18,11 @@ public static class CalendarSyncProviderRegistry
             Notes = string.Empty,
         };
 
-    public static CalendarSyncSettingsDto NormalizeSettings(CalendarSyncSettingsDto? settings)
+    public static CalendarSyncSettingsDto NormalizeSettings(
+        CalendarSyncSettingsDto? settings,
+        bool externalCalendarSyncEnabledFallback = false)
     {
-        var source = settings ?? BuildDefaultSettings();
+        var source = settings ?? BuildDefaultSettings(externalCalendarSyncEnabledFallback);
         var syncMode = NormalizeKnownValue(
             source.SyncMode,
             "notConfigured",
@@ -40,6 +43,7 @@ public static class CalendarSyncProviderRegistry
 
         return new CalendarSyncSettingsDto
         {
+            ExternalCalendarSyncEnabled = source.ExternalCalendarSyncEnabled ?? externalCalendarSyncEnabledFallback,
             SyncMode = syncMode,
             ConflictResolutionMode = conflictResolutionMode,
             UserControlMode = userControlMode,
@@ -56,8 +60,8 @@ public static class CalendarSyncProviderRegistry
     {
         var externalStatus = externalCalendarSyncEnabled ? "requires-setup" : "disabled";
         var externalMessage = externalCalendarSyncEnabled
-            ? "Feature flag включен. Перед запуском нужна настройка OAuth, dry-run и подтверждение модели конфликтов."
-            : "Интеграция с внешним календарем выключена до утверждения модели синхронизации и настройки OAuth.";
+            ? "Контур включен администратором. Перед запуском нужна настройка OAuth, dry-run и подтверждение модели конфликтов."
+            : "Интеграция с внешним календарем выключена в админских настройках.";
 
         return
         [
@@ -137,14 +141,14 @@ public static class CalendarSyncProviderRegistry
             new()
             {
                 Key = "feature-flag",
-                Label = "Feature flag внешних календарей",
+                Label = "Внешние календари в админке",
                 Status = externalCalendarSyncEnabled ? "ready" : "disabled",
                 IsReady = externalCalendarSyncEnabled,
                 IsRequired = true,
                 Severity = externalCalendarSyncEnabled ? "success" : "warning",
                 Message = externalCalendarSyncEnabled
                     ? "Внешний календарный контур включен для диагностики и подготовки подключения."
-                    : "Google Calendar и Яндекс Календарь остаются выключенными до отдельного решения администратора.",
+                    : "Google Calendar и Яндекс Календарь остаются выключенными, пока администратор не включит внешний календарный контур.",
             },
             new()
             {

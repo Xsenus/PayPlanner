@@ -195,6 +195,7 @@ export interface CalendarSyncReadinessItemDto {
 }
 
 export interface CalendarSyncSettingsDto {
+  externalCalendarSyncEnabled?: boolean | null;
   syncMode: string;
   conflictResolutionMode: string;
   userControlMode: string;
@@ -207,6 +208,7 @@ export interface CalendarSyncSettingsDto {
 }
 
 export interface UpdateCalendarSyncSettingsRequest {
+  externalCalendarSyncEnabled?: boolean | null;
   syncMode?: string;
   conflictResolutionMode?: string;
   userControlMode?: string;

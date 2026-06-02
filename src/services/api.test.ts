@@ -162,6 +162,7 @@ describe('apiService auth handling', () => {
 
   it('loads calendar sync settings from the backend', async () => {
     const payload = {
+      externalCalendarSyncEnabled: true,
       syncMode: 'hybrid',
       conflictResolutionMode: 'manualConfirmation',
       requireManualConfirmation: true,
@@ -183,6 +184,7 @@ describe('apiService auth handling', () => {
 
   it('updates calendar sync settings', async () => {
     const payload = {
+      externalCalendarSyncEnabled: true,
       syncMode: 'crmMaster',
       conflictResolutionMode: 'crmWins',
       requireManualConfirmation: false,

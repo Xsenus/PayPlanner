@@ -31,14 +31,18 @@ public sealed class CalendarSyncController : ControllerBase
     }
 
     [HttpGet("providers")]
-    public ActionResult<IReadOnlyList<CalendarSyncProviderDto>> GetProviders()
-        => Ok(CalendarSyncProviderRegistry.BuildProviders(_featureFlags.Value.Legal.ExternalCalendarSync));
+    public async Task<ActionResult<IReadOnlyList<CalendarSyncProviderDto>>> GetProviders(CancellationToken ct)
+    {
+        var settings = await GetSettingsAsync(ct);
+        return Ok(CalendarSyncProviderRegistry.BuildProviders(settings.ExternalCalendarSyncEnabled == true));
+    }
 
     [HttpGet("readiness")]
     public async Task<ActionResult<CalendarSyncReadinessDto>> GetReadiness(CancellationToken ct)
-        => Ok(CalendarSyncProviderRegistry.BuildReadiness(
-            _featureFlags.Value.Legal.ExternalCalendarSync,
-            await GetSettingsAsync(ct)));
+    {
+        var settings = await GetSettingsAsync(ct);
+        return Ok(CalendarSyncProviderRegistry.BuildReadiness(settings.ExternalCalendarSyncEnabled == true, settings));
+    }
 
     [HttpGet("settings")]
     public async Task<ActionResult<CalendarSyncSettingsDto>> GetSettings(CancellationToken ct)
@@ -53,6 +57,7 @@ public sealed class CalendarSyncController : ControllerBase
         var previousSettings = await GetSettingsAsync(ct);
         var normalized = CalendarSyncProviderRegistry.NormalizeSettings(new CalendarSyncSettingsDto
         {
+            ExternalCalendarSyncEnabled = request.ExternalCalendarSyncEnabled ?? previousSettings.ExternalCalendarSyncEnabled,
             SyncMode = request.SyncMode ?? string.Empty,
             ConflictResolutionMode = request.ConflictResolutionMode ?? string.Empty,
             UserControlMode = request.UserControlMode ?? string.Empty,
@@ -62,7 +67,7 @@ public sealed class CalendarSyncController : ControllerBase
             DryRunConfirmed = request.DryRunConfirmed ?? false,
             Notes = request.Notes ?? string.Empty,
             UpdatedAt = DateTime.UtcNow,
-        });
+        }, _featureFlags.Value.Legal.ExternalCalendarSync);
         normalized.UpdatedAt = DateTime.UtcNow;
 
         var setting = await _db.SystemSettings.FirstOrDefaultAsync(item => item.Key == SettingsKey, ct);
@@ -180,7 +185,7 @@ public sealed class CalendarSyncController : ControllerBase
             .FirstOrDefaultAsync(item => item.Key == SettingsKey, ct);
         if (setting is null || string.IsNullOrWhiteSpace(setting.Value))
         {
-            return CalendarSyncProviderRegistry.BuildDefaultSettings();
+            return CalendarSyncProviderRegistry.BuildDefaultSettings(_featureFlags.Value.Legal.ExternalCalendarSync);
         }
 
         try
@@ -189,7 +194,7 @@ public sealed class CalendarSyncController : ControllerBase
             if (settings is not null)
             {
                 settings.UpdatedAt ??= setting.UpdatedAt;
-                return CalendarSyncProviderRegistry.NormalizeSettings(settings);
+                return CalendarSyncProviderRegistry.NormalizeSettings(settings, _featureFlags.Value.Legal.ExternalCalendarSync);
             }
         }
         catch (JsonException)
@@ -197,7 +202,7 @@ public sealed class CalendarSyncController : ControllerBase
             // Invalid stored settings should not break the integration diagnostics screen.
         }
 
-        var defaults = CalendarSyncProviderRegistry.BuildDefaultSettings();
+        var defaults = CalendarSyncProviderRegistry.BuildDefaultSettings(_featureFlags.Value.Legal.ExternalCalendarSync);
         defaults.UpdatedAt = setting.UpdatedAt;
         return defaults;
     }

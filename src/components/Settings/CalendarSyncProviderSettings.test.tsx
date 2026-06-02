@@ -64,7 +64,7 @@ describe('CalendarSyncProviderSettings', () => {
         },
         {
           key: 'feature-flag',
-          label: 'Feature flag внешних календарей',
+          label: 'Внешние календари в админке',
           status: 'ready',
           isReady: true,
           isRequired: true,
@@ -83,6 +83,7 @@ describe('CalendarSyncProviderSettings', () => {
       ],
     });
     apiMock.getCalendarSyncSettings.mockResolvedValue({
+      externalCalendarSyncEnabled: false,
       syncMode: 'notConfigured',
       conflictResolutionMode: 'manualConfirmation',
       userControlMode: 'userManaged',
@@ -116,6 +117,7 @@ describe('CalendarSyncProviderSettings', () => {
       pageSize: 50,
     });
     apiMock.updateCalendarSyncSettings.mockImplementation(async (payload) => ({
+      externalCalendarSyncEnabled: payload.externalCalendarSyncEnabled,
       syncMode: payload.syncMode,
       conflictResolutionMode: payload.conflictResolutionMode,
       userControlMode: payload.userControlMode,
@@ -145,12 +147,14 @@ describe('CalendarSyncProviderSettings', () => {
     render(<CalendarSyncProviderSettings />);
 
     await screen.findByText('Модель синхронизации и конфликты');
+    fireEvent.click(screen.getByLabelText(/Включить Google Calendar и Яндекс Календарь/i));
     fireEvent.change(screen.getByLabelText('Главный источник событий'), { target: { value: 'hybrid' } });
     fireEvent.click(screen.getByLabelText('Dry-run на копии базы выполнен'));
     fireEvent.change(screen.getByLabelText('Комментарий к решению'), { target: { value: 'Согласовано с руководителем.' } });
     fireEvent.click(screen.getByRole('button', { name: /Сохранить/i }));
 
     await waitFor(() => expect(apiMock.updateCalendarSyncSettings).toHaveBeenCalledWith({
+      externalCalendarSyncEnabled: true,
       syncMode: 'hybrid',
       conflictResolutionMode: 'manualConfirmation',
       userControlMode: 'userManaged',
@@ -160,6 +164,7 @@ describe('CalendarSyncProviderSettings', () => {
       dryRunConfirmed: true,
       notes: 'Согласовано с руководителем.',
     }));
+    await waitFor(() => expect(apiMock.getCalendarSyncProviders).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('Настройки внешних календарей сохранены.')).toBeTruthy();
   });
 

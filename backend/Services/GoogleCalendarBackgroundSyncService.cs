@@ -1,11 +1,17 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 
 namespace PayPlanner.Api.Services;
 
 public sealed class GoogleCalendarBackgroundSyncService : BackgroundService
 {
+    private const string CalendarSyncSettingsKey = "calendarSync.settings";
     private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(2);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions> _featureFlags;
@@ -36,7 +42,7 @@ public sealed class GoogleCalendarBackgroundSyncService : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (_featureFlags.CurrentValue.Legal.ExternalCalendarSync)
+            if (await IsExternalCalendarSyncEnabledAsync(stoppingToken))
             {
                 try
                 {
@@ -70,4 +76,30 @@ public sealed class GoogleCalendarBackgroundSyncService : BackgroundService
 
     private int ResolveBatchSize()
         => Math.Clamp(_configuration.GetValue("GoogleCalendarSync:BatchSize", 100), 1, 500);
+
+    private async Task<bool> IsExternalCalendarSyncEnabledAsync(CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+        var setting = await context.SystemSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Key == CalendarSyncSettingsKey, cancellationToken);
+        if (setting is null || string.IsNullOrWhiteSpace(setting.Value))
+        {
+            return _featureFlags.CurrentValue.Legal.ExternalCalendarSync;
+        }
+
+        try
+        {
+            var settings = JsonSerializer.Deserialize<CalendarSyncSettingsDto>(setting.Value, JsonOptions);
+            return CalendarSyncProviderRegistry
+                .NormalizeSettings(settings, _featureFlags.CurrentValue.Legal.ExternalCalendarSync)
+                .ExternalCalendarSyncEnabled == true;
+        }
+        catch (JsonException)
+        {
+            _logger.LogWarning("Stored calendar sync settings are invalid. Google Calendar background sync will use feature flag fallback.");
+            return _featureFlags.CurrentValue.Legal.ExternalCalendarSync;
+        }
+    }
 }

@@ -57,7 +57,7 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             var settings = await ResolveSchedulerSettingsAsync(stoppingToken);
-            if (settings.Enabled && _featureFlags.CurrentValue.Legal.ExternalCalendarSync)
+            if (settings.Enabled)
             {
                 try
                 {
@@ -113,9 +113,9 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
                     startedAt,
                     0,
                     state.BlockingRequiredItems,
-                    "Внешняя календарная синхронизация не запускалась: feature flag выключен.",
+                    "Внешняя календарная синхронизация не запускалась: контур выключен в админских настройках.",
                     cancellationToken);
-                return new CalendarSyncSchedulerResult(true, false, 0, state.BlockingRequiredItems, "Feature flag внешних календарей выключен.");
+                return new CalendarSyncSchedulerResult(true, false, 0, state.BlockingRequiredItems, "Внешние календари выключены в админских настройках.");
             }
 
             if (!state.Readiness.ReadyToConnect)
@@ -155,8 +155,8 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
         CalendarSyncSchedulerSettings schedulerSettings,
         CancellationToken cancellationToken)
     {
-        var featureEnabled = _featureFlags.CurrentValue.Legal.ExternalCalendarSync;
         var calendarSettings = await LoadCalendarSyncSettingsAsync(cancellationToken);
+        var featureEnabled = calendarSettings.ExternalCalendarSyncEnabled == true;
         var readiness = CalendarSyncProviderRegistry.BuildReadiness(featureEnabled, calendarSettings);
         var candidateCount = schedulerSettings.Enabled && featureEnabled
             ? await CountCandidateEventsAsync(schedulerSettings, cancellationToken)
@@ -250,7 +250,7 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
             .FirstOrDefaultAsync(item => item.Key == CalendarSyncSettingsKey, cancellationToken);
         if (setting is null || string.IsNullOrWhiteSpace(setting.Value))
         {
-            return CalendarSyncProviderRegistry.BuildDefaultSettings();
+            return CalendarSyncProviderRegistry.BuildDefaultSettings(_featureFlags.CurrentValue.Legal.ExternalCalendarSync);
         }
 
         try
@@ -259,7 +259,7 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
             if (settings is not null)
             {
                 settings.UpdatedAt ??= setting.UpdatedAt;
-                return CalendarSyncProviderRegistry.NormalizeSettings(settings);
+                return CalendarSyncProviderRegistry.NormalizeSettings(settings, _featureFlags.CurrentValue.Legal.ExternalCalendarSync);
             }
         }
         catch (JsonException)
@@ -267,7 +267,7 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
             _logger.LogWarning("Stored calendar sync settings are invalid. Defaults will be used for scheduler diagnostics.");
         }
 
-        var defaults = CalendarSyncProviderRegistry.BuildDefaultSettings();
+        var defaults = CalendarSyncProviderRegistry.BuildDefaultSettings(_featureFlags.CurrentValue.Legal.ExternalCalendarSync);
         defaults.UpdatedAt = setting.UpdatedAt;
         return defaults;
     }

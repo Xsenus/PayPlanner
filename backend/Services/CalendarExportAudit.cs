@@ -60,6 +60,7 @@ public static class CalendarExportAudit
                 changes,
                 settings = new
                 {
+                    nextSettings.ExternalCalendarSyncEnabled,
                     nextSettings.SyncMode,
                     nextSettings.ConflictResolutionMode,
                     nextSettings.UserControlMode,
@@ -80,6 +81,7 @@ public static class CalendarExportAudit
     {
         var changes = new List<CalendarSyncSettingsChange>();
 
+        AddIfChanged(changes, "ExternalCalendarSyncEnabled", previousSettings.ExternalCalendarSyncEnabled?.ToString(), nextSettings.ExternalCalendarSyncEnabled?.ToString());
         AddIfChanged(changes, "SyncMode", previousSettings.SyncMode, nextSettings.SyncMode);
         AddIfChanged(changes, "ConflictResolutionMode", previousSettings.ConflictResolutionMode, nextSettings.ConflictResolutionMode);
         AddIfChanged(changes, "UserControlMode", previousSettings.UserControlMode, nextSettings.UserControlMode);

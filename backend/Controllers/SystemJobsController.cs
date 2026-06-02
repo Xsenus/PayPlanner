@@ -25,10 +25,12 @@ public sealed class SystemJobsController : ControllerBase
     private const string DatabaseBackupS3ResultsKey = "database-backup.s3.results";
     private const string DatabaseBackupYandexDiskEnabledKey = "database-backup.yandex-disk.enabled";
     private const string DatabaseBackupYandexDiskResultsKey = "database-backup.yandex-disk.results";
+    private const string CalendarSyncSettingsKey = "calendarSync.settings";
     private const string CaseControlEnabledKey = "tasks.automation.caseControl.enabled";
     private const string CaseControlInactiveDaysKey = "tasks.automation.caseControl.inactiveDays";
     private const string CaseControlLimitKey = "tasks.automation.caseControl.limit";
     private const string UserActivityRetentionDaysKey = "user-activity.retention-days";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> CaseControlActiveTaskStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
         "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
@@ -113,6 +115,7 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == CalendarSyncSchedulerService.IntervalMinutesSettingKey ||
                 item.Key == CalendarSyncSchedulerService.BatchSizeSettingKey ||
                 item.Key == CalendarSyncSchedulerService.LookAheadDaysSettingKey ||
+                item.Key == CalendarSyncSettingsKey ||
                 item.Key == CaseControlEnabledKey ||
                 item.Key == CaseControlInactiveDaysKey ||
                 item.Key == CaseControlLimitKey ||
@@ -602,11 +605,13 @@ public sealed class SystemJobsController : ControllerBase
         var lookAheadDays = CalendarSyncSchedulerService.NormalizeLookAheadDays(ParseInt(
             settings.GetValueOrDefault(CalendarSyncSchedulerService.LookAheadDaysSettingKey),
             _configuration.GetValue("CalendarSync:Scheduler:LookAheadDays", CalendarSyncSchedulerService.DefaultLookAheadDays)));
+        var calendarSettings = LoadCalendarSyncSettings(settings);
+        var externalCalendarSyncEnabled = calendarSettings.ExternalCalendarSyncEnabled == true;
         var state = _calendarSyncRunner is null
             ? new CalendarSyncSchedulerState(
                 schedulerEnabled,
-                _featureFlags.CurrentValue.Legal.ExternalCalendarSync,
-                CalendarSyncProviderRegistry.BuildReadiness(_featureFlags.CurrentValue.Legal.ExternalCalendarSync),
+                externalCalendarSyncEnabled,
+                CalendarSyncProviderRegistry.BuildReadiness(externalCalendarSyncEnabled, calendarSettings),
                 0,
                 null,
                 intervalMinutes,
@@ -625,7 +630,7 @@ public sealed class SystemJobsController : ControllerBase
                     ? "active"
                     : "warning";
         var statusText = !state.FeatureEnabled
-            ? "Ожидает feature flag"
+            ? "Выключено в админке"
             : !state.SchedulerEnabled
                 ? "Выключено"
                 : ready
@@ -653,8 +658,29 @@ public sealed class SystemJobsController : ControllerBase
                 ? state.SchedulerEnabled
                     ? "Можно вручную выполнить подготовительную проверку внешних календарей."
                     : "Ручной запуск недоступен, пока фоновая проверка внешних календарей выключена."
-                : "Ручной запуск недоступен, пока feature flag внешних календарей выключен.",
+                : "Ручной запуск недоступен, пока внешний календарный контур выключен в админке.",
         };
+    }
+
+    private CalendarSyncSettingsDto LoadCalendarSyncSettings(IReadOnlyDictionary<string, string> settings)
+    {
+        var fallback = _featureFlags.CurrentValue.Legal.ExternalCalendarSync;
+        var raw = settings.GetValueOrDefault(CalendarSyncSettingsKey);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return CalendarSyncProviderRegistry.BuildDefaultSettings(fallback);
+        }
+
+        try
+        {
+            return CalendarSyncProviderRegistry.NormalizeSettings(
+                JsonSerializer.Deserialize<CalendarSyncSettingsDto>(raw, JsonOptions),
+                fallback);
+        }
+        catch (JsonException)
+        {
+            return CalendarSyncProviderRegistry.BuildDefaultSettings(fallback);
+        }
     }
 
     private async Task<SystemJobDiagnosticsItemDto> BuildCaseControlJobAsync(
@@ -854,6 +880,7 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == CalendarSyncSchedulerService.IntervalMinutesSettingKey ||
                 item.Key == CalendarSyncSchedulerService.BatchSizeSettingKey ||
                 item.Key == CalendarSyncSchedulerService.LookAheadDaysSettingKey ||
+                item.Key == CalendarSyncSettingsKey ||
                 item.Key == CaseControlEnabledKey ||
                 item.Key == CaseControlInactiveDaysKey ||
                 item.Key == CaseControlLimitKey ||
