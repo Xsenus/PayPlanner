@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using Xunit;
 
@@ -347,6 +348,38 @@ public class GoogleCalendarSyncServiceTests
         Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item => item.Operation == "create-event" && item.Status == "success");
         Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item => item.Operation == "delete-event" && item.Status == "success");
         Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item => item.Operation == "delete-calendar" && item.Status == "success");
+    }
+
+    [Fact]
+    public async Task UpdateSettingsAsync_WhenAdminManagedRejectsRegularUser()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "google-admin-policy@example.com", "user");
+        await CreateConnectionAsync(db, user.Id);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "calendarSync.settings",
+            Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+            {
+                SyncMode = "hybrid",
+                ConflictResolutionMode = "latestWins",
+                UserControlMode = "adminManaged",
+                InactiveUserAction = "cleanupExternalData",
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var error = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.UpdateSettingsAsync(
+                user.Id,
+                new UpdateGoogleCalendarSettingsRequest { SyncEnabled = false },
+                CreateHttpRequest(user.Id),
+                CancellationToken.None));
+
+        Assert.Contains("администратором", error.Message);
     }
 
     private static GoogleCalendarSyncService CreateService(PaymentContext db, IHttpClientFactory httpClientFactory)

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
@@ -9,6 +10,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using Xunit;
 
@@ -109,6 +112,38 @@ public class YandexCalendarSyncServiceTests
             request.RequestUri!.AbsoluteUri == "https://caldav.yandex.ru/calendars/user/payplanner/event-yandex-sync-from-delete.ics");
         var link = await db.YandexCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id);
         Assert.Equal("deleted", link.SyncStatus);
+    }
+
+    [Fact]
+    public async Task UpdateSettingsAsync_WhenAdminManagedRejectsRegularUser()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "yandex-admin-policy@example.com", "user");
+        await CreateConnectionAsync(db, user.Id);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "calendarSync.settings",
+            Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+            {
+                SyncMode = "hybrid",
+                ConflictResolutionMode = "latestWins",
+                UserControlMode = "adminManaged",
+                InactiveUserAction = "cleanupExternalData",
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var error = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.UpdateSettingsAsync(
+                user.Id,
+                new UpdateYandexCalendarSettingsRequest { SyncEnabled = false },
+                CreateHttpRequest(user.Id),
+                CancellationToken.None));
+
+        Assert.Contains("администратором", error.Message);
     }
 
     private static YandexCalendarSyncService CreateService(PaymentContext db, IHttpClientFactory httpClientFactory)

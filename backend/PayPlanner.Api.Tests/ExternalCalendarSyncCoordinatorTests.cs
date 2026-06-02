@@ -1,6 +1,11 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
@@ -64,18 +69,94 @@ public sealed class ExternalCalendarSyncCoordinatorTests
         Assert.Equal([42], yandex.DeletedTaskIds);
     }
 
+    [Fact]
+    public async Task HandleUserAccessRevokedAsync_WhenPolicyDisablesSyncOnly_DisablesConnectionsAndLogs()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "user", Description = "User" };
+        var user = new User
+        {
+            Email = "calendar-access@example.com",
+            FullName = "Calendar Access",
+            PasswordHash = "hash",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+        };
+        db.Users.Add(user);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "calendarSync.settings",
+            Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+            {
+                SyncMode = "hybrid",
+                ConflictResolutionMode = "latestWins",
+                UserControlMode = "adminManaged",
+                InactiveUserAction = "disableSyncOnly",
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        db.GoogleCalendarConnections.Add(new GoogleCalendarConnection
+        {
+            UserId = user.Id,
+            GoogleUserId = "google-user",
+            GoogleEmail = "calendar-access@gmail.com",
+            IsEnabled = true,
+            SyncEnabled = true,
+        });
+        db.YandexCalendarConnections.Add(new YandexCalendarConnection
+        {
+            UserId = user.Id,
+            YandexUserId = "yandex-user",
+            YandexEmail = "calendar-access@yandex.ru",
+            IsEnabled = true,
+            SyncEnabled = true,
+        });
+        await db.SaveChangesAsync();
+        var coordinator = CreateCoordinator(new FakeGoogleCalendarSyncService(), new FakeYandexCalendarSyncService(), db);
+
+        await coordinator.HandleUserAccessRevokedAsync(user.Id, actorUserId: 100);
+
+        var googleConnection = await db.GoogleCalendarConnections.SingleAsync();
+        var yandexConnection = await db.YandexCalendarConnections.SingleAsync();
+        Assert.False(googleConnection.IsEnabled);
+        Assert.False(googleConnection.SyncEnabled);
+        Assert.False(yandexConnection.IsEnabled);
+        Assert.False(yandexConnection.SyncEnabled);
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item => item.Operation == "disable-sync" && item.Status == "success");
+        Assert.Contains(await db.YandexCalendarSyncLogs.ToListAsync(), item => item.Operation == "disable-sync" && item.Status == "success");
+    }
+
     private static ExternalCalendarSyncCoordinator CreateCoordinator(
         IGoogleCalendarSyncService google,
-        IYandexCalendarSyncService yandex)
+        IYandexCalendarSyncService yandex,
+        PaymentContext? db = null)
     {
         var services = new ServiceCollection()
             .AddSingleton(google)
-            .AddSingleton(yandex)
-            .BuildServiceProvider();
+            .AddSingleton(yandex);
+        if (db is not null)
+        {
+            services.AddSingleton(db);
+        }
 
         return new ExternalCalendarSyncCoordinator(
-            services,
+            services.BuildServiceProvider(),
             NullLogger<ExternalCalendarSyncCoordinator>.Instance);
+    }
+
+    private static async Task<PaymentContext> CreateContextAsync()
+    {
+        var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection)
+            .Options;
+        var db = new PaymentContext(options, useObjectAuditModel: false);
+        await db.Database.EnsureCreatedAsync();
+        return db;
     }
 
     private sealed class FakeGoogleCalendarSyncService : IGoogleCalendarSyncService
