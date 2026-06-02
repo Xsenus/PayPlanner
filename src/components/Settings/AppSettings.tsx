@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bell, ClipboardList, Cloud, Database, History, Save, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
+import { Bell, CalendarDays, ClipboardList, Cloud, Database, Flag, History, KeyRound, Save, Scale, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -57,6 +58,7 @@ type SettingsSection =
   | 'form-requirements';
 type FinancialRulesSubsection = 'invoices' | 'contracts' | 'case-documents';
 type DatabaseOperationsSubsection = 'invoices' | 'addresses' | 'dictionary-merge' | 'users-merge';
+type IntegrationSettingsTab = 'dadata' | 'feature-flags' | 'calendars' | 'courts';
 type MergeKind = 'countries' | 'base-currencies' | 'service-languages' | 'organization-forms' | 'timezones' | 'tax-systems' | 'tax-system-modes';
 const DETAILS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const SHOW_LEGACY_SQLITE_IMPORT = false;
@@ -78,6 +80,38 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'db-import',
   'db-operations',
   'form-requirements',
+];
+
+const INTEGRATION_SETTINGS_TABS: Array<{
+  id: IntegrationSettingsTab;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}> = [
+  {
+    id: 'dadata',
+    label: 'DaData',
+    description: 'Ключи подсказок, нормализации и проверок реквизитов.',
+    icon: KeyRound,
+  },
+  {
+    id: 'feature-flags',
+    label: 'Юридический контур',
+    description: 'Включатели доступности внешних юридических механизмов.',
+    icon: Flag,
+  },
+  {
+    id: 'calendars',
+    label: 'Календари',
+    description: 'Google Calendar, Яндекс Календарь и правила синхронизации.',
+    icon: CalendarDays,
+  },
+  {
+    id: 'courts',
+    label: 'Суды',
+    description: 'Расписание судебной синхронизации и журнал проверок.',
+    icon: Scale,
+  },
 ];
 
 function isSettingsSection(value: string | null): value is SettingsSection {
@@ -116,6 +150,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
   const [activeSection, setActiveSection] = useState<SettingsSection>(() => initialSection ?? readSettingsSectionFromUrl());
   const [activeFinancialRulesSubsection, setActiveFinancialRulesSubsection] = useState<FinancialRulesSubsection>('invoices');
   const [activeDatabaseOperationsSubsection, setActiveDatabaseOperationsSubsection] = useState<DatabaseOperationsSubsection>('invoices');
+  const [activeIntegrationTab, setActiveIntegrationTab] = useState<IntegrationSettingsTab>('dadata');
   const [loading, setLoading] = useState(false);
   const [validateWithDadata, setValidateWithDadata] = useState(true);
   const [result, setResult] = useState<LegacyAddressMigrationResult | null>(null);
@@ -1582,25 +1617,67 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
             {activeSection === 'integrations' && !restrictedSettingsMode && (
               <div className="space-y-6">
                 <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-900"
-                    >
-                      DaData
-                    </button>
+                  <div className="flex flex-col gap-4">
+                    <div>
+                      <h4 className="text-xl font-semibold text-gray-900">Разделы интеграций</h4>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Настройки разнесены по вкладкам, чтобы ключи, календарная синхронизация и судебные проверки не смешивались на одном экране.
+                      </p>
+                    </div>
+                    <div className="grid gap-3 lg:grid-cols-4" role="tablist" aria-label="Разделы ключей интеграций">
+                      {INTEGRATION_SETTINGS_TABS.map((tab) => {
+                        const Icon = tab.icon;
+                        const isActive = activeIntegrationTab === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={isActive}
+                            onClick={() => setActiveIntegrationTab(tab.id)}
+                            className={`flex min-h-[104px] items-start gap-3 rounded-2xl border px-4 py-3 text-left transition ${
+                              isActive
+                                ? 'border-blue-200 bg-blue-50 text-blue-950 shadow-sm'
+                                : 'border-gray-200 bg-white text-gray-700 hover:border-blue-100 hover:bg-blue-50/50'
+                            }`}
+                          >
+                            <span className={`mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                              isActive ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+                            }`}>
+                              <Icon className="h-5 w-5" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold">{tab.label}</span>
+                              <span className="mt-1 block text-xs leading-5 text-gray-600">{tab.description}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
-                <FeatureFlagSettings />
+                {activeIntegrationTab === 'feature-flags' && (
+                  <div role="tabpanel">
+                    <FeatureFlagSettings />
+                  </div>
+                )}
 
-                <CalendarSyncProviderSettings />
+                {activeIntegrationTab === 'calendars' && (
+                  <div role="tabpanel">
+                    <CalendarSyncProviderSettings />
+                  </div>
+                )}
 
-                <CourtSyncSchedulerSettings />
+                {activeIntegrationTab === 'courts' && (
+                  <div className="space-y-6" role="tabpanel">
+                    <CourtSyncSchedulerSettings />
+                    <CourtSyncJournalSettings />
+                  </div>
+                )}
 
-                <CourtSyncJournalSettings />
-
-                <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+                {activeIntegrationTab === 'dadata' && (
+                  <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm" role="tabpanel">
                   <div className="mb-6">
                     <h4 className="text-xl font-semibold text-gray-900">DaData</h4>
                   </div>
@@ -1652,6 +1729,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                     </div>
                   </div>
                 </div>
+                )}
               </div>
             )}
 
