@@ -7,6 +7,7 @@ const apiMock = vi.hoisted(() => ({
   getCalendarSyncProviders: vi.fn(),
   getCalendarSyncReadiness: vi.fn(),
   getCalendarSyncSettings: vi.fn(),
+  getCalendarSyncLogs: vi.fn(),
   updateCalendarSyncSettings: vi.fn(),
 }));
 
@@ -84,14 +85,42 @@ describe('CalendarSyncProviderSettings', () => {
     apiMock.getCalendarSyncSettings.mockResolvedValue({
       syncMode: 'notConfigured',
       conflictResolutionMode: 'manualConfirmation',
+      userControlMode: 'userManaged',
+      defaultSyncFromDate: null,
+      inactiveUserAction: 'cleanupExternalData',
       requireManualConfirmation: true,
       dryRunConfirmed: false,
       notes: '',
       updatedAt: null,
     });
+    apiMock.getCalendarSyncLogs.mockResolvedValue({
+      items: [
+        {
+          provider: 'google-calendar',
+          providerLabel: 'Google Calendar',
+          id: 1,
+          connectionId: 10,
+          userId: 5,
+          userName: 'Тестовый пользователь',
+          userEmail: 'test@example.com',
+          taskJournalItemId: 42,
+          direction: 'crm-to-google',
+          operation: 'create-event',
+          status: 'success',
+          message: 'Событие создано.',
+          createdAt: '2026-05-26T17:20:00Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 50,
+    });
     apiMock.updateCalendarSyncSettings.mockImplementation(async (payload) => ({
       syncMode: payload.syncMode,
       conflictResolutionMode: payload.conflictResolutionMode,
+      userControlMode: payload.userControlMode,
+      defaultSyncFromDate: payload.defaultSyncFromDate,
+      inactiveUserAction: payload.inactiveUserAction,
       requireManualConfirmation: payload.requireManualConfirmation,
       dryRunConfirmed: payload.dryRunConfirmed,
       notes: payload.notes,
@@ -104,7 +133,7 @@ describe('CalendarSyncProviderSettings', () => {
 
     expect(await screen.findByText('Провайдеры календарной синхронизации')).toBeTruthy();
     expect(screen.getByText('ICS-файлы')).toBeTruthy();
-    expect(screen.getByText('Google Calendar')).toBeTruthy();
+    expect(screen.getAllByText('Google Calendar').length).toBeGreaterThan(0);
     expect(screen.getByText('Модель синхронизации и конфликты')).toBeTruthy();
     expect(screen.getByText('Готовность к подключению Google/Яндекс')).toBeTruthy();
     expect(screen.getByText('Выполнено обязательных шагов: 1 из 2. Пока все обязательные пункты не закрыты, внешняя синхронизация остается подготовительным контуром.')).toBeTruthy();
@@ -124,6 +153,9 @@ describe('CalendarSyncProviderSettings', () => {
     await waitFor(() => expect(apiMock.updateCalendarSyncSettings).toHaveBeenCalledWith({
       syncMode: 'hybrid',
       conflictResolutionMode: 'manualConfirmation',
+      userControlMode: 'userManaged',
+      defaultSyncFromDate: null,
+      inactiveUserAction: 'cleanupExternalData',
       requireManualConfirmation: true,
       dryRunConfirmed: true,
       notes: 'Согласовано с руководителем.',

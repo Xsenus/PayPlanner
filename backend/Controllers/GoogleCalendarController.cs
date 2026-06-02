@@ -107,6 +107,10 @@ public sealed class GoogleCalendarController : ControllerBase
         {
             return Problem(title: "GoogleCalendarConnectionNotFound", detail: ex.Message, statusCode: 404);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Problem(title: "GoogleCalendarUserManagedDisabled", detail: ex.Message, statusCode: 403);
+        }
     }
 
     [Authorize]
@@ -127,6 +131,10 @@ public sealed class GoogleCalendarController : ControllerBase
         {
             return Problem(title: "GoogleCalendarSyncFailed", detail: ex.Message, statusCode: 400);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Problem(title: "GoogleCalendarUserManagedDisabled", detail: ex.Message, statusCode: 403);
+        }
     }
 
     [Authorize]
@@ -146,6 +154,10 @@ public sealed class GoogleCalendarController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return Problem(title: "GoogleCalendarDisconnectFailed", detail: ex.Message, statusCode: 409);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Problem(title: "GoogleCalendarUserManagedDisabled", detail: ex.Message, statusCode: 403);
         }
     }
 

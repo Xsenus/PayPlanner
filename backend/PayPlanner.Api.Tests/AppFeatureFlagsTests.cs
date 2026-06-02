@@ -208,6 +208,9 @@ public class AppFeatureFlagsTests
         {
             SyncMode = "hybrid",
             ConflictResolutionMode = "manualConfirmation",
+            UserControlMode = "adminManaged",
+            DefaultSyncFromDate = new DateTime(2026, 1, 1),
+            InactiveUserAction = "disableSyncOnly",
             RequireManualConfirmation = false,
             DryRunConfirmed = true,
             Notes = "Проверено на копии базы.",
@@ -216,6 +219,9 @@ public class AppFeatureFlagsTests
 
         Assert.Equal("hybrid", updated.SyncMode);
         Assert.Equal("manualConfirmation", updated.ConflictResolutionMode);
+        Assert.Equal("adminManaged", updated.UserControlMode);
+        Assert.Equal(new DateTime(2026, 1, 1), updated.DefaultSyncFromDate);
+        Assert.Equal("disableSyncOnly", updated.InactiveUserAction);
         Assert.True(updated.RequireManualConfirmation);
         Assert.True(updated.DryRunConfirmed);
 
@@ -245,6 +251,9 @@ public class AppFeatureFlagsTests
         {
             SyncMode = "unexpected",
             ConflictResolutionMode = "unsafe",
+            UserControlMode = "unsafe",
+            DefaultSyncFromDate = new DateTime(2026, 1, 3, 14, 10, 0),
+            InactiveUserAction = "unsafe",
             RequireManualConfirmation = false,
             DryRunConfirmed = false,
             Notes = new string('x', 600),
@@ -253,8 +262,80 @@ public class AppFeatureFlagsTests
 
         Assert.Equal("notConfigured", settings.SyncMode);
         Assert.Equal("manualConfirmation", settings.ConflictResolutionMode);
+        Assert.Equal("userManaged", settings.UserControlMode);
+        Assert.Equal(new DateTime(2026, 1, 3), settings.DefaultSyncFromDate);
+        Assert.Equal("cleanupExternalData", settings.InactiveUserAction);
         Assert.True(settings.RequireManualConfirmation);
         Assert.Equal(500, settings.Notes.Length);
+    }
+
+    [Fact]
+    public async Task CalendarSyncController_GetLogs_ReturnsUnifiedProviderLog()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var role = new Role { Name = "user", Description = "User" };
+        var user = new User
+        {
+            Email = "calendar-log@example.com",
+            FullName = "Пользователь календаря",
+            PasswordHash = "hash",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+        };
+        var googleConnection = new GoogleCalendarConnection
+        {
+            User = user,
+            GoogleEmail = "calendar-log@gmail.com",
+            DisplayName = "Google",
+        };
+        var yandexConnection = new YandexCalendarConnection
+        {
+            User = user,
+            YandexEmail = "calendar-log@yandex.ru",
+            DisplayName = "Yandex",
+        };
+        scope.Db.GoogleCalendarConnections.Add(googleConnection);
+        scope.Db.YandexCalendarConnections.Add(yandexConnection);
+        await scope.Db.SaveChangesAsync();
+
+        scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
+        {
+            ConnectionId = googleConnection.Id,
+            Direction = "crm-to-google",
+            Operation = "create-event",
+            Status = "success",
+            Message = "Событие создано.",
+            CreatedAt = new DateTime(2026, 6, 2, 7, 0, 0, DateTimeKind.Utc),
+        });
+        scope.Db.YandexCalendarSyncLogs.Add(new YandexCalendarSyncLog
+        {
+            ConnectionId = yandexConnection.Id,
+            Direction = "crm-to-yandex",
+            Operation = "update-event",
+            Status = "error",
+            Message = "Событие не обновлено.",
+            CreatedAt = new DateTime(2026, 6, 2, 7, 5, 0, DateTimeKind.Utc),
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()), scope.Db);
+
+        var result = await controller.GetLogs(null, null, null, null, pageSize: 10, ct: CancellationToken.None);
+        var page = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+
+        Assert.Equal(2, page.Total);
+        Assert.Equal("yandex-calendar", page.Items[0].Provider);
+        Assert.Equal("google-calendar", page.Items[1].Provider);
+        Assert.Equal(user.Id, page.Items[0].UserId);
+        Assert.Equal("Пользователь календаря", page.Items[0].UserName);
+
+        var filteredResult = await controller.GetLogs("google-calendar", null, null, null, pageSize: 10, ct: CancellationToken.None);
+        var filteredPage = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(filteredResult.Result).Value);
+
+        var item = Assert.Single(filteredPage.Items);
+        Assert.Equal("Google Calendar", item.ProviderLabel);
+        Assert.Equal("create-event", item.Operation);
     }
 
     private sealed class TestOptionsSnapshot<T> : IOptionsSnapshot<T>

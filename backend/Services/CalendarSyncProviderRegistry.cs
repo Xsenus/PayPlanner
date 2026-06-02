@@ -9,6 +9,9 @@ public static class CalendarSyncProviderRegistry
         {
             SyncMode = "notConfigured",
             ConflictResolutionMode = "manualConfirmation",
+            UserControlMode = "userManaged",
+            DefaultSyncFromDate = null,
+            InactiveUserAction = "cleanupExternalData",
             RequireManualConfirmation = true,
             DryRunConfirmed = false,
             Notes = string.Empty,
@@ -25,12 +28,23 @@ public static class CalendarSyncProviderRegistry
             source.ConflictResolutionMode,
             "manualConfirmation",
             ["manualConfirmation", "crmWins", "externalWins", "latestWins"]);
+        var userControlMode = NormalizeKnownValue(
+            source.UserControlMode,
+            "userManaged",
+            ["userManaged", "adminManaged"]);
+        var inactiveUserAction = NormalizeKnownValue(
+            source.InactiveUserAction,
+            "cleanupExternalData",
+            ["cleanupExternalData", "disableSyncOnly", "keepConnection"]);
         var requireManualConfirmation = source.RequireManualConfirmation || conflictResolutionMode == "manualConfirmation";
 
         return new CalendarSyncSettingsDto
         {
             SyncMode = syncMode,
             ConflictResolutionMode = conflictResolutionMode,
+            UserControlMode = userControlMode,
+            DefaultSyncFromDate = NormalizeSyncFromDate(source.DefaultSyncFromDate),
+            InactiveUserAction = inactiveUserAction,
             RequireManualConfirmation = requireManualConfirmation,
             DryRunConfirmed = source.DryRunConfirmed,
             Notes = NormalizeNotes(source.Notes),
@@ -198,6 +212,9 @@ public static class CalendarSyncProviderRegistry
         var normalized = (value ?? string.Empty).Trim();
         return normalized.Length <= 500 ? normalized : normalized[..500];
     }
+
+    private static DateTime? NormalizeSyncFromDate(DateTime? value)
+        => value?.Date;
 
     private static string BuildConflictPolicyReadyMessage(CalendarSyncSettingsDto settings)
     {

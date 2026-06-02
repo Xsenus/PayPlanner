@@ -26,6 +26,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     private const string YandexTokenEndpoint = "https://oauth.yandex.ru/token";
     private const string YandexUserInfoEndpoint = "https://login.yandex.ru/info?format=json";
     private const string CalDavBaseUrl = "https://caldav.yandex.ru";
+    private const string CalendarSyncSettingsKey = "calendarSync.settings";
     private const int DefaultPollIntervalMs = 2000;
 
     private static readonly TimeSpan AuthRequestLifetime = TimeSpan.FromMinutes(15);
@@ -231,6 +232,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         HttpRequest httpRequest,
         CancellationToken cancellationToken = default)
     {
+        await EnsureUserCanManageCalendarAsync(httpRequest, cancellationToken);
         var connection = await _db.YandexCalendarConnections.FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
         if (connection is null)
         {
@@ -251,6 +253,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
     public async Task<YandexCalendarStatusDto> DisconnectAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
     {
+        await EnsureUserCanManageCalendarAsync(request, cancellationToken);
         var connection = await _db.YandexCalendarConnections
             .Include(item => item.Calendars)
             .Include(item => item.TaskLinks)
@@ -282,6 +285,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
     public async Task<YandexCalendarSyncNowResultDto> SyncNowAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
     {
+        await EnsureUserCanManageCalendarAsync(request, cancellationToken);
         var result = await SyncConnectionAsync(userId, forceFull: true, cancellationToken);
         return new YandexCalendarSyncNowResultDto
         {
@@ -1545,6 +1549,46 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     {
         var syncFromDate = ResolveSyncFromDate(connection);
         return syncFromDate.HasValue && task.DueAt < syncFromDate.Value;
+    }
+
+    private async Task EnsureUserCanManageCalendarAsync(HttpRequest request, CancellationToken cancellationToken)
+    {
+        if (request.HttpContext.User.IsInRole("admin"))
+        {
+            return;
+        }
+
+        var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
+        if (string.Equals(settings.UserControlMode, "adminManaged", StringComparison.Ordinal))
+        {
+            throw new UnauthorizedAccessException("Управление синхронизацией календаря ограничено администратором.");
+        }
+    }
+
+    private async Task<CalendarSyncSettingsDto> LoadCalendarSyncSettingsAsync(CancellationToken cancellationToken)
+    {
+        var setting = await _db.SystemSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Key == CalendarSyncSettingsKey, cancellationToken);
+        if (setting is null || string.IsNullOrWhiteSpace(setting.Value))
+        {
+            return CalendarSyncProviderRegistry.BuildDefaultSettings();
+        }
+
+        try
+        {
+            var settings = JsonSerializer.Deserialize<CalendarSyncSettingsDto>(setting.Value, JsonOptions);
+            if (settings is not null)
+            {
+                return CalendarSyncProviderRegistry.NormalizeSettings(settings);
+            }
+        }
+        catch (JsonException)
+        {
+            return CalendarSyncProviderRegistry.BuildDefaultSettings();
+        }
+
+        return CalendarSyncProviderRegistry.BuildDefaultSettings();
     }
 
     private static void MarkYandexLinkDeleted(YandexCalendarTaskLink link)

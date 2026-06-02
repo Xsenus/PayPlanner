@@ -528,8 +528,14 @@ public partial class AuthService
         EnsureProtectedUserManagedBySelf(user, actorUserId);
 
         var previousRoleId = user.RoleId;
+        var wasActive = user.IsActive;
         await ApplyUserChangesAsync(user, request, allowAdministrativeFields: true);
         await _context.SaveChangesAsync();
+
+        if (wasActive && !user.IsActive && _externalCalendarSyncCoordinator is not null)
+        {
+            await _externalCalendarSyncCoordinator.HandleUserAccessRevokedAsync(user.Id, actorUserId);
+        }
 
         var refreshedUser = await QueryUsersWithRelations()
             .FirstAsync(u => u.Id == user.Id);

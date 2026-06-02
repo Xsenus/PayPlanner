@@ -197,6 +197,9 @@ export interface CalendarSyncReadinessItemDto {
 export interface CalendarSyncSettingsDto {
   syncMode: string;
   conflictResolutionMode: string;
+  userControlMode: string;
+  defaultSyncFromDate?: string | null;
+  inactiveUserAction: string;
   requireManualConfirmation: boolean;
   dryRunConfirmed: boolean;
   notes: string;
@@ -206,9 +209,35 @@ export interface CalendarSyncSettingsDto {
 export interface UpdateCalendarSyncSettingsRequest {
   syncMode?: string;
   conflictResolutionMode?: string;
+  userControlMode?: string;
+  defaultSyncFromDate?: string | null;
+  inactiveUserAction?: string;
   requireManualConfirmation?: boolean;
   dryRunConfirmed?: boolean;
   notes?: string;
+}
+
+export interface CalendarSyncLogEntryDto {
+  provider: string;
+  providerLabel: string;
+  id: number;
+  connectionId?: number | null;
+  userId?: number | null;
+  userName: string;
+  userEmail: string;
+  taskJournalItemId?: number | null;
+  direction: string;
+  operation: string;
+  status: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface CalendarSyncLogPageDto {
+  items: CalendarSyncLogEntryDto[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface GoogleCalendarStartAuthResponseDto {
@@ -1825,6 +1854,25 @@ export class ApiService {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+  }
+
+  async getCalendarSyncLogs(params?: {
+    provider?: string;
+    status?: string;
+    operation?: string;
+    userId?: number;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const searchParams = new URLSearchParams();
+    if (params?.provider) searchParams.set('provider', params.provider);
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.operation) searchParams.set('operation', params.operation);
+    if (params?.userId) searchParams.set('userId', params.userId.toString());
+    if (params?.page) searchParams.set('page', params.page.toString());
+    if (params?.pageSize) searchParams.set('pageSize', params.pageSize.toString());
+    const query = searchParams.toString();
+    return this.request<CalendarSyncLogPageDto>(`/calendar-sync/logs${query ? `?${query}` : ''}`);
   }
 
   async getGoogleCalendarStatus() {

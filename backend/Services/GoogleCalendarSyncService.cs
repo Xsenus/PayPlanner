@@ -26,6 +26,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     private const string GoogleTokenEndpoint = "https://oauth2.googleapis.com/token";
     private const string GoogleUserInfoEndpoint = "https://openidconnect.googleapis.com/v1/userinfo";
     private const string GoogleApiBaseUrl = "https://www.googleapis.com/calendar/v3";
+    private const string CalendarSyncSettingsKey = "calendarSync.settings";
     private const int DefaultPollIntervalMs = 2000;
     private static readonly TimeSpan AuthRequestLifetime = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan AccessTokenRefreshSkew = TimeSpan.FromMinutes(2);
@@ -228,6 +229,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         HttpRequest httpRequest,
         CancellationToken cancellationToken = default)
     {
+        await EnsureUserCanManageCalendarAsync(httpRequest, cancellationToken);
         var connection = await _db.GoogleCalendarConnections.FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
         if (connection is null)
         {
@@ -248,6 +250,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
     public async Task<GoogleCalendarStatusDto> DisconnectAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
     {
+        await EnsureUserCanManageCalendarAsync(request, cancellationToken);
         var connection = await _db.GoogleCalendarConnections
             .Include(item => item.Calendars)
             .Include(item => item.TaskLinks)
@@ -280,6 +283,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
     public async Task<GoogleCalendarSyncNowResultDto> SyncNowAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
     {
+        await EnsureUserCanManageCalendarAsync(request, cancellationToken);
         var result = await SyncConnectionAsync(userId, forceFull: true, cancellationToken);
         return new GoogleCalendarSyncNowResultDto
         {
@@ -1480,6 +1484,46 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     {
         var syncFromDate = ResolveSyncFromDate(connection);
         return syncFromDate.HasValue && task.DueAt < syncFromDate.Value;
+    }
+
+    private async Task EnsureUserCanManageCalendarAsync(HttpRequest request, CancellationToken cancellationToken)
+    {
+        if (request.HttpContext.User.IsInRole("admin"))
+        {
+            return;
+        }
+
+        var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
+        if (string.Equals(settings.UserControlMode, "adminManaged", StringComparison.Ordinal))
+        {
+            throw new UnauthorizedAccessException("Управление синхронизацией календаря ограничено администратором.");
+        }
+    }
+
+    private async Task<CalendarSyncSettingsDto> LoadCalendarSyncSettingsAsync(CancellationToken cancellationToken)
+    {
+        var setting = await _db.SystemSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Key == CalendarSyncSettingsKey, cancellationToken);
+        if (setting is null || string.IsNullOrWhiteSpace(setting.Value))
+        {
+            return CalendarSyncProviderRegistry.BuildDefaultSettings();
+        }
+
+        try
+        {
+            var settings = JsonSerializer.Deserialize<CalendarSyncSettingsDto>(setting.Value, JsonOptions);
+            if (settings is not null)
+            {
+                return CalendarSyncProviderRegistry.NormalizeSettings(settings);
+            }
+        }
+        catch (JsonException)
+        {
+            return CalendarSyncProviderRegistry.BuildDefaultSettings();
+        }
+
+        return CalendarSyncProviderRegistry.BuildDefaultSettings();
     }
 
     private static void MarkGoogleLinkDeleted(GoogleCalendarTaskLink link)

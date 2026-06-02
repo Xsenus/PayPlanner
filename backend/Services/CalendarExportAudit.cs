@@ -62,6 +62,9 @@ public static class CalendarExportAudit
                 {
                     nextSettings.SyncMode,
                     nextSettings.ConflictResolutionMode,
+                    nextSettings.UserControlMode,
+                    nextSettings.DefaultSyncFromDate,
+                    nextSettings.InactiveUserAction,
                     nextSettings.RequireManualConfirmation,
                     nextSettings.DryRunConfirmed,
                     nextSettings.Notes,
@@ -79,6 +82,9 @@ public static class CalendarExportAudit
 
         AddIfChanged(changes, "SyncMode", previousSettings.SyncMode, nextSettings.SyncMode);
         AddIfChanged(changes, "ConflictResolutionMode", previousSettings.ConflictResolutionMode, nextSettings.ConflictResolutionMode);
+        AddIfChanged(changes, "UserControlMode", previousSettings.UserControlMode, nextSettings.UserControlMode);
+        AddIfChanged(changes, "DefaultSyncFromDate", previousSettings.DefaultSyncFromDate?.ToString("O"), nextSettings.DefaultSyncFromDate?.ToString("O"));
+        AddIfChanged(changes, "InactiveUserAction", previousSettings.InactiveUserAction, nextSettings.InactiveUserAction);
         AddIfChanged(changes, "RequireManualConfirmation", previousSettings.RequireManualConfirmation.ToString(), nextSettings.RequireManualConfirmation.ToString());
         AddIfChanged(changes, "DryRunConfirmed", previousSettings.DryRunConfirmed.ToString(), nextSettings.DryRunConfirmed.ToString());
         AddIfChanged(changes, "Notes", previousSettings.Notes, nextSettings.Notes);

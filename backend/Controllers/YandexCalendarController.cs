@@ -107,6 +107,10 @@ public sealed class YandexCalendarController : ControllerBase
         {
             return Problem(title: "YandexCalendarConnectionNotFound", detail: ex.Message, statusCode: 404);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Problem(title: "YandexCalendarUserManagedDisabled", detail: ex.Message, statusCode: 403);
+        }
     }
 
     [Authorize]
@@ -127,6 +131,10 @@ public sealed class YandexCalendarController : ControllerBase
         {
             return Problem(title: "YandexCalendarSyncFailed", detail: ex.Message, statusCode: 400);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Problem(title: "YandexCalendarUserManagedDisabled", detail: ex.Message, statusCode: 403);
+        }
     }
 
     [Authorize]
@@ -146,6 +154,10 @@ public sealed class YandexCalendarController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return Problem(title: "YandexCalendarDisconnectFailed", detail: ex.Message, statusCode: 409);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Problem(title: "YandexCalendarUserManagedDisabled", detail: ex.Message, statusCode: 403);
         }
     }
 }
