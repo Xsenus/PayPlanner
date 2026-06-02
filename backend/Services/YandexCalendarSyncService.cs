@@ -1,0 +1,1728 @@
+using System.Globalization;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
+
+namespace PayPlanner.Api.Services;
+
+public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
+{
+    private const string YandexEnabledKey = "auth.yandex.enabled";
+    private const string YandexClientIdKey = "auth.yandex.clientId";
+    private const string YandexClientSecretKey = "auth.yandex.clientSecret";
+    private const string YandexScopesKey = "calendar.yandex.scopes";
+    private const string YandexAuthEndpoint = "https://oauth.yandex.ru/authorize";
+    private const string YandexTokenEndpoint = "https://oauth.yandex.ru/token";
+    private const string YandexUserInfoEndpoint = "https://login.yandex.ru/info?format=json";
+    private const string CalDavBaseUrl = "https://caldav.yandex.ru";
+    private const int DefaultPollIntervalMs = 2000;
+
+    private static readonly TimeSpan AuthRequestLifetime = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan AccessTokenRefreshSkew = TimeSpan.FromMinutes(2);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly PaymentContext _db;
+    private readonly IConfiguration _configuration;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IDataProtector _tokenProtector;
+    private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
+    private readonly ILogger<YandexCalendarSyncService> _logger;
+
+    public YandexCalendarSyncService(
+        PaymentContext db,
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory,
+        IDataProtectionProvider dataProtectionProvider,
+        ILogger<YandexCalendarSyncService> logger)
+        : this(db, configuration, httpClientFactory, dataProtectionProvider, null, logger)
+    {
+    }
+
+    public YandexCalendarSyncService(
+        PaymentContext db,
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory,
+        IDataProtectionProvider dataProtectionProvider,
+        IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator,
+        ILogger<YandexCalendarSyncService> logger)
+    {
+        _db = db;
+        _configuration = configuration;
+        _httpClientFactory = httpClientFactory;
+        _tokenProtector = dataProtectionProvider.CreateProtector("PayPlanner.YandexCalendar.Tokens.v1");
+        _externalCalendarSyncCoordinator = externalCalendarSyncCoordinator;
+        _logger = logger;
+    }
+
+    public async Task<YandexCalendarStatusDto> GetStatusAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
+    {
+        var connection = await LoadConnectionQuery()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+        return await BuildStatusAsync(userId, request, connection, cancellationToken);
+    }
+
+    public async Task<YandexCalendarStartAuthResponseDto> StartAuthAsync(
+        int userId,
+        StartYandexCalendarAuthRequest request,
+        HttpRequest httpRequest,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await ResolveYandexSettingsAsync(cancellationToken);
+        if (!settings.Ready)
+        {
+            throw new InvalidOperationException("Настройки Яндекс OAuth не заполнены или отключены.");
+        }
+
+        var now = DateTime.UtcNow;
+        var state = GenerateToken(32);
+        _db.YandexCalendarAuthRequests.Add(new YandexCalendarAuthRequest
+        {
+            UserId = userId,
+            State = state,
+            ReturnUrl = NormalizeReturnUrl(request.ReturnUrl),
+            Status = "pending",
+            CreatedAt = now,
+            ExpiresAt = now.Add(AuthRequestLifetime),
+        });
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var callbackUrl = BuildAbsoluteUrl(httpRequest, "/api/yandex-calendar/auth/callback");
+        var query = new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = settings.ClientId,
+            ["redirect_uri"] = callbackUrl,
+            ["state"] = state,
+            ["force_confirm"] = "yes",
+            ["device_id"] = $"payplanner-{userId}",
+            ["device_name"] = "PayPlanner CRM",
+        };
+        if (!string.IsNullOrWhiteSpace(settings.Scopes))
+        {
+            query["scope"] = settings.Scopes;
+        }
+
+        return new YandexCalendarStartAuthResponseDto
+        {
+            State = state,
+            AuthUrl = QueryHelpers.AddQueryString(YandexAuthEndpoint, query!),
+            PollIntervalMs = DefaultPollIntervalMs,
+        };
+    }
+
+    public async Task<YandexCalendarAuthStatusDto> GetAuthStatusAsync(int userId, string state, CancellationToken cancellationToken = default)
+    {
+        var authRequest = await _db.YandexCalendarAuthRequests
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.UserId == userId && item.State == state, cancellationToken);
+        if (authRequest is null)
+        {
+            throw new KeyNotFoundException("Запрос подключения Яндекс.Календаря не найден.");
+        }
+
+        var status = authRequest.Status;
+        if (status == "pending" && authRequest.ExpiresAt <= DateTime.UtcNow)
+        {
+            status = "expired";
+        }
+
+        return new YandexCalendarAuthStatusDto
+        {
+            State = authRequest.State,
+            Status = status,
+            Completed = status is "completed" or "failed" or "expired",
+            Detail = authRequest.Error,
+            ReturnUrl = authRequest.ReturnUrl,
+        };
+    }
+
+    public async Task<string> HandleCallbackAsync(
+        string? state,
+        string? code,
+        string? error,
+        string? errorDescription,
+        HttpRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedState = NormalizeOptional(state);
+        if (string.IsNullOrWhiteSpace(normalizedState))
+        {
+            return BuildPopupHtml(false, "Яндекс не вернул state для подключения календаря.");
+        }
+
+        var authRequest = await _db.YandexCalendarAuthRequests
+            .FirstOrDefaultAsync(item => item.State == normalizedState, cancellationToken);
+        if (authRequest is null)
+        {
+            return BuildPopupHtml(false, "Запрос подключения Яндекс.Календаря не найден.");
+        }
+
+        if (authRequest.ExpiresAt <= DateTime.UtcNow)
+        {
+            authRequest.Status = "expired";
+            authRequest.Error = "Срок действия ссылки истёк. Запустите подключение заново.";
+            await _db.SaveChangesAsync(cancellationToken);
+            return BuildPopupHtml(false, authRequest.Error, authRequest.ReturnUrl);
+        }
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            authRequest.Status = "failed";
+            authRequest.Error = NormalizeOptional(errorDescription) ?? error;
+            authRequest.CompletedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+            return BuildPopupHtml(false, authRequest.Error, authRequest.ReturnUrl);
+        }
+
+        var normalizedCode = NormalizeOptional(code);
+        if (string.IsNullOrWhiteSpace(normalizedCode))
+        {
+            authRequest.Status = "failed";
+            authRequest.Error = "Яндекс не вернул код авторизации.";
+            authRequest.CompletedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+            return BuildPopupHtml(false, authRequest.Error, authRequest.ReturnUrl);
+        }
+
+        try
+        {
+            var settings = await ResolveYandexSettingsAsync(cancellationToken);
+            if (!settings.Ready)
+            {
+                throw new InvalidOperationException("Настройки Яндекс OAuth не заполнены или отключены.");
+            }
+
+            var token = await ExchangeCodeAsync(settings, normalizedCode, cancellationToken);
+            var profile = await LoadYandexProfileAsync(token.AccessToken, cancellationToken);
+            await UpsertConnectionFromTokenAsync(authRequest.UserId, token, profile, cancellationToken);
+
+            authRequest.Status = "completed";
+            authRequest.Error = null;
+            authRequest.CompletedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+
+            return BuildPopupHtml(true, "Яндекс.Календарь подключён. Вернитесь в CRM.", authRequest.ReturnUrl);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or JsonException)
+        {
+            authRequest.Status = "failed";
+            authRequest.Error = ex.Message;
+            authRequest.CompletedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+            return BuildPopupHtml(false, ex.Message, authRequest.ReturnUrl);
+        }
+    }
+
+    public async Task<YandexCalendarStatusDto> UpdateSettingsAsync(
+        int userId,
+        UpdateYandexCalendarSettingsRequest request,
+        HttpRequest httpRequest,
+        CancellationToken cancellationToken = default)
+    {
+        var connection = await _db.YandexCalendarConnections.FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+        if (connection is null)
+        {
+            throw new KeyNotFoundException("Подключение Яндекс.Календаря не найдено.");
+        }
+
+        connection.IsEnabled = request.IsEnabled ?? connection.IsEnabled;
+        connection.SyncEnabled = request.SyncEnabled ?? connection.SyncEnabled;
+        connection.CalendarMode = NormalizeKnownValue(request.CalendarMode, connection.CalendarMode, ["personal", "adminByAssignee"]);
+        connection.ConflictResolutionMode = NormalizeKnownValue(request.ConflictResolutionMode, connection.ConflictResolutionMode, ["crmWins", "yandexWins", "latestWins"]);
+        connection.UpdatedAt = DateTime.UtcNow;
+        await AddLogAsync(connection.Id, null, null, "system", "settings-updated", "success", "Настройки Яндекс.Календаря сохранены.", null, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return await GetStatusAsync(userId, httpRequest, cancellationToken);
+    }
+
+    public async Task<YandexCalendarStatusDto> DisconnectAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
+    {
+        var connection = await _db.YandexCalendarConnections
+            .Include(item => item.Calendars)
+            .Include(item => item.TaskLinks)
+            .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+        if (connection is not null)
+        {
+            _db.YandexCalendarConnections.Remove(connection);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        return await GetStatusAsync(userId, request, cancellationToken);
+    }
+
+    public async Task<YandexCalendarSyncNowResultDto> SyncNowAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
+    {
+        var result = await SyncConnectionAsync(userId, forceFull: true, cancellationToken);
+        return new YandexCalendarSyncNowResultDto
+        {
+            ProcessedTasks = result.ProcessedTasks,
+            ImportedEvents = result.ImportedEvents,
+            ErrorCount = result.ErrorCount,
+            Message = result.ErrorCount == 0
+                ? "Синхронизация Яндекс.Календаря выполнена."
+                : "Синхронизация Яндекс.Календаря завершена с ошибками. Проверьте журнал.",
+            Status = await GetStatusAsync(userId, request, cancellationToken),
+        };
+    }
+
+    public async Task<YandexCalendarSchedulerRunResult> SyncDueConnectionsAsync(int batchSize, CancellationToken cancellationToken = default)
+    {
+        var userIds = await _db.YandexCalendarConnections
+            .AsNoTracking()
+            .Where(item => item.IsEnabled && item.SyncEnabled && item.AccessTokenProtected != null)
+            .OrderBy(item => item.LastIncrementalSyncAt ?? item.LastFullSyncAt ?? item.CreatedAt)
+            .Take(Math.Clamp(batchSize, 1, 500))
+            .Select(item => item.UserId)
+            .ToListAsync(cancellationToken);
+
+        var processedTasks = 0;
+        var importedEvents = 0;
+        var errors = 0;
+        foreach (var userId in userIds)
+        {
+            try
+            {
+                var result = await SyncConnectionAsync(userId, forceFull: false, cancellationToken);
+                processedTasks += result.ProcessedTasks;
+                importedEvents += result.ImportedEvents;
+                errors += result.ErrorCount;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                errors++;
+                _logger.LogWarning(ex, "Yandex Calendar scheduled sync failed for user {UserId}", userId);
+            }
+        }
+
+        return new YandexCalendarSchedulerRunResult(userIds.Count, processedTasks, importedEvents, errors);
+    }
+
+    public async Task SyncTaskForConnectedUsersAsync(int taskId, CancellationToken cancellationToken = default)
+    {
+        var task = await _db.TaskJournalItems
+            .AsNoTracking()
+            .Include(item => item.Participants)
+            .FirstOrDefaultAsync(item => item.Id == taskId, cancellationToken);
+        if (task is null)
+        {
+            return;
+        }
+
+        var userIds = await _db.YandexCalendarConnections
+            .AsNoTracking()
+            .Where(item => item.IsEnabled && item.SyncEnabled && item.AccessTokenProtected != null)
+            .Select(item => new
+            {
+                item.UserId,
+                IsAdmin = item.User.Role != null && item.User.Role.Name == "admin",
+            })
+            .ToListAsync(cancellationToken);
+
+        foreach (var item in userIds)
+        {
+            if (!item.IsAdmin && !TaskBelongsToUser(task, item.UserId))
+            {
+                continue;
+            }
+
+            try
+            {
+                await SyncSingleTaskAsync(item.UserId, taskId, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Yandex Calendar task sync failed for task {TaskId} and user {UserId}", taskId, item.UserId);
+            }
+        }
+    }
+
+    public async Task DeleteTaskForConnectedUsersAsync(int taskId, CancellationToken cancellationToken = default)
+    {
+        var links = await _db.YandexCalendarTaskLinks
+            .Include(item => item.Connection)
+            .Where(item => item.TaskJournalItemId == taskId && item.SyncStatus != "deleted")
+            .ToListAsync(cancellationToken);
+
+        foreach (var link in links)
+        {
+            if (link.Connection is null || string.IsNullOrWhiteSpace(link.YandexEventUrl))
+            {
+                continue;
+            }
+
+            try
+            {
+                var accessToken = await ResolveAccessTokenAsync(link.Connection, cancellationToken);
+                var deleted = await DeleteYandexEventAsync(accessToken, link.YandexEventUrl, cancellationToken);
+                link.SyncStatus = "deleted";
+                link.LastDirection = "crm-to-yandex";
+                link.LastSyncedAt = DateTime.UtcNow;
+                link.UpdatedAt = DateTime.UtcNow;
+                link.LastError = null;
+                await AddLogAsync(
+                    link.ConnectionId,
+                    link.CalendarSyncCalendarId,
+                    link.TaskJournalItemId,
+                    "crm-to-yandex",
+                    deleted ? "delete-event" : "delete-event-missing",
+                    "success",
+                    deleted
+                        ? "Событие удалено из Яндекс.Календаря после удаления задачи в CRM."
+                        : "Событие уже отсутствовало в Яндекс.Календаре при удалении задачи в CRM.",
+                    null,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                link.LastError = Trim(ex.Message, 2000);
+                link.UpdatedAt = DateTime.UtcNow;
+                await AddLogAsync(
+                    link.ConnectionId,
+                    link.CalendarSyncCalendarId,
+                    link.TaskJournalItemId,
+                    "crm-to-yandex",
+                    "delete-event",
+                    "error",
+                    "Не удалось удалить событие из Яндекс.Календаря после удаления задачи в CRM.",
+                    ex.Message,
+                    cancellationToken);
+                await _db.SaveChangesAsync(cancellationToken);
+                throw new InvalidOperationException("YandexCalendarTaskDeleteFailed", ex);
+            }
+        }
+
+        if (links.Count > 0)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task CleanupDeletedUserAsync(int userId, int actorUserId, CancellationToken cancellationToken = default)
+    {
+        var failures = new List<string>();
+
+        var ownConnection = await LoadConnectionQuery()
+            .Include(item => item.TaskLinks)
+            .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+        if (ownConnection is not null)
+        {
+            await CleanupConnectionCalendarsAsync(
+                ownConnection,
+                ownConnection.Calendars.ToList(),
+                $"Пользователь #{userId} удаляется из CRM администратором #{actorUserId}.",
+                failures,
+                cancellationToken);
+        }
+
+        var adminConnections = await LoadConnectionQuery()
+            .Include(item => item.TaskLinks)
+            .Where(item => item.UserId != userId && item.Calendars.Any(calendar => calendar.OwnerUserId == userId))
+            .ToListAsync(cancellationToken);
+        foreach (var connection in adminConnections)
+        {
+            var calendars = connection.Calendars.Where(calendar => calendar.OwnerUserId == userId).ToList();
+            await CleanupConnectionCalendarsAsync(
+                connection,
+                calendars,
+                $"Сотрудник #{userId} удаляется из CRM, календарь сотрудника убирается из администраторского Яндекс.Календаря.",
+                failures,
+                cancellationToken);
+        }
+
+        if (failures.Count > 0)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            throw new InvalidOperationException($"YandexCalendarCleanupFailed: {string.Join("; ", failures)}");
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<ConnectionSyncResult> SyncConnectionAsync(int userId, bool forceFull, CancellationToken cancellationToken)
+    {
+        var connection = await LoadConnectionQuery()
+            .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+        if (connection is null || !connection.IsEnabled || !connection.SyncEnabled)
+        {
+            return new ConnectionSyncResult(0, 0, 0);
+        }
+
+        var errors = 0;
+        var importedEvents = 0;
+        try
+        {
+            importedEvents += await ImportYandexChangesAsync(connection, forceFull, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            errors++;
+            connection.LastError = Trim(ex.Message, 2000);
+            await AddLogAsync(connection.Id, null, null, "yandex-to-crm", "import", "error", "Не удалось загрузить изменения из Яндекс.Календаря.", ex.Message, cancellationToken);
+        }
+
+        var tasks = await LoadTasksForConnectionAsync(connection, cancellationToken);
+        var processedTasks = 0;
+        foreach (var task in tasks)
+        {
+            try
+            {
+                await UpsertYandexEventForTaskAsync(connection, task, cancellationToken);
+                processedTasks++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                errors++;
+                connection.LastError = Trim(ex.Message, 2000);
+                await AddLogAsync(connection.Id, null, task.Id, "crm-to-yandex", "upsert", "error", "Не удалось синхронизировать задачу с Яндекс.Календарём.", ex.Message, cancellationToken);
+            }
+        }
+
+        var now = DateTime.UtcNow;
+        connection.LastIncrementalSyncAt = now;
+        if (forceFull || connection.LastFullSyncAt is null)
+        {
+            connection.LastFullSyncAt = now;
+        }
+        if (errors == 0)
+        {
+            connection.LastError = null;
+        }
+        connection.UpdatedAt = now;
+        await _db.SaveChangesAsync(cancellationToken);
+        return new ConnectionSyncResult(processedTasks, importedEvents, errors);
+    }
+
+    private async Task SyncSingleTaskAsync(int userId, int taskId, CancellationToken cancellationToken)
+    {
+        var connection = await LoadConnectionQuery()
+            .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+        if (connection is null || !connection.IsEnabled || !connection.SyncEnabled)
+        {
+            return;
+        }
+
+        var task = await _db.TaskJournalItems
+            .Include(item => item.Participants)
+            .FirstOrDefaultAsync(item => item.Id == taskId, cancellationToken);
+        if (task is null)
+        {
+            return;
+        }
+
+        await UpsertYandexEventForTaskAsync(connection, task, cancellationToken);
+        connection.LastIncrementalSyncAt = DateTime.UtcNow;
+        connection.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task CleanupConnectionCalendarsAsync(
+        YandexCalendarConnection connection,
+        IReadOnlyList<YandexCalendarSyncCalendar> calendars,
+        string reason,
+        List<string> failures,
+        CancellationToken cancellationToken)
+    {
+        if (calendars.Count == 0)
+        {
+            return;
+        }
+
+        string? accessToken = null;
+        try
+        {
+            accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            failures.Add($"подключение #{connection.Id}: {ex.Message}");
+            await AddLogAsync(connection.Id, null, null, "system", "cleanup-user-calendars", "error", "Не удалось получить токен Яндекс.Календаря для очистки календарей удаляемого пользователя.", ex.Message, cancellationToken);
+            return;
+        }
+
+        foreach (var calendar in calendars)
+        {
+            try
+            {
+                var deleted = await DeleteYandexCalendarAsync(accessToken, calendar.CalendarUrl, cancellationToken);
+                await AddLogAsync(
+                    connection.Id,
+                    calendar.Id,
+                    null,
+                    "system",
+                    deleted ? "delete-calendar" : "delete-calendar-missing",
+                    "success",
+                    deleted ? $"Календарь «{calendar.Name}» удалён из Яндекс.Календаря." : $"Календарь «{calendar.Name}» уже отсутствовал в Яндекс.Календаре.",
+                    reason,
+                    cancellationToken);
+
+                foreach (var link in connection.TaskLinks.Where(item => item.CalendarSyncCalendarId == calendar.Id))
+                {
+                    link.SyncStatus = "deleted";
+                    link.LastDirection = "crm-to-yandex";
+                    link.LastSyncedAt = DateTime.UtcNow;
+                    link.UpdatedAt = DateTime.UtcNow;
+                    link.LastError = null;
+                }
+
+                _db.YandexCalendarSyncCalendars.Remove(calendar);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failures.Add($"календарь {calendar.Name}: {ex.Message}");
+                calendar.LastError = Trim(ex.Message, 2000);
+                calendar.UpdatedAt = DateTime.UtcNow;
+                await AddLogAsync(connection.Id, calendar.Id, null, "system", "delete-calendar", "error", $"Не удалось удалить календарь «{calendar.Name}» из Яндекс.Календаря.", ex.Message, cancellationToken);
+            }
+        }
+    }
+
+    private async Task<int> ImportYandexChangesAsync(YandexCalendarConnection connection, bool forceFull, CancellationToken cancellationToken)
+    {
+        var imported = 0;
+        var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
+        foreach (var calendar in connection.Calendars.ToList())
+        {
+            var events = await ListYandexEventsAsync(accessToken, calendar, cancellationToken);
+            foreach (var yandexEvent in events)
+            {
+                if (await ApplyYandexEventAsync(connection, calendar, yandexEvent, cancellationToken))
+                {
+                    imported++;
+                }
+            }
+
+            calendar.SyncToken = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+            calendar.LastSyncedAt = DateTime.UtcNow;
+            calendar.LastError = null;
+            calendar.UpdatedAt = DateTime.UtcNow;
+        }
+
+        return imported;
+    }
+
+    private async Task<bool> ApplyYandexEventAsync(
+        YandexCalendarConnection connection,
+        YandexCalendarSyncCalendar calendar,
+        YandexEventItem yandexEvent,
+        CancellationToken cancellationToken)
+    {
+        var taskId = yandexEvent.PayPlannerTaskId;
+        YandexCalendarTaskLink? link = null;
+        if (taskId.HasValue)
+        {
+            link = await _db.YandexCalendarTaskLinks
+                .Include(item => item.TaskJournalItem)
+                .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == taskId.Value, cancellationToken);
+        }
+
+        link ??= await _db.YandexCalendarTaskLinks
+            .Include(item => item.TaskJournalItem)
+            .FirstOrDefaultAsync(item =>
+                item.YandexCalendarId == calendar.YandexCalendarId &&
+                item.YandexEventId == yandexEvent.Id &&
+                item.ConnectionId == connection.Id,
+                cancellationToken);
+
+        if (link?.TaskJournalItem is null)
+        {
+            return false;
+        }
+
+        if (yandexEvent.Deleted)
+        {
+            link.SyncStatus = "detached";
+            link.LastDirection = "yandex-to-crm";
+            link.LastSyncedAt = DateTime.UtcNow;
+            link.UpdatedAt = DateTime.UtcNow;
+            await AddLogAsync(connection.Id, calendar.Id, link.TaskJournalItemId, "yandex-to-crm", "detach", "success", "Событие удалено в Яндекс.Календаре, связь с задачей помечена как отключённая.", null, cancellationToken);
+            return true;
+        }
+
+        var nextHash = BuildYandexHash(yandexEvent);
+        if (string.Equals(link.LastYandexHash, nextHash, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (connection.ConflictResolutionMode == "crmWins")
+        {
+            link.LastYandexHash = nextHash;
+            link.LastDirection = "yandex-to-crm";
+            link.LastSyncedAt = DateTime.UtcNow;
+            link.UpdatedAt = DateTime.UtcNow;
+            await AddLogAsync(connection.Id, calendar.Id, link.TaskJournalItemId, "yandex-to-crm", "skip", "success", "Изменения в Яндекс.Календаре прочитаны, но правило конфликтов оставляет CRM главным источником.", null, cancellationToken);
+            return false;
+        }
+
+        var task = link.TaskJournalItem;
+        var changed = false;
+        if (yandexEvent.StartAt.HasValue && task.DueAt != yandexEvent.StartAt.Value)
+        {
+            task.DueAt = yandexEvent.StartAt.Value;
+            changed = true;
+        }
+
+        if (yandexEvent.StartAt.HasValue && yandexEvent.EndAt.HasValue)
+        {
+            var minutes = Math.Max(15, (int)Math.Round((yandexEvent.EndAt.Value - yandexEvent.StartAt.Value).TotalMinutes));
+            if (task.PlannedDurationMinutes != minutes)
+            {
+                task.PlannedDurationMinutes = minutes;
+                changed = true;
+            }
+        }
+
+        var importedStatus = ResolveStatusFromSummary(yandexEvent.Summary);
+        if (!string.IsNullOrWhiteSpace(importedStatus) && task.Status != importedStatus)
+        {
+            task.Status = importedStatus;
+            changed = true;
+        }
+
+        var importedTitle = StripStatusPrefix(yandexEvent.Summary);
+        if (!string.IsNullOrWhiteSpace(importedTitle) && !string.Equals(task.Title, importedTitle, StringComparison.Ordinal))
+        {
+            task.Title = Trim(importedTitle, 500);
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            link.LastYandexHash = nextHash;
+            return false;
+        }
+
+        task.UpdatedAt = DateTime.UtcNow;
+        link.YandexEtag = yandexEvent.Etag ?? link.YandexEtag;
+        link.LastYandexHash = nextHash;
+        link.LastCrmHash = BuildCrmHash(task);
+        link.LastDirection = "yandex-to-crm";
+        link.LastSyncedAt = DateTime.UtcNow;
+        link.UpdatedAt = DateTime.UtcNow;
+        await AddLogAsync(connection.Id, calendar.Id, task.Id, "yandex-to-crm", "update-task", "success", "Изменения из Яндекс.Календаря применены к задаче.", null, cancellationToken);
+        if (_externalCalendarSyncCoordinator is not null)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            await _externalCalendarSyncCoordinator.SyncTaskForConnectedUsersAsync(
+                task.Id,
+                ExternalCalendarSyncCoordinator.YandexProvider,
+                cancellationToken);
+        }
+
+        return true;
+    }
+
+    private async Task UpsertYandexEventForTaskAsync(YandexCalendarConnection connection, TaskJournalItem task, CancellationToken cancellationToken)
+    {
+        var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
+        var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken);
+        var crmHash = BuildCrmHash(task);
+        var link = await _db.YandexCalendarTaskLinks
+            .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == task.Id, cancellationToken);
+
+        if (link is not null
+            && string.Equals(link.LastCrmHash, crmHash, StringComparison.Ordinal)
+            && string.Equals(link.SyncStatus, "active", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var eventId = link?.YandexEventId;
+        if (string.IsNullOrWhiteSpace(eventId) || link?.SyncStatus == "detached")
+        {
+            eventId = $"payplanner-task-{task.Id}-{GenerateToken(10)}";
+        }
+
+        var eventUrl = BuildEventUrl(calendar.CalendarUrl, eventId);
+        var ics = BuildIcsEvent(connection, task, eventId, crmHash);
+        var result = await PutYandexEventAsync(accessToken, eventUrl, ics, cancellationToken);
+        var created = link is null || link.SyncStatus == "detached" || string.IsNullOrWhiteSpace(link.YandexEventUrl);
+        if (link is null)
+        {
+            link = new YandexCalendarTaskLink
+            {
+                ConnectionId = connection.Id,
+                CalendarSyncCalendarId = calendar.Id,
+                TaskJournalItemId = task.Id,
+                YandexCalendarId = calendar.YandexCalendarId,
+                YandexEventId = eventId,
+                CreatedAt = DateTime.UtcNow,
+            };
+            _db.YandexCalendarTaskLinks.Add(link);
+        }
+
+        await AddLogAsync(
+            connection.Id,
+            calendar.Id,
+            task.Id,
+            "crm-to-yandex",
+            created ? "create-event" : "update-event",
+            "success",
+            created ? "Задача создана в Яндекс.Календаре." : "Задача обновлена в Яндекс.Календаре.",
+            null,
+            cancellationToken);
+
+        link.CalendarSyncCalendarId = calendar.Id;
+        link.YandexCalendarId = calendar.YandexCalendarId;
+        link.YandexEventId = eventId;
+        link.YandexEventUrl = eventUrl;
+        link.YandexEtag = result.Etag;
+        link.LastCrmHash = crmHash;
+        link.LastYandexHash = BuildYandexHashFromTask(task, eventId);
+        link.LastDirection = "crm-to-yandex";
+        link.SyncStatus = "active";
+        link.LastError = null;
+        link.LastSyncedAt = DateTime.UtcNow;
+        link.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private async Task<YandexCalendarSyncCalendar> EnsureCalendarForTaskAsync(
+        YandexCalendarConnection connection,
+        TaskJournalItem task,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var isAdmin = await IsAdminConnectionAsync(connection.UserId, cancellationToken);
+        var ownerUserId = isAdmin && connection.CalendarMode == "adminByAssignee" ? task.AssigneeUserId : null;
+        var name = ownerUserId.HasValue
+            ? $"PayPlanner - {NormalizeOptional(task.AssigneeName) ?? $"сотрудник #{ownerUserId.Value}"}"
+            : "PayPlanner задачи";
+
+        var calendar = connection.Calendars.FirstOrDefault(item => item.OwnerUserId == ownerUserId);
+        if (calendar is not null)
+        {
+            return calendar;
+        }
+
+        var created = await CreateYandexCalendarAsync(accessToken, connection, name, ownerUserId, cancellationToken);
+        calendar = new YandexCalendarSyncCalendar
+        {
+            ConnectionId = connection.Id,
+            OwnerUserId = ownerUserId,
+            YandexCalendarId = created.Id,
+            CalendarUrl = created.Url,
+            Name = name,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        connection.Calendars.Add(calendar);
+        _db.YandexCalendarSyncCalendars.Add(calendar);
+        connection.DefaultCalendarId ??= created.Id;
+        connection.DefaultCalendarName ??= name;
+        await _db.SaveChangesAsync(cancellationToken);
+        await AddLogAsync(connection.Id, calendar.Id, null, "system", "create-calendar", "success", $"В Яндекс.Календаре создан календарь «{name}».", null, cancellationToken);
+        return calendar;
+    }
+
+    private async Task<IReadOnlyList<TaskJournalItem>> LoadTasksForConnectionAsync(YandexCalendarConnection connection, CancellationToken cancellationToken)
+    {
+        var isAdmin = await IsAdminConnectionAsync(connection.UserId, cancellationToken);
+        var now = DateTime.UtcNow;
+        var from = now.AddDays(-30);
+        var to = now.AddDays(365);
+        var query = _db.TaskJournalItems
+            .Include(item => item.Participants)
+            .Where(item => item.DueAt >= from && item.DueAt <= to);
+
+        if (!isAdmin)
+        {
+            query = query.Where(item =>
+                item.AssigneeUserId == connection.UserId ||
+                item.Participants.Any(participant => participant.UserId == connection.UserId));
+        }
+
+        return await query
+            .OrderBy(item => item.DueAt)
+            .Take(500)
+            .ToListAsync(cancellationToken);
+    }
+
+    private IQueryable<YandexCalendarConnection> LoadConnectionQuery()
+        => _db.YandexCalendarConnections
+            .Include(item => item.User)
+            .ThenInclude(item => item.Role)
+            .Include(item => item.Calendars)
+            .ThenInclude(item => item.OwnerUser);
+
+    private async Task<YandexCalendarStatusDto> BuildStatusAsync(
+        int userId,
+        HttpRequest request,
+        YandexCalendarConnection? connection,
+        CancellationToken cancellationToken)
+    {
+        var logs = connection is null
+            ? []
+            : await _db.YandexCalendarSyncLogs
+                .AsNoTracking()
+                .Where(item => item.ConnectionId == connection.Id)
+                .OrderByDescending(item => item.CreatedAt)
+                .Take(20)
+                .Select(item => new YandexCalendarSyncLogDto
+                {
+                    Id = item.Id,
+                    TaskJournalItemId = item.TaskJournalItemId,
+                    Direction = item.Direction,
+                    Operation = item.Operation,
+                    Status = item.Status,
+                    Message = item.Message,
+                    CreatedAt = item.CreatedAt,
+                })
+                .ToListAsync(cancellationToken);
+
+        return new YandexCalendarStatusDto
+        {
+            YandexOAuthReady = (await ResolveYandexSettingsAsync(cancellationToken)).Ready,
+            CallbackUrl = BuildAbsoluteUrl(request, "/api/yandex-calendar/auth/callback"),
+            Connection = connection is null ? null : MapConnection(connection),
+            RecentLogs = logs,
+        };
+    }
+
+    private static YandexCalendarConnectionDto MapConnection(YandexCalendarConnection connection)
+        => new()
+        {
+            Id = connection.Id,
+            YandexEmail = connection.YandexEmail,
+            DisplayName = connection.DisplayName,
+            IsEnabled = connection.IsEnabled,
+            SyncEnabled = connection.SyncEnabled,
+            CalendarMode = connection.CalendarMode,
+            ConflictResolutionMode = connection.ConflictResolutionMode,
+            DefaultCalendarId = connection.DefaultCalendarId,
+            DefaultCalendarName = connection.DefaultCalendarName,
+            AccessTokenExpiresAt = connection.AccessTokenExpiresAt,
+            LastFullSyncAt = connection.LastFullSyncAt,
+            LastIncrementalSyncAt = connection.LastIncrementalSyncAt,
+            LastError = connection.LastError,
+            CreatedAt = connection.CreatedAt,
+            UpdatedAt = connection.UpdatedAt,
+            Calendars = connection.Calendars
+                .OrderBy(item => item.Name)
+                .Select(item => new YandexCalendarCalendarDto
+                {
+                    Id = item.Id,
+                    OwnerUserId = item.OwnerUserId,
+                    OwnerName = item.OwnerUser?.FullName,
+                    YandexCalendarId = item.YandexCalendarId,
+                    Name = item.Name,
+                    LastSyncedAt = item.LastSyncedAt,
+                    LastError = item.LastError,
+                })
+                .ToList(),
+        };
+
+    private async Task UpsertConnectionFromTokenAsync(
+        int userId,
+        YandexTokenResponse token,
+        YandexProfile profile,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var connection = await _db.YandexCalendarConnections.FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+        if (connection is null)
+        {
+            connection = new YandexCalendarConnection
+            {
+                UserId = userId,
+                CalendarMode = await IsAdminConnectionAsync(userId, cancellationToken) ? "adminByAssignee" : "personal",
+                ConflictResolutionMode = "latestWins",
+                CreatedAt = now,
+            };
+            _db.YandexCalendarConnections.Add(connection);
+        }
+
+        connection.YandexUserId = profile.Id;
+        connection.YandexEmail = profile.Email;
+        connection.DisplayName = profile.DisplayName;
+        connection.AccessTokenProtected = _tokenProtector.Protect(token.AccessToken);
+        if (!string.IsNullOrWhiteSpace(token.RefreshToken))
+        {
+            connection.RefreshTokenProtected = _tokenProtector.Protect(token.RefreshToken);
+        }
+        connection.AccessTokenExpiresAt = token.ExpiresInSeconds.HasValue ? now.AddSeconds(token.ExpiresInSeconds.Value) : now.AddHours(1);
+        connection.Scope = NormalizeOptional(token.Scope) ?? string.Empty;
+        connection.IsEnabled = true;
+        connection.SyncEnabled = true;
+        connection.LastError = null;
+        connection.UpdatedAt = now;
+
+        await AddLogAsync(connection.Id == 0 ? null : connection.Id, null, null, "system", "oauth-connected", "success", "Яндекс.Календарь подключён к профилю.", null, cancellationToken);
+    }
+
+    private async Task<string> ResolveAccessTokenAsync(YandexCalendarConnection connection, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(connection.AccessTokenProtected)
+            && connection.AccessTokenExpiresAt > DateTime.UtcNow.Add(AccessTokenRefreshSkew))
+        {
+            return _tokenProtector.Unprotect(connection.AccessTokenProtected);
+        }
+
+        if (string.IsNullOrWhiteSpace(connection.RefreshTokenProtected))
+        {
+            if (!string.IsNullOrWhiteSpace(connection.AccessTokenProtected))
+            {
+                return _tokenProtector.Unprotect(connection.AccessTokenProtected);
+            }
+
+            throw new InvalidOperationException("Нет OAuth-токена для Яндекс.Календаря. Подключите календарь заново.");
+        }
+
+        var settings = await ResolveYandexSettingsAsync(cancellationToken);
+        if (!settings.Ready)
+        {
+            throw new InvalidOperationException("Настройки Яндекс OAuth не заполнены или отключены.");
+        }
+
+        var refreshToken = _tokenProtector.Unprotect(connection.RefreshTokenProtected);
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.PostAsync(
+            YandexTokenEndpoint,
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = refreshToken,
+                ["client_id"] = settings.ClientId!,
+                ["client_secret"] = settings.ClientSecret!,
+            }),
+            cancellationToken);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Яндекс не обновил токен календаря.");
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        var accessToken = ReadString(document.RootElement, "access_token") ?? throw new InvalidOperationException("Яндекс не вернул access token.");
+        connection.AccessTokenProtected = _tokenProtector.Protect(accessToken);
+        connection.AccessTokenExpiresAt = DateTime.UtcNow.AddSeconds(ReadInt(document.RootElement, "expires_in") ?? 3600);
+        connection.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+        return accessToken;
+    }
+
+    private async Task<YandexTokenResponse> ExchangeCodeAsync(YandexSettings settings, string code, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.PostAsync(
+            YandexTokenEndpoint,
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["client_id"] = settings.ClientId!,
+                ["client_secret"] = settings.ClientSecret!,
+            }),
+            cancellationToken);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Яндекс не выдал токен календаря.");
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        return new YandexTokenResponse(
+            ReadString(document.RootElement, "access_token") ?? throw new InvalidOperationException("Яндекс не вернул access token."),
+            ReadString(document.RootElement, "refresh_token"),
+            ReadString(document.RootElement, "scope"),
+            ReadInt(document.RootElement, "expires_in"));
+    }
+
+    private async Task<YandexProfile> LoadYandexProfileAsync(string accessToken, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, YandexUserInfoEndpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("OAuth", accessToken);
+        using var response = await client.SendAsync(request, cancellationToken);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Яндекс не вернул профиль пользователя.");
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        var id = ReadString(document.RootElement, "id") ?? ReadString(document.RootElement, "client_id") ?? "yandex";
+        var defaultEmail = ReadString(document.RootElement, "default_email");
+        var login = ReadString(document.RootElement, "login");
+        return new YandexProfile(
+            id,
+            defaultEmail ?? (login is null ? null : $"{login}@yandex.ru"),
+            ReadString(document.RootElement, "real_name") ?? ReadString(document.RootElement, "display_name") ?? login);
+    }
+
+    private async Task<YandexCalendarCreateResult> CreateYandexCalendarAsync(
+        string accessToken,
+        YandexCalendarConnection connection,
+        string name,
+        int? ownerUserId,
+        CancellationToken cancellationToken)
+    {
+        var email = NormalizeOptional(connection.YandexEmail)
+            ?? throw new InvalidOperationException("Для Яндекс.Календаря не определён email пользователя.");
+        var slug = $"payplanner-{(ownerUserId.HasValue ? $"user-{ownerUserId.Value}" : "tasks")}";
+        var url = $"{CalDavBaseUrl}/calendars/{Uri.EscapeDataString(email)}/{slug}/";
+        var body = $"""
+<?xml version="1.0" encoding="utf-8" ?>
+<C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:set>
+    <D:prop>
+      <D:displayname>{WebUtility.HtmlEncode(name)}</D:displayname>
+      <C:calendar-description>{WebUtility.HtmlEncode("PayPlanner CRM")}</C:calendar-description>
+    </D:prop>
+  </D:set>
+</C:mkcalendar>
+""";
+
+        var request = BuildYandexRequest(new HttpMethod("MKCALENDAR"), url, accessToken, body, "application/xml; charset=utf-8");
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.SendAsync(request, cancellationToken);
+        if (response.StatusCode is not (HttpStatusCode.Created or HttpStatusCode.MethodNotAllowed))
+        {
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Яндекс.Календарь не создал календарь.");
+            }
+        }
+
+        return new YandexCalendarCreateResult(slug, url);
+    }
+
+    private async Task<bool> DeleteYandexCalendarAsync(string accessToken, string calendarUrl, CancellationToken cancellationToken)
+    {
+        using var request = BuildYandexRequest(HttpMethod.Delete, calendarUrl, accessToken);
+        return await SendYandexDeleteAsync(request, cancellationToken);
+    }
+
+    private async Task<YandexEventWriteResult> PutYandexEventAsync(string accessToken, string eventUrl, string ics, CancellationToken cancellationToken)
+    {
+        using var request = BuildYandexRequest(HttpMethod.Put, eventUrl, accessToken, ics, "text/calendar; charset=utf-8");
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.SendAsync(request, cancellationToken);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Яндекс.Календарь вернул ошибку при сохранении события.");
+        }
+
+        return new YandexEventWriteResult(response.Headers.ETag?.Tag);
+    }
+
+    private async Task<bool> DeleteYandexEventAsync(string accessToken, string eventUrl, CancellationToken cancellationToken)
+    {
+        using var request = BuildYandexRequest(HttpMethod.Delete, eventUrl, accessToken);
+        return await SendYandexDeleteAsync(request, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<YandexEventItem>> ListYandexEventsAsync(
+        string accessToken,
+        YandexCalendarSyncCalendar calendar,
+        CancellationToken cancellationToken)
+    {
+        var from = DateTime.UtcNow.AddDays(-30).ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
+        var to = DateTime.UtcNow.AddDays(365).ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
+        var body = $"""
+<?xml version="1.0" encoding="utf-8" ?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop>
+    <D:getetag />
+    <C:calendar-data />
+  </D:prop>
+  <C:filter>
+    <C:comp-filter name="VCALENDAR">
+      <C:comp-filter name="VEVENT">
+        <C:time-range start="{from}" end="{to}" />
+      </C:comp-filter>
+    </C:comp-filter>
+  </C:filter>
+</C:calendar-query>
+""";
+
+        using var request = BuildYandexRequest(new HttpMethod("REPORT"), calendar.CalendarUrl, accessToken, body, "application/xml; charset=utf-8");
+        request.Headers.Add("Depth", "1");
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.SendAsync(request, cancellationToken);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Яндекс.Календарь не вернул список событий.");
+        }
+
+        return ParseYandexEvents(payload, calendar.CalendarUrl);
+    }
+
+    private static HttpRequestMessage BuildYandexRequest(
+        HttpMethod method,
+        string url,
+        string accessToken,
+        string? body = null,
+        string mediaType = "application/xml; charset=utf-8")
+    {
+        var request = new HttpRequestMessage(method, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("OAuth", accessToken);
+        if (body is not null)
+        {
+            var contentType = mediaType.Split(';', 2)[0];
+            request.Content = new StringContent(body, Encoding.UTF8, contentType);
+        }
+        return request;
+    }
+
+    private async Task<bool> SendYandexDeleteAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.SendAsync(request, cancellationToken);
+        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
+        {
+            return false;
+        }
+
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Яндекс.Календарь вернул ошибку при удалении.");
+        }
+
+        return true;
+    }
+
+    private static IReadOnlyList<YandexEventItem> ParseYandexEvents(string xml, string fallbackCalendarUrl)
+    {
+        var result = new List<YandexEventItem>();
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return result;
+        }
+
+        var document = XDocument.Parse(xml);
+        XNamespace dav = "DAV:";
+        XNamespace caldav = "urn:ietf:params:xml:ns:caldav";
+        foreach (var response in document.Descendants(dav + "response"))
+        {
+            var href = NormalizeOptional(response.Element(dav + "href")?.Value);
+            var etag = NormalizeOptional(response.Descendants(dav + "getetag").FirstOrDefault()?.Value);
+            var data = NormalizeOptional(response.Descendants(caldav + "calendar-data").FirstOrDefault()?.Value);
+            if (data is null)
+            {
+                continue;
+            }
+
+            var properties = ParseIcsProperties(data);
+            var uid = properties.GetValueOrDefault("UID");
+            if (string.IsNullOrWhiteSpace(uid))
+            {
+                continue;
+            }
+
+            var eventUrl = href is null
+                ? BuildEventUrl(fallbackCalendarUrl, uid)
+                : href.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? href : $"{CalDavBaseUrl}{href}";
+            result.Add(new YandexEventItem(
+                uid,
+                eventUrl,
+                etag,
+                string.Equals(properties.GetValueOrDefault("STATUS"), "CANCELLED", StringComparison.OrdinalIgnoreCase),
+                properties.GetValueOrDefault("SUMMARY"),
+                ReadIcsDate(properties.GetValueOrDefault("DTSTART")),
+                ReadIcsDate(properties.GetValueOrDefault("DTEND")),
+                ReadPayPlannerTaskId(properties),
+                properties.GetValueOrDefault("X-PAYPLANNER-HASH")));
+        }
+
+        return result;
+    }
+
+    private static string BuildIcsEvent(YandexCalendarConnection connection, TaskJournalItem task, string eventId, string crmHash)
+    {
+        var start = EnsureUtc(task.DueAt);
+        var end = start.AddMinutes(Math.Max(15, task.PlannedDurationMinutes));
+        return string.Join("\r\n", [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//PayPlanner//CRM Calendar Sync//RU",
+            "CALSCALE:GREGORIAN",
+            "BEGIN:VEVENT",
+            $"UID:{EscapeIcs(eventId)}",
+            $"DTSTAMP:{DateTime.UtcNow:yyyyMMdd'T'HHmmss'Z'}",
+            $"DTSTART:{start:yyyyMMdd'T'HHmmss'Z'}",
+            $"DTEND:{end:yyyyMMdd'T'HHmmss'Z'}",
+            $"SUMMARY:{EscapeIcs($"[{StatusLabel(task.Status)}] {task.Title}")}",
+            $"DESCRIPTION:{EscapeIcs(BuildEventDescription(task))}",
+            $"X-PAYPLANNER-TASK-ID:{task.Id.ToString(CultureInfo.InvariantCulture)}",
+            $"X-PAYPLANNER-CONNECTION-ID:{connection.Id.ToString(CultureInfo.InvariantCulture)}",
+            $"X-PAYPLANNER-HASH:{crmHash}",
+            "END:VEVENT",
+            "END:VCALENDAR",
+            string.Empty,
+        ]);
+    }
+
+    private static string BuildEventUrl(string calendarUrl, string eventId)
+    {
+        var normalized = calendarUrl.EndsWith("/", StringComparison.Ordinal) ? calendarUrl : calendarUrl + "/";
+        var fileName = eventId.EndsWith(".ics", StringComparison.OrdinalIgnoreCase) ? eventId : eventId + ".ics";
+        return normalized + Uri.EscapeDataString(fileName);
+    }
+
+    private static Dictionary<string, string> ParseIcsProperties(string ics)
+    {
+        var properties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var unfolded = Regex.Replace(ics.Replace("\r\n", "\n").Replace('\r', '\n'), "\n[ \t]", string.Empty);
+        foreach (var line in unfolded.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = line.IndexOf(':');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            var name = line[..separator].Split(';', 2)[0].Trim();
+            var value = UnescapeIcs(line[(separator + 1)..].Trim());
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                properties[name] = value;
+            }
+        }
+
+        return properties;
+    }
+
+    private static DateTime? ReadIcsDate(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        return DateTime.TryParseExact(
+            raw.Trim(),
+            ["yyyyMMdd'T'HHmmss'Z'", "yyyyMMdd'T'HHmmss", "yyyyMMdd"],
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static int? ReadPayPlannerTaskId(IReadOnlyDictionary<string, string> properties)
+    {
+        if (properties.TryGetValue("X-PAYPLANNER-TASK-ID", out var raw)
+            && int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+        {
+            return id;
+        }
+
+        var description = properties.GetValueOrDefault("DESCRIPTION");
+        var match = description is null ? null : Regex.Match(description, @"PayPlanner Task #(?<id>\d+)", RegexOptions.IgnoreCase);
+        return match?.Success == true && int.TryParse(match.Groups["id"].Value, out id) ? id : null;
+    }
+
+    private static string BuildEventDescription(TaskJournalItem task)
+    {
+        var lines = new List<string>
+        {
+            $"PayPlanner Task #{task.Id}",
+            $"Объект: {task.ObjectName}",
+            $"Статус: {StatusLabel(task.Status)}",
+            $"Приоритет: {PriorityLabel(task.Priority)}",
+        };
+        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
+        {
+            lines.Add($"Исполнитель: {task.AssigneeName}");
+        }
+        if (!string.IsNullOrWhiteSpace(task.Description))
+        {
+            lines.Add(string.Empty);
+            lines.Add(task.Description.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(task.Result))
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Результат: {task.Result.Trim()}");
+        }
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildCrmHash(TaskJournalItem task)
+        => Sha256($"{task.Id}|{task.Title}|{task.Description}|{task.Result}|{task.Status}|{task.Priority}|{EnsureUtc(task.DueAt):O}|{task.PlannedDurationMinutes}|{task.AssigneeUserId}|{task.AssigneeName}");
+
+    private static string BuildYandexHash(YandexEventItem item)
+        => Sha256($"{item.Id}|{item.Summary}|{item.Deleted}|{item.StartAt:O}|{item.EndAt:O}|{item.PayPlannerHash}");
+
+    private static string BuildYandexHashFromTask(TaskJournalItem task, string eventId)
+        => Sha256($"{eventId}|[{StatusLabel(task.Status)}] {task.Title}|False|{EnsureUtc(task.DueAt):O}|{EnsureUtc(task.DueAt).AddMinutes(Math.Max(15, task.PlannedDurationMinutes)):O}|{BuildCrmHash(task)}");
+
+    private static string Sha256(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static DateTime EnsureUtc(DateTime value)
+    {
+        if (value.Kind == DateTimeKind.Utc)
+        {
+            return value;
+        }
+
+        return DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime();
+    }
+
+    private async Task AddLogAsync(
+        int? connectionId,
+        int? calendarId,
+        int? taskId,
+        string direction,
+        string operation,
+        string status,
+        string message,
+        string? details,
+        CancellationToken cancellationToken)
+    {
+        _db.YandexCalendarSyncLogs.Add(new YandexCalendarSyncLog
+        {
+            ConnectionId = connectionId,
+            CalendarSyncCalendarId = calendarId,
+            TaskJournalItemId = taskId,
+            Direction = direction,
+            Operation = operation,
+            Status = status,
+            Message = Trim(message, 1000),
+            DetailsJson = string.IsNullOrWhiteSpace(details) ? null : JsonSerializer.Serialize(new { detail = Trim(details, 4000) }, JsonOptions),
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        await Task.CompletedTask.WaitAsync(cancellationToken);
+    }
+
+    private async Task<bool> IsAdminConnectionAsync(int userId, CancellationToken cancellationToken)
+        => await _db.Users
+            .AsNoTracking()
+            .Where(item => item.Id == userId)
+            .Select(item => item.Role != null && item.Role.Name == "admin")
+            .FirstOrDefaultAsync(cancellationToken);
+
+    private static bool TaskBelongsToUser(TaskJournalItem task, int userId)
+        => task.AssigneeUserId == userId || task.Participants.Any(item => item.UserId == userId);
+
+    private async Task<YandexSettings> ResolveYandexSettingsAsync(CancellationToken cancellationToken)
+    {
+        var enabled = await GetBooleanSettingOrConfigAsync(YandexEnabledKey, "Auth:Yandex:Enabled", false, cancellationToken);
+        var clientId = await GetSettingOrConfigAsync(YandexClientIdKey, "Auth:Yandex:ClientId", cancellationToken);
+        var clientSecret = await GetSettingOrConfigAsync(YandexClientSecretKey, "Auth:Yandex:ClientSecret", cancellationToken);
+        var scopes = await GetSettingOrConfigAsync(YandexScopesKey, "Calendar:Yandex:Scopes", cancellationToken);
+        return new YandexSettings(enabled, clientId, clientSecret, scopes);
+    }
+
+    private async Task<string?> GetSettingOrConfigAsync(string key, string configPath, CancellationToken cancellationToken)
+    {
+        var setting = await _db.SystemSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Key == key, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(setting?.Value))
+        {
+            return setting.Value.Trim();
+        }
+
+        var value = _configuration[configPath];
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private async Task<bool> GetBooleanSettingOrConfigAsync(string key, string configPath, bool fallback, CancellationToken cancellationToken)
+    {
+        var raw = await GetSettingOrConfigAsync(key, configPath, cancellationToken);
+        return raw?.Trim().ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+            _ => fallback,
+        };
+    }
+
+    private static string BuildAbsoluteUrl(HttpRequest request, string relativePath)
+    {
+        var normalizedPath = relativePath.StartsWith("/", StringComparison.Ordinal) ? relativePath : "/" + relativePath;
+        var scheme = GetProxyHeaderValue(request, "X-Forwarded-Proto") ?? request.Scheme;
+        var host = GetProxyHeaderValue(request, "X-Forwarded-Host") ?? request.Host.Value;
+        var pathBase = ResolveExternalPathBase(request);
+        return $"{scheme}://{host}{pathBase}{normalizedPath}";
+    }
+
+    private static string ResolveExternalPathBase(HttpRequest request)
+    {
+        var requestPathBase = NormalizePathBase(request.PathBase.Value);
+        var forwardedPrefix = NormalizePathBase(GetProxyHeaderValue(request, "X-Forwarded-Prefix"));
+
+        if (string.IsNullOrWhiteSpace(forwardedPrefix))
+        {
+            return requestPathBase ?? string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(requestPathBase))
+        {
+            return forwardedPrefix;
+        }
+
+        return string.Equals(requestPathBase, forwardedPrefix, StringComparison.Ordinal)
+            ? requestPathBase
+            : $"{requestPathBase}{forwardedPrefix}";
+    }
+
+    private static string? GetProxyHeaderValue(HttpRequest request, string headerName)
+    {
+        if (!request.Headers.TryGetValue(headerName, out var values))
+        {
+            return null;
+        }
+
+        return values.ToString()
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+    }
+
+    private static string? NormalizePathBase(string? value)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized) || normalized == "/")
+        {
+            return null;
+        }
+
+        return normalized.StartsWith("/", StringComparison.Ordinal)
+            ? normalized.TrimEnd('/')
+            : "/" + normalized.TrimEnd('/');
+    }
+
+    private static string NormalizeReturnUrl(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "/";
+        }
+
+        if (normalized.Contains("://", StringComparison.Ordinal) || normalized.StartsWith("//", StringComparison.Ordinal))
+        {
+            return "/";
+        }
+
+        return normalized.StartsWith("/", StringComparison.Ordinal) ? normalized : "/" + normalized;
+    }
+
+    private static string BuildPopupHtml(bool success, string? message, string? redirectPath = null)
+    {
+        var title = success ? "Яндекс.Календарь подключён" : "Ошибка подключения Яндекс.Календаря";
+        var safeTitle = WebUtility.HtmlEncode(title);
+        var safeMessage = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(message) ? "Вернитесь в CRM." : message.Trim());
+        var redirectJson = JsonSerializer.Serialize(redirectPath ?? "/?ppTab=profile");
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{{safeTitle}}</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 24px; color: #111827; background: #f8fafc; }
+    .card { max-width: 420px; margin: 10vh auto; background: white; border-radius: 16px; padding: 24px; box-shadow: 0 12px 32px rgba(15,23,42,.08); }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    p { margin: 0; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>{{safeTitle}}</h1>
+    <p>{{safeMessage}}</p>
+  </div>
+  <script>
+    setTimeout(function () {
+      if (window.opener && !window.opener.closed) {
+        window.close();
+        return;
+      }
+      window.location.replace({{redirectJson}});
+    }, 1200);
+  </script>
+</body>
+</html>
+""";
+    }
+
+    private static string GenerateToken(int bytesLength)
+        => WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(bytesLength));
+
+    private static string NormalizeKnownValue(string? value, string fallback, IReadOnlyCollection<string> allowed)
+    {
+        var normalized = NormalizeOptional(value);
+        return normalized is not null && allowed.Contains(normalized, StringComparer.Ordinal) ? normalized : fallback;
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string Trim(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..maxLength];
+
+    private static string? ReadProviderError(string? responseBody, string? fallback)
+    {
+        if (!string.IsNullOrWhiteSpace(responseBody))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(responseBody);
+                return ReadString(document.RootElement, "error_description")
+                    ?? ReadString(document.RootElement, "error", "message")
+                    ?? ReadString(document.RootElement, "error")
+                    ?? ReadString(document.RootElement, "message")
+                    ?? NormalizeOptional(fallback);
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        return NormalizeOptional(fallback);
+    }
+
+    private static string? ReadString(JsonElement root, params string[] path)
+    {
+        if (!TryReadPath(root, out var value, path))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => NormalizeOptional(value.GetString()),
+            JsonValueKind.Number => value.GetRawText().Trim(),
+            JsonValueKind.True => bool.TrueString.ToLowerInvariant(),
+            JsonValueKind.False => bool.FalseString.ToLowerInvariant(),
+            _ => null,
+        };
+    }
+
+    private static int? ReadInt(JsonElement root, params string[] path)
+    {
+        if (!TryReadPath(root, out var value, path))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number when value.TryGetInt32(out var number) => number,
+            JsonValueKind.String when int.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => null,
+        };
+    }
+
+    private static bool TryReadPath(JsonElement root, out JsonElement value, params string[] path)
+    {
+        value = root;
+        foreach (var segment in path)
+        {
+            if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(segment, out value))
+            {
+                value = default;
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string EscapeIcs(string? value)
+        => (value ?? string.Empty)
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace(";", "\\;", StringComparison.Ordinal)
+            .Replace(",", "\\,", StringComparison.Ordinal)
+            .Replace("\r\n", "\\n", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
+
+    private static string UnescapeIcs(string value)
+        => value
+            .Replace("\\n", "\n", StringComparison.OrdinalIgnoreCase)
+            .Replace("\\,", ",", StringComparison.Ordinal)
+            .Replace("\\;", ";", StringComparison.Ordinal)
+            .Replace("\\\\", "\\", StringComparison.Ordinal);
+
+    private static string StatusLabel(string? status)
+        => status switch
+        {
+            "new" => "Новая",
+            "inProgress" or "in_progress" => "В работе",
+            "done" => "Готово",
+            "cancelled" => "Отменено",
+            "onApproval" or "awaiting_approval" => "На согласовании",
+            "approved" => "Согласовано",
+            "revision" => "На доработке",
+            _ => "Задача",
+        };
+
+    private static string PriorityLabel(string? priority)
+        => priority switch
+        {
+            "low" => "Низкий",
+            "high" => "Высокий",
+            "urgent" => "Срочно",
+            _ => "Обычный",
+        };
+
+    private static string? ResolveStatusFromSummary(string? summary)
+    {
+        var normalized = NormalizeOptional(summary);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        if (normalized.StartsWith("[Готово]", StringComparison.OrdinalIgnoreCase)) return "done";
+        if (normalized.StartsWith("[Отменено]", StringComparison.OrdinalIgnoreCase)) return "cancelled";
+        if (normalized.StartsWith("[В работе]", StringComparison.OrdinalIgnoreCase)) return "inProgress";
+        if (normalized.StartsWith("[Новая]", StringComparison.OrdinalIgnoreCase)) return "new";
+        if (normalized.StartsWith("[На согласовании]", StringComparison.OrdinalIgnoreCase)) return "onApproval";
+        if (normalized.StartsWith("[Согласовано]", StringComparison.OrdinalIgnoreCase)) return "approved";
+        if (normalized.StartsWith("[На доработке]", StringComparison.OrdinalIgnoreCase)) return "revision";
+        return null;
+    }
+
+    private static string? StripStatusPrefix(string? summary)
+    {
+        var normalized = NormalizeOptional(summary);
+        if (normalized is null || !normalized.StartsWith("[", StringComparison.Ordinal))
+        {
+            return normalized;
+        }
+
+        var closing = normalized.IndexOf(']', StringComparison.Ordinal);
+        if (closing < 0 || closing + 1 >= normalized.Length)
+        {
+            return normalized;
+        }
+
+        return NormalizeOptional(normalized[(closing + 1)..]);
+    }
+
+    private sealed record YandexSettings(bool Enabled, string? ClientId, string? ClientSecret, string? Scopes)
+    {
+        public bool Ready => Enabled && !string.IsNullOrWhiteSpace(ClientId) && !string.IsNullOrWhiteSpace(ClientSecret);
+    }
+
+    private sealed record YandexTokenResponse(string AccessToken, string? RefreshToken, string? Scope, int? ExpiresInSeconds);
+    private sealed record YandexProfile(string Id, string? Email, string? DisplayName);
+    private sealed record YandexCalendarCreateResult(string Id, string Url);
+    private sealed record YandexEventWriteResult(string? Etag);
+    private sealed record YandexEventItem(string Id, string EventUrl, string? Etag, bool Deleted, string? Summary, DateTime? StartAt, DateTime? EndAt, int? PayPlannerTaskId, string? PayPlannerHash);
+    private sealed record ConnectionSyncResult(int ProcessedTasks, int ImportedEvents, int ErrorCount);
+}

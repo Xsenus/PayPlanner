@@ -123,6 +123,12 @@ public class AppFeatureFlagsTests
         Assert.False(google.FeatureFlagEnabled);
         Assert.True(google.RequiresOAuth);
         Assert.Equal("disabled", google.Status);
+
+        var yandex = Assert.Single(providers, item => item.Key == "yandex-calendar");
+        Assert.False(yandex.IsAvailable);
+        Assert.False(yandex.FeatureFlagEnabled);
+        Assert.True(yandex.RequiresOAuth);
+        Assert.Equal("disabled", yandex.Status);
     }
 
     [Fact]

@@ -2103,6 +2103,153 @@ public class PaymentContext : DbContext
                 .HasDatabaseName("IX_GoogleCalendarSyncLogs_TaskJournalItemId");
         });
 
+        modelBuilder.Entity<YandexCalendarAuthRequest>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.State).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.ReturnUrl).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue("pending").IsRequired();
+            entity.Property(e => e.Error).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.State)
+                .IsUnique()
+                .HasDatabaseName("IX_YandexCalendarAuthRequests_State");
+            entity.HasIndex(e => new { e.UserId, e.Status })
+                .HasDatabaseName("IX_YandexCalendarAuthRequests_User_Status");
+        });
+
+        modelBuilder.Entity<YandexCalendarConnection>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.YandexUserId).HasMaxLength(128);
+            entity.Property(e => e.YandexEmail).HasMaxLength(320);
+            entity.Property(e => e.DisplayName).HasMaxLength(256);
+            entity.Property(e => e.Scope).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.IsEnabled).HasDefaultValue(true);
+            entity.Property(e => e.SyncEnabled).HasDefaultValue(true);
+            entity.Property(e => e.CalendarMode).HasMaxLength(32).HasDefaultValue("personal").IsRequired();
+            entity.Property(e => e.ConflictResolutionMode).HasMaxLength(32).HasDefaultValue("latestWins").IsRequired();
+            entity.Property(e => e.DefaultCalendarId).HasMaxLength(512);
+            entity.Property(e => e.DefaultCalendarName).HasMaxLength(256);
+            entity.Property(e => e.LastError).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.UserId)
+                .IsUnique()
+                .HasDatabaseName("IX_YandexCalendarConnections_UserId");
+            entity.HasIndex(e => e.YandexUserId)
+                .HasDatabaseName("IX_YandexCalendarConnections_YandexUserId");
+        });
+
+        modelBuilder.Entity<YandexCalendarSyncCalendar>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.YandexCalendarId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.CalendarUrl).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.LastError).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Connection)
+                .WithMany(e => e.Calendars)
+                .HasForeignKey(e => e.ConnectionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.OwnerUser)
+                .WithMany()
+                .HasForeignKey(e => e.OwnerUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => new { e.ConnectionId, e.OwnerUserId })
+                .HasDatabaseName("IX_YandexCalendarSyncCalendars_Connection_Owner");
+            entity.HasIndex(e => new { e.ConnectionId, e.YandexCalendarId })
+                .IsUnique()
+                .HasDatabaseName("IX_YandexCalendarSyncCalendars_Connection_YandexCalendar");
+        });
+
+        modelBuilder.Entity<YandexCalendarTaskLink>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.YandexCalendarId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.YandexEventId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.YandexEventUrl).HasMaxLength(1000);
+            entity.Property(e => e.YandexEtag).HasMaxLength(256);
+            entity.Property(e => e.LastCrmHash).HasMaxLength(128);
+            entity.Property(e => e.LastYandexHash).HasMaxLength(128);
+            entity.Property(e => e.LastDirection).HasMaxLength(32);
+            entity.Property(e => e.SyncStatus).HasMaxLength(32).HasDefaultValue("active").IsRequired();
+            entity.Property(e => e.LastError).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Connection)
+                .WithMany(e => e.TaskLinks)
+                .HasForeignKey(e => e.ConnectionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.CalendarSyncCalendar)
+                .WithMany(e => e.TaskLinks)
+                .HasForeignKey(e => e.CalendarSyncCalendarId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany()
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.ConnectionId, e.TaskJournalItemId })
+                .IsUnique()
+                .HasDatabaseName("IX_YandexCalendarTaskLinks_Connection_Task");
+            entity.HasIndex(e => new { e.YandexCalendarId, e.YandexEventId })
+                .HasDatabaseName("IX_YandexCalendarTaskLinks_YandexEvent");
+            entity.HasIndex(e => e.TaskJournalItemId)
+                .HasDatabaseName("IX_YandexCalendarTaskLinks_TaskJournalItemId");
+        });
+
+        modelBuilder.Entity<YandexCalendarSyncLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Direction).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Operation).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Message).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.DetailsJson).HasColumnType("text");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.Connection)
+                .WithMany()
+                .HasForeignKey(e => e.ConnectionId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.CalendarSyncCalendar)
+                .WithMany()
+                .HasForeignKey(e => e.CalendarSyncCalendarId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany()
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => new { e.ConnectionId, e.CreatedAt })
+                .HasDatabaseName("IX_YandexCalendarSyncLogs_Connection_CreatedAt");
+            entity.HasIndex(e => e.TaskJournalItemId)
+                .HasDatabaseName("IX_YandexCalendarSyncLogs_TaskJournalItemId");
+        });
+
         modelBuilder.Entity<TelegramAuthRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -3247,6 +3394,11 @@ public class PaymentContext : DbContext
     public DbSet<GoogleCalendarSyncCalendar> GoogleCalendarSyncCalendars { get; set; }
     public DbSet<GoogleCalendarTaskLink> GoogleCalendarTaskLinks { get; set; }
     public DbSet<GoogleCalendarSyncLog> GoogleCalendarSyncLogs { get; set; }
+    public DbSet<YandexCalendarAuthRequest> YandexCalendarAuthRequests { get; set; }
+    public DbSet<YandexCalendarConnection> YandexCalendarConnections { get; set; }
+    public DbSet<YandexCalendarSyncCalendar> YandexCalendarSyncCalendars { get; set; }
+    public DbSet<YandexCalendarTaskLink> YandexCalendarTaskLinks { get; set; }
+    public DbSet<YandexCalendarSyncLog> YandexCalendarSyncLogs { get; set; }
 
     /// <summary>
     /// Пользователи системы.

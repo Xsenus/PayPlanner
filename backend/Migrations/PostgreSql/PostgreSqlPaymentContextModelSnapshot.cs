@@ -7403,6 +7403,371 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("UserSettings");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarAuthRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ReturnUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("pending");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("State")
+                        .IsUnique()
+                        .HasDatabaseName("IX_YandexCalendarAuthRequests_State");
+
+                    b.HasIndex("UserId", "Status")
+                        .HasDatabaseName("IX_YandexCalendarAuthRequests_User_Status");
+
+                    b.ToTable("YandexCalendarAuthRequests");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarConnection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AccessTokenExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("AccessTokenProtected")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CalendarMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("personal");
+
+                    b.Property<string>("ConflictResolutionMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("latestWins");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DefaultCalendarId")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("DefaultCalendarName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("IsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("LastFullSyncAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("LastIncrementalSyncAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("RefreshTokenProtected")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("SyncEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("YandexEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("YandexUserId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_YandexCalendarConnections_UserId");
+
+                    b.HasIndex("YandexUserId")
+                        .HasDatabaseName("IX_YandexCalendarConnections_YandexUserId");
+
+                    b.ToTable("YandexCalendarConnections");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarSyncCalendar", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CalendarUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int>("ConnectionId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("LastSyncedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("OwnerUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SyncToken")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("YandexCalendarId")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.HasIndex("ConnectionId", "OwnerUserId")
+                        .HasDatabaseName("IX_YandexCalendarSyncCalendars_Connection_Owner");
+
+                    b.HasIndex("ConnectionId", "YandexCalendarId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_YandexCalendarSyncCalendars_Connection_YandexCalendar");
+
+                    b.ToTable("YandexCalendarSyncCalendars");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarSyncLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CalendarSyncCalendarId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ConnectionId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DetailsJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int?>("TaskJournalItemId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CalendarSyncCalendarId");
+
+                    b.HasIndex("TaskJournalItemId")
+                        .HasDatabaseName("IX_YandexCalendarSyncLogs_TaskJournalItemId");
+
+                    b.HasIndex("ConnectionId", "CreatedAt")
+                        .HasDatabaseName("IX_YandexCalendarSyncLogs_Connection_CreatedAt");
+
+                    b.ToTable("YandexCalendarSyncLogs");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarTaskLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CalendarSyncCalendarId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ConnectionId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("LastCrmHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("LastDirection")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("LastSyncedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("LastYandexHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("SyncStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("active");
+
+                    b.Property<int>("TaskJournalItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("YandexCalendarId")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("YandexEtag")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("YandexEventId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("YandexEventUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CalendarSyncCalendarId");
+
+                    b.HasIndex("TaskJournalItemId")
+                        .HasDatabaseName("IX_YandexCalendarTaskLinks_TaskJournalItemId");
+
+                    b.HasIndex("ConnectionId", "TaskJournalItemId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_YandexCalendarTaskLinks_Connection_Task");
+
+                    b.HasIndex("YandexCalendarId", "YandexEventId")
+                        .HasDatabaseName("IX_YandexCalendarTaskLinks_YandexEvent");
+
+                    b.ToTable("YandexCalendarTaskLinks");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.YandexDiskCrmSyncState", b =>
                 {
                     b.Property<int>("Id")
@@ -8651,6 +9016,97 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarAuthRequest", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarConnection", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarSyncCalendar", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.YandexCalendarConnection", "Connection")
+                        .WithMany("Calendars")
+                        .HasForeignKey("ConnectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Connection");
+
+                    b.Navigation("OwnerUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarSyncLog", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.YandexCalendarSyncCalendar", "CalendarSyncCalendar")
+                        .WithMany()
+                        .HasForeignKey("CalendarSyncCalendarId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.YandexCalendarConnection", "Connection")
+                        .WithMany()
+                        .HasForeignKey("ConnectionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("CalendarSyncCalendar");
+
+                    b.Navigation("Connection");
+
+                    b.Navigation("TaskJournalItem");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarTaskLink", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.YandexCalendarSyncCalendar", "CalendarSyncCalendar")
+                        .WithMany("TaskLinks")
+                        .HasForeignKey("CalendarSyncCalendarId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.YandexCalendarConnection", "Connection")
+                        .WithMany("TaskLinks")
+                        .HasForeignKey("ConnectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany()
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CalendarSyncCalendar");
+
+                    b.Navigation("Connection");
+
+                    b.Navigation("TaskJournalItem");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.Act", b =>
                 {
                     b.Navigation("LineItems");
@@ -8873,6 +9329,18 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("ExternalIdentities");
 
                     b.Navigation("InvoiceResponsibles");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarConnection", b =>
+                {
+                    b.Navigation("Calendars");
+
+                    b.Navigation("TaskLinks");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.YandexCalendarSyncCalendar", b =>
+                {
+                    b.Navigation("TaskLinks");
                 });
 #pragma warning restore 612, 618
         }

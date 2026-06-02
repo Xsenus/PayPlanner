@@ -22,7 +22,7 @@ public partial class AuthService
     private readonly PaymentContext _context;
     private readonly IEmailService _emailService;
     private readonly IWebHostEnvironment _environment;
-    private readonly IGoogleCalendarSyncService? _googleCalendarSyncService;
+    private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
     private readonly INotificationService? _notificationService;
     private readonly IPasswordHasher<User> _passwordHasher;
     private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
@@ -35,7 +35,7 @@ public partial class AuthService
         IWebHostEnvironment environment,
         IPasswordHasher<User> passwordHasher,
         INotificationService? notificationService = null,
-        IGoogleCalendarSyncService? googleCalendarSyncService = null)
+        IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator = null)
     {
         _context = context;
         _configuration = configuration;
@@ -43,7 +43,7 @@ public partial class AuthService
         _environment = environment;
         _passwordHasher = passwordHasher;
         _notificationService = notificationService;
-        _googleCalendarSyncService = googleCalendarSyncService;
+        _externalCalendarSyncCoordinator = externalCalendarSyncCoordinator;
     }
 
     private static string NormalizeEmail(string email)
@@ -389,9 +389,9 @@ public partial class AuthService
             await _emailService.SendRegistrationRejectedEmailAsync(user.Email, user.FullName, reason);
         }
 
-        if (_googleCalendarSyncService is not null)
+        if (_externalCalendarSyncCoordinator is not null)
         {
-            await _googleCalendarSyncService.CleanupDeletedUserAsync(userId, actorUserId);
+            await _externalCalendarSyncCoordinator.CleanupDeletedUserAsync(userId, actorUserId);
         }
 
         _context.Users.Remove(user);
@@ -560,9 +560,9 @@ public partial class AuthService
             throw new InvalidOperationException("UserInUseAsResponsible");
         }
 
-        if (_googleCalendarSyncService is not null)
+        if (_externalCalendarSyncCoordinator is not null)
         {
-            await _googleCalendarSyncService.CleanupDeletedUserAsync(id, actorUserId);
+            await _externalCalendarSyncCoordinator.CleanupDeletedUserAsync(id, actorUserId);
         }
 
         _context.Users.Remove(user);

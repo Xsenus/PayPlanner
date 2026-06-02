@@ -287,6 +287,81 @@ export interface GoogleCalendarSyncNowResultDto {
   status: GoogleCalendarStatusDto;
 }
 
+export interface YandexCalendarStartAuthResponseDto {
+  state: string;
+  authUrl: string;
+  pollIntervalMs: number;
+}
+
+export interface YandexCalendarAuthStatusDto {
+  state: string;
+  status: string;
+  completed: boolean;
+  detail?: string | null;
+  returnUrl?: string | null;
+}
+
+export interface YandexCalendarCalendarDto {
+  id: number;
+  ownerUserId?: number | null;
+  ownerName?: string | null;
+  yandexCalendarId: string;
+  name: string;
+  lastSyncedAt?: string | null;
+  lastError?: string | null;
+}
+
+export interface YandexCalendarConnectionDto {
+  id: number;
+  yandexEmail?: string | null;
+  displayName?: string | null;
+  isEnabled: boolean;
+  syncEnabled: boolean;
+  calendarMode: string;
+  conflictResolutionMode: string;
+  defaultCalendarId?: string | null;
+  defaultCalendarName?: string | null;
+  accessTokenExpiresAt?: string | null;
+  lastFullSyncAt?: string | null;
+  lastIncrementalSyncAt?: string | null;
+  lastError?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  calendars: YandexCalendarCalendarDto[];
+}
+
+export interface YandexCalendarSyncLogDto {
+  id: number;
+  taskJournalItemId?: number | null;
+  direction: string;
+  operation: string;
+  status: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface YandexCalendarStatusDto {
+  yandexOAuthReady: boolean;
+  callbackUrl: string;
+  connection?: YandexCalendarConnectionDto | null;
+  recentLogs: YandexCalendarSyncLogDto[];
+}
+
+export interface UpdateYandexCalendarSettingsRequest {
+  isEnabled?: boolean;
+  syncEnabled?: boolean;
+  calendarMode?: string;
+  conflictResolutionMode?: string;
+}
+
+export interface YandexCalendarSyncNowResultDto {
+  processedTasks: number;
+  importedEvents: number;
+  errorCount: number;
+  message: string;
+  status: YandexCalendarStatusDto;
+}
+
 export interface YandexDiskSettingsDto {
   isConfigured: boolean;
   rootPath: string;
@@ -1778,6 +1853,40 @@ export class ApiService {
 
   async disconnectGoogleCalendar() {
     return this.request<GoogleCalendarStatusDto>('/google-calendar/connection', {
+      method: 'DELETE',
+    });
+  }
+
+  async getYandexCalendarStatus() {
+    return this.request<YandexCalendarStatusDto>('/yandex-calendar/status');
+  }
+
+  async startYandexCalendarAuth(returnUrl = '/?ppTab=profile') {
+    return this.request<YandexCalendarStartAuthResponseDto>('/yandex-calendar/auth/start', {
+      method: 'POST',
+      body: JSON.stringify({ returnUrl }),
+    });
+  }
+
+  async getYandexCalendarAuthStatus(state: string) {
+    return this.request<YandexCalendarAuthStatusDto>(`/yandex-calendar/auth/status/${encodeURIComponent(state)}`);
+  }
+
+  async updateYandexCalendarSettings(payload: UpdateYandexCalendarSettingsRequest) {
+    return this.request<YandexCalendarStatusDto>('/yandex-calendar/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async syncYandexCalendarNow() {
+    return this.request<YandexCalendarSyncNowResultDto>('/yandex-calendar/sync-now', {
+      method: 'POST',
+    });
+  }
+
+  async disconnectYandexCalendar() {
+    return this.request<YandexCalendarStatusDto>('/yandex-calendar/connection', {
       method: 'DELETE',
     });
   }

@@ -278,6 +278,81 @@ describe('apiService auth handling', () => {
     expect(init?.method).toBe('POST');
   });
 
+  it('loads Yandex Calendar status from the backend', async () => {
+    const payload = {
+      yandexOAuthReady: true,
+      callbackUrl: 'https://crm.example.com/api/yandex-calendar/auth/callback',
+      connection: {
+        id: 1,
+        yandexEmail: 'user@yandex.ru',
+        isEnabled: true,
+        syncEnabled: true,
+        calendarMode: 'personal',
+        conflictResolutionMode: 'latestWins',
+        createdAt: '2026-06-02T10:00:00Z',
+        updatedAt: '2026-06-02T10:00:00Z',
+        calendars: [],
+      },
+      recentLogs: [],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getYandexCalendarStatus();
+
+    expect(result).toEqual(payload);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-calendar/status');
+  });
+
+  it('starts Yandex Calendar OAuth flow', async () => {
+    const payload = {
+      state: 'state-1',
+      authUrl: 'https://oauth.yandex.ru/authorize?state=state-1',
+      pollIntervalMs: 2000,
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.startYandexCalendarAuth('/?ppTab=profile');
+
+    expect(result).toEqual(payload);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-calendar/auth/start');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ returnUrl: '/?ppTab=profile' });
+  });
+
+  it('runs Yandex Calendar sync now', async () => {
+    const payload = {
+      processedTasks: 2,
+      importedEvents: 1,
+      errorCount: 0,
+      message: 'Синхронизация выполнена.',
+      status: {
+        yandexOAuthReady: true,
+        callbackUrl: 'https://crm.example.com/api/yandex-calendar/auth/callback',
+        connection: null,
+        recentLogs: [],
+      },
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.syncYandexCalendarNow();
+
+    expect(result).toEqual(payload);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/yandex-calendar/sync-now');
+    expect(init?.method).toBe('POST');
+  });
+
   it('loads Yandex Disk settings from the backend', async () => {
     const payload = {
       isConfigured: true,

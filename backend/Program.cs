@@ -118,7 +118,9 @@ builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityE
 builder.Services.AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService>();
 builder.Services.AddHttpClient<IYandexDiskService, YandexDiskService>();
 builder.Services.AddHttpClient();
+builder.Services.AddScoped<IExternalCalendarSyncCoordinator, ExternalCalendarSyncCoordinator>();
 builder.Services.AddScoped<IGoogleCalendarSyncService, GoogleCalendarSyncService>();
+builder.Services.AddScoped<IYandexCalendarSyncService, YandexCalendarSyncService>();
 builder.Services.AddSingleton<IS3StorageClientFactory, S3StorageClientFactory>();
 builder.Services.AddScoped<IS3StorageService, S3StorageService>();
 builder.Services.AddScoped<ICourtSyncProvider, SudrfCourtSyncProvider>();
@@ -146,6 +148,8 @@ builder.Services.AddSingleton<CalendarSyncSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncSchedulerService>());
 builder.Services.AddSingleton<GoogleCalendarBackgroundSyncService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GoogleCalendarBackgroundSyncService>());
+builder.Services.AddSingleton<YandexCalendarBackgroundSyncService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<YandexCalendarBackgroundSyncService>());
 builder.Services.AddSingleton<TaskJournalAutomationSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskJournalAutomationSchedulerService>());
 builder.Services.AddHostedService<TelegramBotPollingService>();

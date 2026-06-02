@@ -23,6 +23,7 @@ import {
 } from '../../utils/taskNotificationDefaults';
 import { ProfilePhotoCropModal } from './ProfilePhotoCropModal';
 import { GoogleCalendarPanel } from './GoogleCalendarPanel';
+import { YandexCalendarPanel } from './YandexCalendarPanel';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { TaskNotificationDefaultsPanel } from '../Tasks/TaskNotificationDefaultsPanel';
 
@@ -784,6 +785,7 @@ export function ProfilePage() {
             </div>
 
             <GoogleCalendarPanel isAdmin={profile?.role?.name === 'admin'} />
+            <YandexCalendarPanel isAdmin={profile?.role?.name === 'admin'} />
 
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-center gap-3">

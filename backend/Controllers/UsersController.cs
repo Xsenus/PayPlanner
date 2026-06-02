@@ -74,11 +74,14 @@ public class UsersController : ControllerBase
         {
             return Conflict(new { message = "Системного администратора нельзя удалить." });
         }
-        catch (InvalidOperationException ex) when (ex.Message.StartsWith("GoogleCalendarCleanupFailed", StringComparison.Ordinal))
+        catch (InvalidOperationException ex) when (
+            ex.Message.StartsWith("ExternalCalendarCleanupFailed", StringComparison.Ordinal)
+            || ex.Message.StartsWith("GoogleCalendarCleanupFailed", StringComparison.Ordinal)
+            || ex.Message.StartsWith("YandexCalendarCleanupFailed", StringComparison.Ordinal))
         {
             return Conflict(new
             {
-                message = "Не удалось удалить календарь PayPlanner из Google Calendar. Пользователь не удален, повторите операцию после проверки подключения Google.",
+                message = "Не удалось удалить календарь PayPlanner из внешнего календаря. Пользователь не удален, повторите операцию после проверки подключений календарей.",
                 detail = ex.Message
             });
         }
@@ -123,11 +126,14 @@ public class UsersController : ControllerBase
         {
             return Conflict(new { message = "Системного администратора нельзя отклонить или удалить." });
         }
-        catch (InvalidOperationException ex) when (ex.Message.StartsWith("GoogleCalendarCleanupFailed", StringComparison.Ordinal))
+        catch (InvalidOperationException ex) when (
+            ex.Message.StartsWith("ExternalCalendarCleanupFailed", StringComparison.Ordinal)
+            || ex.Message.StartsWith("GoogleCalendarCleanupFailed", StringComparison.Ordinal)
+            || ex.Message.StartsWith("YandexCalendarCleanupFailed", StringComparison.Ordinal))
         {
             return Conflict(new
             {
-                message = "Не удалось удалить календарь PayPlanner из Google Calendar. Пользователь не отклонен, повторите операцию после проверки подключения Google.",
+                message = "Не удалось удалить календарь PayPlanner из внешнего календаря. Пользователь не отклонен, повторите операцию после проверки подключений календарей.",
                 detail = ex.Message
             });
         }

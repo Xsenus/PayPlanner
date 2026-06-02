@@ -35,6 +35,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IDataProtector _tokenProtector;
+    private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
     private readonly ILogger<GoogleCalendarSyncService> _logger;
 
     public GoogleCalendarSyncService(
@@ -43,11 +44,23 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         IHttpClientFactory httpClientFactory,
         IDataProtectionProvider dataProtectionProvider,
         ILogger<GoogleCalendarSyncService> logger)
+        : this(db, configuration, httpClientFactory, dataProtectionProvider, null, logger)
+    {
+    }
+
+    public GoogleCalendarSyncService(
+        PaymentContext db,
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory,
+        IDataProtectionProvider dataProtectionProvider,
+        IExternalCalendarSyncCoordinator? externalCalendarSyncCoordinator,
+        ILogger<GoogleCalendarSyncService> logger)
     {
         _db = db;
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
         _tokenProtector = dataProtectionProvider.CreateProtector("PayPlanner.GoogleCalendar.Tokens.v1");
+        _externalCalendarSyncCoordinator = externalCalendarSyncCoordinator;
         _logger = logger;
     }
 
@@ -760,6 +773,15 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         link.LastSyncedAt = DateTime.UtcNow;
         link.UpdatedAt = DateTime.UtcNow;
         await AddLogAsync(connection.Id, calendar.Id, task.Id, "google-to-crm", "update-task", "success", "Изменения из Google Calendar применены к задаче.", null, cancellationToken);
+        if (_externalCalendarSyncCoordinator is not null)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            await _externalCalendarSyncCoordinator.SyncTaskForConnectedUsersAsync(
+                task.Id,
+                ExternalCalendarSyncCoordinator.GoogleProvider,
+                cancellationToken);
+        }
+
         return true;
     }
 
