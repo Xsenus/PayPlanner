@@ -23,6 +23,43 @@ public class YandexCalendarSyncServiceTests
         DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "pp-yandex-calendar-tests")));
 
     [Fact]
+    public async Task StartAuthAsync_WhenProviderDisabledRejectsConnection()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "disabled-yandex@example.com", "user");
+        var now = DateTime.UtcNow;
+        db.SystemSettings.AddRange(
+            new SystemSetting { Key = "auth.yandex.enabled", Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "auth.yandex.clientId", Value = "client-id", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "auth.yandex.clientSecret", Value = "client-secret", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting
+            {
+                Key = "calendarSync.settings",
+                Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+                {
+                    GoogleCalendarSyncEnabled = false,
+                    YandexCalendarSyncEnabled = false,
+                }),
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.StartAuthAsync(
+                user.Id,
+                new StartYandexCalendarAuthRequest { ReturnUrl = "/?ppTab=profile" },
+                CreateHttpRequest(user.Id),
+                CancellationToken.None));
+
+        Assert.Contains("Яндекс Календарь отключен администратором", error.Message);
+        var status = await service.GetStatusAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+        Assert.False(status.IsAvailable);
+        Assert.True(status.YandexOAuthReady);
+    }
+
+    [Fact]
     public async Task DisconnectAsync_RemovesExternalYandexCalendarsBeforeConnection()
     {
         await using var db = await CreateContextAsync();

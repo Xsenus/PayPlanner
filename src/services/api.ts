@@ -310,6 +310,7 @@ export interface GoogleCalendarSyncLogDto {
 }
 
 export interface GoogleCalendarStatusDto {
+  isAvailable: boolean;
   googleOAuthReady: boolean;
   callbackUrl: string;
   connection?: GoogleCalendarConnectionDto | null;
@@ -387,6 +388,7 @@ export interface YandexCalendarSyncLogDto {
 }
 
 export interface YandexCalendarStatusDto {
+  isAvailable: boolean;
   yandexOAuthReady: boolean;
   callbackUrl: string;
   connection?: YandexCalendarConnectionDto | null;

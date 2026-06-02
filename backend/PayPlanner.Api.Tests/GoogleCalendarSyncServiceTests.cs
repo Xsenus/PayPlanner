@@ -72,6 +72,43 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task StartAuthAsync_WhenProviderDisabledRejectsConnection()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "disabled-google@example.com", "user");
+        var now = DateTime.UtcNow;
+        db.SystemSettings.AddRange(
+            new SystemSetting { Key = "auth.google.enabled", Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "auth.google.clientId", Value = "client-id", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "auth.google.clientSecret", Value = "client-secret", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting
+            {
+                Key = "calendarSync.settings",
+                Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+                {
+                    GoogleCalendarSyncEnabled = false,
+                    YandexCalendarSyncEnabled = false,
+                }),
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.StartAuthAsync(
+                user.Id,
+                new StartGoogleCalendarAuthRequest { ReturnUrl = "/?ppTab=profile" },
+                CreateHttpRequest(user.Id),
+                CancellationToken.None));
+
+        Assert.Contains("Google Calendar отключен администратором", error.Message);
+        var status = await service.GetStatusAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+        Assert.False(status.IsAvailable);
+        Assert.True(status.GoogleOAuthReady);
+    }
+
+    [Fact]
     public async Task SyncNowAsync_CreatesCalendarEventAndTaskLink()
     {
         await using var db = await CreateContextAsync();
@@ -429,7 +466,23 @@ public class GoogleCalendarSyncServiceTests
         db.SystemSettings.AddRange(
             new SystemSetting { Key = "auth.google.enabled", Value = "true", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = "auth.google.clientId", Value = "client-id", CreatedAt = now, UpdatedAt = now },
-            new SystemSetting { Key = "auth.google.clientSecret", Value = "client-secret", CreatedAt = now, UpdatedAt = now });
+            new SystemSetting { Key = "auth.google.clientSecret", Value = "client-secret", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting
+            {
+                Key = "calendarSync.settings",
+                Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+                {
+                    GoogleCalendarSyncEnabled = true,
+                    YandexCalendarSyncEnabled = false,
+                    SyncMode = "hybrid",
+                    ConflictResolutionMode = "latestWins",
+                    UserControlMode = "userManaged",
+                    InactiveUserAction = "cleanupExternalData",
+                    RequireManualConfirmation = true,
+                }),
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
         await db.SaveChangesAsync();
     }
 

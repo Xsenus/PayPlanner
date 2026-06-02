@@ -80,6 +80,11 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         CancellationToken cancellationToken = default)
     {
         var settings = await ResolveGoogleSettingsAsync(cancellationToken);
+        if (!await IsGoogleCalendarProviderEnabledAsync(cancellationToken))
+        {
+            throw new InvalidOperationException("Google Calendar отключен администратором.");
+        }
+
         if (!settings.Ready)
         {
             throw new InvalidOperationException("Настройки Google OAuth не заполнены или отключены.");
@@ -1049,9 +1054,13 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                 })
                 .ToListAsync(cancellationToken);
 
+        var oauthSettings = await ResolveGoogleSettingsAsync(cancellationToken);
+        var providerEnabled = await IsGoogleCalendarProviderEnabledAsync(cancellationToken);
+
         return new GoogleCalendarStatusDto
         {
-            GoogleOAuthReady = (await ResolveGoogleSettingsAsync(cancellationToken)).Ready,
+            IsAvailable = providerEnabled,
+            GoogleOAuthReady = oauthSettings.Ready,
             CallbackUrl = BuildAbsoluteUrl(request, "/api/google-calendar/auth/callback"),
             Connection = connection is null ? null : MapConnection(connection),
             RecentLogs = logs,
@@ -1602,6 +1611,12 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
 
         return CalendarSyncProviderRegistry.BuildDefaultSettings();
+    }
+
+    private async Task<bool> IsGoogleCalendarProviderEnabledAsync(CancellationToken cancellationToken)
+    {
+        var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
+        return settings.GoogleCalendarSyncEnabled == true;
     }
 
     private static void MarkGoogleLinkDeleted(GoogleCalendarTaskLink link)

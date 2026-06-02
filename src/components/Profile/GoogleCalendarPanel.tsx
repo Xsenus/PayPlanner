@@ -172,6 +172,10 @@ export function GoogleCalendarPanel({ isAdmin = false }: Props) {
     );
   }
 
+  if (status?.isAvailable === false) {
+    return null;
+  }
+
   const connection = status?.connection;
   const busy = connecting || saving || syncing || disconnecting;
 

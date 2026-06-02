@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, CalendarDays, CheckCircle2, HelpCircle, Power, RefreshCw, Save, ShieldCheck, X } from 'lucide-react';
+import { Activity, AlertTriangle, CalendarDays, CheckCircle2, ExternalLink, HelpCircle, Power, RefreshCw, Save, ShieldCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   apiService,
@@ -607,6 +607,12 @@ interface CalendarSettingHelpItem {
   key: CalendarSettingHelpKey;
   title: string;
   description: string;
+  steps?: string[];
+  links?: Array<{
+    label: string;
+    url: string;
+  }>;
+  note?: string;
 }
 
 function SettingHelpButton({
@@ -744,6 +750,37 @@ function CalendarSyncSettingHelpModal({
 
         <div className="max-h-[calc(90vh-82px)] overflow-y-auto px-5 py-4">
           <p className="text-sm leading-6 text-slate-700">{helpItem.description}</p>
+          {helpItem.steps?.length ? (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-sm font-semibold text-slate-900">Как настроить</div>
+              <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-700">
+                {helpItem.steps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+          {helpItem.links?.length ? (
+            <div className="mt-4 grid gap-2">
+              {helpItem.links.map((link) => (
+                <a
+                  key={link.url}
+                  href={link.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800 transition hover:bg-sky-100"
+                >
+                  <span>{link.label}</span>
+                  <ExternalLink className="h-4 w-4 shrink-0" />
+                </a>
+              ))}
+            </div>
+          ) : null}
+          {helpItem.note ? (
+            <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-900">
+              {helpItem.note}
+            </div>
+          ) : null}
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
             Изменения сохраняются только после нажатия кнопки «Сохранить». Если настройка влияет на внешний календарь, действие будет записано в журнал синхронизации.
           </div>
@@ -758,11 +795,38 @@ const calendarSettingsHelpItems: CalendarSettingHelpItem[] = [
     key: 'googleCalendarSyncEnabled',
     title: 'Включить Google Calendar',
     description: 'Разрешает подготовку и запуск синхронизации с Google Calendar. После включения нужно настроить OAuth Google и закрыть обязательные пункты готовности.',
+    steps: [
+      'В Google Cloud Console создайте или выберите проект для CRM.',
+      'Включите Google Calendar API для выбранного проекта.',
+      'Создайте OAuth Client ID типа Web application.',
+      'В Authorized redirect URIs добавьте callback URL из карточки Google Calendar в профиле пользователя.',
+      'Скопируйте Client ID и Client Secret в раздел «Ключи интеграций» → вкладка «Календари».',
+      'Если приложение находится в режиме тестирования, добавьте сотрудников в тестовые пользователи OAuth consent screen или переведите приложение в публикацию.',
+    ],
+    links: [
+      { label: 'Google Cloud Console: Credentials', url: 'https://console.cloud.google.com/apis/credentials' },
+      { label: 'Google Calendar API: авторизация и scopes', url: 'https://developers.google.com/calendar/api/auth' },
+      { label: 'Google Cloud: настройка OAuth consent screen', url: 'https://support.google.com/cloud/answer/10311615' },
+    ],
+    note: 'Redirect URI должен совпадать полностью: протокол, домен, путь и слеши. Если Google показывает redirect_uri_mismatch, проверьте именно это поле.',
   },
   {
     key: 'yandexCalendarSyncEnabled',
     title: 'Включить Яндекс Календарь',
     description: 'Разрешает подготовку и запуск синхронизации с Яндекс Календарем. Провайдер можно включить независимо от Google Calendar.',
+    steps: [
+      'В кабинете OAuth Яндекс ID создайте приложение или откройте уже созданное.',
+      'Добавьте redirect URI из карточки Яндекс Календаря в профиле пользователя.',
+      'Выдайте приложению права для работы с календарем через CalDAV/Яндекс Календарь.',
+      'Скопируйте Client ID и Client Secret в раздел «Ключи интеграций» → вкладка «Календари».',
+      'Проверьте чек-лист готовности и только после этого разрешайте пользователям подключать календарь.',
+    ],
+    links: [
+      { label: 'Яндекс OAuth: управление приложениями', url: 'https://oauth.yandex.ru/' },
+      { label: 'Документация Яндекс ID: OAuth cabinet', url: 'https://yandex.ru/dev/id/doc/ru/oauth-cabinet' },
+      { label: 'Документация Яндекс ID: Redirect URI и код авторизации', url: 'https://yandex.ru/dev/id/doc/ru/codes/code-url' },
+    ],
+    note: 'Если в Яндексе не указан redirect URI или не хватает прав календаря, подключение пользователя не завершится и ошибка попадет в журнал синхронизации.',
   },
   {
     key: 'syncMode',

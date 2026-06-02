@@ -18,6 +18,7 @@ public sealed class YandexCalendarAuthStatusDto
 
 public sealed class YandexCalendarStatusDto
 {
+    public bool IsAvailable { get; set; }
     public bool YandexOAuthReady { get; set; }
     public string CallbackUrl { get; set; } = string.Empty;
     public YandexCalendarConnectionDto? Connection { get; set; }

@@ -81,6 +81,11 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         CancellationToken cancellationToken = default)
     {
         var settings = await ResolveYandexSettingsAsync(cancellationToken);
+        if (!await IsYandexCalendarProviderEnabledAsync(cancellationToken))
+        {
+            throw new InvalidOperationException("Яндекс Календарь отключен администратором.");
+        }
+
         if (!settings.Ready)
         {
             throw new InvalidOperationException("Настройки Яндекс OAuth не заполнены или отключены.");
@@ -1006,9 +1011,13 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 })
                 .ToListAsync(cancellationToken);
 
+        var oauthSettings = await ResolveYandexSettingsAsync(cancellationToken);
+        var providerEnabled = await IsYandexCalendarProviderEnabledAsync(cancellationToken);
+
         return new YandexCalendarStatusDto
         {
-            YandexOAuthReady = (await ResolveYandexSettingsAsync(cancellationToken)).Ready,
+            IsAvailable = providerEnabled,
+            YandexOAuthReady = oauthSettings.Ready,
             CallbackUrl = BuildAbsoluteUrl(request, "/api/yandex-calendar/auth/callback"),
             Connection = connection is null ? null : MapConnection(connection),
             RecentLogs = logs,
@@ -1667,6 +1676,12 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
 
         return CalendarSyncProviderRegistry.BuildDefaultSettings();
+    }
+
+    private async Task<bool> IsYandexCalendarProviderEnabledAsync(CancellationToken cancellationToken)
+    {
+        var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
+        return settings.YandexCalendarSyncEnabled == true;
     }
 
     private static void MarkYandexLinkDeleted(YandexCalendarTaskLink link)

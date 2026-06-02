@@ -195,6 +195,17 @@ describe('CalendarSyncProviderSettings', () => {
     expect(screen.getByText('Определяет, что считать основным источником при обмене данными: CRM, внешний календарь или гибридную модель.')).toBeTruthy();
   });
 
+  it('opens Google Calendar setup instruction from provider help', async () => {
+    render(<CalendarSyncProviderSettings />);
+
+    await screen.findByText('Модель синхронизации и конфликты');
+    fireEvent.click(screen.getByRole('button', { name: 'Что делает настройка «Включить Google Calendar»' }));
+
+    expect(screen.getByText('Как настроить')).toBeTruthy();
+    expect(screen.getByText('Google Cloud Console: Credentials')).toBeTruthy();
+    expect(screen.getByText(/Redirect URI должен совпадать полностью/i)).toBeTruthy();
+  });
+
   it('loads another page of calendar sync logs', async () => {
     apiMock.getCalendarSyncLogs.mockImplementation(async ({ page, pageSize }) => ({
       items: [

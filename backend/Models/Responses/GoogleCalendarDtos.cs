@@ -18,6 +18,7 @@ public sealed class GoogleCalendarAuthStatusDto
 
 public sealed class GoogleCalendarStatusDto
 {
+    public bool IsAvailable { get; set; }
     public bool GoogleOAuthReady { get; set; }
     public string CallbackUrl { get; set; } = string.Empty;
     public GoogleCalendarConnectionDto? Connection { get; set; }
