@@ -183,6 +183,65 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task DisconnectAsync_RemovesExternalGoogleCalendarsBeforeConnection()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-disconnect@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var task = await CreateTaskAsync(db, user.Id, "Отключить Google Calendar");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-disconnect", "PayPlanner задачи");
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "event-disconnect",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var status = await service.DisconnectAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Null(status.Connection);
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-disconnect", StringComparison.Ordinal));
+        Assert.False(await db.GoogleCalendarConnections.AnyAsync(item => item.Id == connection.Id));
+        Assert.False(await db.GoogleCalendarSyncCalendars.AnyAsync(item => item.GoogleCalendarId == "calendar-disconnect"));
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
+            item.Operation == "delete-calendar" &&
+            item.Status == "success");
+    }
+
+    [Fact]
+    public async Task DisconnectAsync_WhenGoogleCleanupFails_KeepsConnection()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-disconnect-error@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-disconnect-error", "PayPlanner задачи");
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingGoogleHandler(HttpStatusCode.BadGateway)));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.DisconnectAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None));
+
+        Assert.Contains("Не удалось отключить Google Calendar", error.Message);
+        Assert.True(await db.GoogleCalendarConnections.AnyAsync(item => item.Id == connection.Id));
+        Assert.True(await db.GoogleCalendarSyncCalendars.AnyAsync(item => item.GoogleCalendarId == "calendar-disconnect-error"));
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
+            item.ConnectionId == connection.Id &&
+            item.Operation == "delete-calendar" &&
+            item.Status == "error");
+    }
+
+    [Fact]
     public async Task CleanupDeletedUserAsync_RemovesOwnAndAdminCalendars()
     {
         await using var db = await CreateContextAsync();

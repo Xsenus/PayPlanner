@@ -139,7 +139,14 @@ public sealed class GoogleCalendarController : ControllerBase
             return Unauthorized();
         }
 
-        return Ok(await _googleCalendarSyncService.DisconnectAsync(userId.Value, Request, ct));
+        try
+        {
+            return Ok(await _googleCalendarSyncService.DisconnectAsync(userId.Value, Request, ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(title: "GoogleCalendarDisconnectFailed", detail: ex.Message, statusCode: 409);
+        }
     }
 
     [AllowAnonymous]

@@ -253,6 +253,23 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
         if (connection is not null)
         {
+            var failures = new List<string>();
+            await CleanupConnectionCalendarsAsync(
+                connection,
+                connection.Calendars.ToList(),
+                removeConnectionAfterCleanup: false,
+                "Подключение Google Calendar отключается пользователем.",
+                failures,
+                cancellationToken);
+
+            if (failures.Count > 0)
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+                throw new InvalidOperationException(
+                    "Не удалось отключить Google Calendar: сначала нужно удалить созданные PayPlanner календари и события во внешнем календаре. "
+                    + string.Join("; ", failures));
+            }
+
             _db.GoogleCalendarConnections.Remove(connection);
             await _db.SaveChangesAsync(cancellationToken);
         }

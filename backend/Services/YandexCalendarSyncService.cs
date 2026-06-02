@@ -256,6 +256,22 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
         if (connection is not null)
         {
+            var failures = new List<string>();
+            await CleanupConnectionCalendarsAsync(
+                connection,
+                connection.Calendars.ToList(),
+                "Подключение Яндекс.Календаря отключается пользователем.",
+                failures,
+                cancellationToken);
+
+            if (failures.Count > 0)
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+                throw new InvalidOperationException(
+                    "Не удалось отключить Яндекс.Календарь: сначала нужно удалить созданные PayPlanner календари и события во внешнем календаре. "
+                    + string.Join("; ", failures));
+            }
+
             _db.YandexCalendarConnections.Remove(connection);
             await _db.SaveChangesAsync(cancellationToken);
         }

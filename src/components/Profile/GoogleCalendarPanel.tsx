@@ -138,7 +138,7 @@ export function GoogleCalendarPanel({ isAdmin = false }: Props) {
   const handleDisconnect = async () => {
     const approved = await confirm({
       title: 'Отключить Google Calendar?',
-      description: 'Связь с календарём будет удалена из CRM. Уже созданные события в Google не удаляются автоматически.',
+      description: 'CRM сначала удалит созданные PayPlanner календари и события в Google Calendar. Если очистка не пройдёт, подключение останется активным.',
       confirmLabel: 'Отключить',
       cancelLabel: 'Отмена',
       variant: 'danger',

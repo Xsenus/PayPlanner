@@ -139,6 +139,13 @@ public sealed class YandexCalendarController : ControllerBase
             return Unauthorized();
         }
 
-        return Ok(await _yandexCalendarSyncService.DisconnectAsync(userId.Value, Request, ct));
+        try
+        {
+            return Ok(await _yandexCalendarSyncService.DisconnectAsync(userId.Value, Request, ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(title: "YandexCalendarDisconnectFailed", detail: ex.Message, statusCode: 409);
+        }
     }
 }

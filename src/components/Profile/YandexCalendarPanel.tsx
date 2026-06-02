@@ -139,7 +139,7 @@ export function YandexCalendarPanel({ isAdmin = false }: Props) {
   const handleDisconnect = async () => {
     const approved = await confirm({
       title: 'Отключить Яндекс.Календарь?',
-      description: 'Связь с календарем будет удалена из CRM. Уже созданные события в Яндекс.Календаре не удаляются автоматически.',
+      description: 'CRM сначала удалит созданные PayPlanner календари и события в Яндекс.Календаре. Если очистка не пройдёт, подключение останется активным.',
       confirmLabel: 'Отключить',
       cancelLabel: 'Отмена',
       variant: 'danger',
