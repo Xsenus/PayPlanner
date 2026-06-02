@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, CalendarDays, CheckCircle2, Power, RefreshCw, Save, ShieldCheck } from 'lucide-react';
+import { Activity, AlertTriangle, CalendarDays, CheckCircle2, HelpCircle, Power, RefreshCw, Save, ShieldCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   apiService,
@@ -19,6 +19,7 @@ export function CalendarSyncProviderSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const availableCount = useMemo(
     () => providers.filter((provider) => provider.isAvailable).length,
@@ -166,7 +167,18 @@ export function CalendarSyncProviderSettings() {
         <div className="mt-5 rounded-2xl border border-gray-200 bg-white p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h5 className="text-sm font-semibold text-gray-900">Модель синхронизации и конфликты</h5>
+              <div className="flex flex-wrap items-center gap-2">
+                <h5 className="text-sm font-semibold text-gray-900">Модель синхронизации и конфликты</h5>
+                <button
+                  type="button"
+                  onClick={() => setHelpOpen(true)}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 transition hover:bg-sky-100"
+                  title="Пояснение по настройкам"
+                  aria-label="Пояснение по настройкам календарей"
+                >
+                  <HelpCircle className="h-4 w-4" />
+                </button>
+              </div>
               <p className="mt-1 text-xs leading-5 text-gray-600">
                 Эти настройки фиксируют правила перед подключением Google/Яндекс и обновляют чек-лист готовности.
               </p>
@@ -420,6 +432,7 @@ export function CalendarSyncProviderSettings() {
           <p className="mt-3 text-[11px] text-gray-500">Показано {logs.items.length} из {logs.total} событий.</p>
         ) : null}
       </div>
+      {helpOpen ? <CalendarSyncSettingsHelpModal onClose={() => setHelpOpen(false)} /> : null}
     </div>
   );
 }
@@ -486,6 +499,90 @@ function ProviderToggle({
     </label>
   );
 }
+
+function CalendarSyncSettingsHelpModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div>
+            <div className="inline-flex items-center gap-2 text-sm font-semibold text-sky-700">
+              <HelpCircle className="h-4 w-4" />
+              Пояснение
+            </div>
+            <h3 className="mt-1 text-lg font-semibold text-slate-900">Что делают настройки календарной синхронизации</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+            title="Закрыть"
+            aria-label="Закрыть пояснение"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="max-h-[calc(90vh-82px)] overflow-y-auto px-5 py-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            {calendarSettingsHelpItems.map((item) => (
+              <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-sm font-semibold text-slate-900">{item.title}</div>
+                <div className="mt-1 text-sm leading-6 text-slate-600">{item.description}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+            Если включен только один провайдер, второй не мешает подготовке. Например, можно сначала запустить Google Calendar, а Яндекс Календарь подключить позже.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const calendarSettingsHelpItems = [
+  {
+    title: 'Включить Google Calendar',
+    description: 'Разрешает подготовку и запуск синхронизации с Google Calendar. После включения нужно настроить OAuth Google и закрыть обязательные пункты готовности.',
+  },
+  {
+    title: 'Включить Яндекс Календарь',
+    description: 'Разрешает подготовку и запуск синхронизации с Яндекс Календарем. Провайдер можно включить независимо от Google Calendar.',
+  },
+  {
+    title: 'Главный источник событий',
+    description: 'Определяет, что считать основным источником при обмене данными: CRM, внешний календарь или гибридную модель.',
+  },
+  {
+    title: 'Правило спорных изменений',
+    description: 'Задает, что делать, если одно и то же событие изменили в CRM и во внешнем календаре: оставить CRM, принять календарь, взять последнее изменение или отправить на ручное подтверждение.',
+  },
+  {
+    title: 'Кто управляет',
+    description: 'В режиме пользователя сотрудник сам управляет своим календарем. В режиме администратора правила задаются централизованно и применяются к подключениям сотрудников.',
+  },
+  {
+    title: 'Дата начала по умолчанию',
+    description: 'Ограничивает, с какой даты задачи будут выгружаться во внешние календари. Очистка при отключении всё равно удаляет все ранее созданные CRM события.',
+  },
+  {
+    title: 'При потере доступа',
+    description: 'Определяет действие при блокировке, увольнении или удалении сотрудника: удалить внешние события, только отключить синхронизацию или оставить подключение без изменений.',
+  },
+  {
+    title: 'Ручное подтверждение',
+    description: 'Включает дополнительную защиту для конфликтов, чтобы спорные изменения не применялись автоматически без проверки ответственным пользователем.',
+  },
+  {
+    title: 'Dry-run на копии базы',
+    description: 'Отметка, что тестовый прогон на копии базы выполнен. Это часть чек-листа перед запуском фоновой синхронизации.',
+  },
+  {
+    title: 'Комментарий к решению',
+    description: 'Свободное поле для заметки администратора: кто согласовал модель, когда проверяли dry-run и какие ограничения приняли.',
+  },
+];
 
 function getProviderStatusLabel(status: string) {
   if (status === 'active') return 'Активен';

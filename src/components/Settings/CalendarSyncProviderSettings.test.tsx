@@ -175,6 +175,18 @@ describe('CalendarSyncProviderSettings', () => {
     expect(await screen.findByText('Настройки внешних календарей сохранены.')).toBeTruthy();
   });
 
+  it('opens calendar sync settings explanation modal', async () => {
+    render(<CalendarSyncProviderSettings />);
+
+    await screen.findByText('Модель синхронизации и конфликты');
+    fireEvent.click(screen.getByRole('button', { name: 'Пояснение по настройкам календарей' }));
+
+    expect(screen.getByText('Что делают настройки календарной синхронизации')).toBeTruthy();
+    expect(screen.getAllByText('Главный источник событий').length).toBeGreaterThan(1);
+    expect(screen.getAllByText('Дата начала по умолчанию').length).toBeGreaterThan(1);
+    expect(screen.getByText('Dry-run на копии базы')).toBeTruthy();
+  });
+
   it('shows a readable loading error', async () => {
     apiMock.getCalendarSyncProviders.mockRejectedValue(new Error('calendar api down'));
 

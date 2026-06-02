@@ -1,11 +1,15 @@
 using System;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using PayPlanner.Api.Data;
 
 #nullable disable
 
 namespace PayPlanner.Api.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(PaymentContext))]
+    [Migration("20260602053000_AddCalendarSyncFromDate")]
     public partial class AddCalendarSyncFromDate : Migration
     {
         /// <inheritdoc />
