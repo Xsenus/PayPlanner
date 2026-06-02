@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -173,6 +174,54 @@ public sealed class AppVersionControllerTests
     }
 
     [Fact]
+    public async Task CreateRelease_WhenVersionAlreadyExists_ReturnsConflict()
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "admin-duplicate-version@example.test");
+        var controller = CreateController(scope.Db, user.Id, Release("2026-05-21-existing", version: "1.13.10"));
+
+        var result = await controller.CreateRelease(new SaveAppReleaseRequest(
+            "2026-05-22-manual",
+            "1.13.10",
+            new DateTime(2026, 5, 22),
+            "Manual release",
+            "Created from settings",
+            true,
+            [new SaveAppReleaseItemRequest("new", "Manual item")]), CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Contains("Version '1.13.10' already exists.", conflict.Value?.ToString());
+    }
+
+    [Fact]
+    public async Task UpdateRelease_WhenVersionAlreadyExists_ReturnsConflict()
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "admin-update-duplicate-version@example.test");
+        var controller = CreateController(
+            scope.Db,
+            user.Id,
+            Release("2026-05-21-first", version: "1.13.10"),
+            Release("2026-05-22-second", version: "1.13.11"));
+        var releaseId = await scope.Db.AppReleases
+            .Where(release => release.ReleaseId == "2026-05-21-first")
+            .Select(release => release.Id)
+            .SingleAsync();
+
+        var result = await controller.UpdateRelease(releaseId, new SaveAppReleaseRequest(
+            "2026-05-21-first",
+            "1.13.11",
+            new DateTime(2026, 5, 21),
+            "Manual release",
+            "Created from settings",
+            true,
+            [new SaveAppReleaseItemRequest("new", "Manual item")]), CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Contains("Version '1.13.11' already exists.", conflict.Value?.ToString());
+    }
+
+    [Fact]
     public async Task DeleteRelease_RemovesReleaseItemsAndSeenMarks()
     {
         await using var scope = await CreateScopeAsync();
@@ -191,6 +240,130 @@ public sealed class AppVersionControllerTests
         Assert.False(await scope.Db.AppReleases.AnyAsync(item => item.Id == releaseId));
         Assert.False(await scope.Db.AppReleaseItems.AnyAsync(item => item.AppReleaseId == releaseId));
         Assert.False(await scope.Db.AppReleaseSeen.AnyAsync(item => item.AppReleaseId == releaseId));
+    }
+
+    [Fact]
+    public async Task SeedService_WhenReleaseFileHasDuplicateVersions_Throws()
+    {
+        await using var scope = await CreateScopeAsync();
+        var tempRoot = await CreateTempReleaseRootAsync(
+            """
+            [
+              {
+                "releaseId": "2026-05-22-first",
+                "version": "1.13.1",
+                "releasedAt": "2026-05-22T00:00:00",
+                "title": "First release",
+                "summary": "First",
+                "isActive": true,
+                "items": [
+                  { "type": "improved", "text": "First item" }
+                ]
+              },
+              {
+                "releaseId": "2026-05-23-second",
+                "version": "1.13.1",
+                "releasedAt": "2026-05-23T00:00:00",
+                "title": "Second release",
+                "summary": "Second",
+                "isActive": true,
+                "items": [
+                  { "type": "improved", "text": "Second item" }
+                ]
+              }
+            ]
+            """);
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() => AppReleaseSeedService.SyncAsync(scope.Db, tempRoot));
+            Assert.Contains("duplicate version '1.13.1'", exception.Message);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SeedService_WhenReleaseFileHasVersionGap_Throws()
+    {
+        await using var scope = await CreateScopeAsync();
+        var tempRoot = await CreateTempReleaseRootAsync(
+            """
+            [
+              {
+                "releaseId": "2026-05-22-first",
+                "version": "1.13.1",
+                "releasedAt": "2026-05-22T00:00:00",
+                "title": "First release",
+                "summary": "First",
+                "isActive": true,
+                "items": [
+                  { "type": "improved", "text": "First item" }
+                ]
+              },
+              {
+                "releaseId": "2026-05-23-second",
+                "version": "1.13.3",
+                "releasedAt": "2026-05-23T00:00:00",
+                "title": "Second release",
+                "summary": "Second",
+                "isActive": true,
+                "items": [
+                  { "type": "improved", "text": "Second item" }
+                ]
+              }
+            ]
+            """);
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() => AppReleaseSeedService.SyncAsync(scope.Db, tempRoot));
+            Assert.Contains("continuous by release date", exception.Message);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AgentReleaseFile_HasUniqueContinuousVersionsAndNewestFirst()
+    {
+        var releaseFilePath = FindReleaseFilePath();
+        using var document = JsonDocument.Parse(File.ReadAllText(releaseFilePath));
+        var releases = document.RootElement
+            .EnumerateArray()
+            .Select(item => new ReleaseFileEntry(
+                item.GetProperty("releaseId").GetString() ?? string.Empty,
+                ParseVersion(item.GetProperty("version").GetString() ?? string.Empty),
+                DateTime.Parse(item.GetProperty("releasedAt").GetString() ?? string.Empty)))
+            .ToArray();
+
+        var duplicateVersion = releases
+            .GroupBy(release => release.Version.ToString())
+            .FirstOrDefault(group => group.Count() > 1)
+            ?.Key;
+        Assert.Null(duplicateVersion);
+
+        for (var index = 1; index < releases.Length; index++)
+        {
+            Assert.True(
+                CompareReleaseFileEntries(releases[index - 1], releases[index]) >= 0,
+                $"Release file must be sorted newest first, but '{releases[index - 1].ReleaseId}' is before '{releases[index].ReleaseId}'.");
+        }
+
+        var ordered = releases
+            .OrderBy(release => release.ReleasedAt)
+            .ThenBy(release => release.Version)
+            .ToArray();
+        for (var index = 1; index < ordered.Length; index++)
+        {
+            Assert.True(
+                IsNextVersion(ordered[index - 1].Version, ordered[index].Version),
+                $"Expected version after '{ordered[index - 1].Version}' to be continuous, but found '{ordered[index].Version}' for '{ordered[index].ReleaseId}'.");
+        }
     }
 
     [Fact]
@@ -306,11 +479,11 @@ public sealed class AppVersionControllerTests
         return controller;
     }
 
-    private static AppRelease Release(string releaseId, DateTime? releasedAt = null)
+    private static AppRelease Release(string releaseId, DateTime? releasedAt = null, string version = "1.12.0")
         => new()
         {
             ReleaseId = releaseId,
-            Version = "1.12.0",
+            Version = version,
             ReleasedAt = releasedAt ?? new DateTime(2026, 5, 21),
             Title = "Test release",
             Summary = "Release summary",
@@ -320,6 +493,67 @@ public sealed class AppVersionControllerTests
                 new AppReleaseItem { Type = "new", Text = "New feature", SortOrder = 0 },
             ],
         };
+
+    private static async Task<string> CreateTempReleaseRootAsync(string releasesJson)
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"payplanner-releases-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(tempRoot, "AppReleases"));
+        await File.WriteAllTextAsync(Path.Combine(tempRoot, "AppReleases", "releases.json"), releasesJson);
+        return tempRoot;
+    }
+
+    private static string FindReleaseFilePath()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var path = Path.Combine(directory.FullName, "AppReleases", "releases.json");
+            if (File.Exists(path))
+            {
+                return path;
+            }
+
+            path = Path.Combine(directory.FullName, "backend", "AppReleases", "releases.json");
+            if (File.Exists(path))
+            {
+                return path;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException("Could not find backend/AppReleases/releases.json.");
+    }
+
+    private static System.Version ParseVersion(string value)
+    {
+        var version = new System.Version(value);
+        Assert.True(version.Build >= 0, $"Release version '{value}' must contain major, minor and patch parts.");
+        return version;
+    }
+
+    private static int CompareReleaseFileEntries(ReleaseFileEntry left, ReleaseFileEntry right)
+    {
+        var dateComparison = left.ReleasedAt.CompareTo(right.ReleasedAt);
+        return dateComparison != 0 ? dateComparison : left.Version.CompareTo(right.Version);
+    }
+
+    private static bool IsNextVersion(System.Version previous, System.Version current)
+    {
+        if (current.Major == previous.Major && current.Minor == previous.Minor)
+        {
+            return current.Build == previous.Build + 1;
+        }
+
+        if (current.Major == previous.Major && current.Minor == previous.Minor + 1)
+        {
+            return current.Build == 0;
+        }
+
+        return current.Major == previous.Major + 1 && current.Minor == 0 && current.Build == 0;
+    }
+
+    private sealed record ReleaseFileEntry(string ReleaseId, System.Version Version, DateTime ReleasedAt);
 
     private static async Task<User> CreateUserAsync(PaymentContext db, string email)
     {

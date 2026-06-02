@@ -30,10 +30,15 @@ public static class AppReleaseSeedService
 
         var json = await File.ReadAllTextAsync(path, ct);
         var releases = JsonSerializer.Deserialize<List<AppReleaseSeedDto>>(json, JsonOptions) ?? [];
+        ValidateSeedReleases(releases);
+
         var normalized = releases
-            .Where(release => !string.IsNullOrWhiteSpace(release.ReleaseId))
-            .GroupBy(release => release.ReleaseId.Trim(), StringComparer.Ordinal)
-            .Select(group => group.Last())
+            .Select(release =>
+            {
+                release.ReleaseId = release.ReleaseId.Trim();
+                release.Version = release.Version?.Trim();
+                return release;
+            })
             .ToArray();
         var seedReleaseIds = normalized
             .Select(release => release.ReleaseId.Trim())
@@ -103,6 +108,117 @@ public static class AppReleaseSeedService
         => !string.IsNullOrWhiteSpace(type) && AllowedItemTypes.Contains(type)
             ? type.Trim().ToLowerInvariant()
             : "improved";
+
+    private static void ValidateSeedReleases(IReadOnlyCollection<AppReleaseSeedDto> releases)
+    {
+        if (releases.Any(release => string.IsNullOrWhiteSpace(release.ReleaseId)))
+        {
+            throw new InvalidDataException("App release seed contains release without releaseId.");
+        }
+
+        var duplicateReleaseId = releases
+            .GroupBy(release => release.ReleaseId.Trim(), StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1)
+            ?.Key;
+        if (duplicateReleaseId is not null)
+        {
+            throw new InvalidDataException($"App release seed contains duplicate releaseId '{duplicateReleaseId}'.");
+        }
+
+        if (releases.Any(release => string.IsNullOrWhiteSpace(release.Version)))
+        {
+            throw new InvalidDataException("App release seed contains release without version.");
+        }
+
+        var duplicateVersion = releases
+            .GroupBy(release => release.Version!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1)
+            ?.Key;
+        if (duplicateVersion is not null)
+        {
+            throw new InvalidDataException($"App release seed contains duplicate version '{duplicateVersion}'.");
+        }
+
+        var ordered = releases
+            .Select(release =>
+            {
+                var version = ReleaseVersion.Parse(release.Version);
+                if (version is null)
+                {
+                    throw new InvalidDataException($"App release seed contains invalid version '{release.Version}'.");
+                }
+
+                return new SeedReleaseWithVersion(release, version.Value);
+            })
+            .OrderBy(item => item.Release.ReleasedAt)
+            .ThenBy(item => item.Version)
+            .ToArray();
+
+        for (var index = 1; index < ordered.Length; index++)
+        {
+            var previous = ordered[index - 1];
+            var current = ordered[index];
+            if (current.Version.CompareTo(previous.Version) <= 0)
+            {
+                throw new InvalidDataException(
+                    $"App release version '{current.Release.Version}' must be newer than '{previous.Release.Version}' because it is published later.");
+            }
+
+            if (!current.Version.IsNextAfter(previous.Version))
+            {
+                throw new InvalidDataException(
+                    $"App release versions must be continuous by release date. Expected next version after '{previous.Release.Version}', but found '{current.Release.Version}'.");
+            }
+        }
+    }
+
+    private readonly record struct SeedReleaseWithVersion(AppReleaseSeedDto Release, ReleaseVersion Version);
+
+    private readonly record struct ReleaseVersion(int Major, int Minor, int Patch) : IComparable<ReleaseVersion>
+    {
+        public int CompareTo(ReleaseVersion other)
+        {
+            var major = Major.CompareTo(other.Major);
+            if (major != 0) return major;
+
+            var minor = Minor.CompareTo(other.Minor);
+            if (minor != 0) return minor;
+
+            return Patch.CompareTo(other.Patch);
+        }
+
+        public bool IsNextAfter(ReleaseVersion previous)
+        {
+            if (Major == previous.Major && Minor == previous.Minor)
+            {
+                return Patch == previous.Patch + 1;
+            }
+
+            if (Major == previous.Major && Minor == previous.Minor + 1)
+            {
+                return Patch == 0;
+            }
+
+            return Major == previous.Major + 1 && Minor == 0 && Patch == 0;
+        }
+
+        public static ReleaseVersion? Parse(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+
+            var parts = value.Trim().Split('.');
+            if (parts.Length != 3) return null;
+
+            return int.TryParse(parts[0], out var major)
+                && int.TryParse(parts[1], out var minor)
+                && int.TryParse(parts[2], out var patch)
+                && major >= 0
+                && minor >= 0
+                && patch >= 0
+                    ? new ReleaseVersion(major, minor, patch)
+                    : null;
+        }
+    }
 
     private sealed class AppReleaseSeedDto
     {

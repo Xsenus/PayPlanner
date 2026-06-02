@@ -130,11 +130,15 @@ public sealed class AppVersionController : ControllerBase
         var exists = await _db.AppReleases.AnyAsync(item => item.ReleaseId == releaseId, ct);
         if (exists) return Conflict($"Release '{releaseId}' already exists.");
 
+        var version = request.Version.Trim();
+        var versionExists = await _db.AppReleases.AnyAsync(item => item.Version == version, ct);
+        if (versionExists) return Conflict($"Version '{version}' already exists.");
+
         var now = DateTime.UtcNow;
         var release = new AppRelease
         {
             ReleaseId = releaseId,
-            Version = request.Version.Trim(),
+            Version = version,
             ReleasedAt = request.ReleasedAt,
             Title = request.Title.Trim(),
             Summary = request.Summary?.Trim() ?? string.Empty,
@@ -171,8 +175,12 @@ public sealed class AppVersionController : ControllerBase
         var duplicate = await _db.AppReleases.AnyAsync(item => item.Id != id && item.ReleaseId == releaseId, ct);
         if (duplicate) return Conflict($"Release '{releaseId}' already exists.");
 
+        var version = request.Version.Trim();
+        var duplicateVersion = await _db.AppReleases.AnyAsync(item => item.Id != id && item.Version == version, ct);
+        if (duplicateVersion) return Conflict($"Version '{version}' already exists.");
+
         release.ReleaseId = releaseId;
-        release.Version = request.Version.Trim();
+        release.Version = version;
         release.ReleasedAt = request.ReleasedAt;
         release.Title = request.Title.Trim();
         release.Summary = request.Summary?.Trim() ?? string.Empty;
