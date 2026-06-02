@@ -117,7 +117,8 @@ builder.Services.Configure<DadataOptions>(builder.Configuration.GetSection("DaDa
 builder.Services.AddHttpClient<ILegalEntityEnrichmentService, DadataLegalEntityEnrichmentService>();
 builder.Services.AddHttpClient<ISudrfCourtSyncService, SudrfCourtSyncService>();
 builder.Services.AddHttpClient<IYandexDiskService, YandexDiskService>();
-builder.Services.AddHttpClient<IGoogleCalendarSyncService, GoogleCalendarSyncService>();
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<IGoogleCalendarSyncService, GoogleCalendarSyncService>();
 builder.Services.AddSingleton<IS3StorageClientFactory, S3StorageClientFactory>();
 builder.Services.AddScoped<IS3StorageService, S3StorageService>();
 builder.Services.AddScoped<ICourtSyncProvider, SudrfCourtSyncProvider>();

@@ -80,7 +80,7 @@ describe('SystemJobDiagnosticsSettings', () => {
     render(<SystemJobDiagnosticsSettings />);
 
     expect(await screen.findByText('Фоновые сервисы')).toBeTruthy();
-    expect(screen.getByText('Резервное копирование базы данных')).toBeTruthy();
+    expect(await screen.findByText('Резервное копирование базы данных')).toBeTruthy();
     expect(screen.getByText('Синхронизация судебных источников')).toBeTruthy();
     expect(screen.getByText('Расписание: 02:00,14:00')).toBeTruthy();
     expect(screen.getByText('Ожидает feature flag')).toBeTruthy();

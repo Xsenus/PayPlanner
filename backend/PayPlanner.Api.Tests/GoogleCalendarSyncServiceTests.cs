@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -20,6 +21,33 @@ public class GoogleCalendarSyncServiceTests
 {
     private static readonly IDataProtectionProvider TestDataProtectionProvider =
         DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "pp-google-tests")));
+
+    [Fact]
+    public async Task ServiceProvider_ResolvesGoogleCalendarSyncService()
+    {
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton<IDataProtectionProvider>(TestDataProtectionProvider);
+        services.AddLogging();
+        services.AddHttpClient();
+        services.AddScoped<PaymentContext>(_ =>
+        {
+            var options = new DbContextOptionsBuilder<PaymentContext>()
+                .UseSqlite(connection)
+                .Options;
+            return new PaymentContext(options, useObjectAuditModel: false);
+        });
+        services.AddScoped<IGoogleCalendarSyncService, GoogleCalendarSyncService>();
+
+        await using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var service = scope.ServiceProvider.GetRequiredService<IGoogleCalendarSyncService>();
+
+        Assert.IsType<GoogleCalendarSyncService>(service);
+    }
 
     [Fact]
     public async Task StartAuthAsync_CreatesOfflineGoogleCalendarAuthorizationUrl()
