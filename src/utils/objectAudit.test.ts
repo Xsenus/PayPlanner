@@ -54,6 +54,10 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditFieldLabel('task-journal-item', 'Result')).toBe('Результат задачи');
     expect(getObjectAuditFieldLabel('calendar-sync', 'SyncMode')).toBe('Главный источник событий');
     expect(getObjectAuditFieldLabel('calendar-sync', 'DryRunConfirmed')).toBe('Dry-run на копии базы');
+    expect(getObjectAuditFieldLabel('user', 'Last Activity Action')).toBe('Последнее действие');
+    expect(getObjectAuditFieldLabel('user', 'Last Activity At')).toBe('Время последней активности');
+    expect(getObjectAuditFieldLabel('user', 'Last Activity Section')).toBe('Последний раздел');
+    expect(getObjectAuditFieldLabel('user', 'Last Login At')).toBe('Последний вход');
   });
 
   it('builds readable change summary', () => {
@@ -95,6 +99,10 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue('PartiallyPaid')).toBe('Частично оплачен');
     expect(formatAuditValue('crmMaster')).toBe('CRM главная');
     expect(formatAuditValue('manualConfirmation')).toBe('Ручное подтверждение');
+    expect(formatAuditValue('open_tab', 'user', 'Last Activity Action')).toBe('Открытие раздела');
+    expect(formatAuditValue('login', 'user', 'Last Activity Action')).toBe('Вход в систему');
+    expect(formatAuditValue('settings', 'user', 'Last Activity Section')).toBe('Настройки');
+    expect(formatAuditValue('auth', 'user', 'Last Activity Section')).toBe('Авторизация');
     expect(formatAuditValue('2026-04-27 00:00:00', 'payment', 'Date')).toBe('27.04.2026');
     expect(formatAuditValue('1500.00', 'payment', 'Amount')).toMatch(/1\s*500\s*₽/u);
     expect(formatAuditValue('42', 'payment', 'Payment Status Id')).toBe('ID 42');

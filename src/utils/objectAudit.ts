@@ -123,6 +123,11 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   PhotoUrl: 'Фото',
   PermissionsUpdatedAt: 'Изменение прав',
   PermissionsUpdatedByUserName: 'Изменил права',
+  LastActivityAction: 'Последнее действие',
+  LastActivityAt: 'Время последней активности',
+  LastActivitySection: 'Последний раздел',
+  LastActivityDescription: 'Описание последней активности',
+  LastLoginAt: 'Последний вход',
   IsDeleted: 'Состояние удаления',
 };
 
@@ -373,6 +378,10 @@ const VALUE_LABELS: Record<string, string> = {
   crmwins: 'Оставлять версию CRM',
   externalwins: 'Принимать внешний календарь',
   latestwins: 'Брать последнее изменение',
+  opentab: 'Открытие раздела',
+  login: 'Вход в систему',
+  settings: 'Настройки',
+  auth: 'Авторизация',
 };
 
 export interface ParsedAuditFieldChange {
