@@ -397,12 +397,33 @@ public class AppFeatureFlagsTests
         scope.Db.YandexCalendarConnections.Add(yandexConnection);
         await scope.Db.SaveChangesAsync();
 
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Подготовить документы",
+            AssigneeName = user.FullName,
+            DueAt = new DateTime(2026, 6, 3, 10, 0, 0, DateTimeKind.Utc),
+        };
+        var calendar = new GoogleCalendarSyncCalendar
+        {
+            ConnectionId = googleConnection.Id,
+            OwnerUserId = user.Id,
+            GoogleCalendarId = "google-calendar-log",
+            Name = "PayPlanner - Пользователь календаря",
+        };
+        scope.Db.TaskJournalItems.Add(task);
+        scope.Db.GoogleCalendarSyncCalendars.Add(calendar);
+        await scope.Db.SaveChangesAsync();
+
         scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
         {
             ConnectionId = googleConnection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
             Direction = "crm-to-google",
             Operation = "create-event",
             Status = "success",
+            DetailsJson = "{\"detail\":\"dry-run verified\"}",
             Message = "Событие создано.",
             CreatedAt = new DateTime(2026, 6, 2, 7, 0, 0, DateTimeKind.Utc),
         });
@@ -428,12 +449,25 @@ public class AppFeatureFlagsTests
         Assert.Equal(user.Id, page.Items[0].UserId);
         Assert.Equal("Пользователь календаря", page.Items[0].UserName);
 
+        var pagedResult = await controller.GetLogs(null, null, null, null, page: 2, pageSize: 1, ct: CancellationToken.None);
+        var paged = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(pagedResult.Result).Value);
+        Assert.Equal(2, paged.Total);
+        Assert.Equal(2, paged.Page);
+        Assert.Equal("google-calendar", Assert.Single(paged.Items).Provider);
+
         var filteredResult = await controller.GetLogs("google-calendar", null, null, null, pageSize: 10, ct: CancellationToken.None);
         var filteredPage = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(filteredResult.Result).Value);
 
         var item = Assert.Single(filteredPage.Items);
         Assert.Equal("Google Calendar", item.ProviderLabel);
         Assert.Equal("create-event", item.Operation);
+        Assert.Equal(task.Id, item.TaskJournalItemId);
+        Assert.Equal(task.Title, item.TaskTitle);
+        Assert.Equal(task.ObjectName, item.TaskObjectName);
+        Assert.Equal(calendar.Name, item.CalendarName);
+        Assert.Equal("task", item.TargetType);
+        Assert.Equal($"Задача: {task.Title}", item.TargetLabel);
+        Assert.Equal("dry-run verified", item.Details);
     }
 
     private sealed class TestOptionsSnapshot<T> : IOptionsSnapshot<T>

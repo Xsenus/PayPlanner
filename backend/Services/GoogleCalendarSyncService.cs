@@ -1448,6 +1448,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         string? details,
         CancellationToken cancellationToken)
     {
+        var detailsJson = await BuildLogDetailsJsonAsync(connectionId, calendarId, taskId, details, cancellationToken);
+
         _db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
         {
             ConnectionId = connectionId,
@@ -1457,11 +1459,87 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             Operation = operation,
             Status = status,
             Message = Trim(message, 1000),
-            DetailsJson = string.IsNullOrWhiteSpace(details) ? null : JsonSerializer.Serialize(new { detail = Trim(details, 4000) }, JsonOptions),
+            DetailsJson = detailsJson,
             CreatedAt = DateTime.UtcNow,
         });
 
         await Task.CompletedTask.WaitAsync(cancellationToken);
+    }
+
+    private async Task<string?> BuildLogDetailsJsonAsync(
+        int? connectionId,
+        int? calendarId,
+        int? taskId,
+        string? details,
+        CancellationToken cancellationToken)
+    {
+        var context = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(details))
+        {
+            context["detail"] = Trim(details, 4000);
+        }
+
+        if (connectionId.HasValue)
+        {
+            var connection = await _db.GoogleCalendarConnections
+                .AsNoTracking()
+                .Where(item => item.Id == connectionId.Value)
+                .Select(item => new
+                {
+                    UserName = item.User == null ? string.Empty : item.User.FullName,
+                    UserEmail = item.User == null ? string.Empty : item.User.Email,
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            AddContextValue(context, "userName", connection?.UserName);
+            AddContextValue(context, "userEmail", connection?.UserEmail);
+        }
+
+        if (calendarId.HasValue)
+        {
+            var calendar = await _db.GoogleCalendarSyncCalendars
+                .AsNoTracking()
+                .Where(item => item.Id == calendarId.Value)
+                .Select(item => new
+                {
+                    item.Name,
+                    OwnerName = item.OwnerUser == null ? string.Empty : item.OwnerUser.FullName,
+                    OwnerEmail = item.OwnerUser == null ? string.Empty : item.OwnerUser.Email,
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            AddContextValue(context, "calendarName", calendar?.Name);
+            AddContextValue(context, "calendarOwnerName", calendar?.OwnerName);
+            AddContextValue(context, "calendarOwnerEmail", calendar?.OwnerEmail);
+        }
+
+        if (taskId.HasValue)
+        {
+            var task = await _db.TaskJournalItems
+                .AsNoTracking()
+                .Where(item => item.Id == taskId.Value)
+                .Select(item => new
+                {
+                    item.Title,
+                    item.ObjectName,
+                    item.AssigneeName,
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            AddContextValue(context, "taskTitle", task?.Title);
+            AddContextValue(context, "taskObjectName", task?.ObjectName);
+            AddContextValue(context, "taskAssigneeName", task?.AssigneeName);
+        }
+
+        return context.Count == 0 ? null : JsonSerializer.Serialize(context, JsonOptions);
+    }
+
+    private static void AddContextValue(Dictionary<string, string> context, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            context[key] = Trim(value, 1000);
+        }
     }
 
     private async Task<bool> IsAdminConnectionAsync(int userId, CancellationToken cancellationToken)

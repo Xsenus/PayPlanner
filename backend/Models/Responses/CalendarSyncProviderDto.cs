@@ -63,10 +63,16 @@ public sealed class CalendarSyncLogEntryDto
     public string UserName { get; set; } = string.Empty;
     public string UserEmail { get; set; } = string.Empty;
     public int? TaskJournalItemId { get; set; }
+    public string TaskTitle { get; set; } = string.Empty;
+    public string TaskObjectName { get; set; } = string.Empty;
+    public string CalendarName { get; set; } = string.Empty;
+    public string TargetType { get; set; } = string.Empty;
+    public string TargetLabel { get; set; } = string.Empty;
     public string Direction { get; set; } = string.Empty;
     public string Operation { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
+    public string Details { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
 }
 

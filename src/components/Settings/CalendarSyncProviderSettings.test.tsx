@@ -109,16 +109,22 @@ describe('CalendarSyncProviderSettings', () => {
           userName: 'Тестовый пользователь',
           userEmail: 'test@example.com',
           taskJournalItemId: 42,
+          taskTitle: 'Проверить документы',
+          taskObjectName: 'Дело клиента',
+          calendarName: 'PayPlanner - Тестовый пользователь',
+          targetType: 'task',
+          targetLabel: 'Задача: Проверить документы',
           direction: 'crm-to-google',
           operation: 'create-event',
           status: 'success',
           message: 'Событие создано.',
+          details: 'Синхронизация выполнена для тестового пользователя.',
           createdAt: '2026-05-26T17:20:00Z',
         },
       ],
       total: 1,
       page: 1,
-      pageSize: 50,
+      pageSize: 25,
     });
     apiMock.updateCalendarSyncSettings.mockImplementation(async (payload) => ({
       externalCalendarSyncEnabled: payload.googleCalendarSyncEnabled || payload.yandexCalendarSyncEnabled,
@@ -143,20 +149,23 @@ describe('CalendarSyncProviderSettings', () => {
     expect(screen.getByText('ICS-файлы')).toBeTruthy();
     expect(screen.getAllByText('Google Calendar').length).toBeGreaterThan(0);
     expect(screen.getByText('Модель синхронизации и конфликты')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Показать готовность к подключению календарей' }));
     expect(screen.getByText('Готовность к подключению Google/Яндекс')).toBeTruthy();
     expect(screen.getByText('Выполнено обязательных шагов: 1 из 2. Пока все обязательные пункты не закрыты, внешняя синхронизация остается подготовительным контуром.')).toBeTruthy();
     expect(screen.getByText('Правила конфликтов')).toBeTruthy();
     expect(screen.getByText('Нужна подготовка')).toBeTruthy();
+    expect(screen.getByText('Задача: Проверить документы')).toBeTruthy();
+    expect(screen.getByText('Дело клиента')).toBeTruthy();
   });
 
   it('saves calendar sync conflict settings', async () => {
     render(<CalendarSyncProviderSettings />);
 
     await screen.findByText('Модель синхронизации и конфликты');
-    fireEvent.click(screen.getByLabelText(/Включить Google Calendar/i));
-    fireEvent.change(screen.getByLabelText('Главный источник событий'), { target: { value: 'hybrid' } });
-    fireEvent.click(screen.getByLabelText('Dry-run на копии базы выполнен'));
-    fireEvent.change(screen.getByLabelText('Комментарий к решению'), { target: { value: 'Согласовано с руководителем.' } });
+    fireEvent.click(screen.getAllByLabelText(/Включить Google Calendar/i)[0]);
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'hybrid' } });
+    fireEvent.click(screen.getAllByLabelText(/Dry-run на копии базы выполнен/i)[0]);
+    fireEvent.change(screen.getByPlaceholderText(/Например: модель согласована/i), { target: { value: 'Согласовано с руководителем.' } });
     fireEvent.click(screen.getByRole('button', { name: /Сохранить/i }));
 
     await waitFor(() => expect(apiMock.updateCalendarSyncSettings).toHaveBeenCalledWith({
@@ -179,12 +188,50 @@ describe('CalendarSyncProviderSettings', () => {
     render(<CalendarSyncProviderSettings />);
 
     await screen.findByText('Модель синхронизации и конфликты');
-    fireEvent.click(screen.getByRole('button', { name: 'Пояснение по настройкам календарей' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Что делает настройка «Главный источник событий»' }));
 
-    expect(screen.getByText('Что делают настройки календарной синхронизации')).toBeTruthy();
+    expect(screen.getByText('Пояснение настройки')).toBeTruthy();
     expect(screen.getAllByText('Главный источник событий').length).toBeGreaterThan(1);
-    expect(screen.getAllByText('Дата начала по умолчанию').length).toBeGreaterThan(1);
-    expect(screen.getByText('Dry-run на копии базы')).toBeTruthy();
+    expect(screen.getByText('Определяет, что считать основным источником при обмене данными: CRM, внешний календарь или гибридную модель.')).toBeTruthy();
+  });
+
+  it('loads another page of calendar sync logs', async () => {
+    apiMock.getCalendarSyncLogs.mockImplementation(async ({ page, pageSize }) => ({
+      items: [
+        {
+          provider: 'google-calendar',
+          providerLabel: 'Google Calendar',
+          id: page,
+          connectionId: 10,
+          userId: 5,
+          userName: 'Тестовый пользователь',
+          userEmail: 'test@example.com',
+          taskJournalItemId: 42,
+          taskTitle: page === 2 ? 'Вторая страница' : 'Первая страница',
+          taskObjectName: 'Дело клиента',
+          calendarName: 'PayPlanner - Тестовый пользователь',
+          targetType: 'task',
+          targetLabel: page === 2 ? 'Задача: Вторая страница' : 'Задача: Первая страница',
+          direction: 'crm-to-google',
+          operation: 'update-event',
+          status: 'success',
+          message: 'Событие обновлено.',
+          details: '',
+          createdAt: '2026-05-26T17:20:00Z',
+        },
+      ],
+      total: 26,
+      page,
+      pageSize,
+    }));
+
+    render(<CalendarSyncProviderSettings />);
+
+    expect(await screen.findByText('Задача: Первая страница')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Вперёд/i }));
+
+    await waitFor(() => expect(apiMock.getCalendarSyncLogs).toHaveBeenLastCalledWith({ page: 2, pageSize: 25 }));
+    expect(await screen.findByText('Задача: Вторая страница')).toBeTruthy();
   });
 
   it('shows a readable loading error', async () => {

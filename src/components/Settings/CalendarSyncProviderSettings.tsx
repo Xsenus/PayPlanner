@@ -4,10 +4,14 @@ import {
   apiService,
   type CalendarSyncProviderDto,
   type CalendarSyncReadinessDto,
+  type CalendarSyncLogEntryDto,
   type CalendarSyncLogPageDto,
   type CalendarSyncSettingsDto,
 } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { TablePagination } from '../ui/TablePagination';
+
+const LOG_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 export function CalendarSyncProviderSettings() {
   const [providers, setProviders] = useState<CalendarSyncProviderDto[]>([]);
@@ -16,10 +20,14 @@ export function CalendarSyncProviderSettings() {
   const [settings, setSettings] = useState<CalendarSyncSettingsDto | null>(null);
   const [draft, setDraft] = useState<CalendarSyncSettingsDto | null>(null);
   const [loading, setLoading] = useState(false);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logPage, setLogPage] = useState(1);
+  const [logPageSize, setLogPageSize] = useState(25);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [readinessOpen, setReadinessOpen] = useState(false);
+  const [activeSettingHelpKey, setActiveSettingHelpKey] = useState<CalendarSettingHelpKey | null>(null);
 
   const availableCount = useMemo(
     () => providers.filter((provider) => provider.isAvailable).length,
@@ -36,10 +44,27 @@ export function CalendarSyncProviderSettings() {
     [readiness],
   );
 
+  const totalLogPages = useMemo(
+    () => Math.max(1, Math.ceil((logs?.total ?? 0) / Math.max(1, logs?.pageSize ?? logPageSize))),
+    [logs, logPageSize],
+  );
+
   const applyLoadedSettings = useCallback((next: CalendarSyncSettingsDto) => {
     setSettings(next);
     setDraft({ ...next });
   }, []);
+
+  const loadCalendarSyncLogs = useCallback(async (page = logPage, pageSize = logPageSize) => {
+    setLogsLoading(true);
+    try {
+      const loadedLogs = await apiService.getCalendarSyncLogs({ page, pageSize });
+      setLogs(loadedLogs);
+      setLogPage(loadedLogs.page);
+      setLogPageSize(loadedLogs.pageSize);
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [logPage, logPageSize]);
 
   const loadCalendarSyncState = useCallback(async () => {
     setLoading(true);
@@ -51,17 +76,19 @@ export function CalendarSyncProviderSettings() {
         apiService.getCalendarSyncReadiness(),
         apiService.getCalendarSyncSettings(),
       ]);
-      const loadedLogs = await apiService.getCalendarSyncLogs({ pageSize: 50 });
+      const loadedLogs = await apiService.getCalendarSyncLogs({ page: 1, pageSize: logPageSize });
       setProviders(loadedProviders);
       setReadiness(loadedReadiness);
       setLogs(loadedLogs);
+      setLogPage(loadedLogs.page);
+      setLogPageSize(loadedLogs.pageSize);
       applyLoadedSettings(loadedSettings);
     } catch (loadError) {
       setError(extractDisplayErrorMessage(loadError, 'Не удалось загрузить состояние внешних календарей.'));
     } finally {
       setLoading(false);
     }
-  }, [applyLoadedSettings]);
+  }, [applyLoadedSettings, logPageSize]);
 
   useEffect(() => {
     void loadCalendarSyncState();
@@ -171,10 +198,10 @@ export function CalendarSyncProviderSettings() {
                 <h5 className="text-sm font-semibold text-gray-900">Модель синхронизации и конфликты</h5>
                 <button
                   type="button"
-                  onClick={() => setHelpOpen(true)}
+                  onClick={() => setReadinessOpen(true)}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 transition hover:bg-sky-100"
-                  title="Пояснение по настройкам"
-                  aria-label="Пояснение по настройкам календарей"
+                  title="Показать готовность к подключению"
+                  aria-label="Показать готовность к подключению календарей"
                 >
                   <HelpCircle className="h-4 w-4" />
                 </button>
@@ -199,19 +226,26 @@ export function CalendarSyncProviderSettings() {
               checked={draft.googleCalendarSyncEnabled === true}
               label="Включить Google Calendar"
               description="Google Calendar перейдет из состояния «Выключен» в подготовку подключения. После этого нужно заполнить OAuth Google и закрыть чек-лист готовности."
+              helpKey="googleCalendarSyncEnabled"
+              onOpenHelp={setActiveSettingHelpKey}
               onChange={(checked) => updateDraft({ googleCalendarSyncEnabled: checked })}
             />
             <ProviderToggle
               checked={draft.yandexCalendarSyncEnabled === true}
               label="Включить Яндекс Календарь"
               description="Яндекс Календарь перейдет из состояния «Выключен» в подготовку подключения. После этого нужно заполнить OAuth Яндекса и закрыть чек-лист готовности."
+              helpKey="yandexCalendarSyncEnabled"
+              onOpenHelp={setActiveSettingHelpKey}
               onChange={(checked) => updateDraft({ yandexCalendarSyncEnabled: checked })}
             />
           </div>
 
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             <label className="block">
-              <span className="text-xs font-semibold text-gray-700">Главный источник событий</span>
+              <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
+                Главный источник событий
+                <SettingHelpButton helpKey="syncMode" onOpen={setActiveSettingHelpKey} />
+              </span>
               <select
                 value={draft.syncMode}
                 onChange={(event) => updateDraft({ syncMode: event.target.value })}
@@ -224,7 +258,10 @@ export function CalendarSyncProviderSettings() {
             </label>
 
             <label className="block">
-              <span className="text-xs font-semibold text-gray-700">Правило спорных изменений</span>
+              <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
+                Правило спорных изменений
+                <SettingHelpButton helpKey="conflictResolutionMode" onOpen={setActiveSettingHelpKey} />
+              </span>
               <select
                 value={draft.conflictResolutionMode}
                 onChange={(event) => updateDraft({ conflictResolutionMode: event.target.value })}
@@ -250,7 +287,10 @@ export function CalendarSyncProviderSettings() {
 
             <div className="mt-4 grid gap-3 lg:grid-cols-3">
               <label className="block">
-                <span className="text-xs font-semibold text-gray-700">Кто управляет</span>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
+                  Кто управляет
+                  <SettingHelpButton helpKey="userControlMode" onOpen={setActiveSettingHelpKey} />
+                </span>
                 <select
                   value={draft.userControlMode}
                   onChange={(event) => updateDraft({ userControlMode: event.target.value })}
@@ -263,7 +303,10 @@ export function CalendarSyncProviderSettings() {
               </label>
 
               <label className="block">
-                <span className="text-xs font-semibold text-gray-700">Дата начала по умолчанию</span>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
+                  Дата начала по умолчанию
+                  <SettingHelpButton helpKey="defaultSyncFromDate" onOpen={setActiveSettingHelpKey} />
+                </span>
                 <input
                   type="date"
                   value={formatDateInputValue(draft.defaultSyncFromDate)}
@@ -273,7 +316,10 @@ export function CalendarSyncProviderSettings() {
               </label>
 
               <label className="block">
-                <span className="text-xs font-semibold text-gray-700">При потере доступа</span>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
+                  При потере доступа
+                  <SettingHelpButton helpKey="inactiveUserAction" onOpen={setActiveSettingHelpKey} />
+                </span>
                 <select
                   value={draft.inactiveUserAction}
                   onChange={(event) => updateDraft({ inactiveUserAction: event.target.value })}
@@ -295,7 +341,10 @@ export function CalendarSyncProviderSettings() {
                 onChange={(event) => updateDraft({ requireManualConfirmation: event.target.checked })}
                 className="mt-0.5 h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
               />
-              <span>Требовать ручное подтверждение спорных изменений</span>
+              <span className="inline-flex items-center gap-1">
+                Требовать ручное подтверждение спорных изменений
+                <SettingHelpButton helpKey="requireManualConfirmation" onOpen={setActiveSettingHelpKey} />
+              </span>
             </label>
             <label className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-xs text-gray-700">
               <input
@@ -304,12 +353,18 @@ export function CalendarSyncProviderSettings() {
                 onChange={(event) => updateDraft({ dryRunConfirmed: event.target.checked })}
                 className="mt-0.5 h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
               />
-              <span>Dry-run на копии базы выполнен</span>
+              <span className="inline-flex items-center gap-1">
+                Dry-run на копии базы выполнен
+                <SettingHelpButton helpKey="dryRunConfirmed" onOpen={setActiveSettingHelpKey} />
+              </span>
             </label>
           </div>
 
           <label className="mt-4 block">
-            <span className="text-xs font-semibold text-gray-700">Комментарий к решению</span>
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700">
+              Комментарий к решению
+              <SettingHelpButton helpKey="notes" onOpen={setActiveSettingHelpKey} />
+            </span>
             <textarea
               value={draft.notes}
               onChange={(event) => updateDraft({ notes: event.target.value })}
@@ -329,7 +384,7 @@ export function CalendarSyncProviderSettings() {
         </div>
       ) : null}
 
-      {readiness ? (
+      {false && readiness ? (
         <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -381,12 +436,12 @@ export function CalendarSyncProviderSettings() {
           </div>
           <button
             type="button"
-            onClick={() => void loadCalendarSyncState()}
-            disabled={loading}
+            onClick={() => void loadCalendarSyncLogs(logPage, logPageSize)}
+            disabled={logsLoading}
             className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            <span>Обновить журнал</span>
+            <RefreshCw className={`h-4 w-4 ${logsLoading ? 'animate-spin' : ''}`} />
+            <span>{logsLoading ? 'Обновляем' : 'Обновить журнал'}</span>
           </button>
         </div>
 
@@ -397,6 +452,7 @@ export function CalendarSyncProviderSettings() {
                 <th className="px-3 py-2">Время</th>
                 <th className="px-3 py-2">Провайдер</th>
                 <th className="px-3 py-2">Сотрудник</th>
+                <th className="px-3 py-2">Объект</th>
                 <th className="px-3 py-2">Действие</th>
                 <th className="px-3 py-2">Статус</th>
                 <th className="px-3 py-2">Сообщение</th>
@@ -411,6 +467,11 @@ export function CalendarSyncProviderSettings() {
                     <div className="font-medium">{item.userName || 'Система'}</div>
                     {item.userEmail ? <div className="text-[11px] text-gray-500">{item.userEmail}</div> : null}
                   </td>
+                  <td className="min-w-[220px] px-3 py-2 text-gray-700">
+                    <div className="font-medium">{getCalendarLogTargetLabel(item)}</div>
+                    {item.taskObjectName ? <div className="text-[11px] text-gray-500">{item.taskObjectName}</div> : null}
+                    {item.details ? <div className="mt-1 text-[11px] leading-4 text-gray-500">Детали: {item.details}</div> : null}
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-700">{getCalendarLogOperationLabel(item.operation)}</td>
                   <td className="whitespace-nowrap px-3 py-2">
                     <span className={`rounded-full px-2 py-0.5 font-semibold ${getCalendarLogStatusClass(item.status)}`}>
@@ -421,7 +482,7 @@ export function CalendarSyncProviderSettings() {
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-sm text-gray-500">Событий синхронизации пока нет.</td>
+                  <td colSpan={7} className="px-3 py-6 text-center text-sm text-gray-500">Событий синхронизации пока нет.</td>
                 </tr>
               )}
             </tbody>
@@ -429,10 +490,35 @@ export function CalendarSyncProviderSettings() {
         </div>
 
         {logs ? (
-          <p className="mt-3 text-[11px] text-gray-500">Показано {logs.items.length} из {logs.total} событий.</p>
+          <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
+            <TablePagination
+              page={logs.page}
+              totalPages={totalLogPages}
+              totalItems={logs.total}
+              pageSize={logs.pageSize}
+              pageSizeOptions={LOG_PAGE_SIZE_OPTIONS}
+              recordsLabel="Событий"
+              pageSizeLabel="Событий на странице"
+              onPageChange={(nextPage) => void loadCalendarSyncLogs(nextPage, logs.pageSize)}
+              onPageSizeChange={(nextPageSize) => void loadCalendarSyncLogs(1, nextPageSize)}
+            />
+          </div>
         ) : null}
       </div>
-      {helpOpen ? <CalendarSyncSettingsHelpModal onClose={() => setHelpOpen(false)} /> : null}
+      {readinessOpen ? (
+        <CalendarSyncReadinessModal
+          readiness={readiness}
+          requiredReadyCount={requiredReadyCount}
+          requiredTotalCount={requiredTotalCount}
+          onClose={() => setReadinessOpen(false)}
+        />
+      ) : null}
+      {activeSettingHelpKey ? (
+        <CalendarSyncSettingHelpModal
+          helpItem={getCalendarSettingHelpItem(activeSettingHelpKey)}
+          onClose={() => setActiveSettingHelpKey(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -474,11 +560,15 @@ function ProviderToggle({
   checked,
   label,
   description,
+  helpKey,
+  onOpenHelp,
   onChange,
 }: {
   checked: boolean;
   label: string;
   description: string;
+  helpKey?: CalendarSettingHelpKey;
+  onOpenHelp?: (key: CalendarSettingHelpKey) => void;
   onChange: (checked: boolean) => void;
 }) {
   return (
@@ -493,6 +583,7 @@ function ProviderToggle({
         <span className="flex items-center gap-2 text-sm font-semibold text-gray-900">
           <Power className="h-4 w-4 text-sky-700" />
           {label}
+          {helpKey && onOpenHelp ? <SettingHelpButton helpKey={helpKey} onOpen={onOpenHelp} /> : null}
         </span>
         <span className="mt-1 block text-xs leading-5 text-gray-600">{description}</span>
       </span>
@@ -500,17 +591,145 @@ function ProviderToggle({
   );
 }
 
-function CalendarSyncSettingsHelpModal({ onClose }: { onClose: () => void }) {
+type CalendarSettingHelpKey =
+  | 'googleCalendarSyncEnabled'
+  | 'yandexCalendarSyncEnabled'
+  | 'syncMode'
+  | 'conflictResolutionMode'
+  | 'userControlMode'
+  | 'defaultSyncFromDate'
+  | 'inactiveUserAction'
+  | 'requireManualConfirmation'
+  | 'dryRunConfirmed'
+  | 'notes';
+
+interface CalendarSettingHelpItem {
+  key: CalendarSettingHelpKey;
+  title: string;
+  description: string;
+}
+
+function SettingHelpButton({
+  helpKey,
+  onOpen,
+}: {
+  helpKey: CalendarSettingHelpKey;
+  onOpen: (key: CalendarSettingHelpKey) => void;
+}) {
+  const item = getCalendarSettingHelpItem(helpKey);
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpen(helpKey);
+      }}
+      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 transition hover:bg-sky-100"
+      title={`Что делает настройка «${item.title}»`}
+      aria-label={`Что делает настройка «${item.title}»`}
+    >
+      <HelpCircle className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
+function CalendarSyncReadinessModal({
+  readiness,
+  requiredReadyCount,
+  requiredTotalCount,
+  onClose,
+}: {
+  readiness: CalendarSyncReadinessDto | null;
+  requiredReadyCount: number;
+  requiredTotalCount: number;
+  onClose: () => void;
+}) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
-      <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div>
+            <div className="inline-flex items-center gap-2 text-sm font-semibold text-amber-700">
+              <AlertTriangle className="h-4 w-4" />
+              Готовность к подключению
+            </div>
+            <h3 className="mt-1 text-lg font-semibold text-slate-900">Готовность к подключению Google/Яндекс</h3>
+            {readiness ? (
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                Выполнено обязательных шагов: {requiredReadyCount} из {requiredTotalCount}. Пока все обязательные пункты не закрыты, внешняя синхронизация остается подготовительным контуром.
+              </p>
+            ) : (
+              <p className="mt-1 text-sm leading-6 text-slate-600">Чек-лист готовности еще загружается.</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+            title="Закрыть"
+            aria-label="Закрыть готовность к подключению"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="max-h-[calc(90vh-116px)] overflow-y-auto px-5 py-4">
+          {readiness ? (
+            <>
+              <div className="mb-4 flex justify-end">
+                <span className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${readiness.readyToConnect ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-white text-amber-700'}`}>
+                  {readiness.readyToConnect ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                  {readiness.readyToConnect ? 'Можно подключать' : 'Нужна подготовка'}
+                </span>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {readiness.items.map((item) => (
+                  <div key={item.key} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+                    <div className="flex items-start gap-2">
+                      {item.isReady ? (
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                      ) : (
+                        <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${getReadinessIconClass(item.severity)}`} />
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-semibold text-gray-900">{item.label}</span>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${getReadinessBadgeClass(item.severity, item.isReady)}`}>
+                            {getReadinessStatusLabel(item.status, item.isReady)}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-5 text-gray-600">{item.message}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalendarSyncSettingHelpModal({
+  helpItem,
+  onClose,
+}: {
+  helpItem: CalendarSettingHelpItem;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
+      <div className="max-h-[90vh] w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
             <div className="inline-flex items-center gap-2 text-sm font-semibold text-sky-700">
               <HelpCircle className="h-4 w-4" />
-              Пояснение
+              Пояснение настройки
             </div>
-            <h3 className="mt-1 text-lg font-semibold text-slate-900">Что делают настройки календарной синхронизации</h3>
+            <h3 className="mt-1 text-lg font-semibold text-slate-900">{helpItem.title}</h3>
           </div>
           <button
             type="button"
@@ -524,16 +743,9 @@ function CalendarSyncSettingsHelpModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="max-h-[calc(90vh-82px)] overflow-y-auto px-5 py-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            {calendarSettingsHelpItems.map((item) => (
-              <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div className="text-sm font-semibold text-slate-900">{item.title}</div>
-                <div className="mt-1 text-sm leading-6 text-slate-600">{item.description}</div>
-              </div>
-            ))}
-          </div>
+          <p className="text-sm leading-6 text-slate-700">{helpItem.description}</p>
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-            Если включен только один провайдер, второй не мешает подготовке. Например, можно сначала запустить Google Calendar, а Яндекс Календарь подключить позже.
+            Изменения сохраняются только после нажатия кнопки «Сохранить». Если настройка влияет на внешний календарь, действие будет записано в журнал синхронизации.
           </div>
         </div>
       </div>
@@ -541,48 +753,62 @@ function CalendarSyncSettingsHelpModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-const calendarSettingsHelpItems = [
+const calendarSettingsHelpItems: CalendarSettingHelpItem[] = [
   {
+    key: 'googleCalendarSyncEnabled',
     title: 'Включить Google Calendar',
     description: 'Разрешает подготовку и запуск синхронизации с Google Calendar. После включения нужно настроить OAuth Google и закрыть обязательные пункты готовности.',
   },
   {
+    key: 'yandexCalendarSyncEnabled',
     title: 'Включить Яндекс Календарь',
     description: 'Разрешает подготовку и запуск синхронизации с Яндекс Календарем. Провайдер можно включить независимо от Google Calendar.',
   },
   {
+    key: 'syncMode',
     title: 'Главный источник событий',
     description: 'Определяет, что считать основным источником при обмене данными: CRM, внешний календарь или гибридную модель.',
   },
   {
+    key: 'conflictResolutionMode',
     title: 'Правило спорных изменений',
     description: 'Задает, что делать, если одно и то же событие изменили в CRM и во внешнем календаре: оставить CRM, принять календарь, взять последнее изменение или отправить на ручное подтверждение.',
   },
   {
+    key: 'userControlMode',
     title: 'Кто управляет',
     description: 'В режиме пользователя сотрудник сам управляет своим календарем. В режиме администратора правила задаются централизованно и применяются к подключениям сотрудников.',
   },
   {
+    key: 'defaultSyncFromDate',
     title: 'Дата начала по умолчанию',
     description: 'Ограничивает, с какой даты задачи будут выгружаться во внешние календари. Очистка при отключении всё равно удаляет все ранее созданные CRM события.',
   },
   {
+    key: 'inactiveUserAction',
     title: 'При потере доступа',
     description: 'Определяет действие при блокировке, увольнении или удалении сотрудника: удалить внешние события, только отключить синхронизацию или оставить подключение без изменений.',
   },
   {
+    key: 'requireManualConfirmation',
     title: 'Ручное подтверждение',
     description: 'Включает дополнительную защиту для конфликтов, чтобы спорные изменения не применялись автоматически без проверки ответственным пользователем.',
   },
   {
+    key: 'dryRunConfirmed',
     title: 'Dry-run на копии базы',
     description: 'Отметка, что тестовый прогон на копии базы выполнен. Это часть чек-листа перед запуском фоновой синхронизации.',
   },
   {
+    key: 'notes',
     title: 'Комментарий к решению',
     description: 'Свободное поле для заметки администратора: кто согласовал модель, когда проверяли dry-run и какие ограничения приняли.',
   },
 ];
+
+function getCalendarSettingHelpItem(key: CalendarSettingHelpKey) {
+  return calendarSettingsHelpItems.find((item) => item.key === key) ?? calendarSettingsHelpItems[0];
+}
 
 function getProviderStatusLabel(status: string) {
   if (status === 'active') return 'Активен';
@@ -621,6 +847,15 @@ function getReadinessBadgeClass(severity: string, isReady: boolean) {
 function formatDateInputValue(value?: string | null) {
   if (!value) return '';
   return value.slice(0, 10);
+}
+
+function getCalendarLogTargetLabel(item: CalendarSyncLogEntryDto) {
+  if (item.targetLabel) return item.targetLabel;
+  if (item.taskTitle) return `Задача: ${item.taskTitle}`;
+  if (item.calendarName) return `Календарь: ${item.calendarName}`;
+  if (item.userName) return `Подключение: ${item.userName}`;
+  if (item.taskJournalItemId) return `Задача #${item.taskJournalItemId}`;
+  return 'Системное действие';
 }
 
 function getCalendarLogStatusLabel(status: string) {
