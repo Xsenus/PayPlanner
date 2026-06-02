@@ -150,24 +150,17 @@ public static class AppReleaseSeedService
 
                 return new SeedReleaseWithVersion(release, version.Value);
             })
-            .OrderBy(item => item.Release.ReleasedAt)
-            .ThenBy(item => item.Version)
+            .OrderBy(item => item.Version)
             .ToArray();
 
         for (var index = 1; index < ordered.Length; index++)
         {
             var previous = ordered[index - 1];
             var current = ordered[index];
-            if (current.Version.CompareTo(previous.Version) <= 0)
-            {
-                throw new InvalidDataException(
-                    $"App release version '{current.Release.Version}' must be newer than '{previous.Release.Version}' because it is published later.");
-            }
-
             if (!current.Version.IsNextAfter(previous.Version))
             {
                 throw new InvalidDataException(
-                    $"App release versions must be continuous by release date. Expected next version after '{previous.Release.Version}', but found '{current.Release.Version}'.");
+                    $"App release versions must be continuous. Expected next version after '{previous.Release.Version}', but found '{current.Release.Version}'.");
             }
         }
     }

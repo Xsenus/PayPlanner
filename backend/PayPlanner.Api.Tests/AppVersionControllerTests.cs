@@ -320,7 +320,7 @@ public sealed class AppVersionControllerTests
         try
         {
             var exception = await Assert.ThrowsAsync<InvalidDataException>(() => AppReleaseSeedService.SyncAsync(scope.Db, tempRoot));
-            Assert.Contains("continuous by release date", exception.Message);
+            Assert.Contains("continuous", exception.Message);
         }
         finally
         {
