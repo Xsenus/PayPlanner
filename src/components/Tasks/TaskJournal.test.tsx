@@ -10,6 +10,7 @@ const apiMock = vi.hoisted(() => ({
   getTaskJournalItems: vi.fn(),
   getTaskJournalAssignees: vi.fn(),
   getTaskJournalSettings: vi.fn(),
+  getCalendarSyncSettings: vi.fn(),
   getUserSetting: vi.fn(),
   updateTaskJournalSettings: vi.fn(),
   getTaskJournalCaseAutomationCandidates: vi.fn(),
@@ -340,6 +341,25 @@ describe('TaskJournal', () => {
       { id: 20, shortName: 'ООО Ромашка', inn: '5400000000', email: 'office@example.com' } as LegalEntitySummary,
     ];
     apiMock.getUserSetting.mockRejectedValue(new Error('not found'));
+    apiMock.getCalendarSyncSettings.mockResolvedValue({
+      externalCalendarSyncEnabled: false,
+      googleCalendarSyncEnabled: false,
+      yandexCalendarSyncEnabled: false,
+      googleSyncIntervalMinutes: 10,
+      yandexSyncIntervalMinutes: 10,
+      manualFullSyncCooldownMinutes: 10,
+      completedTaskCalendarAction: 'color',
+      completedTaskGoogleColorId: '8',
+      syncMode: 'notConfigured',
+      conflictResolutionMode: 'manualConfirmation',
+      userControlMode: 'userManaged',
+      defaultSyncFromDate: null,
+      inactiveUserAction: 'cleanupExternalData',
+      requireManualConfirmation: true,
+      dryRunConfirmed: false,
+      notes: '',
+      updatedAt: null,
+    });
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([]);
     apiMock.createTaskJournalCaseAutomationTask.mockResolvedValue(createTask({
       type: 'control',

@@ -152,10 +152,11 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
-    public async Task SyncTaskForConnectedUsersAsync_TreatsUnspecifiedTaskDueAtAsUtcWhenWritingYandexEvent()
+    public async Task SyncTaskForConnectedUsersAsync_TreatsUnspecifiedTaskDueAtAsCrmLocalTimeWhenWritingYandexEvent()
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-yandex-unspecified@example.com", "user");
+        await SetUserTimeZoneAsync(db, user.Id, "Europe/Samara");
         var connection = await CreateConnectionAsync(db, user.Id);
         await CreateCalendarAsync(db, connection.Id, "calendar-yandex-unspecified", "PayPlanner задачи");
         var task = await CreateTaskAsync(
@@ -170,8 +171,47 @@ public class YandexCalendarSyncServiceTests
 
         var putRequest = handler.Requests.Single(request => request.Method == HttpMethod.Put);
         var body = await putRequest.Content!.ReadAsStringAsync();
-        Assert.Contains("DTSTART:20260605T090000Z", body);
-        Assert.Contains("DTEND:20260605T100000Z", body);
+        Assert.Contains("DTSTART:20260605T050000Z", body);
+        Assert.Contains("DTEND:20260605T060000Z", body);
+    }
+
+    [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_DeletesCompletedTaskEventWhenHideModeEnabled()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-completed-hide@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "hide");
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-yandex-completed-hide", "PayPlanner Р·Р°РґР°С‡Рё");
+        var task = await CreateTaskAsync(
+            db,
+            user.Id,
+            "РЎРєСЂС‹С‚СЊ РіРѕС‚РѕРІСѓСЋ Р·Р°РґР°С‡Сѓ",
+            new DateTime(2026, 6, 5, 9, 0, 0));
+        task.Status = "done";
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = "event-yandex-completed-hide",
+            YandexEventUrl = $"{calendar.CalendarUrl}event-yandex-completed-hide.ics",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsoluteUri == "https://caldav.yandex.ru/calendars/user/payplanner/event-yandex-completed-hide.ics");
+        var link = await db.YandexCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal("deleted", link.SyncStatus);
     }
 
     [Fact]
@@ -264,6 +304,19 @@ public class YandexCalendarSyncServiceTests
         return user;
     }
 
+    private static async Task SetUserTimeZoneAsync(PaymentContext db, int userId, string timeZoneId)
+    {
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = userId,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = timeZoneId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+    }
+
     private static async Task<YandexCalendarConnection> CreateConnectionAsync(PaymentContext db, int userId, DateTime? syncFromDate = null)
     {
         var protector = TestDataProtectionProvider.CreateProtector("PayPlanner.YandexCalendar.Tokens.v1");
@@ -287,7 +340,10 @@ public class YandexCalendarSyncServiceTests
         return connection;
     }
 
-    private static async Task SetCalendarSyncSettingsAsync(PaymentContext db, int manualFullSyncCooldownMinutes)
+    private static async Task SetCalendarSyncSettingsAsync(
+        PaymentContext db,
+        int manualFullSyncCooldownMinutes,
+        string completedTaskCalendarAction = "color")
     {
         var now = DateTime.UtcNow;
         db.SystemSettings.Add(new SystemSetting
@@ -303,6 +359,8 @@ public class YandexCalendarSyncServiceTests
                 InactiveUserAction = "cleanupExternalData",
                 RequireManualConfirmation = true,
                 ManualFullSyncCooldownMinutes = manualFullSyncCooldownMinutes,
+                CompletedTaskCalendarAction = completedTaskCalendarAction,
+                CompletedTaskGoogleColorId = "8",
             }),
             CreatedAt = now,
             UpdatedAt = now,

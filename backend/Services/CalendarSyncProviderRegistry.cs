@@ -5,11 +5,13 @@ namespace PayPlanner.Api.Services;
 public static class CalendarSyncProviderRegistry
 {
     public const int DefaultProviderSyncIntervalMinutes = 10;
-    public const int MinProviderSyncIntervalMinutes = 5;
+    public const int MinProviderSyncIntervalMinutes = 1;
     public const int MaxProviderSyncIntervalMinutes = 1440;
     public const int DefaultManualFullSyncCooldownMinutes = 10;
-    public const int MinManualFullSyncCooldownMinutes = 5;
+    public const int MinManualFullSyncCooldownMinutes = 1;
     public const int MaxManualFullSyncCooldownMinutes = 1440;
+    public const string DefaultCompletedTaskCalendarAction = "color";
+    public const string DefaultCompletedTaskGoogleColorId = "8";
 
     public static CalendarSyncSettingsDto BuildDefaultSettings(bool externalCalendarSyncEnabled = false)
         => new()
@@ -20,6 +22,8 @@ public static class CalendarSyncProviderRegistry
             GoogleSyncIntervalMinutes = DefaultProviderSyncIntervalMinutes,
             YandexSyncIntervalMinutes = DefaultProviderSyncIntervalMinutes,
             ManualFullSyncCooldownMinutes = DefaultManualFullSyncCooldownMinutes,
+            CompletedTaskCalendarAction = DefaultCompletedTaskCalendarAction,
+            CompletedTaskGoogleColorId = DefaultCompletedTaskGoogleColorId,
             SyncMode = "notConfigured",
             ConflictResolutionMode = "manualConfirmation",
             UserControlMode = "userManaged",
@@ -51,6 +55,10 @@ public static class CalendarSyncProviderRegistry
             source.InactiveUserAction,
             "cleanupExternalData",
             ["cleanupExternalData", "disableSyncOnly", "keepConnection"]);
+        var completedTaskCalendarAction = NormalizeKnownValue(
+            source.CompletedTaskCalendarAction,
+            DefaultCompletedTaskCalendarAction,
+            ["color", "hide"]);
         var requireManualConfirmation = source.RequireManualConfirmation || conflictResolutionMode == "manualConfirmation";
         var legacyExternalCalendarSyncEnabled = source.ExternalCalendarSyncEnabled ?? externalCalendarSyncEnabledFallback;
         var googleCalendarSyncEnabled = source.GoogleCalendarSyncEnabled ?? legacyExternalCalendarSyncEnabled;
@@ -64,6 +72,8 @@ public static class CalendarSyncProviderRegistry
             GoogleSyncIntervalMinutes = NormalizeProviderInterval(source.GoogleSyncIntervalMinutes),
             YandexSyncIntervalMinutes = NormalizeProviderInterval(source.YandexSyncIntervalMinutes),
             ManualFullSyncCooldownMinutes = NormalizeManualFullSyncCooldown(source.ManualFullSyncCooldownMinutes),
+            CompletedTaskCalendarAction = completedTaskCalendarAction,
+            CompletedTaskGoogleColorId = NormalizeGoogleColorId(source.CompletedTaskGoogleColorId),
             SyncMode = syncMode,
             ConflictResolutionMode = conflictResolutionMode,
             UserControlMode = userControlMode,
@@ -81,6 +91,14 @@ public static class CalendarSyncProviderRegistry
 
     public static int NormalizeManualFullSyncCooldown(int value)
         => Math.Clamp(value <= 0 ? DefaultManualFullSyncCooldownMinutes : value, MinManualFullSyncCooldownMinutes, MaxManualFullSyncCooldownMinutes);
+
+    public static string NormalizeGoogleColorId(string? value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? DefaultCompletedTaskGoogleColorId : value.Trim();
+        return int.TryParse(normalized, out var parsed) && parsed is >= 1 and <= 11
+            ? parsed.ToString()
+            : DefaultCompletedTaskGoogleColorId;
+    }
 
     public static IReadOnlyList<CalendarSyncProviderDto> BuildProviders(bool externalCalendarSyncEnabled)
         => BuildProviders(externalCalendarSyncEnabled, externalCalendarSyncEnabled);

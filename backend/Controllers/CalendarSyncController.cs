@@ -77,6 +77,8 @@ public sealed class CalendarSyncController : ControllerBase
             GoogleSyncIntervalMinutes = request.GoogleSyncIntervalMinutes ?? previousSettings.GoogleSyncIntervalMinutes,
             YandexSyncIntervalMinutes = request.YandexSyncIntervalMinutes ?? previousSettings.YandexSyncIntervalMinutes,
             ManualFullSyncCooldownMinutes = request.ManualFullSyncCooldownMinutes ?? previousSettings.ManualFullSyncCooldownMinutes,
+            CompletedTaskCalendarAction = request.CompletedTaskCalendarAction ?? previousSettings.CompletedTaskCalendarAction,
+            CompletedTaskGoogleColorId = request.CompletedTaskGoogleColorId ?? previousSettings.CompletedTaskGoogleColorId,
             SyncMode = request.SyncMode ?? string.Empty,
             ConflictResolutionMode = request.ConflictResolutionMode ?? string.Empty,
             UserControlMode = request.UserControlMode ?? string.Empty,

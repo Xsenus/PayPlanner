@@ -21,6 +21,7 @@ import {
   TASK_NOTIFICATION_DEFAULTS_SETTING_KEY,
   type TaskNotificationDefaults,
 } from '../../utils/taskNotificationDefaults';
+import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import { ProfilePhotoCropModal } from './ProfilePhotoCropModal';
 import { GoogleCalendarPanel } from './GoogleCalendarPanel';
 import { YandexCalendarPanel } from './YandexCalendarPanel';
@@ -180,6 +181,7 @@ export function ProfilePage() {
   const [profile, setProfile] = useState<User | null>(null);
   const [publicSettings, setPublicSettings] = useState<AuthProviderPublicSettings>(EMPTY_PUBLIC_SETTINGS);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [contractorBalance, setContractorBalance] = useState<ContractorBalance>(EMPTY_CONTRACTOR_BALANCE);
   const [passwordForm, setPasswordForm] = useState<PasswordFormState>(EMPTY_PASSWORD_FORM);
@@ -204,10 +206,11 @@ export function ProfilePage() {
   }, []);
 
   const loadProfile = useCallback(async () => {
-    const [nextProfile, nextProviders, nextTaskNotificationDefaults, nextContractorBalance] = await Promise.all([
+    const [nextProfile, nextProviders, nextTaskNotificationDefaults, nextTimeZone, nextContractorBalance] = await Promise.all([
       authService.getProfile(),
       authService.getAuthProviders(),
       apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
+      apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY).catch(() => null),
       authService.getContractorBalance().catch(() => EMPTY_CONTRACTOR_BALANCE),
     ]);
 
@@ -215,6 +218,7 @@ export function ProfilePage() {
     setForm(buildFormState(nextProfile));
     setPublicSettings(nextProviders);
     setTaskNotificationDefaults(parseTaskNotificationDefaults(nextTaskNotificationDefaults?.value));
+    setTimeZoneId(normalizeUserTimeZoneId(nextTimeZone?.value));
     setContractorBalance(nextContractorBalance);
     return nextProfile;
   }, []);
@@ -352,6 +356,7 @@ export function ProfilePage() {
       };
 
       const nextProfile = await authService.updateProfile(payload);
+      await apiService.upsertUserSetting(USER_TIME_ZONE_SETTING_KEY, timeZoneId);
       setProfile(nextProfile);
       setForm(buildFormState(nextProfile));
       await refreshUser();
@@ -739,6 +744,18 @@ export function ProfilePage() {
                     onChange={(event) => updateForm('viber', event.target.value)}
                     className="w-full rounded-2xl border border-slate-300 px-3 py-3"
                   />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-medium text-slate-700">Часовой пояс</span>
+                  <select
+                    value={timeZoneId}
+                    onChange={(event) => setTimeZoneId(event.target.value)}
+                    className="w-full rounded-2xl border border-slate-300 px-3 py-3"
+                  >
+                    {USER_TIME_ZONE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </label>
               </div>
 

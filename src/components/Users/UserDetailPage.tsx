@@ -16,6 +16,7 @@ import {
   TASK_NOTIFICATION_DEFAULTS_SETTING_KEY,
   type TaskNotificationDefaults,
 } from '../../utils/taskNotificationDefaults';
+import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import { TaskNotificationDefaultsPanel } from '../Tasks/TaskNotificationDefaultsPanel';
 
 type UserDetailSection = 'main' | 'contacts' | 'employment' | 'notifications' | 'access';
@@ -212,6 +213,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   const [user, setUser] = useState<User | null>(null);
   const [mainCompanySettings, setMainCompanySettings] = useState<MainCompanySettingsDto | null>(null);
   const [departments, setDepartments] = useState<BaseDictItem[]>([]);
+  const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [selectedCompanyToAddId, setSelectedCompanyToAddId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -220,12 +222,13 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
   const loadData = useCallback(async () => {
-    const [nextRoles, nextUser, nextMainCompanySettings, nextDepartments, nextTaskNotificationDefaults] = await Promise.all([
+    const [nextRoles, nextUser, nextMainCompanySettings, nextDepartments, nextTaskNotificationDefaults, nextTimeZone] = await Promise.all([
       authService.getRoles(),
       isCreateMode ? Promise.resolve<User | null>(null) : authService.getUser(userId),
       apiService.getMainCompanySettings(),
       apiService.getDict('departments'),
       isCreateMode ? Promise.resolve(null) : apiService.getUserSettingForUser(userId, TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
+      isCreateMode ? Promise.resolve(null) : apiService.getUserSettingForUser(userId, USER_TIME_ZONE_SETTING_KEY).catch(() => null),
     ]);
 
     setRoles(nextRoles);
@@ -233,6 +236,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
     setMainCompanySettings(nextMainCompanySettings);
     setDepartments(nextDepartments);
     setTaskNotificationDefaults(parseTaskNotificationDefaults(nextTaskNotificationDefaults?.value));
+    setTimeZoneId(normalizeUserTimeZoneId(nextTimeZone?.value));
 
     const nextForm = buildForm(nextUser);
     if (!nextForm.departmentId && nextForm.department) {
@@ -360,6 +364,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
         nextUser = await authService.updateUser(userId, payload);
       }
 
+      await apiService.upsertUserSettingForUser(nextUser.id, USER_TIME_ZONE_SETTING_KEY, timeZoneId);
       setUser(nextUser);
       setForm(buildForm(nextUser));
       onSaved(nextUser);
@@ -523,6 +528,20 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                     disabled={administrativeFieldsDisabled}
                     helperText="Отдел выбирается из справочника и участвует в правилах видимости по отделу."
                   />
+                  <label className="space-y-2">
+                    <span className="text-sm font-medium text-slate-700">Часовой пояс</span>
+                    <select
+                      value={timeZoneId}
+                      onChange={(event) => setTimeZoneId(event.target.value)}
+                      disabled={administrativeFieldsDisabled}
+                      className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                    >
+                      {USER_TIME_ZONE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    <span className="block text-xs leading-5 text-slate-500">Используется для задач во внутренних и внешних календарях.</span>
+                  </label>
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 md:col-span-2">
                     <input type="checkbox" checked={form.requiresFinancialActionReason} onChange={(event) => updateForm('requiresFinancialActionReason', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Требовать причину при действиях с финансовыми документами

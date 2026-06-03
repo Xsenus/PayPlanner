@@ -970,7 +970,15 @@ function taskCalendarStatusTone(status: TaskJournalStatus) {
   }
 }
 
-function getTaskCalendarCardTone(task: TaskJournalItem, colorMode: TaskCalendarColorMode) {
+function getTaskCalendarCardTone(
+  task: TaskJournalItem,
+  colorMode: TaskCalendarColorMode,
+  completedTaskCalendarAction: 'color' | 'hide' = 'color',
+) {
+  if (completedTaskCalendarAction === 'color' && task.status === 'done') {
+    return 'border-slate-300 bg-slate-200 text-slate-900 ring-1 ring-slate-300';
+  }
+
   if (colorMode === 'priority') {
     return taskCalendarPriorityTone(task.priority);
   }
@@ -1148,12 +1156,17 @@ function getTimelineTaskTone(
   currentUserId: number | null,
   assigneeFilter: string,
   colorMode: TaskCalendarColorMode,
+  completedTaskCalendarAction: 'color' | 'hide' = 'color',
 ) {
   const isOverdue = isTaskOverdue(task);
   const isSelectedAssignee =
     assigneeFilter !== 'all' &&
     (String(task.assigneeUserId ?? '') === assigneeFilter || hasAssigneeParticipant(task, assigneeFilter));
   const isOwnTask = isSelectedAssignee || isTaskExecutorForUser(task, currentUserId);
+
+  if (completedTaskCalendarAction === 'color' && task.status === 'done') {
+    return { label: 'Выполнено', className: 'border-slate-700 bg-slate-600 text-white', dotClassName: 'bg-slate-600' };
+  }
 
   if (colorMode === 'priority') {
     switch (task.priority) {
@@ -1428,6 +1441,7 @@ export function TaskJournal({
   const [caseCalendarLoading, setCaseCalendarLoading] = useState(false);
   const [caseCalendarExporting, setCaseCalendarExporting] = useState(false);
   const [taskSettings, setTaskSettings] = useState<TaskJournalSettingsDto>(DEFAULT_TASK_JOURNAL_SETTINGS);
+  const [completedTaskCalendarAction, setCompletedTaskCalendarAction] = useState<'color' | 'hide'>('color');
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
   const [automationCandidates, setAutomationCandidates] = useState<TaskJournalCaseAutomationCandidate[]>([]);
@@ -1587,11 +1601,12 @@ export function TaskJournal({
           })
           : []
       ));
-      const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, automationResponse] = await Promise.all([
+      const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
         loadAllTaskJournalItems(),
         apiService.getTaskJournalAssignees(),
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
+        apiService.getCalendarSyncSettings().catch(() => null),
         automationPromise,
       ]);
       setTasks(taskItems);
@@ -1599,6 +1614,7 @@ export function TaskJournal({
       setAutomationCandidates(automationResponse);
       setTaskSettings(settingsResponse);
       setTaskNotificationDefaults(parseTaskNotificationDefaults(notificationDefaultsResponse?.value));
+      setCompletedTaskCalendarAction(calendarSyncSettingsResponse?.completedTaskCalendarAction === 'hide' ? 'hide' : 'color');
     } catch {
       toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');
     } finally {
@@ -1853,6 +1869,13 @@ export function TaskJournal({
     const nowDate = new Date();
     return statusAndPeriodFilteredTasks.filter((task) => matchesMetricFilter(task, metricFilter, nowDate));
   }, [metricFilter, statusAndPeriodFilteredTasks]);
+
+  const calendarTasks = useMemo(
+    () => completedTaskCalendarAction === 'hide'
+      ? filteredTasks.filter((task) => task.status !== 'done')
+      : filteredTasks,
+    [completedTaskCalendarAction, filteredTasks],
+  );
 
   useEffect(() => {
     setSelectedTaskIds((previous) => {
@@ -3005,9 +3028,10 @@ export function TaskJournal({
               onExport={() => void handleCaseCalendarExport()}
             />
             <TaskCalendar
-              tasks={filteredTasks}
+              tasks={calendarTasks}
               mode={periodMode}
               colorMode={calendarColorMode}
+              completedTaskCalendarAction={completedTaskCalendarAction}
               loadWarningMode={calendarLoadWarningMode}
               anchorDate={calendarAnchorDate}
               selectedDate={calendarSelectedDate}
@@ -3043,8 +3067,9 @@ export function TaskJournal({
               onExport={() => void handleCaseCalendarExport()}
             />
             <TaskTimelineCalendar
-              tasks={filteredTasks}
+              tasks={calendarTasks}
               colorMode={calendarColorMode}
+              completedTaskCalendarAction={completedTaskCalendarAction}
               anchorDate={calendarAnchorDate}
               highlightedTaskId={highlightedTaskId}
               loading={loading}
@@ -3801,6 +3826,7 @@ function formatCaseCalendarEventDate(event: CaseCalendarEvent) {
 function TaskTimelineCalendar({
   tasks,
   colorMode,
+  completedTaskCalendarAction,
   anchorDate,
   highlightedTaskId,
   loading,
@@ -3820,6 +3846,7 @@ function TaskTimelineCalendar({
 }: {
   tasks: TaskJournalItem[];
   colorMode: TaskCalendarColorMode;
+  completedTaskCalendarAction: 'color' | 'hide';
   anchorDate: Date;
   highlightedTaskId: number | null;
   loading: boolean;
@@ -4110,7 +4137,7 @@ function TaskTimelineCalendar({
                       ) : null}
 
                       {placements.map(({ task, top, height, lane, laneCount }) => {
-                        const tone = getTimelineTaskTone(task, currentUserId, assigneeFilter, colorMode);
+                        const tone = getTimelineTaskTone(task, currentUserId, assigneeFilter, colorMode, completedTaskCalendarAction);
                         const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const start = new Date(task.dueAt);
                         const end = new Date(start.getTime() + normalizeTaskDuration(task.plannedDurationMinutes) * 60 * 1000);
@@ -4195,6 +4222,7 @@ function TaskCalendar({
   tasks,
   mode,
   colorMode,
+  completedTaskCalendarAction,
   loadWarningMode,
   anchorDate,
   selectedDate,
@@ -4219,6 +4247,7 @@ function TaskCalendar({
   tasks: TaskJournalItem[];
   mode: PeriodMode;
   colorMode: TaskCalendarColorMode;
+  completedTaskCalendarAction: 'color' | 'hide';
   loadWarningMode: TaskCalendarLoadWarningMode;
   anchorDate: Date;
   selectedDate: Date;
@@ -4542,7 +4571,7 @@ function TaskCalendar({
                       {dayTasks.slice(0, mode === 'day' ? 8 : 3).map((task) => {
                         const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const hasTimeConflict = conflictTaskIds.has(task.id);
-                        const calendarCardTone = getTaskCalendarCardTone(task, colorMode);
+                        const calendarCardTone = getTaskCalendarCardTone(task, colorMode, completedTaskCalendarAction);
                         const tooltipTitle = [
                           ...buildTaskTooltipLines(task),
                           ...(hasTimeConflict ? ['Конфликт: задача пересекается по времени с другой задачей исполнителя.'] : []),

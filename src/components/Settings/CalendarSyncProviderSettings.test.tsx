@@ -99,6 +99,8 @@ describe('CalendarSyncProviderSettings', () => {
       googleSyncIntervalMinutes: 10,
       yandexSyncIntervalMinutes: 10,
       manualFullSyncCooldownMinutes: 10,
+      completedTaskCalendarAction: 'color',
+      completedTaskGoogleColorId: '8',
       syncMode: 'notConfigured',
       conflictResolutionMode: 'manualConfirmation',
       userControlMode: 'userManaged',
@@ -167,6 +169,8 @@ describe('CalendarSyncProviderSettings', () => {
       googleSyncIntervalMinutes: payload.googleSyncIntervalMinutes,
       yandexSyncIntervalMinutes: payload.yandexSyncIntervalMinutes,
       manualFullSyncCooldownMinutes: payload.manualFullSyncCooldownMinutes,
+      completedTaskCalendarAction: payload.completedTaskCalendarAction,
+      completedTaskGoogleColorId: payload.completedTaskGoogleColorId,
       syncMode: payload.syncMode,
       conflictResolutionMode: payload.conflictResolutionMode,
       userControlMode: payload.userControlMode,
@@ -202,7 +206,10 @@ describe('CalendarSyncProviderSettings', () => {
 
     await screen.findByText('Модель синхронизации и конфликты');
     fireEvent.click(screen.getAllByLabelText(/Включить Google Calendar/i)[0]);
-    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: 'hybrid' } });
+    const syncModeSelect = screen.getAllByRole('combobox')
+      .find((element) => (element as HTMLSelectElement).value === 'notConfigured');
+    expect(syncModeSelect).toBeTruthy();
+    fireEvent.change(syncModeSelect!, { target: { value: 'hybrid' } });
     fireEvent.click(screen.getAllByLabelText(/Dry-run на копии базы выполнен/i)[0]);
     fireEvent.change(screen.getByPlaceholderText(/Например: модель согласована/i), { target: { value: 'Согласовано с руководителем.' } });
     fireEvent.click(screen.getByRole('button', { name: /Сохранить/i }));
@@ -213,6 +220,8 @@ describe('CalendarSyncProviderSettings', () => {
       googleSyncIntervalMinutes: 10,
       yandexSyncIntervalMinutes: 10,
       manualFullSyncCooldownMinutes: 10,
+      completedTaskCalendarAction: 'color',
+      completedTaskGoogleColorId: '8',
       syncMode: 'hybrid',
       conflictResolutionMode: 'manualConfirmation',
       userControlMode: 'userManaged',

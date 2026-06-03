@@ -13,8 +13,22 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
 
 const LOG_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
-const MIN_CALENDAR_SYNC_INTERVAL_MINUTES = 5;
+const MIN_CALENDAR_SYNC_INTERVAL_MINUTES = 1;
 const MAX_CALENDAR_SYNC_INTERVAL_MINUTES = 1440;
+const completedTaskActionOptions = [
+  { value: 'color', label: 'Выделять цветом' },
+  { value: 'hide', label: 'Скрывать из календарей' },
+];
+const googleEventColorOptions = [
+  { value: '8', label: 'Графитовый' },
+  { value: '2', label: 'Зеленый' },
+  { value: '5', label: 'Желтый' },
+  { value: '6', label: 'Оранжевый' },
+  { value: '11', label: 'Красный' },
+  { value: '7', label: 'Бирюзовый' },
+  { value: '9', label: 'Синий' },
+  { value: '10', label: 'Фиолетовый' },
+];
 
 type CalendarLogFilters = {
   provider: string;
@@ -151,6 +165,8 @@ export function CalendarSyncProviderSettings() {
         googleSyncIntervalMinutes: normalizeCalendarSyncInterval(draft.googleSyncIntervalMinutes),
         yandexSyncIntervalMinutes: normalizeCalendarSyncInterval(draft.yandexSyncIntervalMinutes),
         manualFullSyncCooldownMinutes: normalizeCalendarSyncInterval(draft.manualFullSyncCooldownMinutes),
+        completedTaskCalendarAction: draft.completedTaskCalendarAction,
+        completedTaskGoogleColorId: draft.completedTaskGoogleColorId,
         syncMode: draft.syncMode,
         conflictResolutionMode: draft.conflictResolutionMode,
         userControlMode: draft.userControlMode,
@@ -282,7 +298,8 @@ export function CalendarSyncProviderSettings() {
             />
           </div>
 
-          <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <div className="flex flex-col gap-1">
               <h6 className="text-sm font-semibold text-gray-900">Интервалы фоновой синхронизации</h6>
               <p className="text-xs leading-5 text-gray-600">
@@ -303,7 +320,7 @@ export function CalendarSyncProviderSettings() {
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
+          <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
             <div className="flex flex-col gap-1">
               <h6 className="text-sm font-semibold text-gray-900">Защита ручной полной синхронизации</h6>
               <p className="text-xs leading-5 text-gray-600">
@@ -316,6 +333,43 @@ export function CalendarSyncProviderSettings() {
                 value={draft.manualFullSyncCooldownMinutes}
                 onChange={(value) => updateDraft({ manualFullSyncCooldownMinutes: value })}
               />
+            </div>
+          </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+            <div className="flex flex-col gap-1">
+              <h6 className="text-sm font-semibold text-gray-900">Выполненные задачи в календарях</h6>
+              <p className="text-xs leading-5 text-gray-600">
+                Администратор выбирает, оставлять готовые задачи во внутреннем календаре и внешних календарях с отдельной отметкой или убирать их после выполнения.
+              </p>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-semibold text-gray-700">Действие после выполнения</span>
+                <select
+                  value={draft.completedTaskCalendarAction}
+                  onChange={(event) => updateDraft({ completedTaskCalendarAction: event.target.value })}
+                  className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                >
+                  {completedTaskActionOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold text-gray-700">Цвет готовых задач в Google</span>
+                <select
+                  value={draft.completedTaskGoogleColorId}
+                  onChange={(event) => updateDraft({ completedTaskGoogleColorId: event.target.value })}
+                  disabled={draft.completedTaskCalendarAction !== 'color'}
+                  className="mt-1 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  {googleEventColorOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
             </div>
           </div>
 

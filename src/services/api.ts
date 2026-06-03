@@ -203,6 +203,8 @@ export interface CalendarSyncSettingsDto {
   googleSyncIntervalMinutes: number;
   yandexSyncIntervalMinutes: number;
   manualFullSyncCooldownMinutes: number;
+  completedTaskCalendarAction: string;
+  completedTaskGoogleColorId: string;
   syncMode: string;
   conflictResolutionMode: string;
   userControlMode: string;
@@ -221,6 +223,8 @@ export interface UpdateCalendarSyncSettingsRequest {
   googleSyncIntervalMinutes?: number;
   yandexSyncIntervalMinutes?: number;
   manualFullSyncCooldownMinutes?: number;
+  completedTaskCalendarAction?: string;
+  completedTaskGoogleColorId?: string;
   syncMode?: string;
   conflictResolutionMode?: string;
   userControlMode?: string;

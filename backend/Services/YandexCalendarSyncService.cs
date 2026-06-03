@@ -521,6 +521,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             await AddLogAsync(connection.Id, null, null, "yandex-to-crm", "import", "error", "Не удалось загрузить изменения из Яндекс.Календаря.", ex.Message, cancellationToken);
         }
 
+        var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
         errors += await DeleteLinksOutsideSyncWindowAsync(connection, cancellationToken);
 
         var tasks = await LoadTasksForConnectionAsync(connection, cancellationToken);
@@ -529,7 +530,15 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         {
             try
             {
-                await UpsertYandexEventForTaskAsync(connection, task, cancellationToken);
+                if (ShouldHideCompletedTask(settings, task))
+                {
+                    await DeleteTaskLinkForCompletedTaskAsync(connection, task.Id, cancellationToken);
+                }
+                else
+                {
+                    await UpsertYandexEventForTaskAsync(connection, task, cancellationToken);
+                }
+
                 processedTasks++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -581,7 +590,16 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             return;
         }
 
-        await UpsertYandexEventForTaskAsync(connection, task, cancellationToken);
+        var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
+        if (ShouldHideCompletedTask(settings, task))
+        {
+            await DeleteTaskLinkForCompletedTaskAsync(connection, task.Id, cancellationToken);
+        }
+        else
+        {
+            await UpsertYandexEventForTaskAsync(connection, task, cancellationToken);
+        }
+
         connection.LastIncrementalSyncAt = DateTime.UtcNow;
         connection.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
@@ -729,16 +747,19 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var task = link.TaskJournalItem;
         var changed = false;
         var changes = new List<string>();
-        if (yandexEvent.StartAt.HasValue && task.DueAt != yandexEvent.StartAt.Value)
+        var timeZone = await ResolveTaskTimeZoneAsync(connection, calendar, task, cancellationToken);
+        var importedStartAt = yandexEvent.StartAt.HasValue ? CalendarTimeZoneHelper.ToUserLocal(yandexEvent.StartAt.Value, timeZone) : (DateTime?)null;
+        var importedEndAt = yandexEvent.EndAt.HasValue ? CalendarTimeZoneHelper.ToUserLocal(yandexEvent.EndAt.Value, timeZone) : (DateTime?)null;
+        if (importedStartAt.HasValue && task.DueAt != importedStartAt.Value)
         {
-            changes.Add($"Срок: {FormatLogDateTime(task.DueAt)} → {FormatLogDateTime(yandexEvent.StartAt.Value)}");
-            task.DueAt = yandexEvent.StartAt.Value;
+            changes.Add($"Срок: {FormatLogDateTime(task.DueAt)} → {FormatLogDateTime(importedStartAt.Value)}");
+            task.DueAt = importedStartAt.Value;
             changed = true;
         }
 
-        if (yandexEvent.StartAt.HasValue && yandexEvent.EndAt.HasValue)
+        if (importedStartAt.HasValue && importedEndAt.HasValue)
         {
-            var minutes = Math.Max(15, (int)Math.Round((yandexEvent.EndAt.Value - yandexEvent.StartAt.Value).TotalMinutes));
+            var minutes = Math.Max(15, (int)Math.Round((importedEndAt.Value - importedStartAt.Value).TotalMinutes));
             if (task.PlannedDurationMinutes != minutes)
             {
                 changes.Add($"Длительность: {FormatDuration(task.PlannedDurationMinutes)} → {FormatDuration(minutes)}");
@@ -772,7 +793,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         task.UpdatedAt = DateTime.UtcNow;
         link.YandexEtag = yandexEvent.Etag ?? link.YandexEtag;
         link.LastYandexHash = nextHash;
-        link.LastCrmHash = BuildCrmHash(task);
+        link.LastCrmHash = BuildCrmHash(task, timeZone);
         link.LastDirection = "yandex-to-crm";
         link.LastSyncedAt = DateTime.UtcNow;
         link.UpdatedAt = DateTime.UtcNow;
@@ -793,7 +814,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     {
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken);
-        var crmHash = BuildCrmHash(task);
+        var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken);
+        var crmHash = BuildCrmHash(task, timeZone);
         var link = await _db.YandexCalendarTaskLinks
             .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == task.Id, cancellationToken);
 
@@ -811,7 +833,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
 
         var eventUrl = BuildEventUrl(calendar.CalendarUrl, eventId);
-        var ics = BuildIcsEvent(connection, task, eventId, crmHash);
+        var ics = BuildIcsEvent(connection, task, eventId, crmHash, timeZone);
         var result = await PutYandexEventAsync(accessToken, eventUrl, ics, cancellationToken);
         var created = link is null || link.SyncStatus == "detached" || string.IsNullOrWhiteSpace(link.YandexEventUrl);
         if (link is null)
@@ -845,7 +867,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         link.YandexEventUrl = eventUrl;
         link.YandexEtag = result.Etag;
         link.LastCrmHash = crmHash;
-        link.LastYandexHash = BuildYandexHashFromTask(task, eventId);
+        link.LastYandexHash = BuildYandexHashFromTask(task, eventId, timeZone);
         link.LastDirection = "crm-to-yandex";
         link.SyncStatus = "active";
         link.LastError = null;
@@ -912,6 +934,24 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             .OrderBy(item => item.DueAt)
             .Take(500)
             .ToListAsync(cancellationToken);
+    }
+
+    private async Task<TimeZoneInfo> ResolveTaskTimeZoneAsync(
+        YandexCalendarConnection connection,
+        YandexCalendarSyncCalendar? calendar,
+        TaskJournalItem task,
+        CancellationToken cancellationToken)
+    {
+        var ownerUserId = calendar?.OwnerUserId;
+        if (!ownerUserId.HasValue)
+        {
+            var isAdmin = await IsAdminConnectionAsync(connection.UserId, cancellationToken);
+            ownerUserId = isAdmin && connection.CalendarMode == "adminByAssignee"
+                ? task.AssigneeUserId
+                : connection.UserId;
+        }
+
+        return await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, ownerUserId ?? connection.UserId, cancellationToken);
     }
 
     private async Task<int> DeleteLinksOutsideSyncWindowAsync(YandexCalendarConnection connection, CancellationToken cancellationToken)
@@ -1002,6 +1042,38 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             deleted
                 ? "Событие удалено из Яндекс.Календаря, потому что задача раньше даты начала синхронизации."
                 : "Событие уже отсутствовало в Яндекс.Календаре при очистке задачи раньше даты начала синхронизации.",
+            null,
+            cancellationToken);
+    }
+
+    private async Task DeleteTaskLinkForCompletedTaskAsync(YandexCalendarConnection connection, int taskId, CancellationToken cancellationToken)
+    {
+        var link = await _db.YandexCalendarTaskLinks
+            .FirstOrDefaultAsync(item =>
+                item.ConnectionId == connection.Id &&
+                item.TaskJournalItemId == taskId &&
+                item.SyncStatus == "active",
+                cancellationToken);
+        if (link is null)
+        {
+            return;
+        }
+
+        var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
+        var deleted = string.IsNullOrWhiteSpace(link.YandexEventUrl)
+            ? false
+            : await DeleteYandexEventAsync(accessToken, link.YandexEventUrl, cancellationToken);
+        MarkYandexLinkDeleted(link);
+        await AddLogAsync(
+            connection.Id,
+            link.CalendarSyncCalendarId,
+            link.TaskJournalItemId,
+            "crm-to-yandex",
+            deleted ? "delete-event" : "delete-event-missing",
+            "success",
+            deleted
+                ? "Событие удалено из Яндекс Календаря, потому что в настройках включено скрытие выполненных задач."
+                : "Событие уже отсутствовало в Яндекс Календаре при скрытии выполненной задачи.",
             null,
             cancellationToken);
     }
@@ -1408,9 +1480,9 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         return result;
     }
 
-    private static string BuildIcsEvent(YandexCalendarConnection connection, TaskJournalItem task, string eventId, string crmHash)
+    private static string BuildIcsEvent(YandexCalendarConnection connection, TaskJournalItem task, string eventId, string crmHash, TimeZoneInfo timeZone)
     {
-        var start = EnsureUtc(task.DueAt);
+        var start = CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone);
         var end = start.AddMinutes(Math.Max(15, task.PlannedDurationMinutes));
         return string.Join("\r\n", [
             "BEGIN:VCALENDAR",
@@ -1519,14 +1591,14 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         return string.Join('\n', lines);
     }
 
-    private static string BuildCrmHash(TaskJournalItem task)
-        => Sha256($"{task.Id}|{task.Title}|{task.Description}|{task.Result}|{task.Status}|{task.Priority}|{EnsureUtc(task.DueAt):O}|{task.PlannedDurationMinutes}|{task.AssigneeUserId}|{task.AssigneeName}");
+    private static string BuildCrmHash(TaskJournalItem task, TimeZoneInfo timeZone)
+        => Sha256($"{task.Id}|{task.Title}|{task.Description}|{task.Result}|{task.Status}|{task.Priority}|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone):O}|{task.PlannedDurationMinutes}|{task.AssigneeUserId}|{task.AssigneeName}|{timeZone.Id}");
 
     private static string BuildYandexHash(YandexEventItem item)
         => Sha256($"{item.Id}|{item.Summary}|{item.Deleted}|{item.StartAt:O}|{item.EndAt:O}|{item.PayPlannerHash}");
 
-    private static string BuildYandexHashFromTask(TaskJournalItem task, string eventId)
-        => Sha256($"{eventId}|[{StatusLabel(task.Status)}] {task.Title}|False|{EnsureUtc(task.DueAt):O}|{EnsureUtc(task.DueAt).AddMinutes(Math.Max(15, task.PlannedDurationMinutes)):O}|{BuildCrmHash(task)}");
+    private static string BuildYandexHashFromTask(TaskJournalItem task, string eventId, TimeZoneInfo timeZone)
+        => Sha256($"{eventId}|[{StatusLabel(task.Status)}] {task.Title}|False|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone):O}|{CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, timeZone).AddMinutes(Math.Max(15, task.PlannedDurationMinutes)):O}|{BuildCrmHash(task, timeZone)}");
 
     private static string Sha256(string value)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
@@ -1538,6 +1610,10 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             DateTimeKind.Local => value.ToUniversalTime(),
             _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
         };
+
+    private static bool ShouldHideCompletedTask(CalendarSyncSettingsDto settings, TaskJournalItem task)
+        => string.Equals(settings.CompletedTaskCalendarAction, "hide", StringComparison.Ordinal) &&
+           string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase);
 
     private static DateTime? BuildManualFullSyncAvailableAt(DateTime? lastFullSyncAt, int cooldownMinutes)
         => lastFullSyncAt.HasValue
@@ -1997,7 +2073,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         => minutes.HasValue ? $"{minutes.Value} мин." : "не указана";
 
     private static string FormatLogDateTime(DateTime value)
-        => EnsureUtc(value).ToString("dd.MM.yyyy HH:mm 'UTC'", CultureInfo.InvariantCulture);
+        => value.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
 
     private static string BuildTaskSnapshotDetails(TaskJournalItem task)
     {

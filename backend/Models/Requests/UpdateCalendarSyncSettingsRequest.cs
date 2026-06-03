@@ -8,6 +8,8 @@ public sealed class UpdateCalendarSyncSettingsRequest
     public int? GoogleSyncIntervalMinutes { get; set; }
     public int? YandexSyncIntervalMinutes { get; set; }
     public int? ManualFullSyncCooldownMinutes { get; set; }
+    public string? CompletedTaskCalendarAction { get; set; }
+    public string? CompletedTaskGoogleColorId { get; set; }
     public string? SyncMode { get; set; }
     public string? ConflictResolutionMode { get; set; }
     public string? UserControlMode { get; set; }

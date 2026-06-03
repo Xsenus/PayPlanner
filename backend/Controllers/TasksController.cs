@@ -77,6 +77,7 @@ public class TasksController : ControllerBase
     private const string CaseInactivityAutomationEscalationDaysSettingKey = "tasks.automation.caseControl.escalationDays";
     private const string CaseInactivityAutomationEscalationUserSettingKey = "tasks.automation.caseControl.escalationUserId";
     private const string ContractorPaymentMarker = "[PayPlanner:TaskContractorPayment]";
+    private const string CalendarSyncSettingsKey = "calendarSync.settings";
 
     private readonly PaymentContext _db;
     private readonly INotificationService _notificationService;
@@ -458,6 +459,12 @@ public class TasksController : ControllerBase
             query = query.Where(task => task.DueAt <= to.Value);
         }
 
+        var calendarSyncSettings = await LoadCalendarSyncSettingsAsync(ct);
+        if (string.Equals(calendarSyncSettings.CompletedTaskCalendarAction, "hide", StringComparison.Ordinal))
+        {
+            query = query.Where(task => task.Status != "done");
+        }
+
         var tasks = await query
             .OrderBy(task => task.DueAt)
             .ThenBy(task => task.Id)
@@ -465,7 +472,8 @@ public class TasksController : ControllerBase
             .ToListAsync(ct);
 
         var reminders = IcsReminderOptions.Normalize(reminderMinutes);
-        var calendar = BuildIcsCalendar(tasks, reminders);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var calendar = BuildIcsCalendar(tasks, reminders, timeZone);
         _db.ObjectAuditEvents.Add(CalendarExportAudit.CreateExportEvent(
             User,
             "tasks",
@@ -3440,10 +3448,34 @@ public class TasksController : ControllerBase
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
 
-    private static string BuildIcsCalendar(IEnumerable<TaskJournalItem> tasks, IReadOnlyList<int>? reminderMinutes = null)
+    private async Task<CalendarSyncSettingsDto> LoadCalendarSyncSettingsAsync(CancellationToken ct)
+    {
+        var setting = await _db.SystemSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Key == CalendarSyncSettingsKey, ct);
+        if (setting is null || string.IsNullOrWhiteSpace(setting.Value))
+        {
+            return CalendarSyncProviderRegistry.BuildDefaultSettings();
+        }
+
+        try
+        {
+            var settings = JsonSerializer.Deserialize<CalendarSyncSettingsDto>(setting.Value, JsonOptions);
+            return settings is null
+                ? CalendarSyncProviderRegistry.BuildDefaultSettings()
+                : CalendarSyncProviderRegistry.NormalizeSettings(settings);
+        }
+        catch (JsonException)
+        {
+            return CalendarSyncProviderRegistry.BuildDefaultSettings();
+        }
+    }
+
+    private static string BuildIcsCalendar(IEnumerable<TaskJournalItem> tasks, IReadOnlyList<int>? reminderMinutes = null, TimeZoneInfo? timeZone = null)
     {
         var now = DateTime.UtcNow;
         var reminders = reminderMinutes is { Count: > 0 } ? reminderMinutes : IcsReminderOptions.DefaultReminderMinutes;
+        var calendarTimeZone = timeZone ?? TimeZoneInfo.Local;
         var builder = new StringBuilder();
         builder.AppendLine("BEGIN:VCALENDAR");
         builder.AppendLine("VERSION:2.0");
@@ -3454,7 +3486,7 @@ public class TasksController : ControllerBase
 
         foreach (var task in tasks)
         {
-            var start = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc);
+            var start = CalendarTimeZoneHelper.ToExternalUtc(task.DueAt, calendarTimeZone);
             var end = start.AddMinutes(NormalizeTaskDuration(task.PlannedDurationMinutes));
             var description = string.Join("\\n", new[]
             {
@@ -3467,9 +3499,9 @@ public class TasksController : ControllerBase
 
             builder.AppendLine("BEGIN:VEVENT");
             builder.AppendLine($"UID:payplanner-task-{task.Id}@crm.elitpravo.com");
-            builder.AppendLine($"DTSTAMP:{FormatIcsDate(now)}");
-            builder.AppendLine($"DTSTART:{FormatIcsDate(start)}");
-            builder.AppendLine($"DTEND:{FormatIcsDate(end)}");
+            builder.AppendLine($"DTSTAMP:{FormatIcsDate(now, calendarTimeZone)}");
+            builder.AppendLine($"DTSTART:{FormatIcsDate(start, calendarTimeZone)}");
+            builder.AppendLine($"DTEND:{FormatIcsDate(end, calendarTimeZone)}");
             builder.AppendLine($"SUMMARY:{EscapeIcsText(task.Title)}");
             builder.AppendLine($"DESCRIPTION:{EscapeIcsText(description)}");
             builder.AppendLine($"STATUS:{(task.Status == "done" ? "COMPLETED" : "CONFIRMED")}");
@@ -3493,8 +3525,8 @@ public class TasksController : ControllerBase
         builder.AppendLine("END:VALARM");
     }
 
-    private static string FormatIcsDate(DateTime value)
-        => DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("yyyyMMdd'T'HHmmss'Z'");
+    private static string FormatIcsDate(DateTime value, TimeZoneInfo timeZone)
+        => CalendarTimeZoneHelper.FormatUtcIcsDateTime(value, timeZone);
 
     private static string EscapeIcsText(string? value)
         => (value ?? string.Empty)

@@ -45,6 +45,8 @@ public sealed class CalendarSyncSettingsDto
     public int GoogleSyncIntervalMinutes { get; set; } = 10;
     public int YandexSyncIntervalMinutes { get; set; } = 10;
     public int ManualFullSyncCooldownMinutes { get; set; } = 10;
+    public string CompletedTaskCalendarAction { get; set; } = "color";
+    public string CompletedTaskGoogleColorId { get; set; } = "8";
     public string SyncMode { get; set; } = "notConfigured";
     public string ConflictResolutionMode { get; set; } = "manualConfirmation";
     public string UserControlMode { get; set; } = "userManaged";

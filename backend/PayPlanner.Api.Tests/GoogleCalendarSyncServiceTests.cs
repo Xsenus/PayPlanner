@@ -152,11 +152,12 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
-    public async Task SyncNowAsync_TreatsUnspecifiedTaskDueAtAsUtcWhenCreatingGoogleEvent()
+    public async Task SyncNowAsync_TreatsUnspecifiedTaskDueAtAsCrmLocalTimeWhenCreatingGoogleEvent()
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-unspecified-google@example.com", "user");
         await EnableGoogleSettingsAsync(db);
+        await SetUserTimeZoneAsync(db, user.Id, "Europe/Samara");
         await CreateConnectionAsync(db, user.Id);
         await CreateTaskAsync(
             db,
@@ -175,8 +176,67 @@ public class GoogleCalendarSyncServiceTests
             request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
         var body = await createEventRequest.Content!.ReadAsStringAsync();
         using var document = JsonDocument.Parse(body);
-        Assert.Equal("2026-06-05T09:00:00.0000000Z", document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
-        Assert.Equal("2026-06-05T10:00:00.0000000Z", document.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
+        Assert.Equal("2026-06-05T09:00:00+04:00", document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
+        Assert.Equal("2026-06-05T10:00:00+04:00", document.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
+    }
+
+    [Fact]
+    public async Task SyncNowAsync_UsesGoogleColorForCompletedTasksWhenColorModeEnabled()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-completed-color-google@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        await CreateConnectionAsync(db, user.Id);
+        var task = await CreateTaskAsync(db, user.Id, "Р“РѕС‚РѕРІР°СЏ Р·Р°РґР°С‡Р°", dueAt: new DateTime(2026, 6, 5, 9, 0, 0));
+        task.Status = "done";
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        var createEventRequest = handler.Requests.Single(request =>
+            request.Method == HttpMethod.Post &&
+            request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
+        var body = await createEventRequest.Content!.ReadAsStringAsync();
+        using var document = JsonDocument.Parse(body);
+        Assert.Equal("8", document.RootElement.GetProperty("colorId").GetString());
+    }
+
+    [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_DeletesCompletedTaskEventWhenHideModeEnabled()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-completed-hide-google@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 10, completedTaskCalendarAction: "hide");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-completed-hide", "PayPlanner Р·Р°РґР°С‡Рё");
+        var task = await CreateTaskAsync(db, user.Id, "РЎРєСЂС‹С‚СЊ РіРѕС‚РѕРІСѓСЋ Р·Р°РґР°С‡Сѓ", dueAt: new DateTime(2026, 6, 5, 9, 0, 0));
+        task.Status = "done";
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "event-completed-hide",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.Contains("/events/event-completed-hide", StringComparison.Ordinal));
+        var link = await db.GoogleCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal("deleted", link.SyncStatus);
     }
 
     [Fact]
@@ -185,6 +245,7 @@ public class GoogleCalendarSyncServiceTests
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-google-move@example.com", "user");
         await EnableGoogleSettingsAsync(db);
+        await SetUserTimeZoneAsync(db, user.Id, "Europe/Samara");
         var connection = await CreateConnectionAsync(db, user.Id);
         var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-google-move", "PayPlanner задачи");
         var task = await CreateTaskAsync(db, user.Id, "Перенесенная задача", dueAt: new DateTime(2026, 6, 5, 8, 0, 0, DateTimeKind.Utc));
@@ -210,8 +271,8 @@ public class GoogleCalendarSyncServiceTests
                 etag = "\"etag-google-move\"",
                 status = "confirmed",
                 summary = "[Новая] Перенесенная задача",
-                start = new { dateTime = "2026-06-05T16:00:00+07:00" },
-                end = new { dateTime = "2026-06-05T17:00:00+07:00" },
+                start = new { dateTime = "2026-06-05T16:00:00+04:00" },
+                end = new { dateTime = "2026-06-05T17:00:00+04:00" },
                 extendedProperties = new
                 {
                     @private = new Dictionary<string, string>
@@ -232,7 +293,7 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal(0, firstResult.ErrorCount);
         Assert.Equal(0, secondResult.ErrorCount);
         var updatedTask = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
-        Assert.Equal(new DateTime(2026, 6, 5, 9, 0, 0, DateTimeKind.Utc), updatedTask.DueAt);
+        Assert.Equal(new DateTime(2026, 6, 5, 16, 0, 0), updatedTask.DueAt);
         Assert.DoesNotContain(handler.Requests, request =>
             request.Method == HttpMethod.Put &&
             request.RequestUri!.AbsolutePath.Contains("/events/event-google-move", StringComparison.Ordinal));
@@ -586,6 +647,19 @@ public class GoogleCalendarSyncServiceTests
         return user;
     }
 
+    private static async Task SetUserTimeZoneAsync(PaymentContext db, int userId, string timeZoneId)
+    {
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = userId,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = timeZoneId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+    }
+
     private static async Task EnableGoogleSettingsAsync(PaymentContext db)
     {
         var now = DateTime.UtcNow;
@@ -612,7 +686,11 @@ public class GoogleCalendarSyncServiceTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task SetCalendarSyncSettingsAsync(PaymentContext db, int manualFullSyncCooldownMinutes)
+    private static async Task SetCalendarSyncSettingsAsync(
+        PaymentContext db,
+        int manualFullSyncCooldownMinutes,
+        string completedTaskCalendarAction = "color",
+        string completedTaskGoogleColorId = "8")
     {
         var setting = await db.SystemSettings.SingleAsync(item => item.Key == "calendarSync.settings");
         setting.Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
@@ -625,6 +703,8 @@ public class GoogleCalendarSyncServiceTests
             InactiveUserAction = "cleanupExternalData",
             RequireManualConfirmation = true,
             ManualFullSyncCooldownMinutes = manualFullSyncCooldownMinutes,
+            CompletedTaskCalendarAction = completedTaskCalendarAction,
+            CompletedTaskGoogleColorId = completedTaskGoogleColorId,
         });
         setting.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();

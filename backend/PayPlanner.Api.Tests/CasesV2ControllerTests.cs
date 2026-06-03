@@ -1468,7 +1468,7 @@ public class CasesV2ControllerTests
             ResponsibleUserId = owner.Id,
             CourtName = "Арбитражный суд",
             CourtCaseNumber = "А55-100/2026",
-            NextHearingAt = new DateTime(2026, 6, 10, 11, 0, 0, DateTimeKind.Utc),
+            NextHearingAt = new DateTime(2026, 6, 10, 11, 0, 0, DateTimeKind.Unspecified),
             AppealDeadlineAt = new DateTime(2026, 6, 20, 0, 0, 0, DateTimeKind.Utc),
             MotionDeadlineAt = new DateTime(2026, 7, 5, 0, 0, 0, DateTimeKind.Utc),
         };
@@ -1489,6 +1489,14 @@ public class CasesV2ControllerTests
             AssigneeName = owner.FullName,
             AuthorUserId = owner.Id,
             AuthorName = owner.FullName,
+        });
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
@@ -1540,6 +1548,8 @@ public class CasesV2ControllerTests
         Assert.Contains("BEGIN:VCALENDAR", ics, StringComparison.Ordinal);
         Assert.Contains("X-WR-CALNAME:Календарь дел", ics, StringComparison.Ordinal);
         Assert.Contains("SUMMARY:Судебное заседание", ics, StringComparison.Ordinal);
+        Assert.Contains("DTSTART:20260610T070000Z", ics, StringComparison.Ordinal);
+        Assert.DoesNotContain("DTSTART:20260610T110000Z", ics, StringComparison.Ordinal);
         Assert.Contains("SUMMARY:Срок апелляции", ics, StringComparison.Ordinal);
         Assert.Contains("SUMMARY:Подготовить позицию", ics, StringComparison.Ordinal);
         Assert.Contains("BEGIN:VALARM", ics, StringComparison.Ordinal);

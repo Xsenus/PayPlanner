@@ -66,6 +66,8 @@ public static class CalendarExportAudit
                     nextSettings.GoogleSyncIntervalMinutes,
                     nextSettings.YandexSyncIntervalMinutes,
                     nextSettings.ManualFullSyncCooldownMinutes,
+                    nextSettings.CompletedTaskCalendarAction,
+                    nextSettings.CompletedTaskGoogleColorId,
                     nextSettings.SyncMode,
                     nextSettings.ConflictResolutionMode,
                     nextSettings.UserControlMode,
@@ -92,6 +94,8 @@ public static class CalendarExportAudit
         AddIfChanged(changes, "GoogleSyncIntervalMinutes", previousSettings.GoogleSyncIntervalMinutes.ToString(), nextSettings.GoogleSyncIntervalMinutes.ToString());
         AddIfChanged(changes, "YandexSyncIntervalMinutes", previousSettings.YandexSyncIntervalMinutes.ToString(), nextSettings.YandexSyncIntervalMinutes.ToString());
         AddIfChanged(changes, "ManualFullSyncCooldownMinutes", previousSettings.ManualFullSyncCooldownMinutes.ToString(), nextSettings.ManualFullSyncCooldownMinutes.ToString());
+        AddIfChanged(changes, "CompletedTaskCalendarAction", previousSettings.CompletedTaskCalendarAction, nextSettings.CompletedTaskCalendarAction);
+        AddIfChanged(changes, "CompletedTaskGoogleColorId", previousSettings.CompletedTaskGoogleColorId, nextSettings.CompletedTaskGoogleColorId);
         AddIfChanged(changes, "SyncMode", previousSettings.SyncMode, nextSettings.SyncMode);
         AddIfChanged(changes, "ConflictResolutionMode", previousSettings.ConflictResolutionMode, nextSettings.ConflictResolutionMode);
         AddIfChanged(changes, "UserControlMode", previousSettings.UserControlMode, nextSettings.UserControlMode);

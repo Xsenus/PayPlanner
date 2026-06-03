@@ -1519,8 +1519,16 @@ public class TasksControllerTests
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var task = await CreateTaskAsync(db, author.Id, client.Id);
         task.Title = "Проверить документы";
-        task.DueAt = new DateTime(2026, 5, 10, 9, 0, 0, DateTimeKind.Utc);
+        task.DueAt = new DateTime(2026, 5, 10, 9, 0, 0, DateTimeKind.Unspecified);
         task.PlannedDurationMinutes = 90;
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = author.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
@@ -1532,8 +1540,8 @@ public class TasksControllerTests
         Assert.Equal("text/calendar; charset=utf-8", file.ContentType);
         Assert.Contains("BEGIN:VCALENDAR", content);
         Assert.Contains("SUMMARY:Проверить документы", content);
-        Assert.Contains("DTSTART:20260510T090000Z", content);
-        Assert.Contains("DTEND:20260510T103000Z", content);
+        Assert.Contains("DTSTART:20260510T050000Z", content);
+        Assert.Contains("DTEND:20260510T063000Z", content);
         Assert.Contains("BEGIN:VALARM", content);
         Assert.Contains("DESCRIPTION:Напоминание: Проверить документы", content);
         Assert.Contains("TRIGGER:-PT1H", content);
