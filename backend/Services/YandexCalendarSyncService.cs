@@ -1507,14 +1507,12 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static DateTime EnsureUtc(DateTime value)
-    {
-        if (value.Kind == DateTimeKind.Utc)
+        => value.Kind switch
         {
-            return value;
-        }
-
-        return DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime();
-    }
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        };
 
     private async Task AddLogAsync(
         int? connectionId,

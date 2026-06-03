@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -148,6 +149,113 @@ public class GoogleCalendarSyncServiceTests
         Assert.False(await db.GoogleCalendarTaskLinks.AnyAsync(item => item.TaskJournalItemId == oldTask.Id));
         Assert.True(await db.GoogleCalendarTaskLinks.AnyAsync(item => item.TaskJournalItemId == newTask.Id));
         Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SyncNowAsync_TreatsUnspecifiedTaskDueAtAsUtcWhenCreatingGoogleEvent()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-unspecified-google@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        await CreateConnectionAsync(db, user.Id);
+        await CreateTaskAsync(
+            db,
+            user.Id,
+            "Дата без Kind не должна сдвигаться",
+            dueAt: new DateTime(2026, 6, 5, 9, 0, 0, DateTimeKind.Unspecified));
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        var createEventRequest = handler.Requests.Single(request =>
+            request.Method == HttpMethod.Post &&
+            request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
+        var body = await createEventRequest.Content!.ReadAsStringAsync();
+        using var document = JsonDocument.Parse(body);
+        Assert.Equal("2026-06-05T09:00:00.0000000Z", document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
+        Assert.Equal("2026-06-05T10:00:00.0000000Z", document.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
+    }
+
+    [Fact]
+    public async Task SyncNowAsync_AppliesGoogleMoveWithoutPushingTaskBackOnNextCycle()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-google-move@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-google-move", "PayPlanner задачи");
+        var task = await CreateTaskAsync(db, user.Id, "Перенесенная задача", dueAt: new DateTime(2026, 6, 5, 8, 0, 0, DateTimeKind.Utc));
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "event-google-move",
+            SyncStatus = "active",
+            LastCrmHash = "old-crm-hash",
+            LastGoogleHash = "old-google-hash",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var googleEvents = new object[]
+        {
+            new
+            {
+                id = "event-google-move",
+                etag = "\"etag-google-move\"",
+                status = "confirmed",
+                summary = "[Новая] Перенесенная задача",
+                start = new { dateTime = "2026-06-05T16:00:00+07:00" },
+                end = new { dateTime = "2026-06-05T17:00:00+07:00" },
+                extendedProperties = new
+                {
+                    @private = new Dictionary<string, string>
+                    {
+                        ["payPlannerTaskId"] = task.Id.ToString(),
+                    },
+                },
+            },
+        };
+        var handler = new RecordingGoogleHandler(eventItems: googleEvents);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var firstResult = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+        db.ChangeTracker.Clear();
+        var secondResult = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(1, firstResult.ImportedEvents);
+        Assert.Equal(0, firstResult.ErrorCount);
+        Assert.Equal(0, secondResult.ErrorCount);
+        var updatedTask = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(new DateTime(2026, 6, 5, 9, 0, 0, DateTimeKind.Utc), updatedTask.DueAt);
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Method == HttpMethod.Put &&
+            request.RequestUri!.AbsolutePath.Contains("/events/event-google-move", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SyncNowAsync_RetriesGoogleRateLimitWhenListingEvents()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-google-rate-limit@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-rate-limit", "PayPlanner задачи");
+        var handler = new RecordingGoogleHandler(eventListRateLimitCount: 1);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(2, handler.Requests.Count(request =>
+            request.Method == HttpMethod.Get &&
+            request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal)));
+        Assert.DoesNotContain(await db.GoogleCalendarSyncLogs.ToListAsync(), log => log.Status == "error");
     }
 
     [Fact]
@@ -576,10 +684,17 @@ public class GoogleCalendarSyncServiceTests
     private sealed class RecordingGoogleHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _deleteStatusCode;
+        private readonly object[] _eventItems;
+        private int _eventListRateLimitCount;
 
-        public RecordingGoogleHandler(HttpStatusCode deleteStatusCode = HttpStatusCode.NoContent)
+        public RecordingGoogleHandler(
+            HttpStatusCode deleteStatusCode = HttpStatusCode.NoContent,
+            object[]? eventItems = null,
+            int eventListRateLimitCount = 0)
         {
             _deleteStatusCode = deleteStatusCode;
+            _eventItems = eventItems ?? [];
+            _eventListRateLimitCount = eventListRateLimitCount;
         }
 
         public List<HttpRequestMessage> Requests { get; } = [];
@@ -601,7 +716,21 @@ public class GoogleCalendarSyncServiceTests
 
             if (path.Contains("/events", StringComparison.Ordinal) && request.Method == HttpMethod.Get)
             {
-                return Task.FromResult(Json(new { items = Array.Empty<object>(), nextSyncToken = "sync-token" }));
+                if (_eventListRateLimitCount > 0)
+                {
+                    _eventListRateLimitCount--;
+                    var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                    {
+                        Content = new StringContent(
+                            "{\"error\":{\"message\":\"Rate Limit Exceeded\",\"errors\":[{\"reason\":\"rateLimitExceeded\"}]}}",
+                            Encoding.UTF8,
+                            "application/json"),
+                    };
+                    response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.Zero);
+                    return Task.FromResult(response);
+                }
+
+                return Task.FromResult(Json(new { items = _eventItems, nextSyncToken = "sync-token" }));
             }
 
             if (path.Contains("/events", StringComparison.Ordinal) && request.Method == HttpMethod.Post)
@@ -636,6 +765,15 @@ public class GoogleCalendarSyncServiceTests
             };
 
         private static HttpRequestMessage CloneRequest(HttpRequestMessage source)
-            => new(source.Method, source.RequestUri);
+        {
+            var clone = new HttpRequestMessage(source.Method, source.RequestUri);
+            if (source.Content is not null)
+            {
+                var body = source.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                clone.Content = new StringContent(body, Encoding.UTF8, source.Content.Headers.ContentType?.MediaType ?? "application/json");
+            }
+
+            return clone;
+        }
     }
 }

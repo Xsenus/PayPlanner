@@ -152,6 +152,29 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_TreatsUnspecifiedTaskDueAtAsUtcWhenWritingYandexEvent()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-unspecified@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-yandex-unspecified", "PayPlanner задачи");
+        var task = await CreateTaskAsync(
+            db,
+            user.Id,
+            "Дата без Kind не должна сдвигаться",
+            new DateTime(2026, 6, 5, 9, 0, 0, DateTimeKind.Unspecified));
+        var handler = new RecordingYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        var putRequest = handler.Requests.Single(request => request.Method == HttpMethod.Put);
+        var body = await putRequest.Content!.ReadAsStringAsync();
+        Assert.Contains("DTSTART:20260605T090000Z", body);
+        Assert.Contains("DTEND:20260605T100000Z", body);
+    }
+
+    [Fact]
     public async Task UpdateSettingsAsync_WhenAdminManagedRejectsRegularUser()
     {
         await using var db = await CreateContextAsync();
@@ -323,7 +346,15 @@ public class YandexCalendarSyncServiceTests
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Requests.Add(new HttpRequestMessage(request.Method, request.RequestUri));
+            Requests.Add(CloneRequest(request));
+
+            if (request.Method == HttpMethod.Put)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
+                {
+                    Content = new StringContent(string.Empty, Encoding.UTF8, "text/plain"),
+                });
+            }
 
             if (request.Method == HttpMethod.Delete)
             {
@@ -337,6 +368,18 @@ public class YandexCalendarSyncServiceTests
             {
                 Content = new StringContent("not found", Encoding.UTF8, "text/plain"),
             });
+        }
+
+        private static HttpRequestMessage CloneRequest(HttpRequestMessage source)
+        {
+            var clone = new HttpRequestMessage(source.Method, source.RequestUri);
+            if (source.Content is not null)
+            {
+                var body = source.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                clone.Content = new StringContent(body, Encoding.UTF8, source.Content.Headers.ContentType?.MediaType ?? "text/plain");
+            }
+
+            return clone;
         }
     }
 }

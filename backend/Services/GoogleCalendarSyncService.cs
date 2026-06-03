@@ -28,6 +28,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     private const string GoogleApiBaseUrl = "https://www.googleapis.com/calendar/v3";
     private const string CalendarSyncSettingsKey = "calendarSync.settings";
     private const int DefaultPollIntervalMs = 2000;
+    private const int GoogleRateLimitRetryCount = 2;
     private static readonly TimeSpan AuthRequestLifetime = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan AccessTokenRefreshSkew = TimeSpan.FromMinutes(2);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -1301,19 +1302,17 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
         var url = QueryHelpers.AddQueryString($"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendar.GoogleCalendarId)}/events", query!);
         using var request = BuildGoogleRequest(HttpMethod.Get, url, accessToken);
-        var client = _httpClientFactory.CreateClient();
-        using var response = await client.SendAsync(request, cancellationToken);
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        var response = await SendGoogleWithRetryAsync(request, cancellationToken);
         if ((int)response.StatusCode == 410)
         {
             return new GoogleEventsResponse([], null, ResetRequired: true);
         }
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Google не вернул список событий.");
+            throw new InvalidOperationException(ReadProviderError(response.Payload, response.ReasonPhrase) ?? "Google не вернул список событий.");
         }
 
-        using var document = JsonDocument.Parse(payload);
+        using var document = JsonDocument.Parse(response.Payload);
         var events = new List<GoogleEventItem>();
         if (document.RootElement.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
         {
@@ -1341,33 +1340,57 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
     private async Task<JsonDocument> SendGoogleJsonAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient();
-        using var response = await client.SendAsync(request, cancellationToken);
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        var response = await SendGoogleWithRetryAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Google Calendar API вернул ошибку.");
+            throw new InvalidOperationException(ReadProviderError(response.Payload, response.ReasonPhrase) ?? "Google Calendar API вернул ошибку.");
         }
 
-        return JsonDocument.Parse(payload);
+        return JsonDocument.Parse(response.Payload);
     }
 
     private async Task<bool> SendGoogleDeleteAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient();
-        using var response = await client.SendAsync(request, cancellationToken);
+        var response = await SendGoogleWithRetryAsync(request, cancellationToken);
         if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
         {
             return false;
         }
 
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Google Calendar API вернул ошибку при удалении.");
+            throw new InvalidOperationException(ReadProviderError(response.Payload, response.ReasonPhrase) ?? "Google Calendar API вернул ошибку при удалении.");
         }
 
         return true;
+    }
+
+    private async Task<GoogleHttpResponse> SendGoogleWithRetryAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient();
+        var snapshot = await GoogleRequestSnapshot.FromAsync(request, cancellationToken);
+        GoogleHttpResponse? lastResponse = null;
+
+        for (var attempt = 0; attempt <= GoogleRateLimitRetryCount; attempt++)
+        {
+            using var retryRequest = snapshot.CreateRequest();
+            using var response = await client.SendAsync(retryRequest, cancellationToken);
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+            var result = new GoogleHttpResponse(response.StatusCode, response.ReasonPhrase, payload);
+            if (!IsGoogleRateLimitResponse(result) || attempt == GoogleRateLimitRetryCount)
+            {
+                return result;
+            }
+
+            lastResponse = result;
+            var delay = ResolveGoogleRetryDelay(response, attempt);
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        return lastResponse ?? new GoogleHttpResponse(HttpStatusCode.TooManyRequests, null, string.Empty);
     }
 
     private static HttpRequestMessage BuildGoogleRequest(HttpMethod method, string url, string accessToken, string? jsonBody = null)
@@ -1442,13 +1465,45 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static DateTime EnsureUtc(DateTime value)
-    {
-        if (value.Kind == DateTimeKind.Utc)
+        => value.Kind switch
         {
-            return value;
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        };
+
+    private static bool IsGoogleRateLimitResponse(GoogleHttpResponse response)
+    {
+        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            return true;
         }
 
-        return DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime();
+        if (response.StatusCode != HttpStatusCode.Forbidden || string.IsNullOrWhiteSpace(response.Payload))
+        {
+            return false;
+        }
+
+        return response.Payload.Contains("rateLimitExceeded", StringComparison.OrdinalIgnoreCase)
+            || response.Payload.Contains("userRateLimitExceeded", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static TimeSpan ResolveGoogleRetryDelay(HttpResponseMessage response, int attempt)
+    {
+        if (response.Headers.RetryAfter?.Delta is { } delta)
+        {
+            return delta > TimeSpan.FromSeconds(5) ? TimeSpan.FromSeconds(5) : delta;
+        }
+
+        if (response.Headers.RetryAfter?.Date is { } date)
+        {
+            var delay = date - DateTimeOffset.UtcNow;
+            return delay <= TimeSpan.Zero
+                ? TimeSpan.Zero
+                : delay > TimeSpan.FromSeconds(5) ? TimeSpan.FromSeconds(5) : delay;
+        }
+
+        return TimeSpan.FromMilliseconds(250 * (attempt + 1));
     }
 
     private async Task AddLogAsync(
@@ -2018,6 +2073,44 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     private sealed record GoogleProfile(string Sub, string? Email, string? Name);
     private sealed record GoogleCalendarCreateResult(string Id);
     private sealed record GoogleEventWriteResult(string Id, string? Etag);
+    private sealed record GoogleHttpResponse(HttpStatusCode StatusCode, string? ReasonPhrase, string Payload)
+    {
+        public bool IsSuccessStatusCode => (int)StatusCode >= 200 && (int)StatusCode <= 299;
+    }
+
+    private sealed record GoogleRequestSnapshot(
+        HttpMethod Method,
+        Uri? RequestUri,
+        AuthenticationHeaderValue? Authorization,
+        string? Body,
+        string? MediaType)
+    {
+        public static async Task<GoogleRequestSnapshot> FromAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content is null
+                ? null
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            return new GoogleRequestSnapshot(
+                request.Method,
+                request.RequestUri,
+                request.Headers.Authorization,
+                body,
+                request.Content?.Headers.ContentType?.MediaType);
+        }
+
+        public HttpRequestMessage CreateRequest()
+        {
+            var request = new HttpRequestMessage(Method, RequestUri);
+            request.Headers.Authorization = Authorization;
+            if (Body is not null)
+            {
+                request.Content = new StringContent(Body, Encoding.UTF8, MediaType ?? "application/json");
+            }
+
+            return request;
+        }
+    }
+
     private sealed record GoogleEventsResponse(IReadOnlyList<GoogleEventItem> Events, string? NextSyncToken, bool ResetRequired);
     private sealed record GoogleEventItem(string Id, string? Etag, string? Status, string? Summary, DateTime? StartAt, DateTime? EndAt, int? PayPlannerTaskId);
     private sealed record ConnectionSyncResult(int ProcessedTasks, int ImportedEvents, int ErrorCount);
