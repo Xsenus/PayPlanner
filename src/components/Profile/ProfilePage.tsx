@@ -552,16 +552,16 @@ export function ProfilePage() {
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <div className="text-lg font-semibold text-slate-900">Расчеты по задачам</div>
-                <div className="mt-1 text-sm text-slate-500">Оплаты, которые ожидают выполнения или уже закрыты по задачам.</div>
+                <div className="mt-1 text-sm text-slate-500">Выплаты организации вам как привлеченному исполнителю по выполненным и ожидающим задачам.</div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Должны мне</div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">К выплате мне</div>
                   <div className="mt-1 text-2xl font-semibold text-emerald-900">{formatCurrencySmart(contractorBalance.owedToMe).full}</div>
                 </div>
-                <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
-                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-700">Должен я</div>
-                  <div className="mt-1 text-2xl font-semibold text-rose-900">{formatCurrencySmart(contractorBalance.owedByMe).full}</div>
+                <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">Выплачено мне</div>
+                  <div className="mt-1 text-2xl font-semibold text-sky-900">{formatCurrencySmart(contractorBalance.paidToMe).full}</div>
                 </div>
               </div>
             </div>
@@ -571,7 +571,7 @@ export function ProfilePage() {
                   <div key={`${item.direction}-${item.taskId}-${item.paymentId ?? 'planned'}`} className="flex flex-col gap-2 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="truncate font-semibold text-slate-800">{item.taskTitle}</div>
-                      <div className="mt-1 text-xs text-slate-500">{item.direction === 'toMe' ? item.authorName : item.assigneeName}</div>
+                      <div className="mt-1 text-xs text-slate-500">Постановщик: {item.authorName || '—'}</div>
                     </div>
                     <div className="font-semibold text-slate-900">{formatCurrencySmart(item.outstandingAmount).full}</div>
                   </div>

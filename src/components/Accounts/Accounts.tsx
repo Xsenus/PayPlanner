@@ -322,6 +322,50 @@ function getInvoiceCaseSummary(invoice: Invoice | null): string[] {
   return [];
 }
 
+function getPaymentCaseSummary(payment?: Payment | null): string[] {
+  if (!payment) return [];
+  const title = payment.clientCaseTitle?.trim() || payment.clientCase?.title?.trim();
+  if (title) return [title];
+  if (payment.clientCaseId) return [`Дело #${payment.clientCaseId}`];
+  return [];
+}
+
+function resolveAccountCounterparty(invoice: Invoice | null, payments: Payment[], type: Payment['type']) {
+  const firstPayment = payments[0] ?? null;
+  const counterpartyName = invoice?.counterpartyName?.trim() || firstPayment?.counterpartyName?.trim() || '';
+  const expenseClientName = invoice?.expenseClientName?.trim() || firstPayment?.expenseClient?.name?.trim() || '';
+  const expenseLegalEntityName = invoice?.expenseLegalEntityName?.trim() || firstPayment?.expenseLegalEntityName?.trim() || '';
+  const clientName = invoice?.clientName?.trim() || firstPayment?.client?.name?.trim() || '';
+  const legalEntityName = invoice?.legalEntityName?.trim() || firstPayment?.legalEntityName?.trim() || '';
+
+  if (type === 'Expense') {
+    const primaryName = counterpartyName || expenseLegalEntityName || expenseClientName || legalEntityName || clientName || '—';
+    const primaryIsExpenseClient = !counterpartyName && !expenseLegalEntityName && Boolean(expenseClientName);
+    const expenseBasis = [
+      expenseClientName && expenseClientName !== primaryName ? `Клиент расхода: ${expenseClientName}` : null,
+      expenseLegalEntityName && expenseLegalEntityName !== primaryName ? `Организация расхода: ${expenseLegalEntityName}` : null,
+    ].filter((item): item is string => Boolean(item));
+
+    return {
+      primaryName,
+      clientId: primaryIsExpenseClient ? invoice?.expenseClientId ?? firstPayment?.expenseClientId ?? null : null,
+      clientStatus: primaryIsExpenseClient ? invoice?.expenseClientStatus ?? null : null,
+      company: primaryIsExpenseClient ? invoice?.expenseClientCompany ?? null : null,
+      caseLines: getInvoiceCaseSummary(invoice).length > 0 ? getInvoiceCaseSummary(invoice) : getPaymentCaseSummary(firstPayment),
+      expenseBasis,
+    };
+  }
+
+  return {
+    primaryName: clientName || legalEntityName || counterpartyName || '—',
+    clientId: invoice?.clientId ?? firstPayment?.clientId ?? null,
+    clientStatus: invoice?.clientStatus ?? null,
+    company: invoice?.clientCompany ?? null,
+    caseLines: getInvoiceCaseSummary(invoice).length > 0 ? getInvoiceCaseSummary(invoice) : getPaymentCaseSummary(firstPayment),
+    expenseBasis: [] as string[],
+  };
+}
+
 const PAGE_SIZE_OPTIONS = [10, 15, 25, 50, 100];
 const ACCOUNT_COLUMNS = [
   { key: 'date', label: 'Дата', defaultVisible: true, defaultWidth: 150 },
@@ -3069,9 +3113,10 @@ export function Accounts({
                       : null;
                     const actListKey = `${row.accountNumber}-${invoice?.id ?? 'no-invoice'}`;
                     const isActListOpen = expandedActListKey === actListKey;
-                    const primaryName = invoice?.clientName || invoice?.legalEntityName || invoice?.counterpartyName || row.payments[0]?.client?.name || '—';
-                    const caseLines = getInvoiceCaseSummary(invoice);
-                    const clientId = typeof invoice?.clientId === 'number' ? invoice.clientId : null;
+                    const counterpartySummary = resolveAccountCounterparty(invoice, row.payments, row.type);
+                    const primaryName = counterpartySummary.primaryName;
+                    const caseLines = counterpartySummary.caseLines;
+                    const clientId = typeof counterpartySummary.clientId === 'number' ? counterpartySummary.clientId : null;
                     const isExpanded = expandedAccounts[row.accountNumber] ?? false;
                     const colSpan = orderedVisibleColumns.length + 1 + (canEdit || canDelete ? 1 : 0);
                     const responsibleLabel = invoice?.responsibles?.length
@@ -3157,14 +3202,19 @@ export function Accounts({
                                         )}
                                       </div>
                                       <div className="flex flex-wrap items-center gap-2">
-                                        <ClientStatusBadge status={invoice?.clientStatus} />
+                                        <ClientStatusBadge status={counterpartySummary.clientStatus} />
                                         <span
                                           className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClass}`}
                                         >
                                           {typeLabel}
                                         </span>
                                       </div>
-                                      {invoice?.clientCompany && <div className="w-full truncate text-xs text-gray-500" title={invoice.clientCompany}>{invoice.clientCompany}</div>}
+                                      {counterpartySummary.company && <div className="w-full truncate text-xs text-gray-500" title={counterpartySummary.company}>{counterpartySummary.company}</div>}
+                                      {counterpartySummary.expenseBasis.map((line) => (
+                                        <div key={line} className="w-full truncate text-xs text-gray-500" title={line}>
+                                          {line}
+                                        </div>
+                                      ))}
                                       {caseLines.length > 0 && (
                                         <div className="w-full truncate text-xs text-gray-500" title={`${(t('cases') ?? 'Дела')}: ${caseLines.join(', ')}`}>
                                           {(t('cases') ?? 'Дела')}: {caseLines.join(', ')}

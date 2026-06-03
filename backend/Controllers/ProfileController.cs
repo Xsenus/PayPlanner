@@ -58,9 +58,7 @@ public class ProfileController : ControllerBase
             .AsNoTracking()
             .Include(task => task.ContractorPayment)
             .Where(task => task.ContractorPaymentEnabled)
-            .Where(task =>
-                task.AssigneeUserId == userId.Value ||
-                task.AuthorUserId == userId.Value)
+            .Where(task => task.AssigneeUserId == userId.Value)
             .OrderByDescending(task => task.ContractorPaymentDueDate ?? task.UpdatedAt ?? task.CreatedAt)
             .Take(200)
             .ToListAsync(cancellationToken);

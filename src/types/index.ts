@@ -3074,6 +3074,9 @@ export interface Payment {
   paymentOrderNumber?: string | null;
   paymentDocumentDate?: string | null;
   clientCaseId?: number | null;
+  clientCaseTitle?: string | null;
+  clientCaseReference?: string | null;
+  counterpartyName?: string | null;
   dealTypeId?: number | null;
   incomeTypeId?: number | null;
   serviceId?: number | null;

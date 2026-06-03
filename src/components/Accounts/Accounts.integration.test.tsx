@@ -739,6 +739,56 @@ describe('Accounts integration', () => {
     expect(screen.getByRole('heading', { name: 'Кредиторка' })).toBeTruthy();
   });
 
+  it('shows contractor payment recipient separately from expense client', () => {
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [
+        {
+          ...createAccountRow({
+            invoice: createInvoice({
+              type: 'Expense',
+              status: 'Pending',
+              isPaid: false,
+              clientId: null,
+              clientName: null,
+              expenseClientId: 55,
+              expenseClientName: 'Клиент по делу',
+              counterpartyName: 'Исполнитель Анна',
+              clientCaseId: 701,
+              clientCaseTitle: 'Дело клиента',
+            }),
+            payments: [
+              createRepresentativePayment({
+                type: 'Expense',
+                status: 'Pending',
+                isPaid: false,
+                counterpartyName: 'Исполнитель Анна',
+                expenseClientId: 55,
+                expenseClient: { ...createClient(), name: 'Клиент по делу' },
+                clientCaseId: 701,
+                clientCaseTitle: 'Дело клиента',
+                description: 'Оплата исполнителю по задаче',
+              }),
+            ],
+            status: 'created',
+          }),
+          type: 'Expense',
+        },
+      ],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+
+    render(<Accounts />);
+
+    expect(screen.getByText('Исполнитель Анна')).toBeTruthy();
+    expect(screen.getByText('Клиент расхода: Клиент по делу')).toBeTruthy();
+    expect(screen.getByText('Дела: Дело клиента')).toBeTruthy();
+  });
+
   it('shows document signing status separately from payment status', () => {
     getAccountsRegistryResultMock.mockReturnValue({
       items: [
