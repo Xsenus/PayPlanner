@@ -296,7 +296,7 @@ function exportCurrentCasesReport(report: CurrentCasesReport) {
   downloadCsv('current-cases-report.csv', rows);
 }
 
-function exportLawyerWorkloadReport(report: LawyerWorkloadReport) {
+function exportLawyerWorkloadReport(report: LawyerWorkloadReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Юрист', 'Активные дела', 'Открытые задачи', 'Просроченные задачи', 'На согласовании', 'Сегодня', 'Ближайшие дни', 'Просроченные сроки', 'Активные сроки', 'Плановые часы', 'Индекс нагрузки', 'Риск', 'Ближайшая задача', 'Ближайший срок'],
   ];
@@ -315,7 +315,7 @@ function exportLawyerWorkloadReport(report: LawyerWorkloadReport) {
       item.plannedHours,
       item.workloadScore,
       item.riskLabel,
-      item.nearestTaskDueAt ? formatDate(item.nearestTaskDueAt) : '',
+      item.nearestTaskDueAt ? formatDateTime(item.nearestTaskDueAt, timeZoneId) : '',
       item.nearestDeadlineAt ? formatDate(item.nearestDeadlineAt) : '',
     ]);
   });
@@ -2719,12 +2719,14 @@ function LawyerWorkloadReportSection({
   error,
   filters,
   onReload,
+  profileTimeZoneId,
 }: {
   report: LawyerWorkloadReport | null;
   loading: boolean;
   error: string | null;
   filters?: ManagementReportExportFilters;
   onReload: () => void;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.items ?? [];
   const overloadedRows = rows.filter((row) => row.isOverloaded);
@@ -2745,7 +2747,7 @@ function LawyerWorkloadReportSection({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => report && exportLawyerWorkloadReport(report)}
+            onClick={() => report && exportLawyerWorkloadReport(report, profileTimeZoneId)}
             disabled={!report}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -2887,7 +2889,7 @@ function LawyerWorkloadReportSection({
                           {row.riskLabel}
                         </span>
                         <div className="mt-2 text-xs text-slate-500">
-                          {row.nearestTaskDueAt ? `Задача: ${formatDate(row.nearestTaskDueAt)}` : 'Ближайшая задача не указана'}
+                          {row.nearestTaskDueAt ? `Задача: ${formatDateTime(row.nearestTaskDueAt, profileTimeZoneId)}` : 'Ближайшая задача не указана'}
                         </div>
                         {row.nearestDeadlineAt ? (
                           <div className="mt-1 text-xs text-slate-500">Срок: {formatDate(row.nearestDeadlineAt)}</div>
@@ -6386,6 +6388,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               error={lawyerWorkloadReportError}
               filters={lawyerWorkloadReportFilters}
               onReload={reloadLawyerWorkloadReport}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <OverdueProceduralDeadlinesReportSection

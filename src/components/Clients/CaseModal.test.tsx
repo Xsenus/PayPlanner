@@ -19,6 +19,7 @@ vi.mock('../../services/api', () => ({
     getClientCaseFinanceSummaries: vi.fn(),
     getLegalEntityCaseFinanceSummaries: vi.fn(),
     markCaseActivity: vi.fn(),
+    getUserSetting: vi.fn(),
     getCaseRelatedParties: vi.fn(),
     addCaseRelatedParty: vi.fn(),
     deleteCaseRelatedParty: vi.fn(),
@@ -65,6 +66,8 @@ describe('CaseModal', () => {
       inactivityRemindersEnabled: true,
       eventHistory: '',
     });
+    vi.mocked(apiService.getUserSetting).mockReset();
+    vi.mocked(apiService.getUserSetting).mockResolvedValue(null);
     vi.mocked(apiService.getCaseRelatedParties).mockReset();
     vi.mocked(apiService.getCaseRelatedParties).mockResolvedValue([]);
     vi.mocked(apiService.addCaseRelatedParty).mockReset();
@@ -395,6 +398,47 @@ describe('CaseModal', () => {
 
     await waitFor(() => {
       expect(apiService.updateCaseDocument).toHaveBeenCalledWith(1, 1, { documentType: 'Решение суда' });
+    });
+  });
+
+  it('shows document upload time in the profile time zone', async () => {
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
+    vi.mocked(apiService.getCaseDocuments).mockResolvedValue([
+      {
+        id: 1,
+        clientCaseId: 1,
+        documentKey: 'claim',
+        version: 1,
+        documentType: 'Иск',
+        status: 'Подготовлен',
+        originalFileName: 'claim.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 2048,
+        uploadedByUserId: 7,
+        uploadedByName: 'Кожеваткин Андрей',
+        uploadedAt: '2026-05-18T10:00:00Z',
+        isLatestVersion: true,
+      },
+    ]);
+
+    render(
+      <CaseModal
+        isOpen
+        onClose={vi.fn()}
+        caseData={createCase()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('claim.pdf')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getAllByText((_text, element) => {
+        const value = element?.textContent ?? '';
+        return element?.tagName === 'DIV'
+          && element.className === 'text-xs text-gray-500'
+          && value.includes('18.05.2026')
+          && value.includes('14:00');
+      }).length).toBeGreaterThan(0);
     });
   });
 
