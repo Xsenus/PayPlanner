@@ -57,7 +57,9 @@ import { useInvoices } from "../../hooks/useInvoices";
 import { useLegalEntities } from "../../hooks/useLegalEntities";
 import { usePaymentsPaged } from "../../hooks/usePaymentsPaged";
 import { useToast } from "../../hooks/useToast";
+import { useUserTimeZone } from "../../hooks/useUserTimeZone";
 import { formatCurrencySmart } from "../../utils/formatters";
+import { formatDateTimeInTimeZone } from "../../utils/timeZoneDate";
 import { ActModal } from "../Acts/ActModal";
 import { InvoiceModal } from "../Accounts/InvoiceModal";
 import { PaymentModal } from "../Calendar/PaymentModal";
@@ -740,6 +742,7 @@ export function LegalEntityModal({
   const { t } = useTranslation();
   const { confirm } = useDialog();
   const toast = useToast();
+  const profileTimeZoneId = useUserTimeZone();
 
   const legalEntityFieldLabels = useMemo<Record<string, string>>(
     () => ({
@@ -3303,7 +3306,7 @@ export function LegalEntityModal({
                             {caseItem.courtName ? <span>Суд: {caseItem.courtName}</span> : null}
                             {caseItem.courtCaseNumber ? <span>Судебное № {caseItem.courtCaseNumber}</span> : null}
                             {caseItem.nextHearingAt ? (
-                              <span>Заседание: {formatDocumentDate(caseItem.nextHearingAt)}</span>
+                              <span>Заседание: {formatDateTimeInTimeZone(caseItem.nextHearingAt, profileTimeZoneId)}</span>
                             ) : null}
                           </div>
                         ) : null}

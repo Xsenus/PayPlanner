@@ -3,6 +3,7 @@ import { Archive, ArrowUpDown, Bookmark, Briefcase, ClipboardPlus, Download, Loa
 
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import type { ActResponsible, ClientCase, ClientCaseAccessRequest } from '../../types';
@@ -11,7 +12,6 @@ import { toRuDate } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
-import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import { CaseModal } from '../Clients/CaseModal';
 import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
@@ -412,7 +412,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [bulkSaving, setBulkSaving] = useState(false);
   const [creatingTaskCaseId, setCreatingTaskCaseId] = useState<number | null>(null);
   const [courtSyncCaseId, setCourtSyncCaseId] = useState<number | null>(null);
-  const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
+  const timeZoneId = useUserTimeZone();
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [ownerPickerOpen, setOwnerPickerOpen] = useState(false);
@@ -446,29 +446,6 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     defaultPageSize: 25,
     maxPageSize: 200,
   });
-
-  useEffect(() => {
-    let cancelled = false;
-    if (typeof apiService.getUserSetting !== 'function') {
-      return undefined;
-    }
-
-    apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY)
-      .then((response) => {
-        if (!cancelled) {
-          setTimeZoneId(normalizeUserTimeZoneId(response?.value));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setTimeZoneId(normalizeUserTimeZoneId());
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;

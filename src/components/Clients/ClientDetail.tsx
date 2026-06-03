@@ -49,6 +49,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useRolePermissions } from "../../hooks/useRolePermissions";
 import { useDialog } from "../../hooks/useDialog";
 import { useToast } from "../../hooks/useToast";
+import { useUserTimeZone } from "../../hooks/useUserTimeZone";
 import { extractDisplayErrorMessage } from "../../utils/errorUtils";
 import { PaymentModal } from "../Calendar/PaymentModal";
 import type {
@@ -86,6 +87,7 @@ import { MonthRangePicker } from "../MonthRange/MonthRangePicker";
 import { CaseModal } from "./CaseModal";
 import { TwoTypeStats } from "../Statistics/TwoTypeStats";
 import { formatCurrencySmart } from "../../utils/formatters";
+import { formatDateTimeInTimeZone } from "../../utils/timeZoneDate";
 import { ActModal } from "../Acts/ActModal";
 import { InvoiceModal } from "../Accounts/InvoiceModal";
 import { ContractModal } from "../Contracts/ContractModal";
@@ -1326,6 +1328,7 @@ export function ClientDetail({
   const { user, isAdmin } = useAuth();
   const { confirm } = useDialog();
   const toast = useToast();
+  const profileTimeZoneId = useUserTimeZone();
   const permissions = useRolePermissions(user?.role?.id);
   const userIsAdmin = isAdmin();
   const clientPermissions = permissions.clients;
@@ -8135,7 +8138,7 @@ export function ClientDetail({
                                       {caseItem.courtName ? <span>Суд: {caseItem.courtName}</span> : null}
                                       {caseItem.courtCaseNumber ? <span>Судебное № {caseItem.courtCaseNumber}</span> : null}
                                       {caseItem.nextHearingAt ? (
-                                        <span>Заседание: {toRuDate(caseItem.nextHearingAt)}</span>
+                                        <span>Заседание: {formatDateTimeInTimeZone(caseItem.nextHearingAt, profileTimeZoneId)}</span>
                                       ) : null}
                                     </div>
                                   ) : null}

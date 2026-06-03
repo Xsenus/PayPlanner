@@ -37,6 +37,7 @@ import { useCurrentCasesReport } from '../../hooks/useCurrentCasesReport';
 import { useLawyerWorkloadReport } from '../../hooks/useLawyerWorkloadReport';
 import { useOverdueProceduralDeadlinesReport } from '../../hooks/useOverdueProceduralDeadlinesReport';
 import { useTaskReport, type TaskReportScope } from '../../hooks/useTaskReport';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { useDirectionReport } from '../../hooks/useDirectionReport';
 import { useSalesPointReport } from '../../hooks/useSalesPointReport';
 import { useVatReport } from '../../hooks/useVatReport';
@@ -60,6 +61,7 @@ import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicke
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
@@ -177,14 +179,8 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value));
+function formatDateTime(value: string, timeZoneId?: string | null) {
+  return formatDateTimeInTimeZone(value, timeZoneId);
 }
 
 function csvCell(value: unknown) {
@@ -2423,7 +2419,7 @@ function TaskReportSection({
                       </div>
                     </div>
                     {item.nearestDueAt ? (
-                      <div className="mt-2 text-xs text-slate-500">Ближайший срок: {formatDateTime(item.nearestDueAt)}</div>
+                      <div className="mt-2 text-xs text-slate-500">Ближайший срок: {formatDateTime(item.nearestDueAt, profileTimeZoneId)}</div>
                     ) : null}
                   </div>
                 )) : (
@@ -2470,7 +2466,7 @@ function TaskReportSection({
                     </td>
                     <td className="px-4 py-3 text-slate-600">{row.assigneeName || 'Без исполнителя'}</td>
                     <td className="px-4 py-3">
-                      <div className={row.isOverdue ? 'font-semibold text-rose-700' : 'text-slate-600'}>{formatDateTime(row.dueAt)}</div>
+                      <div className={row.isOverdue ? 'font-semibold text-rose-700' : 'text-slate-600'}>{formatDateTime(row.dueAt, profileTimeZoneId)}</div>
                       {row.daysOverdue ? <div className="mt-1 text-xs text-rose-600">{row.daysOverdue} дн. просрочки</div> : null}
                     </td>
                     <td className="px-4 py-3">
@@ -5712,6 +5708,7 @@ interface ReportsProps {
 }
 
 export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsProps = {}) {
+  const profileTimeZoneId = useUserTimeZone();
   const now = new Date();
   const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
   const [range, setRange] = useState<MonthRange>({ from: ymNow, to: ymNow });
