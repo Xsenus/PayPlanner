@@ -4024,6 +4024,62 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task AddHistoryEntry_UsesUserTimeZoneForHistoryTimestamp()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "timezone-history@example.com", "Владелец");
+        var nowUtc = DateTime.UtcNow;
+        var selectedZone = TimeZoneInfo.GetSystemTimeZones()
+            .Select(zone => new
+            {
+                Zone = zone,
+                LocalNow = CalendarTimeZoneHelper.ToUserLocal(nowUtc, zone),
+            })
+            .FirstOrDefault(item => item.LocalNow.Date != nowUtc.Date);
+        Assert.NotNull(selectedZone);
+        var client = new Client
+        {
+            Name = "Клиент истории",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с историей по timezone",
+            Status = ClientCaseStatus.Open,
+            EventHistory = "Дело создано",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone!.Zone.Id,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.AddHistoryEntry(clientCase.Id, new CasesV2Controller.AddClientCaseHistoryEntryRequest
+        {
+            Text = "Проверить местное время",
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        await db.Entry(clientCase).ReloadAsync();
+        var commentLine = clientCase.EventHistory
+            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Single(line => line.Contains("Проверить местное время", StringComparison.Ordinal));
+        var expectedLocalDate = selectedZone.LocalNow.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"));
+        var unexpectedUtcDate = nowUtc.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"));
+        Assert.StartsWith(expectedLocalDate, commentLine, StringComparison.Ordinal);
+        Assert.NotEqual(unexpectedUtcDate, expectedLocalDate);
+    }
+
+    [Fact]
     public async Task MarkActivity_DoesNotResetLastViewForNonResponsibleViewer()
     {
         await using var db = await CreateContextAsync();

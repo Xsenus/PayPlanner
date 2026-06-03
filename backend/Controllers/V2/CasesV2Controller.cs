@@ -111,6 +111,7 @@ public class CasesV2Controller : ControllerBase
     private readonly ICourtSyncProviderRegistry? _courtSyncProviderRegistry;
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions>? _featureFlags;
+    private CaseStatusClock? _caseStatusClock;
 
     public CasesV2Controller(
         PaymentContext db,
@@ -4183,10 +4184,40 @@ public class CasesV2Controller : ControllerBase
 
     private async Task<CaseStatusClock> ResolveCaseStatusClockAsync(CancellationToken ct)
     {
+        if (_caseStatusClock is { } cachedClock)
+        {
+            return cachedClock;
+        }
+
         var nowUtc = DateTime.UtcNow;
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var nowLocal = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone);
-        return new CaseStatusClock(nowLocal.Date, nowUtc, nowLocal);
+        var clock = new CaseStatusClock(nowLocal.Date, nowUtc, nowLocal);
+        _caseStatusClock = clock;
+        return clock;
+    }
+
+    private CaseStatusClock ResolveCaseStatusClock()
+    {
+        if (_caseStatusClock is { } cachedClock)
+        {
+            return cachedClock;
+        }
+
+        var nowUtc = DateTime.UtcNow;
+        var userId = User.GetUserId();
+        var timeZoneId = userId.HasValue
+            ? _db.UserSettings
+                .AsNoTracking()
+                .Where(item => item.UserId == userId.Value && item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
+                .Select(item => item.Value)
+                .FirstOrDefault()
+            : null;
+        var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+        var nowLocal = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone);
+        var clock = new CaseStatusClock(nowLocal.Date, nowUtc, nowLocal);
+        _caseStatusClock = clock;
+        return clock;
     }
 
     private static CaseCalendarDateRange ResolveCaseCalendarDateRange(DateTime? from, DateTime? to, TimeZoneInfo timeZone)
@@ -9960,9 +9991,14 @@ public class CasesV2Controller : ControllerBase
         return builder.ToString().Trim();
     }
 
-    private static void AppendCaseEvent(ClientCase clientCase, string eventText)
+    private void AppendCaseEvent(ClientCase clientCase, string eventText)
     {
-        var line = $"{DateTime.UtcNow:dd.MM.yyyy HH:mm}: {eventText}";
+        AppendCaseEvent(clientCase, eventText, ResolveCaseStatusClock().NowLocal);
+    }
+
+    private static void AppendCaseEvent(ClientCase clientCase, string eventText, DateTime localNow)
+    {
+        var line = $"{FormatUserGeneratedAt(localNow)}: {eventText}";
         var existing = clientCase.EventHistory?.Trim();
         var next = string.IsNullOrWhiteSpace(existing)
             ? line
