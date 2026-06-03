@@ -11,8 +11,16 @@ const apiMock = vi.hoisted(() => ({
   updateCalendarSyncSettings: vi.fn(),
 }));
 
+const authMock = vi.hoisted(() => ({
+  getUsers: vi.fn(),
+}));
+
 vi.mock('../../services/api', () => ({
   apiService: apiMock,
+}));
+
+vi.mock('../../services/authService', () => ({
+  authService: authMock,
 }));
 
 describe('CalendarSyncProviderSettings', () => {
@@ -88,6 +96,8 @@ describe('CalendarSyncProviderSettings', () => {
       externalCalendarSyncEnabled: false,
       googleCalendarSyncEnabled: false,
       yandexCalendarSyncEnabled: false,
+      googleSyncIntervalMinutes: 10,
+      yandexSyncIntervalMinutes: 10,
       syncMode: 'notConfigured',
       conflictResolutionMode: 'manualConfirmation',
       userControlMode: 'userManaged',
@@ -98,6 +108,18 @@ describe('CalendarSyncProviderSettings', () => {
       notes: '',
       updatedAt: null,
     });
+    authMock.getUsers.mockResolvedValue([
+      {
+        id: 5,
+        email: 'test@example.com',
+        fullName: 'Тестовый пользователь',
+        isEmployee: true,
+        role: { id: 1, name: 'admin' },
+        isActive: true,
+        isApproved: true,
+        createdAt: '2026-05-26T10:00:00Z',
+      },
+    ]);
     apiMock.getCalendarSyncLogs.mockResolvedValue({
       items: [
         {
@@ -109,6 +131,8 @@ describe('CalendarSyncProviderSettings', () => {
           userName: 'Тестовый пользователь',
           userEmail: 'test@example.com',
           taskJournalItemId: 42,
+          calendarOwnerUserId: 5,
+          taskAssigneeUserId: 5,
           taskTitle: 'Проверить документы',
           taskObjectName: 'Дело клиента',
           taskAssigneeName: 'Иван Исполнитель',
@@ -118,10 +142,16 @@ describe('CalendarSyncProviderSettings', () => {
           targetType: 'task',
           targetLabel: 'Задача: Проверить документы',
           direction: 'crm-to-google',
+          directionLabel: 'CRM → Google Calendar',
           operation: 'create-event',
+          operationLabel: 'Создание события',
           status: 'success',
+          statusLabel: 'Успешно',
           message: 'Событие создано.',
           details: 'Синхронизация выполнена для тестового пользователя.',
+          changeSummary: '',
+          actorLabel: 'Тестовый пользователь (test@example.com)',
+          calendarRoleLabel: 'Календарь исполнителя: Тестовый пользователь (owner@example.com)',
           createdAt: '2026-05-26T17:20:00Z',
         },
       ],
@@ -133,6 +163,8 @@ describe('CalendarSyncProviderSettings', () => {
       externalCalendarSyncEnabled: payload.googleCalendarSyncEnabled || payload.yandexCalendarSyncEnabled,
       googleCalendarSyncEnabled: payload.googleCalendarSyncEnabled,
       yandexCalendarSyncEnabled: payload.yandexCalendarSyncEnabled,
+      googleSyncIntervalMinutes: payload.googleSyncIntervalMinutes,
+      yandexSyncIntervalMinutes: payload.yandexSyncIntervalMinutes,
       syncMode: payload.syncMode,
       conflictResolutionMode: payload.conflictResolutionMode,
       userControlMode: payload.userControlMode,
@@ -158,8 +190,8 @@ describe('CalendarSyncProviderSettings', () => {
     expect(screen.getByText('Правила конфликтов')).toBeTruthy();
     expect(screen.getByText('Нужна подготовка')).toBeTruthy();
     expect(screen.getByText('Задача: Проверить документы')).toBeTruthy();
-    expect(screen.getByText('Исполнитель задачи: Иван Исполнитель')).toBeTruthy();
-    expect(screen.getByText('Календарь сотрудника: Тестовый пользователь')).toBeTruthy();
+    expect(screen.getAllByText('Исполнитель задачи: Иван Исполнитель').length).toBeGreaterThan(0);
+    expect(screen.getByText('Календарь исполнителя: Тестовый пользователь (owner@example.com)')).toBeTruthy();
     expect(screen.getByText('Дело клиента')).toBeTruthy();
   });
 
@@ -176,6 +208,8 @@ describe('CalendarSyncProviderSettings', () => {
     await waitFor(() => expect(apiMock.updateCalendarSyncSettings).toHaveBeenCalledWith({
       googleCalendarSyncEnabled: true,
       yandexCalendarSyncEnabled: false,
+      googleSyncIntervalMinutes: 10,
+      yandexSyncIntervalMinutes: 10,
       syncMode: 'hybrid',
       conflictResolutionMode: 'manualConfirmation',
       userControlMode: 'userManaged',
@@ -236,6 +270,8 @@ describe('CalendarSyncProviderSettings', () => {
           userName: 'Тестовый пользователь',
           userEmail: 'test@example.com',
           taskJournalItemId: 42,
+          calendarOwnerUserId: 5,
+          taskAssigneeUserId: 5,
           taskTitle: page === 2 ? 'Вторая страница' : 'Первая страница',
           taskObjectName: 'Дело клиента',
           taskAssigneeName: 'Тестовый пользователь',
@@ -245,10 +281,16 @@ describe('CalendarSyncProviderSettings', () => {
           targetType: 'task',
           targetLabel: page === 2 ? 'Задача: Вторая страница' : 'Задача: Первая страница',
           direction: 'crm-to-google',
+          directionLabel: 'CRM → Google Calendar',
           operation: 'update-event',
+          operationLabel: 'Обновление события',
           status: 'success',
+          statusLabel: 'Успешно',
           message: 'Событие обновлено.',
           details: '',
+          changeSummary: '',
+          actorLabel: 'Тестовый пользователь (test@example.com)',
+          calendarRoleLabel: 'Календарь исполнителя: Тестовый пользователь (owner@example.com)',
           createdAt: '2026-05-26T17:20:00Z',
         },
       ],
@@ -264,6 +306,30 @@ describe('CalendarSyncProviderSettings', () => {
 
     await waitFor(() => expect(apiMock.getCalendarSyncLogs).toHaveBeenLastCalledWith({ page: 2, pageSize: 25 }));
     expect(await screen.findByText('Задача: Вторая страница')).toBeTruthy();
+  });
+
+  it('loads calendar sync logs with selected filters', async () => {
+    render(<CalendarSyncProviderSettings />);
+
+    await screen.findByText('Фильтры журнала');
+    fireEvent.change(screen.getByLabelText('Провайдер'), { target: { value: 'google-calendar' } });
+    fireEvent.change(screen.getByLabelText('Сотрудник'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('Действие'), { target: { value: 'update-task' } });
+    fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'success' } });
+    fireEvent.change(screen.getByLabelText('С даты и времени'), { target: { value: '2026-05-26T10:00' } });
+    fireEvent.change(screen.getByLabelText('По дату и время'), { target: { value: '2026-05-26T18:00' } });
+    fireEvent.change(screen.getByLabelText('Поиск'), { target: { value: 'документы' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Применить фильтры' }));
+
+    await waitFor(() => expect(apiMock.getCalendarSyncLogs).toHaveBeenLastCalledWith(expect.objectContaining({
+      provider: 'google-calendar',
+      status: 'success',
+      operation: 'update-task',
+      userId: 5,
+      search: 'документы',
+      page: 1,
+      pageSize: 25,
+    })));
   });
 
   it('shows a readable loading error', async () => {

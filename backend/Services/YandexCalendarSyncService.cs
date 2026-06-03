@@ -250,7 +250,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         connection.ConflictResolutionMode = NormalizeKnownValue(request.ConflictResolutionMode, connection.ConflictResolutionMode, ["crmWins", "yandexWins", "latestWins"]);
         connection.SyncFromDate = NormalizeSyncFromDate(request.SyncFromDate);
         connection.UpdatedAt = DateTime.UtcNow;
-        await AddLogAsync(connection.Id, null, null, "system", "settings-updated", "success", "Настройки Яндекс.Календаря сохранены.", null, cancellationToken);
+        await AddLogAsync(connection.Id, null, null, "system", "settings-updated", "success", "Настройки Яндекс.Календаря сохранены.", BuildConnectionSettingsDetails(connection), cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
 
         return await GetStatusAsync(userId, httpRequest, cancellationToken);
@@ -706,8 +706,10 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
         var task = link.TaskJournalItem;
         var changed = false;
+        var changes = new List<string>();
         if (yandexEvent.StartAt.HasValue && task.DueAt != yandexEvent.StartAt.Value)
         {
+            changes.Add($"Срок: {FormatLogDateTime(task.DueAt)} → {FormatLogDateTime(yandexEvent.StartAt.Value)}");
             task.DueAt = yandexEvent.StartAt.Value;
             changed = true;
         }
@@ -717,6 +719,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             var minutes = Math.Max(15, (int)Math.Round((yandexEvent.EndAt.Value - yandexEvent.StartAt.Value).TotalMinutes));
             if (task.PlannedDurationMinutes != minutes)
             {
+                changes.Add($"Длительность: {FormatDuration(task.PlannedDurationMinutes)} → {FormatDuration(minutes)}");
                 task.PlannedDurationMinutes = minutes;
                 changed = true;
             }
@@ -725,6 +728,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var importedStatus = ResolveStatusFromSummary(yandexEvent.Summary);
         if (!string.IsNullOrWhiteSpace(importedStatus) && task.Status != importedStatus)
         {
+            changes.Add($"Статус: {FormatTaskStatus(task.Status)} → {FormatTaskStatus(importedStatus)}");
             task.Status = importedStatus;
             changed = true;
         }
@@ -732,6 +736,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var importedTitle = StripStatusPrefix(yandexEvent.Summary);
         if (!string.IsNullOrWhiteSpace(importedTitle) && !string.Equals(task.Title, importedTitle, StringComparison.Ordinal))
         {
+            changes.Add($"Название: «{task.Title}» → «{Trim(importedTitle, 500)}»");
             task.Title = Trim(importedTitle, 500);
             changed = true;
         }
@@ -749,7 +754,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         link.LastDirection = "yandex-to-crm";
         link.LastSyncedAt = DateTime.UtcNow;
         link.UpdatedAt = DateTime.UtcNow;
-        await AddLogAsync(connection.Id, calendar.Id, task.Id, "yandex-to-crm", "update-task", "success", "Изменения из Яндекс.Календаря применены к задаче.", null, cancellationToken);
+        await AddLogAsync(connection.Id, calendar.Id, task.Id, "yandex-to-crm", "update-task", "success", "Изменения из Яндекс.Календаря применены к задаче.", string.Join("; ", changes), cancellationToken);
         if (_externalCalendarSyncCoordinator is not null)
         {
             await _db.SaveChangesAsync(cancellationToken);
@@ -809,7 +814,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             created ? "create-event" : "update-event",
             "success",
             created ? "Задача создана в Яндекс.Календаре." : "Задача обновлена в Яндекс.Календаре.",
-            null,
+            BuildTaskSnapshotDetails(task),
             cancellationToken);
 
         link.CalendarSyncCalendarId = calendar.Id;
@@ -1956,6 +1961,70 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             "high" => "Высокий",
             "urgent" => "Срочно",
             _ => "Обычный",
+        };
+
+    private static string FormatTaskStatus(string? status) => StatusLabel(status);
+
+    private static string FormatDuration(int? minutes)
+        => minutes.HasValue ? $"{minutes.Value} мин." : "не указана";
+
+    private static string FormatLogDateTime(DateTime value)
+        => EnsureUtc(value).ToString("dd.MM.yyyy HH:mm 'UTC'", CultureInfo.InvariantCulture);
+
+    private static string BuildTaskSnapshotDetails(TaskJournalItem task)
+    {
+        var parts = new List<string>
+        {
+            $"Срок: {FormatLogDateTime(task.DueAt)}",
+            $"Длительность: {FormatDuration(task.PlannedDurationMinutes)}",
+            $"Статус: {FormatTaskStatus(task.Status)}",
+        };
+
+        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
+        {
+            parts.Add($"Исполнитель: {task.AssigneeName}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(task.ObjectName))
+        {
+            parts.Add($"Объект: {task.ObjectName}");
+        }
+
+        return string.Join("; ", parts);
+    }
+
+    private static string BuildConnectionSettingsDetails(YandexCalendarConnection connection)
+    {
+        var parts = new List<string>
+        {
+            $"Подключение: {(connection.IsEnabled ? "включено" : "выключено")}",
+            $"Синхронизация: {(connection.SyncEnabled ? "включена" : "выключена")}",
+            $"Режим календарей: {FormatCalendarMode(connection.CalendarMode)}",
+            $"Правило конфликтов: {FormatYandexConflictMode(connection.ConflictResolutionMode)}",
+        };
+
+        parts.Add(connection.SyncFromDate.HasValue
+            ? $"Синхронизировать задачи с даты: {FormatLogDateTime(connection.SyncFromDate.Value)}"
+            : "Синхронизировать задачи с даты: стандартный диапазон");
+
+        return string.Join("; ", parts);
+    }
+
+    private static string FormatCalendarMode(string? mode)
+        => mode switch
+        {
+            "adminByAssignee" => "отдельные календари сотрудников",
+            "personal" => "личный календарь пользователя",
+            _ => "стандартный режим",
+        };
+
+    private static string FormatYandexConflictMode(string? mode)
+        => mode switch
+        {
+            "crmWins" => "CRM главная",
+            "yandexWins" => "Яндекс.Календарь главный",
+            "latestWins" => "последнее изменение главное",
+            _ => "последнее изменение главное",
         };
 
     private static string? ResolveStatusFromSummary(string? summary)

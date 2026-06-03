@@ -200,6 +200,8 @@ export interface CalendarSyncSettingsDto {
   externalCalendarSyncEnabled?: boolean | null;
   googleCalendarSyncEnabled?: boolean | null;
   yandexCalendarSyncEnabled?: boolean | null;
+  googleSyncIntervalMinutes: number;
+  yandexSyncIntervalMinutes: number;
   syncMode: string;
   conflictResolutionMode: string;
   userControlMode: string;
@@ -215,6 +217,8 @@ export interface UpdateCalendarSyncSettingsRequest {
   externalCalendarSyncEnabled?: boolean | null;
   googleCalendarSyncEnabled?: boolean | null;
   yandexCalendarSyncEnabled?: boolean | null;
+  googleSyncIntervalMinutes?: number;
+  yandexSyncIntervalMinutes?: number;
   syncMode?: string;
   conflictResolutionMode?: string;
   userControlMode?: string;
@@ -234,6 +238,8 @@ export interface CalendarSyncLogEntryDto {
   userName: string;
   userEmail: string;
   taskJournalItemId?: number | null;
+  calendarOwnerUserId?: number | null;
+  taskAssigneeUserId?: number | null;
   taskTitle: string;
   taskObjectName: string;
   taskAssigneeName: string;
@@ -243,10 +249,16 @@ export interface CalendarSyncLogEntryDto {
   targetType: string;
   targetLabel: string;
   direction: string;
+  directionLabel: string;
   operation: string;
+  operationLabel: string;
   status: string;
+  statusLabel: string;
   message: string;
   details: string;
+  changeSummary: string;
+  actorLabel: string;
+  calendarRoleLabel: string;
   createdAt: string;
 }
 
@@ -1880,6 +1892,9 @@ export class ApiService {
     status?: string;
     operation?: string;
     userId?: number;
+    createdFrom?: string;
+    createdTo?: string;
+    search?: string;
     page?: number;
     pageSize?: number;
   }) {
@@ -1888,6 +1903,9 @@ export class ApiService {
     if (params?.status) searchParams.set('status', params.status);
     if (params?.operation) searchParams.set('operation', params.operation);
     if (params?.userId) searchParams.set('userId', params.userId.toString());
+    if (params?.createdFrom) searchParams.set('createdFrom', params.createdFrom);
+    if (params?.createdTo) searchParams.set('createdTo', params.createdTo);
+    if (params?.search) searchParams.set('search', params.search);
     if (params?.page) searchParams.set('page', params.page.toString());
     if (params?.pageSize) searchParams.set('pageSize', params.pageSize.toString());
     const query = searchParams.toString();

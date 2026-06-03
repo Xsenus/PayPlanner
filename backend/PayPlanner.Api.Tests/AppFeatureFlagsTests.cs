@@ -461,6 +461,9 @@ public class AppFeatureFlagsTests
         var item = Assert.Single(filteredPage.Items);
         Assert.Equal("Google Calendar", item.ProviderLabel);
         Assert.Equal("create-event", item.Operation);
+        Assert.Equal("Создание события", item.OperationLabel);
+        Assert.Equal("CRM → Google Calendar", item.DirectionLabel);
+        Assert.Equal("Успешно", item.StatusLabel);
         Assert.Equal(task.Id, item.TaskJournalItemId);
         Assert.Equal(task.Title, item.TaskTitle);
         Assert.Equal(task.ObjectName, item.TaskObjectName);
@@ -471,6 +474,20 @@ public class AppFeatureFlagsTests
         Assert.Equal("task", item.TargetType);
         Assert.Equal($"Задача: {task.Title}", item.TargetLabel);
         Assert.Equal("dry-run verified", item.Details);
+
+        var dateFilteredResult = await controller.GetLogs(
+            null,
+            null,
+            null,
+            user.Id,
+            createdFrom: new DateTime(2026, 6, 2, 7, 1, 0, DateTimeKind.Utc),
+            createdTo: new DateTime(2026, 6, 2, 7, 10, 0, DateTimeKind.Utc),
+            search: "Яндекс",
+            pageSize: 10,
+            ct: CancellationToken.None);
+        var dateFilteredPage = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(dateFilteredResult.Result).Value);
+        var dateFilteredItem = Assert.Single(dateFilteredPage.Items);
+        Assert.Equal("yandex-calendar", dateFilteredItem.Provider);
     }
 
     [Fact]

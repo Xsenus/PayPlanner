@@ -21,13 +21,19 @@ public sealed class CalendarSyncController : ControllerBase
 
     private readonly IOptionsSnapshot<AppFeatureFlagsOptions> _featureFlags;
     private readonly PaymentContext _db;
+    private readonly GoogleCalendarBackgroundSyncService? _googleBackgroundSync;
+    private readonly YandexCalendarBackgroundSyncService? _yandexBackgroundSync;
 
     public CalendarSyncController(
         IOptionsSnapshot<AppFeatureFlagsOptions> featureFlags,
-        PaymentContext db)
+        PaymentContext db,
+        GoogleCalendarBackgroundSyncService? googleBackgroundSync = null,
+        YandexCalendarBackgroundSyncService? yandexBackgroundSync = null)
     {
         _featureFlags = featureFlags;
         _db = db;
+        _googleBackgroundSync = googleBackgroundSync;
+        _yandexBackgroundSync = yandexBackgroundSync;
     }
 
     [HttpGet("providers")]
@@ -68,6 +74,8 @@ public sealed class CalendarSyncController : ControllerBase
         {
             GoogleCalendarSyncEnabled = googleCalendarSyncEnabled,
             YandexCalendarSyncEnabled = yandexCalendarSyncEnabled,
+            GoogleSyncIntervalMinutes = request.GoogleSyncIntervalMinutes ?? previousSettings.GoogleSyncIntervalMinutes,
+            YandexSyncIntervalMinutes = request.YandexSyncIntervalMinutes ?? previousSettings.YandexSyncIntervalMinutes,
             SyncMode = request.SyncMode ?? string.Empty,
             ConflictResolutionMode = request.ConflictResolutionMode ?? string.Empty,
             UserControlMode = request.UserControlMode ?? string.Empty,
@@ -96,6 +104,8 @@ public sealed class CalendarSyncController : ControllerBase
         ApplyAdministrativeDefaults(normalized);
         _db.ObjectAuditEvents.Add(CalendarExportAudit.CreateSettingsUpdatedEvent(User, previousSettings, normalized));
         await _db.SaveChangesAsync(ct);
+        _googleBackgroundSync?.NotifySettingsChanged();
+        _yandexBackgroundSync?.NotifySettingsChanged();
 
         return Ok(normalized);
     }
@@ -107,6 +117,9 @@ public sealed class CalendarSyncController : ControllerBase
         [FromQuery] string? status,
         [FromQuery] string? operation,
         [FromQuery] int? userId,
+        [FromQuery] DateTime? createdFrom = null,
+        [FromQuery] DateTime? createdTo = null,
+        [FromQuery] string? search = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
@@ -127,10 +140,12 @@ public sealed class CalendarSyncController : ControllerBase
                     UserName = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.FullName,
                     UserEmail = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.Email,
                     TaskJournalItemId = item.TaskJournalItemId,
+                    TaskAssigneeUserId = item.TaskJournalItem == null ? null : item.TaskJournalItem.AssigneeUserId,
                     TaskTitle = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.Title,
                     TaskObjectName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.ObjectName,
                     TaskAssigneeName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.AssigneeName,
                     CalendarName = item.CalendarSyncCalendar == null ? string.Empty : item.CalendarSyncCalendar.Name,
+                    CalendarOwnerUserId = item.CalendarSyncCalendar == null ? null : item.CalendarSyncCalendar.OwnerUserId,
                     CalendarOwnerName = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.FullName,
                     CalendarOwnerEmail = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.Email,
                     Direction = item.Direction,
@@ -156,10 +171,12 @@ public sealed class CalendarSyncController : ControllerBase
                     UserName = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.FullName,
                     UserEmail = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.Email,
                     TaskJournalItemId = item.TaskJournalItemId,
+                    TaskAssigneeUserId = item.TaskJournalItem == null ? null : item.TaskJournalItem.AssigneeUserId,
                     TaskTitle = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.Title,
                     TaskObjectName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.ObjectName,
                     TaskAssigneeName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.AssigneeName,
                     CalendarName = item.CalendarSyncCalendar == null ? string.Empty : item.CalendarSyncCalendar.Name,
+                    CalendarOwnerUserId = item.CalendarSyncCalendar == null ? null : item.CalendarSyncCalendar.OwnerUserId,
                     CalendarOwnerName = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.FullName,
                     CalendarOwnerEmail = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.Email,
                     Direction = item.Direction,
@@ -185,7 +202,32 @@ public sealed class CalendarSyncController : ControllerBase
 
         if (userId.HasValue)
         {
-            logs = logs.Where(item => item.UserId == userId.Value);
+            logs = logs.Where(item => item.UserId == userId.Value || item.CalendarOwnerUserId == userId.Value || item.TaskAssigneeUserId == userId.Value);
+        }
+
+        if (createdFrom.HasValue)
+        {
+            logs = logs.Where(item => item.CreatedAt >= NormalizeFilterDate(createdFrom.Value));
+        }
+
+        if (createdTo.HasValue)
+        {
+            logs = logs.Where(item => item.CreatedAt <= NormalizeFilterDate(createdTo.Value));
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var query = search.Trim();
+            logs = logs.Where(item =>
+                item.ProviderLabel.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                item.UserName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                item.UserEmail.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                item.CalendarName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                item.CalendarOwnerName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                item.TaskTitle.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                item.TaskObjectName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                item.Message.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                item.Details.Contains(query, StringComparison.OrdinalIgnoreCase));
         }
 
         var orderedLogs = logs.OrderByDescending(item => item.CreatedAt).ToList();
@@ -239,6 +281,8 @@ public sealed class CalendarSyncController : ControllerBase
             UserName = userName,
             UserEmail = userEmail,
             TaskJournalItemId = item.TaskJournalItemId,
+            CalendarOwnerUserId = item.CalendarOwnerUserId,
+            TaskAssigneeUserId = item.TaskAssigneeUserId,
             TaskTitle = taskTitle,
             TaskObjectName = taskObjectName,
             TaskAssigneeName = taskAssigneeName,
@@ -248,13 +292,96 @@ public sealed class CalendarSyncController : ControllerBase
             TargetType = targetType,
             TargetLabel = targetLabel,
             Direction = item.Direction,
+            DirectionLabel = BuildDirectionLabel(item.Direction, item.ProviderLabel),
             Operation = item.Operation,
+            OperationLabel = BuildOperationLabel(item.Operation),
             Status = item.Status,
+            StatusLabel = BuildStatusLabel(item.Status),
             Message = item.Message,
             Details = details.GetValueOrDefault("detail") ?? string.Empty,
+            ChangeSummary = BuildChangeSummary(details),
+            ActorLabel = BuildActorLabel(userName, userEmail),
+            CalendarRoleLabel = BuildCalendarRoleLabel(calendarOwnerName, calendarOwnerEmail, taskAssigneeName),
             CreatedAt = item.CreatedAt,
         };
     }
+
+    private static DateTime NormalizeFilterDate(DateTime value)
+        => value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime();
+
+    private static string BuildChangeSummary(Dictionary<string, string> details)
+    {
+        var changeSummary = details.GetValueOrDefault("changes");
+        if (!string.IsNullOrWhiteSpace(changeSummary))
+        {
+            return changeSummary;
+        }
+
+        var detail = details.GetValueOrDefault("detail");
+        return detail?.Contains(":", StringComparison.Ordinal) == true ? detail : string.Empty;
+    }
+
+    private static string BuildActorLabel(string userName, string userEmail)
+    {
+        var name = FirstNonEmpty(userName, "Система");
+        return string.IsNullOrWhiteSpace(userEmail) ? name : $"{name} ({userEmail})";
+    }
+
+    private static string BuildCalendarRoleLabel(string calendarOwnerName, string calendarOwnerEmail, string taskAssigneeName)
+    {
+        if (string.IsNullOrWhiteSpace(calendarOwnerName))
+        {
+            return string.Empty;
+        }
+
+        var owner = string.IsNullOrWhiteSpace(calendarOwnerEmail)
+            ? calendarOwnerName
+            : $"{calendarOwnerName} ({calendarOwnerEmail})";
+        return string.Equals(calendarOwnerName, taskAssigneeName, StringComparison.OrdinalIgnoreCase)
+            ? $"Календарь исполнителя: {owner}"
+            : $"Календарь сотрудника: {owner}";
+    }
+
+    private static string BuildDirectionLabel(string direction, string providerLabel)
+        => direction switch
+        {
+            "crm-to-google" or "crm-to-yandex" => $"CRM → {providerLabel}",
+            "google-to-crm" or "yandex-to-crm" => $"{providerLabel} → CRM",
+            "system" => "Системное действие",
+            _ => direction,
+        };
+
+    private static string BuildStatusLabel(string status)
+        => status switch
+        {
+            "success" => "Успешно",
+            "error" => "Ошибка",
+            "warning" => "Внимание",
+            "skipped" => "Пропущено",
+            _ => string.IsNullOrWhiteSpace(status) ? "Неизвестно" : status,
+        };
+
+    private static string BuildOperationLabel(string operation)
+        => operation switch
+        {
+            "create-event" => "Создание события",
+            "update-event" => "Обновление события",
+            "delete-event" => "Удаление события",
+            "update-task" => "Обновление задачи в CRM",
+            "detach" => "Отвязка удаленного события",
+            "skip" => "Изменение пропущено по правилу конфликтов",
+            "upsert" => "Создание или обновление события",
+            "import" => "Чтение изменений календаря",
+            "create-calendar" => "Создание календаря сотрудника",
+            "delete-calendar" => "Удаление календаря сотрудника",
+            "delete-calendar-missing" => "Календарь уже отсутствует",
+            "cleanup-user-calendars" => "Очистка календарей сотрудника",
+            "settings-updated" => "Настройки изменены",
+            "disable-sync" => "Синхронизация отключена",
+            "sync-now" => "Ручной запуск синхронизации",
+            "oauth-connected" => "Календарь подключен",
+            _ => string.IsNullOrWhiteSpace(operation) ? "Действие не указано" : operation,
+        };
 
     private static string ResolveTargetType(string operation, string taskTitle, string calendarName)
     {
@@ -411,6 +538,8 @@ public sealed class CalendarSyncController : ControllerBase
         public string UserName { get; set; } = string.Empty;
         public string UserEmail { get; set; } = string.Empty;
         public int? TaskJournalItemId { get; set; }
+        public int? CalendarOwnerUserId { get; set; }
+        public int? TaskAssigneeUserId { get; set; }
         public string TaskTitle { get; set; } = string.Empty;
         public string TaskObjectName { get; set; } = string.Empty;
         public string TaskAssigneeName { get; set; } = string.Empty;

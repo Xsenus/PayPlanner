@@ -16,6 +16,8 @@ public sealed class GoogleCalendarBackgroundSyncService : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions> _featureFlags;
     private readonly ILogger<GoogleCalendarBackgroundSyncService> _logger;
+    private readonly object _wakeLock = new();
+    private TaskCompletionSource _settingsChanged = NewWakeSignal();
 
     public GoogleCalendarBackgroundSyncService(
         IServiceScopeFactory scopeFactory,
@@ -42,7 +44,8 @@ public sealed class GoogleCalendarBackgroundSyncService : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            if (await IsExternalCalendarSyncEnabledAsync(stoppingToken))
+            var settings = await LoadCalendarSyncSettingsAsync(stoppingToken);
+            if (settings.GoogleCalendarSyncEnabled == true)
             {
                 try
                 {
@@ -56,11 +59,20 @@ public sealed class GoogleCalendarBackgroundSyncService : BackgroundService
 
             try
             {
-                await Task.Delay(TimeSpan.FromMinutes(ResolveIntervalMinutes()), stoppingToken);
+                await WaitForNextRunAsync(TimeSpan.FromMinutes(ResolveIntervalMinutes(settings)), stoppingToken);
             }
             catch (TaskCanceledException)
             {
             }
+        }
+    }
+
+    public void NotifySettingsChanged()
+    {
+        lock (_wakeLock)
+        {
+            _settingsChanged.TrySetResult();
+            _settingsChanged = NewWakeSignal();
         }
     }
 
@@ -71,13 +83,15 @@ public sealed class GoogleCalendarBackgroundSyncService : BackgroundService
         return await googleCalendarSync.SyncDueConnectionsAsync(ResolveBatchSize(), cancellationToken);
     }
 
-    private int ResolveIntervalMinutes()
-        => Math.Clamp(_configuration.GetValue("GoogleCalendarSync:IntervalMinutes", 10), 2, 1440);
+    private int ResolveIntervalMinutes(CalendarSyncSettingsDto? settings = null)
+        => CalendarSyncProviderRegistry.NormalizeProviderInterval(
+            settings?.GoogleSyncIntervalMinutes
+            ?? _configuration.GetValue("GoogleCalendarSync:IntervalMinutes", CalendarSyncProviderRegistry.DefaultProviderSyncIntervalMinutes));
 
     private int ResolveBatchSize()
         => Math.Clamp(_configuration.GetValue("GoogleCalendarSync:BatchSize", 100), 1, 500);
 
-    private async Task<bool> IsExternalCalendarSyncEnabledAsync(CancellationToken cancellationToken)
+    private async Task<CalendarSyncSettingsDto> LoadCalendarSyncSettingsAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
@@ -86,20 +100,33 @@ public sealed class GoogleCalendarBackgroundSyncService : BackgroundService
             .FirstOrDefaultAsync(item => item.Key == CalendarSyncSettingsKey, cancellationToken);
         if (setting is null || string.IsNullOrWhiteSpace(setting.Value))
         {
-            return _featureFlags.CurrentValue.Legal.ExternalCalendarSync;
+            return CalendarSyncProviderRegistry.BuildDefaultSettings(_featureFlags.CurrentValue.Legal.ExternalCalendarSync);
         }
 
         try
         {
             var settings = JsonSerializer.Deserialize<CalendarSyncSettingsDto>(setting.Value, JsonOptions);
-            return CalendarSyncProviderRegistry
-                .NormalizeSettings(settings, _featureFlags.CurrentValue.Legal.ExternalCalendarSync)
-                .GoogleCalendarSyncEnabled == true;
+            return CalendarSyncProviderRegistry.NormalizeSettings(settings, _featureFlags.CurrentValue.Legal.ExternalCalendarSync);
         }
         catch (JsonException)
         {
             _logger.LogWarning("Stored calendar sync settings are invalid. Google Calendar background sync will use feature flag fallback.");
-            return _featureFlags.CurrentValue.Legal.ExternalCalendarSync;
+            return CalendarSyncProviderRegistry.BuildDefaultSettings(_featureFlags.CurrentValue.Legal.ExternalCalendarSync);
         }
     }
+
+    private async Task WaitForNextRunAsync(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        Task wakeTask;
+        lock (_wakeLock)
+        {
+            wakeTask = _settingsChanged.Task;
+        }
+
+        var delayTask = Task.Delay(delay, cancellationToken);
+        await Task.WhenAny(delayTask, wakeTask).WaitAsync(cancellationToken);
+    }
+
+    private static TaskCompletionSource NewWakeSignal()
+        => new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

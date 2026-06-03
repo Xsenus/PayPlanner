@@ -42,6 +42,8 @@ public sealed class CalendarSyncSettingsDto
     public bool? ExternalCalendarSyncEnabled { get; set; }
     public bool? GoogleCalendarSyncEnabled { get; set; }
     public bool? YandexCalendarSyncEnabled { get; set; }
+    public int GoogleSyncIntervalMinutes { get; set; } = 10;
+    public int YandexSyncIntervalMinutes { get; set; } = 10;
     public string SyncMode { get; set; } = "notConfigured";
     public string ConflictResolutionMode { get; set; } = "manualConfirmation";
     public string UserControlMode { get; set; } = "userManaged";
@@ -63,6 +65,8 @@ public sealed class CalendarSyncLogEntryDto
     public string UserName { get; set; } = string.Empty;
     public string UserEmail { get; set; } = string.Empty;
     public int? TaskJournalItemId { get; set; }
+    public int? CalendarOwnerUserId { get; set; }
+    public int? TaskAssigneeUserId { get; set; }
     public string TaskTitle { get; set; } = string.Empty;
     public string TaskObjectName { get; set; } = string.Empty;
     public string TaskAssigneeName { get; set; } = string.Empty;
@@ -72,10 +76,16 @@ public sealed class CalendarSyncLogEntryDto
     public string TargetType { get; set; } = string.Empty;
     public string TargetLabel { get; set; } = string.Empty;
     public string Direction { get; set; } = string.Empty;
+    public string DirectionLabel { get; set; } = string.Empty;
     public string Operation { get; set; } = string.Empty;
+    public string OperationLabel { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public string StatusLabel { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
     public string Details { get; set; } = string.Empty;
+    public string ChangeSummary { get; set; } = string.Empty;
+    public string ActorLabel { get; set; } = string.Empty;
+    public string CalendarRoleLabel { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
 }
 

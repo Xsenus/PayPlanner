@@ -1,5 +1,6 @@
-import { Activity, AlertTriangle, CalendarDays, CheckCircle2, ExternalLink, HelpCircle, Power, RefreshCw, Save, ShieldCheck, X } from 'lucide-react';
+import { Activity, AlertTriangle, CalendarDays, CheckCircle2, ExternalLink, Filter, HelpCircle, Power, RefreshCw, Save, ShieldCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { authService, type User } from '../../services/authService';
 import {
   apiService,
   type CalendarSyncProviderDto,
@@ -12,6 +13,28 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { TablePagination } from '../ui/TablePagination';
 
 const LOG_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const MIN_CALENDAR_SYNC_INTERVAL_MINUTES = 5;
+const MAX_CALENDAR_SYNC_INTERVAL_MINUTES = 1440;
+
+type CalendarLogFilters = {
+  provider: string;
+  status: string;
+  operation: string;
+  userId: string;
+  createdFrom: string;
+  createdTo: string;
+  search: string;
+};
+
+const defaultLogFilters: CalendarLogFilters = {
+  provider: '',
+  status: '',
+  operation: '',
+  userId: '',
+  createdFrom: '',
+  createdTo: '',
+  search: '',
+};
 
 export function CalendarSyncProviderSettings() {
   const [providers, setProviders] = useState<CalendarSyncProviderDto[]>([]);
@@ -19,6 +42,8 @@ export function CalendarSyncProviderSettings() {
   const [logs, setLogs] = useState<CalendarSyncLogPageDto | null>(null);
   const [settings, setSettings] = useState<CalendarSyncSettingsDto | null>(null);
   const [draft, setDraft] = useState<CalendarSyncSettingsDto | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [logFilters, setLogFilters] = useState<CalendarLogFilters>(defaultLogFilters);
   const [loading, setLoading] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logPage, setLogPage] = useState(1);
@@ -54,31 +79,45 @@ export function CalendarSyncProviderSettings() {
     setDraft({ ...next });
   }, []);
 
+  const buildLogQuery = useCallback((page: number, pageSize: number) => ({
+    provider: logFilters.provider || undefined,
+    status: logFilters.status || undefined,
+    operation: logFilters.operation || undefined,
+    userId: logFilters.userId ? Number(logFilters.userId) : undefined,
+    createdFrom: logFilters.createdFrom ? new Date(logFilters.createdFrom).toISOString() : undefined,
+    createdTo: logFilters.createdTo ? new Date(logFilters.createdTo).toISOString() : undefined,
+    search: logFilters.search.trim() || undefined,
+    page,
+    pageSize,
+  }), [logFilters]);
+
   const loadCalendarSyncLogs = useCallback(async (page = logPage, pageSize = logPageSize) => {
     setLogsLoading(true);
     try {
-      const loadedLogs = await apiService.getCalendarSyncLogs({ page, pageSize });
+      const loadedLogs = await apiService.getCalendarSyncLogs(buildLogQuery(page, pageSize));
       setLogs(loadedLogs);
       setLogPage(loadedLogs.page);
       setLogPageSize(loadedLogs.pageSize);
     } finally {
       setLogsLoading(false);
     }
-  }, [logPage, logPageSize]);
+  }, [buildLogQuery, logPage, logPageSize]);
 
   const loadCalendarSyncState = useCallback(async () => {
     setLoading(true);
     setError(null);
     setSaveMessage(null);
     try {
-      const [loadedProviders, loadedReadiness, loadedSettings] = await Promise.all([
+      const [loadedProviders, loadedReadiness, loadedSettings, loadedUsers] = await Promise.all([
         apiService.getCalendarSyncProviders(),
         apiService.getCalendarSyncReadiness(),
         apiService.getCalendarSyncSettings(),
+        authService.getUsers('active').catch(() => []),
       ]);
       const loadedLogs = await apiService.getCalendarSyncLogs({ page: 1, pageSize: logPageSize });
       setProviders(loadedProviders);
       setReadiness(loadedReadiness);
+      setUsers(loadedUsers);
       setLogs(loadedLogs);
       setLogPage(loadedLogs.page);
       setLogPageSize(loadedLogs.pageSize);
@@ -109,6 +148,8 @@ export function CalendarSyncProviderSettings() {
       const updated = await apiService.updateCalendarSyncSettings({
         googleCalendarSyncEnabled: draft.googleCalendarSyncEnabled === true,
         yandexCalendarSyncEnabled: draft.yandexCalendarSyncEnabled === true,
+        googleSyncIntervalMinutes: normalizeCalendarSyncInterval(draft.googleSyncIntervalMinutes),
+        yandexSyncIntervalMinutes: normalizeCalendarSyncInterval(draft.yandexSyncIntervalMinutes),
         syncMode: draft.syncMode,
         conflictResolutionMode: draft.conflictResolutionMode,
         userControlMode: draft.userControlMode,
@@ -238,6 +279,27 @@ export function CalendarSyncProviderSettings() {
               onOpenHelp={setActiveSettingHelpKey}
               onChange={(checked) => updateDraft({ yandexCalendarSyncEnabled: checked })}
             />
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+            <div className="flex flex-col gap-1">
+              <h6 className="text-sm font-semibold text-gray-900">Интервалы фоновой синхронизации</h6>
+              <p className="text-xs leading-5 text-gray-600">
+                Стандартный интервал - 10 минут. Минимум в CRM - {MIN_CALENDAR_SYNC_INTERVAL_MINUTES} минут, чтобы не создавать лишнюю нагрузку на API календарей.
+              </p>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <CalendarIntervalInput
+                label="Google Calendar"
+                value={draft.googleSyncIntervalMinutes}
+                onChange={(value) => updateDraft({ googleSyncIntervalMinutes: value })}
+              />
+              <CalendarIntervalInput
+                label="Яндекс Календарь"
+                value={draft.yandexSyncIntervalMinutes}
+                onChange={(value) => updateDraft({ yandexSyncIntervalMinutes: value })}
+              />
+            </div>
           </div>
 
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
@@ -445,49 +507,161 @@ export function CalendarSyncProviderSettings() {
           </button>
         </div>
 
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-slate-700">
+            <Filter className="h-4 w-4 text-sky-700" />
+            Фильтры журнала
+          </div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            <label className="block">
+              <span className="text-[11px] font-semibold uppercase text-slate-500">Провайдер</span>
+              <select
+                value={logFilters.provider}
+                onChange={(event) => setLogFilters((current) => ({ ...current, provider: event.target.value }))}
+                className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              >
+                <option value="">Все</option>
+                <option value="google-calendar">Google Calendar</option>
+                <option value="yandex-calendar">Яндекс Календарь</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-semibold uppercase text-slate-500">Сотрудник</span>
+              <select
+                value={logFilters.userId}
+                onChange={(event) => setLogFilters((current) => ({ ...current, userId: event.target.value }))}
+                className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              >
+                <option value="">Все сотрудники</option>
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>{user.fullName || user.email}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-semibold uppercase text-slate-500">Действие</span>
+              <select
+                value={logFilters.operation}
+                onChange={(event) => setLogFilters((current) => ({ ...current, operation: event.target.value }))}
+                className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              >
+                <option value="">Все действия</option>
+                {calendarLogOperationOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-semibold uppercase text-slate-500">Статус</span>
+              <select
+                value={logFilters.status}
+                onChange={(event) => setLogFilters((current) => ({ ...current, status: event.target.value }))}
+                className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              >
+                <option value="">Все статусы</option>
+                <option value="success">Успешно</option>
+                <option value="error">Ошибка</option>
+                <option value="warning">Внимание</option>
+                <option value="skipped">Пропущено</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-semibold uppercase text-slate-500">С даты и времени</span>
+              <input
+                type="datetime-local"
+                value={logFilters.createdFrom}
+                onChange={(event) => setLogFilters((current) => ({ ...current, createdFrom: event.target.value }))}
+                className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-semibold uppercase text-slate-500">По дату и время</span>
+              <input
+                type="datetime-local"
+                value={logFilters.createdTo}
+                onChange={(event) => setLogFilters((current) => ({ ...current, createdTo: event.target.value }))}
+                className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              />
+            </label>
+            <label className="block xl:col-span-2">
+              <span className="text-[11px] font-semibold uppercase text-slate-500">Поиск</span>
+              <input
+                type="search"
+                value={logFilters.search}
+                onChange={(event) => setLogFilters((current) => ({ ...current, search: event.target.value }))}
+                placeholder="Задача, объект, сотрудник, сообщение"
+                className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              />
+            </label>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void loadCalendarSyncLogs(1, logPageSize)}
+              className="inline-flex h-8 items-center justify-center rounded-lg bg-sky-600 px-3 text-xs font-semibold text-white hover:bg-sky-700"
+            >
+              Применить фильтры
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLogFilters(defaultLogFilters);
+                void apiService.getCalendarSyncLogs({ page: 1, pageSize: logPageSize }).then((loadedLogs) => {
+                  setLogs(loadedLogs);
+                  setLogPage(loadedLogs.page);
+                  setLogPageSize(loadedLogs.pageSize);
+                });
+              }}
+              className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Сбросить
+            </button>
+          </div>
+        </div>
+
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 text-left text-xs">
             <thead className="bg-gray-50 text-[11px] font-semibold uppercase text-gray-500">
               <tr>
-                <th className="px-3 py-2">Время</th>
-                <th className="px-3 py-2">Провайдер</th>
-                <th className="px-3 py-2">Сотрудник</th>
-                <th className="px-3 py-2">Объект</th>
-                <th className="px-3 py-2">Действие</th>
-                <th className="px-3 py-2">Статус</th>
-                <th className="px-3 py-2">Сообщение</th>
+                <th className="px-3 py-2">Когда и куда</th>
+                <th className="px-3 py-2">Участники</th>
+                <th className="px-3 py-2">Объект и изменения</th>
+                <th className="px-3 py-2">Результат</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {logs?.items.length ? logs.items.map((item) => (
                 <tr key={`${item.provider}-${item.id}`} className="align-top">
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-600">{formatCalendarSyncLogDateTime(item.createdAt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 font-medium text-gray-800">{item.providerLabel}</td>
-                  <td className="px-3 py-2 text-gray-700">
-                    <div className="font-medium">{getCalendarLogEmployeeName(item)}</div>
-                    {getCalendarLogEmployeeEmail(item) ? <div className="text-[11px] text-gray-500">{getCalendarLogEmployeeEmail(item)}</div> : null}
-                    {item.calendarOwnerName && item.calendarOwnerName !== getCalendarLogEmployeeName(item) ? (
-                      <div className="text-[11px] text-gray-500">Владелец календаря: {item.calendarOwnerName}</div>
-                    ) : null}
+                  <td className="min-w-[180px] px-3 py-2 text-gray-700">
+                    <div className="whitespace-nowrap font-medium">{formatCalendarSyncLogDateTime(item.createdAt)}</div>
+                    <div className="mt-1 font-semibold text-gray-900">{item.providerLabel}</div>
+                    <div className="text-[11px] text-gray-500">{item.directionLabel || getCalendarLogDirectionLabel(item)}</div>
+                    <div className="mt-1 text-[11px] font-semibold text-sky-700">{item.operationLabel || getCalendarLogOperationLabel(item.operation)}</div>
                   </td>
-                  <td className="min-w-[220px] px-3 py-2 text-gray-700">
+                  <td className="min-w-[230px] px-3 py-2 text-gray-700">
+                    <div className="font-medium">{item.actorLabel || getCalendarLogEmployeeName(item)}</div>
+                    {getCalendarLogEmployeeEmail(item) ? <div className="text-[11px] text-gray-500">{getCalendarLogEmployeeEmail(item)}</div> : null}
+                    {item.calendarRoleLabel ? <div className="mt-1 text-[11px] text-gray-500">{item.calendarRoleLabel}</div> : null}
+                    {item.taskAssigneeName ? <div className="text-[11px] text-gray-500">Исполнитель задачи: {item.taskAssigneeName}</div> : null}
+                  </td>
+                  <td className="min-w-[320px] px-3 py-2 text-gray-700">
                     <div className="font-medium">{getCalendarLogTargetLabel(item)}</div>
                     {getCalendarLogTargetDetails(item).map((detail) => (
                       <div key={detail} className="text-[11px] text-gray-500">{detail}</div>
                     ))}
-                    {item.details ? <div className="mt-1 text-[11px] leading-4 text-gray-500">Детали: {item.details}</div> : null}
+                    {item.changeSummary ? <div className="mt-2 rounded-lg bg-sky-50 px-2 py-1 text-[11px] leading-4 text-sky-900">Изменения: {item.changeSummary}</div> : null}
+                    {!item.changeSummary && item.details ? <div className="mt-2 rounded-lg bg-slate-50 px-2 py-1 text-[11px] leading-4 text-slate-600">Параметры: {item.details}</div> : null}
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-700">{getCalendarLogOperationLabel(item.operation)}</td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    <span className={`rounded-full px-2 py-0.5 font-semibold ${getCalendarLogStatusClass(item.status)}`}>
-                      {getCalendarLogStatusLabel(item.status)}
+                  <td className="min-w-[240px] px-3 py-2 text-gray-600">
+                    <span className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${getCalendarLogStatusClass(item.status)}`}>
+                      {item.statusLabel || getCalendarLogStatusLabel(item.status)}
                     </span>
+                    <div className="mt-2 leading-5">{item.message || 'Без сообщения'}</div>
                   </td>
-                  <td className="min-w-[260px] px-3 py-2 text-gray-600">{item.message || 'Без сообщения'}</td>
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-sm text-gray-500">Событий синхронизации пока нет.</td>
+                  <td colSpan={4} className="px-3 py-6 text-center text-sm text-gray-500">Событий синхронизации не найдено.</td>
                 </tr>
               )}
             </tbody>
@@ -553,11 +727,55 @@ const inactiveUserActionOptions = [
   { value: 'keepConnection', label: 'Ничего не менять' },
 ];
 
+const calendarLogOperationOptions = [
+  { value: 'create-event', label: 'Создание события' },
+  { value: 'update-event', label: 'Обновление события' },
+  { value: 'update-task', label: 'Обновление задачи в CRM' },
+  { value: 'delete-event', label: 'Удаление события' },
+  { value: 'create-calendar', label: 'Создание календаря сотрудника' },
+  { value: 'delete-calendar', label: 'Удаление календаря сотрудника' },
+  { value: 'settings-updated', label: 'Настройки изменены' },
+  { value: 'sync-now', label: 'Ручной запуск синхронизации' },
+  { value: 'import', label: 'Чтение изменений календаря' },
+  { value: 'skip', label: 'Пропуск по правилу конфликтов' },
+  { value: 'detach', label: 'Отвязка удаленного события' },
+  { value: 'oauth-connected', label: 'Календарь подключен' },
+];
+
 function Capability({ enabled, label }: { enabled: boolean; label: string }) {
   return (
     <span className={`rounded-xl px-2 py-1 font-medium ${enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
       {label}
     </span>
+  );
+}
+
+function CalendarIntervalInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-semibold text-gray-700">{label}</span>
+      <div className="mt-1 flex items-center gap-2">
+        <input
+          type="number"
+          min={MIN_CALENDAR_SYNC_INTERVAL_MINUTES}
+          max={MAX_CALENDAR_SYNC_INTERVAL_MINUTES}
+          step={1}
+          value={Number.isFinite(value) ? value : 10}
+          onChange={(event) => onChange(Number(event.target.value))}
+          onBlur={(event) => onChange(normalizeCalendarSyncInterval(Number(event.target.value)))}
+          className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+        />
+        <span className="shrink-0 text-xs text-gray-500">мин.</span>
+      </div>
+    </label>
   );
 }
 
@@ -932,6 +1150,11 @@ function formatDateInputValue(value?: string | null) {
   return value.slice(0, 10);
 }
 
+function normalizeCalendarSyncInterval(value: number | undefined | null) {
+  if (!Number.isFinite(value ?? Number.NaN)) return 10;
+  return Math.min(MAX_CALENDAR_SYNC_INTERVAL_MINUTES, Math.max(MIN_CALENDAR_SYNC_INTERVAL_MINUTES, Math.round(value ?? 10)));
+}
+
 function formatCalendarSyncLogDateTime(value: string) {
   const normalizedValue = /(?:z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
   const date = new Date(normalizedValue);
@@ -1000,6 +1223,10 @@ function getCalendarLogOperationLabel(operation: string) {
     'create-event': 'Создание события',
     'update-event': 'Обновление события',
     'delete-event': 'Удаление события',
+    'update-task': 'Обновление задачи в CRM',
+    detach: 'Отвязка удаленного события',
+    skip: 'Изменение пропущено по правилу конфликтов',
+    upsert: 'Создание или обновление события',
     'create-calendar': 'Создание календаря',
     'delete-calendar': 'Удаление календаря',
     'delete-calendar-missing': 'Календарь уже отсутствует',
@@ -1010,4 +1237,11 @@ function getCalendarLogOperationLabel(operation: string) {
     import: 'Импорт события',
   };
   return labels[operation] ?? operation;
+}
+
+function getCalendarLogDirectionLabel(item: CalendarSyncLogEntryDto) {
+  if (item.direction === 'crm-to-google' || item.direction === 'crm-to-yandex') return `CRM → ${item.providerLabel}`;
+  if (item.direction === 'google-to-crm' || item.direction === 'yandex-to-crm') return `${item.providerLabel} → CRM`;
+  if (item.direction === 'system') return 'Системное действие';
+  return item.direction || 'Направление не указано';
 }

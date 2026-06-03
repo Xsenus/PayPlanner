@@ -4,12 +4,18 @@ namespace PayPlanner.Api.Services;
 
 public static class CalendarSyncProviderRegistry
 {
+    public const int DefaultProviderSyncIntervalMinutes = 10;
+    public const int MinProviderSyncIntervalMinutes = 5;
+    public const int MaxProviderSyncIntervalMinutes = 1440;
+
     public static CalendarSyncSettingsDto BuildDefaultSettings(bool externalCalendarSyncEnabled = false)
         => new()
         {
             ExternalCalendarSyncEnabled = externalCalendarSyncEnabled,
             GoogleCalendarSyncEnabled = externalCalendarSyncEnabled,
             YandexCalendarSyncEnabled = externalCalendarSyncEnabled,
+            GoogleSyncIntervalMinutes = DefaultProviderSyncIntervalMinutes,
+            YandexSyncIntervalMinutes = DefaultProviderSyncIntervalMinutes,
             SyncMode = "notConfigured",
             ConflictResolutionMode = "manualConfirmation",
             UserControlMode = "userManaged",
@@ -51,6 +57,8 @@ public static class CalendarSyncProviderRegistry
             ExternalCalendarSyncEnabled = googleCalendarSyncEnabled || yandexCalendarSyncEnabled,
             GoogleCalendarSyncEnabled = googleCalendarSyncEnabled,
             YandexCalendarSyncEnabled = yandexCalendarSyncEnabled,
+            GoogleSyncIntervalMinutes = NormalizeProviderInterval(source.GoogleSyncIntervalMinutes),
+            YandexSyncIntervalMinutes = NormalizeProviderInterval(source.YandexSyncIntervalMinutes),
             SyncMode = syncMode,
             ConflictResolutionMode = conflictResolutionMode,
             UserControlMode = userControlMode,
@@ -62,6 +70,9 @@ public static class CalendarSyncProviderRegistry
             UpdatedAt = source.UpdatedAt,
         };
     }
+
+    public static int NormalizeProviderInterval(int value)
+        => Math.Clamp(value <= 0 ? DefaultProviderSyncIntervalMinutes : value, MinProviderSyncIntervalMinutes, MaxProviderSyncIntervalMinutes);
 
     public static IReadOnlyList<CalendarSyncProviderDto> BuildProviders(bool externalCalendarSyncEnabled)
         => BuildProviders(externalCalendarSyncEnabled, externalCalendarSyncEnabled);
