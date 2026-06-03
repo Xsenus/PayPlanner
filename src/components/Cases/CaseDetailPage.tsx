@@ -2930,7 +2930,7 @@ export function CaseDetailPage({
                 ['Суд', caseItem.courtName || '—'],
                 ['№ в суде', caseItem.courtCaseNumber || '—'],
                 ['Заседание', formatRuDateTime(caseItem.nextHearingAt) || '—'],
-                ['Просмотр ответственным', responsibleLastViewedAt ? `${toRuDate(responsibleLastViewedAt)}${responsibleLastViewedByName ? ` · ${responsibleLastViewedByName}` : ''}` : '—'],
+                ['Просмотр ответственным', responsibleLastViewedAt ? `${formatRuDateTime(responsibleLastViewedAt)}${responsibleLastViewedByName ? ` · ${responsibleLastViewedByName}` : ''}` : '—'],
               ]} />
               <InfoSection title="Участники процесса" rows={[
                 ['Истец', caseItem.claimant || '—'],
@@ -6026,7 +6026,7 @@ function DocumentCard({
             <div className="mt-1 text-xs text-blue-600">Шаблон: {document.templateLabel}</div>
           ) : null}
           <div className="mt-2 text-xs text-slate-400">
-            {document.uploadedByName || '—'} · {toRuDate(document.uploadedAt) || '—'}
+            {document.uploadedByName || '—'} · {formatRuDateTime(document.uploadedAt) || '—'}
           </div>
         </div>
       </div>

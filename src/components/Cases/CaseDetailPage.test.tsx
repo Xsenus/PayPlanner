@@ -75,6 +75,7 @@ vi.mock('../../services/api', () => ({
     deleteCaseRelatedParty: vi.fn(),
     requestCaseAccess: vi.fn(),
     markCaseActivity: vi.fn(),
+    getUserSetting: vi.fn(),
   },
 }));
 
@@ -161,6 +162,8 @@ describe('CaseDetailPage', () => {
     window.sessionStorage.clear();
     vi.mocked(apiService.getCaseV2).mockReset();
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase());
+    vi.mocked(apiService.getUserSetting).mockReset();
+    vi.mocked(apiService.getUserSetting).mockResolvedValue(null);
     vi.mocked(apiService.updateCaseV2).mockReset();
     vi.mocked(apiService.updateCaseV2).mockImplementation(async (id, payload) => createCase({ ...payload, id }));
     vi.mocked(apiService.getActResponsibles).mockReset();
@@ -824,6 +827,33 @@ describe('CaseDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'История' }));
     expect(await screen.findByText('Массовое изменение')).toBeTruthy();
+  });
+
+  it('shows case activity and document upload timestamps in the profile time zone', async () => {
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      lastViewedByResponsibleAt: '2026-05-12T10:15:00Z',
+      lastViewedByResponsibleUserName: 'Кожеваткин Андрей',
+    }));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => {
+      expect(screen.getAllByText((_text, element) => {
+        const value = element?.textContent ?? '';
+        return value.includes('14:15') && value.includes('Кожеваткин');
+      }).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Документы/u }));
+    expect(await screen.findByText('Заявление.docx')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getAllByText((_text, element) => {
+        const value = element?.textContent ?? '';
+        return value.includes('Администратор') && value.includes('02.05.2026') && value.includes('14:00');
+      }).length).toBeGreaterThan(0);
+    });
   });
 
   it('opens full case editing from the detail header and saves changes', async () => {

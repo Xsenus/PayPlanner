@@ -1407,6 +1407,46 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_UsesAssigneeTimeZoneForDueAt()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateAdminUserAsync(db, "samara-responsible@example.com", "Ответственный Самара");
+        var client = await CreateClientAsync(db, "Клиент Самара");
+        client.ResponsibleUserId = assignee.Id;
+        var clientCase = await CreateCaseAsync(db, client.Id, "Контроль времени");
+        clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = assignee.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "10",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Equal(1, result.CreatedCount);
+            Assert.Null(result.Error);
+        }
+
+        var task = await db.TaskJournalItems.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        var assigneeTimeZone = CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara");
+        var createdLocal = CalendarTimeZoneHelper.ToUserLocal(task.CreatedAt, assigneeTimeZone);
+        var dueLocal = CalendarTimeZoneHelper.ToUserLocal(task.DueAt, assigneeTimeZone);
+        Assert.Equal(createdLocal.Date.AddDays(1).AddHours(9), dueLocal);
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_DoesNotRecreateRecentlyDeletedControlTask()
     {
         await using var db = await CreateContextAsync();

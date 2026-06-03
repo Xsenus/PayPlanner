@@ -185,6 +185,10 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     continue;
                 }
 
+                var assigneeTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(
+                    context,
+                    assignee.Id,
+                    cancellationToken);
                 var daysWithoutActiveTask = ResolveDaysWithoutActiveTask(
                     candidate.Case,
                     now,
@@ -196,6 +200,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     candidate.Case,
                     owner,
                     assignee,
+                    assigneeTimeZone,
                     now,
                     settings,
                     escalationUser,
@@ -374,6 +379,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         ClientCase clientCase,
         CaseOwnerBinding owner,
         User assignee,
+        TimeZoneInfo assigneeTimeZone,
         DateTime now,
         TaskJournalAutomationSettings settings,
         User? escalationUser,
@@ -395,7 +401,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             AssigneeName = assigneeName,
             AuthorUserId = assignee.Id,
             AuthorName = assigneeName,
-            DueAt = now.Date.AddDays(1).AddHours(9),
+            DueAt = BuildNextMorningDueAt(now, assigneeTimeZone),
             PlannedDurationMinutes = 60,
             Type = "control",
             Priority = ResolveAutomationPriority(daysWithoutActiveTask, settings.InactiveDays, settings.EscalationDays),
@@ -433,6 +439,13 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         AddEscalationObserver(task, isEscalated ? escalationUser : null, assignee.Id, now);
 
         return task;
+    }
+
+    private static DateTime BuildNextMorningDueAt(DateTime nowUtc, TimeZoneInfo assigneeTimeZone)
+    {
+        var localNow = CalendarTimeZoneHelper.ToUserLocal(nowUtc, assigneeTimeZone);
+        var localDueAt = localNow.Date.AddDays(1).AddHours(9);
+        return CalendarTimeZoneHelper.FromUserLocalToUtc(localDueAt, assigneeTimeZone);
     }
 
     private static string ResolveRepeatEscalationPriority(
