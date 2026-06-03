@@ -60,4 +60,35 @@ describe('calendar profile panels', () => {
     await waitFor(() => expect(apiMock.getYandexCalendarStatus).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText('Яндекс.Календарь')).toBeNull());
   });
+
+  it('disables Google manual sync button while full sync cooldown is active', async () => {
+    apiMock.getGoogleCalendarStatus.mockResolvedValue({
+      isAvailable: true,
+      googleOAuthReady: true,
+      callbackUrl: 'https://crm.example.com/api/google-calendar/auth/callback',
+      connection: {
+        id: 1,
+        googleEmail: 'user@example.com',
+        displayName: 'User',
+        isEnabled: true,
+        syncEnabled: true,
+        calendarMode: 'personal',
+        conflictResolutionMode: 'latestWins',
+        lastFullSyncAt: '2999-01-01T10:00:00Z',
+        lastIncrementalSyncAt: '2999-01-01T10:00:00Z',
+        manualFullSyncCooldownMinutes: 10,
+        manualFullSyncAvailableAt: '2999-01-01T10:10:00Z',
+        createdAt: '2999-01-01T09:00:00Z',
+        updatedAt: '2999-01-01T10:00:00Z',
+        calendars: [],
+      },
+      recentLogs: [],
+    });
+
+    render(<GoogleCalendarPanel />);
+
+    const syncButton = await screen.findByRole('button', { name: /Повторную полную синхронизацию можно запустить после/i });
+
+    expect((syncButton as HTMLButtonElement).disabled).toBe(true);
+  });
 });

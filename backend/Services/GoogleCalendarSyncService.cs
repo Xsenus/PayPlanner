@@ -290,6 +290,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     public async Task<GoogleCalendarSyncNowResultDto> SyncNowAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
     {
         await EnsureUserCanManageCalendarAsync(request, cancellationToken);
+        var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
+        await EnsureManualFullSyncAllowedAsync(userId, settings, cancellationToken);
         var result = await SyncConnectionAsync(userId, forceFull: true, cancellationToken);
         return new GoogleCalendarSyncNowResultDto
         {
@@ -333,6 +335,26 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
 
         return new GoogleCalendarSchedulerRunResult(userIds.Count, processedTasks, importedEvents, errors);
+    }
+
+    private async Task EnsureManualFullSyncAllowedAsync(
+        int userId,
+        CalendarSyncSettingsDto settings,
+        CancellationToken cancellationToken)
+    {
+        var lastFullSyncAt = await _db.GoogleCalendarConnections
+            .AsNoTracking()
+            .Where(item => item.UserId == userId && item.IsEnabled && item.SyncEnabled)
+            .Select(item => item.LastFullSyncAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        var availableAt = BuildManualFullSyncAvailableAt(lastFullSyncAt, settings.ManualFullSyncCooldownMinutes);
+        var now = DateTime.UtcNow;
+        if (availableAt.HasValue && availableAt.Value > now)
+        {
+            throw new CalendarManualSyncCooldownException(
+                $"Повторную полную синхронизацию Google Calendar можно запустить после {FormatLogDateTime(availableAt.Value)}. До этого времени работает обычная фоновая синхронизация.",
+                availableAt.Value);
+        }
     }
 
     public async Task SyncTaskForConnectedUsersAsync(int taskId, CancellationToken cancellationToken = default)
@@ -1062,18 +1084,19 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
         var oauthSettings = await ResolveGoogleSettingsAsync(cancellationToken);
         var providerEnabled = await IsGoogleCalendarProviderEnabledAsync(cancellationToken);
+        var calendarSettings = await LoadCalendarSyncSettingsAsync(cancellationToken);
 
         return new GoogleCalendarStatusDto
         {
             IsAvailable = providerEnabled,
             GoogleOAuthReady = oauthSettings.Ready,
             CallbackUrl = BuildAbsoluteUrl(request, "/api/google-calendar/auth/callback"),
-            Connection = connection is null ? null : MapConnection(connection),
+            Connection = connection is null ? null : MapConnection(connection, calendarSettings),
             RecentLogs = logs,
         };
     }
 
-    private static GoogleCalendarConnectionDto MapConnection(GoogleCalendarConnection connection)
+    private static GoogleCalendarConnectionDto MapConnection(GoogleCalendarConnection connection, CalendarSyncSettingsDto settings)
         => new()
         {
             Id = connection.Id,
@@ -1088,6 +1111,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             AccessTokenExpiresAt = connection.AccessTokenExpiresAt,
             LastFullSyncAt = connection.LastFullSyncAt,
             LastIncrementalSyncAt = connection.LastIncrementalSyncAt,
+            ManualFullSyncCooldownMinutes = settings.ManualFullSyncCooldownMinutes,
+            ManualFullSyncAvailableAt = BuildManualFullSyncAvailableAt(connection.LastFullSyncAt, settings.ManualFullSyncCooldownMinutes),
             SyncFromDate = connection.SyncFromDate,
             LastError = connection.LastError,
             CreatedAt = connection.CreatedAt,
@@ -1471,6 +1496,11 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             DateTimeKind.Local => value.ToUniversalTime(),
             _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
         };
+
+    private static DateTime? BuildManualFullSyncAvailableAt(DateTime? lastFullSyncAt, int cooldownMinutes)
+        => lastFullSyncAt.HasValue
+            ? EnsureUtc(lastFullSyncAt.Value).AddMinutes(Math.Max(0, cooldownMinutes))
+            : null;
 
     private static bool IsGoogleRateLimitResponse(GoogleHttpResponse response)
     {

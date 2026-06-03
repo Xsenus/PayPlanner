@@ -226,7 +226,7 @@ public class GoogleCalendarSyncServiceTests
 
         var firstResult = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
         db.ChangeTracker.Clear();
-        var secondResult = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+        var secondResult = await service.SyncDueConnectionsAsync(10, CancellationToken.None);
 
         Assert.Equal(1, firstResult.ImportedEvents);
         Assert.Equal(0, firstResult.ErrorCount);
@@ -236,6 +236,24 @@ public class GoogleCalendarSyncServiceTests
         Assert.DoesNotContain(handler.Requests, request =>
             request.Method == HttpMethod.Put &&
             request.RequestUri!.AbsolutePath.Contains("/events/event-google-move", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SyncNowAsync_WhenManualFullSyncCooldownActiveRejectsRepeatedRun()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-google-cooldown@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        connection.LastFullSyncAt = DateTime.UtcNow.AddMinutes(-5);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 30);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingGoogleHandler()));
+
+        var error = await Assert.ThrowsAsync<CalendarManualSyncCooldownException>(() =>
+            service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None));
+
+        Assert.Contains("Повторную полную синхронизацию Google Calendar можно запустить после", error.Message);
     }
 
     [Fact]
@@ -591,6 +609,24 @@ public class GoogleCalendarSyncServiceTests
                 CreatedAt = now,
                 UpdatedAt = now,
             });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SetCalendarSyncSettingsAsync(PaymentContext db, int manualFullSyncCooldownMinutes)
+    {
+        var setting = await db.SystemSettings.SingleAsync(item => item.Key == "calendarSync.settings");
+        setting.Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+        {
+            GoogleCalendarSyncEnabled = true,
+            YandexCalendarSyncEnabled = false,
+            SyncMode = "hybrid",
+            ConflictResolutionMode = "latestWins",
+            UserControlMode = "userManaged",
+            InactiveUserAction = "cleanupExternalData",
+            RequireManualConfirmation = true,
+            ManualFullSyncCooldownMinutes = manualFullSyncCooldownMinutes,
+        });
+        setting.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
     }
 

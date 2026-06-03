@@ -202,6 +202,7 @@ export interface CalendarSyncSettingsDto {
   yandexCalendarSyncEnabled?: boolean | null;
   googleSyncIntervalMinutes: number;
   yandexSyncIntervalMinutes: number;
+  manualFullSyncCooldownMinutes: number;
   syncMode: string;
   conflictResolutionMode: string;
   userControlMode: string;
@@ -219,6 +220,7 @@ export interface UpdateCalendarSyncSettingsRequest {
   yandexCalendarSyncEnabled?: boolean | null;
   googleSyncIntervalMinutes?: number;
   yandexSyncIntervalMinutes?: number;
+  manualFullSyncCooldownMinutes?: number;
   syncMode?: string;
   conflictResolutionMode?: string;
   userControlMode?: string;
@@ -307,6 +309,8 @@ export interface GoogleCalendarConnectionDto {
   accessTokenExpiresAt?: string | null;
   lastFullSyncAt?: string | null;
   lastIncrementalSyncAt?: string | null;
+  manualFullSyncCooldownMinutes: number;
+  manualFullSyncAvailableAt?: string | null;
   syncFromDate?: string | null;
   lastError?: string | null;
   createdAt: string;
@@ -385,6 +389,8 @@ export interface YandexCalendarConnectionDto {
   accessTokenExpiresAt?: string | null;
   lastFullSyncAt?: string | null;
   lastIncrementalSyncAt?: string | null;
+  manualFullSyncCooldownMinutes: number;
+  manualFullSyncAvailableAt?: string | null;
   syncFromDate?: string | null;
   lastError?: string | null;
   createdAt: string;

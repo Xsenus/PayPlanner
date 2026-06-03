@@ -76,6 +76,7 @@ public sealed class CalendarSyncController : ControllerBase
             YandexCalendarSyncEnabled = yandexCalendarSyncEnabled,
             GoogleSyncIntervalMinutes = request.GoogleSyncIntervalMinutes ?? previousSettings.GoogleSyncIntervalMinutes,
             YandexSyncIntervalMinutes = request.YandexSyncIntervalMinutes ?? previousSettings.YandexSyncIntervalMinutes,
+            ManualFullSyncCooldownMinutes = request.ManualFullSyncCooldownMinutes ?? previousSettings.ManualFullSyncCooldownMinutes,
             SyncMode = request.SyncMode ?? string.Empty,
             ConflictResolutionMode = request.ConflictResolutionMode ?? string.Empty,
             UserControlMode = request.UserControlMode ?? string.Empty,

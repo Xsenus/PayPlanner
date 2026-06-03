@@ -150,6 +150,7 @@ export function CalendarSyncProviderSettings() {
         yandexCalendarSyncEnabled: draft.yandexCalendarSyncEnabled === true,
         googleSyncIntervalMinutes: normalizeCalendarSyncInterval(draft.googleSyncIntervalMinutes),
         yandexSyncIntervalMinutes: normalizeCalendarSyncInterval(draft.yandexSyncIntervalMinutes),
+        manualFullSyncCooldownMinutes: normalizeCalendarSyncInterval(draft.manualFullSyncCooldownMinutes),
         syncMode: draft.syncMode,
         conflictResolutionMode: draft.conflictResolutionMode,
         userControlMode: draft.userControlMode,
@@ -298,6 +299,22 @@ export function CalendarSyncProviderSettings() {
                 label="Яндекс Календарь"
                 value={draft.yandexSyncIntervalMinutes}
                 onChange={(value) => updateDraft({ yandexSyncIntervalMinutes: value })}
+              />
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
+            <div className="flex flex-col gap-1">
+              <h6 className="text-sm font-semibold text-gray-900">Защита ручной полной синхронизации</h6>
+              <p className="text-xs leading-5 text-gray-600">
+                После ручного запуска пользователю нужно подождать этот интервал перед повторной полной синхронизацией. Фоновый обмен по расписанию продолжает работать.
+              </p>
+            </div>
+            <div className="mt-3 max-w-md">
+              <CalendarIntervalInput
+                label="Повторный ручной запуск"
+                value={draft.manualFullSyncCooldownMinutes}
+                onChange={(value) => updateDraft({ manualFullSyncCooldownMinutes: value })}
               />
             </div>
           </div>

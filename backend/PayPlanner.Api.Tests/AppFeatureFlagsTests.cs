@@ -218,6 +218,7 @@ public class AppFeatureFlagsTests
             UserControlMode = "adminManaged",
             DefaultSyncFromDate = new DateTime(2026, 1, 1),
             InactiveUserAction = "disableSyncOnly",
+            ManualFullSyncCooldownMinutes = 30,
             RequireManualConfirmation = false,
             DryRunConfirmed = true,
             Notes = "Проверено на копии базы.",
@@ -232,6 +233,7 @@ public class AppFeatureFlagsTests
         Assert.Equal("adminManaged", updated.UserControlMode);
         Assert.Equal(new DateTime(2026, 1, 1), updated.DefaultSyncFromDate);
         Assert.Equal("disableSyncOnly", updated.InactiveUserAction);
+        Assert.Equal(30, updated.ManualFullSyncCooldownMinutes);
         Assert.True(updated.RequireManualConfirmation);
         Assert.True(updated.DryRunConfirmed);
 
@@ -244,6 +246,7 @@ public class AppFeatureFlagsTests
         Assert.Contains("googleCalendarSyncEnabled", auditEvent.MetadataJson);
         Assert.Contains("yandexCalendarSyncEnabled", auditEvent.MetadataJson);
         Assert.Contains("DryRunConfirmed", auditEvent.MetadataJson);
+        Assert.Contains("ManualFullSyncCooldownMinutes", auditEvent.MetadataJson);
 
         var readinessResult = await controller.GetReadiness(CancellationToken.None);
         var readiness = Assert.IsType<CalendarSyncReadinessDto>(Assert.IsType<OkObjectResult>(readinessResult.Result).Value);
@@ -350,6 +353,7 @@ public class AppFeatureFlagsTests
             SyncMode = "unexpected",
             ConflictResolutionMode = "unsafe",
             UserControlMode = "unsafe",
+            ManualFullSyncCooldownMinutes = 1,
             DefaultSyncFromDate = new DateTime(2026, 1, 3, 14, 10, 0),
             InactiveUserAction = "unsafe",
             RequireManualConfirmation = false,
@@ -361,6 +365,7 @@ public class AppFeatureFlagsTests
         Assert.Equal("notConfigured", settings.SyncMode);
         Assert.Equal("manualConfirmation", settings.ConflictResolutionMode);
         Assert.Equal("userManaged", settings.UserControlMode);
+        Assert.Equal(CalendarSyncProviderRegistry.MinManualFullSyncCooldownMinutes, settings.ManualFullSyncCooldownMinutes);
         Assert.Equal(new DateTime(2026, 1, 3), settings.DefaultSyncFromDate);
         Assert.Equal("cleanupExternalData", settings.InactiveUserAction);
         Assert.True(settings.RequireManualConfirmation);

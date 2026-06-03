@@ -44,6 +44,7 @@ public sealed class CalendarSyncSettingsDto
     public bool? YandexCalendarSyncEnabled { get; set; }
     public int GoogleSyncIntervalMinutes { get; set; } = 10;
     public int YandexSyncIntervalMinutes { get; set; } = 10;
+    public int ManualFullSyncCooldownMinutes { get; set; } = 10;
     public string SyncMode { get; set; } = "notConfigured";
     public string ConflictResolutionMode { get; set; } = "manualConfirmation";
     public string UserControlMode { get; set; } = "userManaged";

@@ -179,6 +179,13 @@ export function YandexCalendarPanel({ isAdmin = false }: Props) {
 
   const connection = status?.connection;
   const busy = connecting || saving || syncing || disconnecting;
+  const manualFullSyncAvailableAt = connection?.manualFullSyncAvailableAt ?? null;
+  const manualFullSyncBlocked = Boolean(
+    manualFullSyncAvailableAt && new Date(manualFullSyncAvailableAt).getTime() > Date.now(),
+  );
+  const manualFullSyncTitle = manualFullSyncBlocked
+    ? `Повторную полную синхронизацию можно запустить после ${formatDateTime(manualFullSyncAvailableAt)}`
+    : 'Синхронизировать сейчас';
 
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -245,6 +252,12 @@ export function YandexCalendarPanel({ isAdmin = false }: Props) {
 
           {connection.lastError ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">{connection.lastError}</div>
+          ) : null}
+
+          {manualFullSyncBlocked ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Повторная полная синхронизация будет доступна после {formatDateTime(manualFullSyncAvailableAt)}. Фоновая синхронизация продолжает работать.
+            </div>
           ) : null}
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -321,10 +334,10 @@ export function YandexCalendarPanel({ isAdmin = false }: Props) {
             <button
               type="button"
               onClick={() => void handleSync()}
-              disabled={busy}
+              disabled={busy || manualFullSyncBlocked}
               className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-blue-200 text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-              title="Синхронизировать сейчас"
-              aria-label="Синхронизировать сейчас"
+              title={manualFullSyncTitle}
+              aria-label={manualFullSyncTitle}
             >
               {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             </button>

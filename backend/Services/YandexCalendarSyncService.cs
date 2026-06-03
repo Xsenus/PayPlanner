@@ -291,6 +291,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     public async Task<YandexCalendarSyncNowResultDto> SyncNowAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
     {
         await EnsureUserCanManageCalendarAsync(request, cancellationToken);
+        var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
+        await EnsureManualFullSyncAllowedAsync(userId, settings, cancellationToken);
         var result = await SyncConnectionAsync(userId, forceFull: true, cancellationToken);
         return new YandexCalendarSyncNowResultDto
         {
@@ -334,6 +336,26 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
 
         return new YandexCalendarSchedulerRunResult(userIds.Count, processedTasks, importedEvents, errors);
+    }
+
+    private async Task EnsureManualFullSyncAllowedAsync(
+        int userId,
+        CalendarSyncSettingsDto settings,
+        CancellationToken cancellationToken)
+    {
+        var lastFullSyncAt = await _db.YandexCalendarConnections
+            .AsNoTracking()
+            .Where(item => item.UserId == userId && item.IsEnabled && item.SyncEnabled)
+            .Select(item => item.LastFullSyncAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        var availableAt = BuildManualFullSyncAvailableAt(lastFullSyncAt, settings.ManualFullSyncCooldownMinutes);
+        var now = DateTime.UtcNow;
+        if (availableAt.HasValue && availableAt.Value > now)
+        {
+            throw new CalendarManualSyncCooldownException(
+                $"Повторную полную синхронизацию Яндекс.Календаря можно запустить после {FormatLogDateTime(availableAt.Value)}. До этого времени работает обычная фоновая синхронизация.",
+                availableAt.Value);
+        }
     }
 
     public async Task SyncTaskForConnectedUsersAsync(int taskId, CancellationToken cancellationToken = default)
@@ -1018,18 +1040,19 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
         var oauthSettings = await ResolveYandexSettingsAsync(cancellationToken);
         var providerEnabled = await IsYandexCalendarProviderEnabledAsync(cancellationToken);
+        var calendarSettings = await LoadCalendarSyncSettingsAsync(cancellationToken);
 
         return new YandexCalendarStatusDto
         {
             IsAvailable = providerEnabled,
             YandexOAuthReady = oauthSettings.Ready,
             CallbackUrl = BuildAbsoluteUrl(request, "/api/yandex-calendar/auth/callback"),
-            Connection = connection is null ? null : MapConnection(connection),
+            Connection = connection is null ? null : MapConnection(connection, calendarSettings),
             RecentLogs = logs,
         };
     }
 
-    private static YandexCalendarConnectionDto MapConnection(YandexCalendarConnection connection)
+    private static YandexCalendarConnectionDto MapConnection(YandexCalendarConnection connection, CalendarSyncSettingsDto settings)
         => new()
         {
             Id = connection.Id,
@@ -1044,6 +1067,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             AccessTokenExpiresAt = connection.AccessTokenExpiresAt,
             LastFullSyncAt = connection.LastFullSyncAt,
             LastIncrementalSyncAt = connection.LastIncrementalSyncAt,
+            ManualFullSyncCooldownMinutes = settings.ManualFullSyncCooldownMinutes,
+            ManualFullSyncAvailableAt = BuildManualFullSyncAvailableAt(connection.LastFullSyncAt, settings.ManualFullSyncCooldownMinutes),
             SyncFromDate = connection.SyncFromDate,
             LastError = connection.LastError,
             CreatedAt = connection.CreatedAt,
@@ -1513,6 +1538,11 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             DateTimeKind.Local => value.ToUniversalTime(),
             _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
         };
+
+    private static DateTime? BuildManualFullSyncAvailableAt(DateTime? lastFullSyncAt, int cooldownMinutes)
+        => lastFullSyncAt.HasValue
+            ? EnsureUtc(lastFullSyncAt.Value).AddMinutes(Math.Max(0, cooldownMinutes))
+            : null;
 
     private async Task AddLogAsync(
         int? connectionId,

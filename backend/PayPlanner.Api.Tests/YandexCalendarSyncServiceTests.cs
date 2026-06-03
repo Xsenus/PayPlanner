@@ -175,6 +175,23 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_WhenManualFullSyncCooldownActiveRejectsRepeatedRun()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-cooldown@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        connection.LastFullSyncAt = DateTime.UtcNow.AddMinutes(-5);
+        await SetCalendarSyncSettingsAsync(db, manualFullSyncCooldownMinutes: 30);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingYandexHandler()));
+
+        var error = await Assert.ThrowsAsync<CalendarManualSyncCooldownException>(() =>
+            service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None));
+
+        Assert.Contains("Повторную полную синхронизацию Яндекс.Календаря можно запустить после", error.Message);
+    }
+
+    [Fact]
     public async Task UpdateSettingsAsync_WhenAdminManagedRejectsRegularUser()
     {
         await using var db = await CreateContextAsync();
@@ -268,6 +285,29 @@ public class YandexCalendarSyncServiceTests
         db.YandexCalendarConnections.Add(connection);
         await db.SaveChangesAsync();
         return connection;
+    }
+
+    private static async Task SetCalendarSyncSettingsAsync(PaymentContext db, int manualFullSyncCooldownMinutes)
+    {
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "calendarSync.settings",
+            Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+            {
+                GoogleCalendarSyncEnabled = false,
+                YandexCalendarSyncEnabled = true,
+                SyncMode = "hybrid",
+                ConflictResolutionMode = "latestWins",
+                UserControlMode = "userManaged",
+                InactiveUserAction = "cleanupExternalData",
+                RequireManualConfirmation = true,
+                ManualFullSyncCooldownMinutes = manualFullSyncCooldownMinutes,
+            }),
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
     }
 
     private static async Task<YandexCalendarSyncCalendar> CreateCalendarAsync(

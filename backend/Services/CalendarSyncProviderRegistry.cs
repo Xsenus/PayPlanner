@@ -7,6 +7,9 @@ public static class CalendarSyncProviderRegistry
     public const int DefaultProviderSyncIntervalMinutes = 10;
     public const int MinProviderSyncIntervalMinutes = 5;
     public const int MaxProviderSyncIntervalMinutes = 1440;
+    public const int DefaultManualFullSyncCooldownMinutes = 10;
+    public const int MinManualFullSyncCooldownMinutes = 5;
+    public const int MaxManualFullSyncCooldownMinutes = 1440;
 
     public static CalendarSyncSettingsDto BuildDefaultSettings(bool externalCalendarSyncEnabled = false)
         => new()
@@ -16,6 +19,7 @@ public static class CalendarSyncProviderRegistry
             YandexCalendarSyncEnabled = externalCalendarSyncEnabled,
             GoogleSyncIntervalMinutes = DefaultProviderSyncIntervalMinutes,
             YandexSyncIntervalMinutes = DefaultProviderSyncIntervalMinutes,
+            ManualFullSyncCooldownMinutes = DefaultManualFullSyncCooldownMinutes,
             SyncMode = "notConfigured",
             ConflictResolutionMode = "manualConfirmation",
             UserControlMode = "userManaged",
@@ -59,6 +63,7 @@ public static class CalendarSyncProviderRegistry
             YandexCalendarSyncEnabled = yandexCalendarSyncEnabled,
             GoogleSyncIntervalMinutes = NormalizeProviderInterval(source.GoogleSyncIntervalMinutes),
             YandexSyncIntervalMinutes = NormalizeProviderInterval(source.YandexSyncIntervalMinutes),
+            ManualFullSyncCooldownMinutes = NormalizeManualFullSyncCooldown(source.ManualFullSyncCooldownMinutes),
             SyncMode = syncMode,
             ConflictResolutionMode = conflictResolutionMode,
             UserControlMode = userControlMode,
@@ -73,6 +78,9 @@ public static class CalendarSyncProviderRegistry
 
     public static int NormalizeProviderInterval(int value)
         => Math.Clamp(value <= 0 ? DefaultProviderSyncIntervalMinutes : value, MinProviderSyncIntervalMinutes, MaxProviderSyncIntervalMinutes);
+
+    public static int NormalizeManualFullSyncCooldown(int value)
+        => Math.Clamp(value <= 0 ? DefaultManualFullSyncCooldownMinutes : value, MinManualFullSyncCooldownMinutes, MaxManualFullSyncCooldownMinutes);
 
     public static IReadOnlyList<CalendarSyncProviderDto> BuildProviders(bool externalCalendarSyncEnabled)
         => BuildProviders(externalCalendarSyncEnabled, externalCalendarSyncEnabled);

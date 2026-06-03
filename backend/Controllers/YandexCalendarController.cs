@@ -127,6 +127,11 @@ public sealed class YandexCalendarController : ControllerBase
         {
             return Ok(await _yandexCalendarSyncService.SyncNowAsync(userId.Value, Request, ct));
         }
+        catch (CalendarManualSyncCooldownException ex)
+        {
+            Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling((ex.AvailableAt - DateTime.UtcNow).TotalSeconds)).ToString();
+            return Problem(title: "YandexCalendarManualSyncCooldown", detail: ex.Message, statusCode: 429);
+        }
         catch (InvalidOperationException ex)
         {
             return Problem(title: "YandexCalendarSyncFailed", detail: ex.Message, statusCode: 400);

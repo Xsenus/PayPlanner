@@ -127,6 +127,11 @@ public sealed class GoogleCalendarController : ControllerBase
         {
             return Ok(await _googleCalendarSyncService.SyncNowAsync(userId.Value, Request, ct));
         }
+        catch (CalendarManualSyncCooldownException ex)
+        {
+            Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling((ex.AvailableAt - DateTime.UtcNow).TotalSeconds)).ToString();
+            return Problem(title: "GoogleCalendarManualSyncCooldown", detail: ex.Message, statusCode: 429);
+        }
         catch (InvalidOperationException ex)
         {
             return Problem(title: "GoogleCalendarSyncFailed", detail: ex.Message, statusCode: 400);

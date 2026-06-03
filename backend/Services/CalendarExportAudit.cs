@@ -63,6 +63,9 @@ public static class CalendarExportAudit
                     nextSettings.ExternalCalendarSyncEnabled,
                     nextSettings.GoogleCalendarSyncEnabled,
                     nextSettings.YandexCalendarSyncEnabled,
+                    nextSettings.GoogleSyncIntervalMinutes,
+                    nextSettings.YandexSyncIntervalMinutes,
+                    nextSettings.ManualFullSyncCooldownMinutes,
                     nextSettings.SyncMode,
                     nextSettings.ConflictResolutionMode,
                     nextSettings.UserControlMode,
@@ -86,6 +89,9 @@ public static class CalendarExportAudit
         AddIfChanged(changes, "ExternalCalendarSyncEnabled", previousSettings.ExternalCalendarSyncEnabled?.ToString(), nextSettings.ExternalCalendarSyncEnabled?.ToString());
         AddIfChanged(changes, "GoogleCalendarSyncEnabled", previousSettings.GoogleCalendarSyncEnabled?.ToString(), nextSettings.GoogleCalendarSyncEnabled?.ToString());
         AddIfChanged(changes, "YandexCalendarSyncEnabled", previousSettings.YandexCalendarSyncEnabled?.ToString(), nextSettings.YandexCalendarSyncEnabled?.ToString());
+        AddIfChanged(changes, "GoogleSyncIntervalMinutes", previousSettings.GoogleSyncIntervalMinutes.ToString(), nextSettings.GoogleSyncIntervalMinutes.ToString());
+        AddIfChanged(changes, "YandexSyncIntervalMinutes", previousSettings.YandexSyncIntervalMinutes.ToString(), nextSettings.YandexSyncIntervalMinutes.ToString());
+        AddIfChanged(changes, "ManualFullSyncCooldownMinutes", previousSettings.ManualFullSyncCooldownMinutes.ToString(), nextSettings.ManualFullSyncCooldownMinutes.ToString());
         AddIfChanged(changes, "SyncMode", previousSettings.SyncMode, nextSettings.SyncMode);
         AddIfChanged(changes, "ConflictResolutionMode", previousSettings.ConflictResolutionMode, nextSettings.ConflictResolutionMode);
         AddIfChanged(changes, "UserControlMode", previousSettings.UserControlMode, nextSettings.UserControlMode);
@@ -131,7 +137,7 @@ public static class CalendarExportAudit
             _ => "ручное подтверждение",
         };
 
-        return $"Обновлены правила внешних календарей: {syncMode}, спорные изменения - {conflictMode}.";
+        return $"Обновлены правила внешних календарей: {syncMode}, спорные изменения - {conflictMode}, повторная полная синхронизация - через {settings.ManualFullSyncCooldownMinutes} мин.";
     }
 
     private sealed record CalendarSyncSettingsChange(string Field, string OldValue, string NewValue);

@@ -39,6 +39,8 @@ public sealed class GoogleCalendarConnectionDto
     public DateTime? AccessTokenExpiresAt { get; set; }
     public DateTime? LastFullSyncAt { get; set; }
     public DateTime? LastIncrementalSyncAt { get; set; }
+    public int ManualFullSyncCooldownMinutes { get; set; }
+    public DateTime? ManualFullSyncAvailableAt { get; set; }
     public DateTime? SyncFromDate { get; set; }
     public string? LastError { get; set; }
     public DateTime CreatedAt { get; set; }
