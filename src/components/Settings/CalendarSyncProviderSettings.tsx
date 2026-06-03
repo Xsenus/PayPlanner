@@ -612,6 +612,7 @@ interface CalendarSettingHelpItem {
   key: CalendarSettingHelpKey;
   title: string;
   description: string;
+  redirectUri?: string;
   steps?: string[];
   links?: Array<{
     label: string;
@@ -755,6 +756,17 @@ function CalendarSyncSettingHelpModal({
 
         <div className="max-h-[calc(90vh-82px)] overflow-y-auto px-5 py-4">
           <p className="text-sm leading-6 text-slate-700">{helpItem.description}</p>
+          {helpItem.redirectUri ? (
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+              <div className="text-sm font-semibold text-emerald-950">Redirect URI для кабинета провайдера</div>
+              <div className="mt-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 font-mono text-sm text-emerald-950 break-all">
+                {helpItem.redirectUri}
+              </div>
+              <p className="mt-2 text-xs leading-5 text-emerald-900">
+                Скопируйте этот адрес без изменений в настройки OAuth-приложения. Адрес должен совпадать полностью.
+              </p>
+            </div>
+          ) : null}
           {helpItem.steps?.length ? (
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
               <div className="text-sm font-semibold text-slate-900">Как настроить</div>
@@ -800,11 +812,12 @@ const calendarSettingsHelpItems: CalendarSettingHelpItem[] = [
     key: 'googleCalendarSyncEnabled',
     title: 'Включить Google Calendar',
     description: 'Разрешает подготовку и запуск синхронизации с Google Calendar. После включения нужно настроить OAuth Google и закрыть обязательные пункты готовности.',
+    redirectUri: 'https://api.elitpravo.com/api/google-calendar/auth/callback',
     steps: [
       'В Google Cloud Console создайте или выберите проект для CRM.',
       'Включите Google Calendar API для выбранного проекта.',
       'Создайте OAuth Client ID типа Web application.',
-      'В Authorized redirect URIs добавьте callback URL из карточки Google Calendar в профиле пользователя.',
+      'В Authorized redirect URIs добавьте Redirect URI из блока выше.',
       'Скопируйте Client ID и Client Secret в раздел «Ключи интеграций» → вкладка «Календари».',
       'Если приложение находится в режиме тестирования, добавьте сотрудников в тестовые пользователи OAuth consent screen или переведите приложение в публикацию.',
     ],
@@ -819,9 +832,10 @@ const calendarSettingsHelpItems: CalendarSettingHelpItem[] = [
     key: 'yandexCalendarSyncEnabled',
     title: 'Включить Яндекс Календарь',
     description: 'Разрешает подготовку и запуск синхронизации с Яндекс Календарем. Провайдер можно включить независимо от Google Calendar.',
+    redirectUri: 'https://api.elitpravo.com/api/yandex-calendar/auth/callback',
     steps: [
       'В кабинете OAuth Яндекс ID создайте приложение или откройте уже созданное.',
-      'Добавьте redirect URI из карточки Яндекс Календаря в профиле пользователя.',
+      'Добавьте Redirect URI из блока выше в настройки приложения.',
       'Выдайте приложению права для работы с календарем через CalDAV/Яндекс Календарь.',
       'Скопируйте Client ID и Client Secret в раздел «Ключи интеграций» → вкладка «Календари».',
       'Проверьте чек-лист готовности и только после этого разрешайте пользователям подключать календарь.',

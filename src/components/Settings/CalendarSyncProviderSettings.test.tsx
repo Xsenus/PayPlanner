@@ -208,7 +208,20 @@ describe('CalendarSyncProviderSettings', () => {
 
     expect(screen.getByText('Как настроить')).toBeTruthy();
     expect(screen.getByText('Google Cloud Console: Credentials')).toBeTruthy();
+    expect(screen.getByText('Redirect URI для кабинета провайдера')).toBeTruthy();
+    expect(screen.getByText('https://api.elitpravo.com/api/google-calendar/auth/callback')).toBeTruthy();
     expect(screen.getByText(/Redirect URI должен совпадать полностью/i)).toBeTruthy();
+  });
+
+  it('shows Yandex Calendar redirect URI in provider help', async () => {
+    render(<CalendarSyncProviderSettings />);
+
+    await screen.findByText('Модель синхронизации и конфликты');
+    fireEvent.click(screen.getByRole('button', { name: 'Что делает настройка «Включить Яндекс Календарь»' }));
+
+    expect(screen.getByText('Redirect URI для кабинета провайдера')).toBeTruthy();
+    expect(screen.getByText('https://api.elitpravo.com/api/yandex-calendar/auth/callback')).toBeTruthy();
+    expect(screen.getByText('Яндекс OAuth: управление приложениями')).toBeTruthy();
   });
 
   it('loads another page of calendar sync logs', async () => {
