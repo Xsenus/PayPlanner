@@ -2057,13 +2057,14 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
         var deadlines = await _db.ClientCaseProceduralDeadlines
             .AsNoTracking()
             .Where(item => item.ClientCaseId == id)
             .OrderBy(item => item.Status == "closed")
             .ThenBy(item => item.DueAt)
             .ThenBy(item => item.Id)
-            .Select(item => MapProceduralDeadline(item))
+            .Select(item => MapProceduralDeadline(item, statusClock))
             .ToListAsync(ct);
 
         return Ok(deadlines);
@@ -2145,7 +2146,7 @@ public class CasesV2Controller : ControllerBase
         await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "created", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
 
-        return Created($"/api/v2/cases/{id}/procedural-deadlines/{deadline.Id}", MapProceduralDeadline(deadline));
+        return Created($"/api/v2/cases/{id}/procedural-deadlines/{deadline.Id}", MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
     }
 
     [HttpPut("{id:int}/procedural-deadlines/{deadlineId:int}")]
@@ -2246,7 +2247,7 @@ public class CasesV2Controller : ControllerBase
         await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "updated", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
 
-        return Ok(MapProceduralDeadline(deadline));
+        return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
     }
 
     [HttpPost("{id:int}/procedural-deadlines/{deadlineId:int}/close")]
@@ -2300,7 +2301,7 @@ public class CasesV2Controller : ControllerBase
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, id, actorUserId, actorName, ct);
         await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "closed", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
-        return Ok(MapProceduralDeadline(deadline));
+        return Ok(MapProceduralDeadline(deadline, await ResolveCaseStatusClockAsync(ct)));
     }
 
     [HttpGet("{id:int}/court-instances")]
@@ -2630,12 +2631,13 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
         var items = await _db.ClientCaseCourtEvents
             .AsNoTracking()
             .Where(item => item.ClientCaseId == id)
             .OrderBy(item => item.ScheduledAt)
             .ThenBy(item => item.Id)
-            .Select(item => MapCourtEvent(item))
+            .Select(item => MapCourtEvent(item, statusClock))
             .ToListAsync(ct);
 
         return Ok(items);
@@ -2725,7 +2727,7 @@ public class CasesV2Controller : ControllerBase
         await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "created", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
 
-        return Created($"/api/v2/cases/{id}/court-events/{courtEvent.Id}", MapCourtEvent(courtEvent));
+        return Created($"/api/v2/cases/{id}/court-events/{courtEvent.Id}", MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
     }
 
     [HttpPut("{id:int}/court-events/{courtEventId:int}")]
@@ -2810,7 +2812,7 @@ public class CasesV2Controller : ControllerBase
         await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "updated", actorUserId, actorName, ct);
         await _db.SaveChangesAsync(ct);
 
-        return Ok(MapCourtEvent(courtEvent));
+        return Ok(MapCourtEvent(courtEvent, await ResolveCaseStatusClockAsync(ct)));
     }
 
     [HttpGet("{id:int}/court-events/{courtEventId:int}/history")]
@@ -4165,6 +4167,15 @@ public class CasesV2Controller : ControllerBase
         DateTime ToInstantExclusiveUtc,
         DateTime TodayDate,
         DateTime NowInstantUtc);
+
+    private readonly record struct CaseStatusClock(DateTime TodayDate, DateTime NowInstantUtc);
+
+    private async Task<CaseStatusClock> ResolveCaseStatusClockAsync(CancellationToken ct)
+    {
+        var nowUtc = DateTime.UtcNow;
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        return new CaseStatusClock(CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date, nowUtc);
+    }
 
     private static CaseCalendarDateRange ResolveCaseCalendarDateRange(DateTime? from, DateTime? to, TimeZoneInfo timeZone)
     {
@@ -8817,7 +8828,7 @@ public class CasesV2Controller : ControllerBase
 """;
     }
 
-    private static ClientCaseProceduralDeadlineDto MapProceduralDeadline(ClientCaseProceduralDeadline item)
+    private static ClientCaseProceduralDeadlineDto MapProceduralDeadline(ClientCaseProceduralDeadline item, CaseStatusClock clock)
         => new()
         {
             Id = item.Id,
@@ -8846,11 +8857,11 @@ public class CasesV2Controller : ControllerBase
             ClosedByUserId = item.ClosedByUserId,
             ClosedByUserName = item.ClosedByUserName,
             CloseReason = item.CloseReason,
-            IsOverdue = item.Status != "closed" && item.DueAt.Date < DateTime.UtcNow.Date,
-            IsWarning = item.Status != "closed" && item.DueAt.Date >= DateTime.UtcNow.Date && item.DueAt.Date <= DateTime.UtcNow.Date.AddDays(Math.Max(0, item.WarningDaysBefore)),
+            IsOverdue = item.Status != "closed" && IsCaseStatusOverdue(item.DueAt, item.AllDay, clock),
+            IsWarning = item.Status != "closed" && IsCaseStatusInWarningPeriod(item.DueAt, item.AllDay, Math.Max(0, item.WarningDaysBefore), clock),
         };
 
-    private static ClientCaseCourtEventDto MapCourtEvent(ClientCaseCourtEvent item)
+    private static ClientCaseCourtEventDto MapCourtEvent(ClientCaseCourtEvent item, CaseStatusClock clock)
         => new()
         {
             Id = item.Id,
@@ -8881,8 +8892,21 @@ public class CasesV2Controller : ControllerBase
             UpdatedAt = item.UpdatedAt,
             UpdatedByUserId = item.UpdatedByUserId,
             UpdatedByUserName = item.UpdatedByUserName,
-            IsOverdue = item.MovementStatus is not "held" and not "completed" and not "cancelled" && item.ScheduledAt.Date < DateTime.UtcNow.Date,
+            IsOverdue = item.MovementStatus is not "held" and not "completed" and not "cancelled" && IsCaseStatusOverdue(item.ScheduledAt, item.AllDay, clock),
         };
+
+    private static bool IsCaseStatusOverdue(DateTime value, bool allDay, CaseStatusClock clock)
+        => allDay
+            ? value.Date < clock.TodayDate
+            : value < clock.NowInstantUtc;
+
+    private static bool IsCaseStatusInWarningPeriod(DateTime value, bool allDay, int warningDays, CaseStatusClock clock)
+    {
+        var normalizedWarningDays = Math.Max(0, warningDays);
+        return allDay
+            ? value.Date >= clock.TodayDate && value.Date <= clock.TodayDate.AddDays(normalizedWarningDays)
+            : value >= clock.NowInstantUtc && value <= clock.NowInstantUtc.AddDays(normalizedWarningDays);
+    }
 
     private static ClientCaseCourtEventHistoryDto MapCourtEventHistory(ClientCaseCourtEventHistory item)
         => new()

@@ -1740,6 +1740,112 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CaseDeadlineAndCourtEventLists_UseUserTimeZoneForStatusFlags()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "case-status-flags@example.com", "Calendar Owner");
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        var selectedZone = TimeZoneInfo.GetSystemTimeZones()
+            .Select(zone => new
+            {
+                Zone = zone,
+                LocalToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, zone).Date,
+            })
+            .FirstOrDefault(item => item.LocalToday != utcToday);
+        Assert.NotNull(selectedZone);
+
+        var shouldBeOverdue = selectedZone!.LocalToday > utcToday;
+        var deadlineDate = shouldBeOverdue ? utcToday : selectedZone.LocalToday;
+        var client = new Client
+        {
+            Name = "Status flags client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Status flags case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone.Zone.Id,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        db.ClientCaseProceduralDeadlines.Add(new ClientCaseProceduralDeadline
+        {
+            ClientCaseId = clientCase.Id,
+            DeadlineType = "motion",
+            Title = "Status deadline",
+            DueAt = deadlineDate,
+            AllDay = true,
+            Status = "active",
+            WarningDaysBefore = 0,
+            CreatedAt = nowUtc,
+            CreatedByUserId = owner.Id,
+            CreatedByUserName = owner.FullName,
+            UpdatedAt = nowUtc,
+            UpdatedByUserId = owner.Id,
+            UpdatedByUserName = owner.FullName,
+        });
+        db.ClientCaseCourtEvents.Add(new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = "hearing",
+            Title = "Status all-day court event",
+            ScheduledAt = deadlineDate,
+            AllDay = true,
+            MovementStatus = "scheduled",
+            CreatedAt = nowUtc,
+            CreatedByUserId = owner.Id,
+            CreatedByUserName = owner.FullName,
+            UpdatedAt = nowUtc,
+            UpdatedByUserId = owner.Id,
+            UpdatedByUserName = owner.FullName,
+        });
+        db.ClientCaseCourtEvents.Add(new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = "hearing",
+            Title = "Status timed court event",
+            ScheduledAt = nowUtc.AddMinutes(-1),
+            AllDay = false,
+            MovementStatus = "scheduled",
+            CreatedAt = nowUtc,
+            CreatedByUserId = owner.Id,
+            CreatedByUserName = owner.FullName,
+            UpdatedAt = nowUtc,
+            UpdatedByUserId = owner.Id,
+            UpdatedByUserName = owner.FullName,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var deadlinesResult = await controller.GetProceduralDeadlines(clientCase.Id, CancellationToken.None);
+        var deadlinesOk = Assert.IsType<OkObjectResult>(deadlinesResult.Result);
+        var deadlines = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseProceduralDeadlineDto>>(deadlinesOk.Value);
+        var deadline = Assert.Single(deadlines);
+        Assert.Equal(shouldBeOverdue, deadline.IsOverdue);
+        Assert.Equal(!shouldBeOverdue, deadline.IsWarning);
+
+        var courtEventsResult = await controller.GetCourtEvents(clientCase.Id, CancellationToken.None);
+        var courtEventsOk = Assert.IsType<OkObjectResult>(courtEventsResult.Result);
+        var courtEvents = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtEventDto>>(courtEventsOk.Value);
+        Assert.Contains(courtEvents, item => item.Title == "Status all-day court event" && item.IsOverdue == shouldBeOverdue);
+        Assert.Contains(courtEvents, item => item.Title == "Status timed court event" && item.IsOverdue);
+    }
+
+    [Fact]
     public async Task ProceduralDeadlines_CreateShowInCalendarAndClose()
     {
         await using var db = await CreateContextAsync();
