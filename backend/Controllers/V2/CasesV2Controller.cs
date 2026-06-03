@@ -1708,14 +1708,14 @@ public class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var fromDate = (from ?? DateTime.UtcNow.Date.AddDays(-30)).Date;
-        var toDate = (to ?? fromDate.AddDays(90)).Date;
-        if (toDate < fromDate)
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var range = ResolveCaseCalendarDateRange(from, to, timeZone);
+        if (range.ToDate < range.FromDate)
         {
             return BadRequest(new { message = "Дата окончания периода не может быть раньше даты начала." });
         }
 
-        var events = await QueryCaseCalendarEventsAsync(visibility, fromDate, toDate, clientCaseId, responsibleUserId, includeTasks, ct);
+        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct);
         return Ok(events);
     }
 
@@ -1739,15 +1739,15 @@ public class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var fromDate = (from ?? DateTime.UtcNow.Date.AddDays(-30)).Date;
-        var toDate = (to ?? fromDate.AddDays(90)).Date;
-        if (toDate < fromDate)
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var range = ResolveCaseCalendarDateRange(from, to, timeZone);
+        if (range.ToDate < range.FromDate)
         {
             return BadRequest(new { message = "Дата окончания периода не может быть раньше даты начала." });
         }
 
-        var events = await QueryCaseCalendarEventsAsync(visibility, fromDate, toDate, clientCaseId, responsibleUserId, includeTasks, ct);
-        return Ok(BuildCaseCalendarSummary(events, fromDate, toDate));
+        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct);
+        return Ok(BuildCaseCalendarSummary(events, range.FromDate, range.ToDate));
     }
 
     [HttpGet("/api/case-calendar/events.ics")]
@@ -1776,16 +1776,15 @@ public class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var fromDate = (from ?? DateTime.UtcNow.Date.AddDays(-30)).Date;
-        var toDate = (to ?? fromDate.AddDays(90)).Date;
-        if (toDate < fromDate)
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var range = ResolveCaseCalendarDateRange(from, to, timeZone);
+        if (range.ToDate < range.FromDate)
         {
             return BadRequest(new { message = "Дата окончания периода не может быть раньше даты начала." });
         }
 
         var reminders = IcsReminderOptions.Normalize(reminderMinutes);
-        var events = await QueryCaseCalendarEventsAsync(visibility, fromDate, toDate, clientCaseId, responsibleUserId, includeTasks, ct);
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct);
         _db.ObjectAuditEvents.Add(CalendarExportAudit.CreateExportEvent(
             User,
             "cases",
@@ -1794,8 +1793,8 @@ public class CasesV2Controller : ControllerBase
             reminders,
             new
             {
-                from = fromDate,
-                to = toDate,
+                from = range.FromDate,
+                to = range.ToDate,
                 clientCaseId,
                 responsibleUserId,
                 includeTasks,
@@ -1805,7 +1804,7 @@ public class CasesV2Controller : ControllerBase
         return File(
             Encoding.UTF8.GetBytes(BuildCaseCalendarIcs(events, reminders, timeZone)),
             "text/calendar; charset=utf-8",
-            $"case-calendar-{fromDate:yyyyMMdd}-{toDate:yyyyMMdd}.ics");
+            $"case-calendar-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.ics");
     }
 
     [HttpPost("procedural-deadlines/calculate")]
@@ -4158,16 +4157,36 @@ public class CasesV2Controller : ControllerBase
         });
     }
 
+    private readonly record struct CaseCalendarDateRange(
+        DateTime FromDate,
+        DateTime ToDate,
+        DateTime ToDateExclusive,
+        DateTime FromInstantUtc,
+        DateTime ToInstantExclusiveUtc);
+
+    private static CaseCalendarDateRange ResolveCaseCalendarDateRange(DateTime? from, DateTime? to, TimeZoneInfo timeZone)
+    {
+        var localToday = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
+        var fromDate = (from ?? localToday.AddDays(-30)).Date;
+        var toDate = (to ?? fromDate.AddDays(90)).Date;
+        var toDateExclusive = toDate.AddDays(1);
+
+        return new CaseCalendarDateRange(
+            fromDate,
+            toDate,
+            toDateExclusive,
+            CalendarTimeZoneHelper.FromUserLocalToUtc(fromDate, timeZone),
+            CalendarTimeZoneHelper.FromUserLocalToUtc(toDateExclusive, timeZone));
+    }
+
     private async Task<IReadOnlyList<CaseCalendarEventDto>> QueryCaseCalendarEventsAsync(
         DataVisibilityAccess visibility,
-        DateTime fromDate,
-        DateTime toDate,
+        CaseCalendarDateRange range,
         int? clientCaseId,
         int? responsibleUserId,
         bool includeTasks,
         CancellationToken ct)
     {
-        var toExclusive = toDate.Date.AddDays(1);
         var caseQuery = _db.ClientCases
             .AsNoTracking()
             .ApplyClientCaseVisibility(visibility)
@@ -4189,29 +4208,31 @@ public class CasesV2Controller : ControllerBase
         }
 
         caseQuery = caseQuery.Where(item =>
-            (item.DueDate.HasValue && item.DueDate.Value >= fromDate && item.DueDate.Value < toExclusive) ||
-            (item.NextHearingAt.HasValue && item.NextHearingAt.Value >= fromDate && item.NextHearingAt.Value < toExclusive) ||
-            (item.ClaimFiledAt.HasValue && item.ClaimFiledAt.Value >= fromDate && item.ClaimFiledAt.Value < toExclusive) ||
-            (item.CourtDecisionAt.HasValue && item.CourtDecisionAt.Value >= fromDate && item.CourtDecisionAt.Value < toExclusive) ||
-            (item.AppealDeadlineAt.HasValue && item.AppealDeadlineAt.Value >= fromDate && item.AppealDeadlineAt.Value < toExclusive) ||
-            (item.CassationDeadlineAt.HasValue && item.CassationDeadlineAt.Value >= fromDate && item.CassationDeadlineAt.Value < toExclusive) ||
-            (item.MotionDeadlineAt.HasValue && item.MotionDeadlineAt.Value >= fromDate && item.MotionDeadlineAt.Value < toExclusive) ||
-            (item.ObjectionDeadlineAt.HasValue && item.ObjectionDeadlineAt.Value >= fromDate && item.ObjectionDeadlineAt.Value < toExclusive) ||
+            (item.DueDate.HasValue && item.DueDate.Value >= range.FromDate && item.DueDate.Value < range.ToDateExclusive) ||
+            (item.NextHearingAt.HasValue && item.NextHearingAt.Value >= range.FromInstantUtc && item.NextHearingAt.Value < range.ToInstantExclusiveUtc) ||
+            (item.ClaimFiledAt.HasValue && item.ClaimFiledAt.Value >= range.FromDate && item.ClaimFiledAt.Value < range.ToDateExclusive) ||
+            (item.CourtDecisionAt.HasValue && item.CourtDecisionAt.Value >= range.FromDate && item.CourtDecisionAt.Value < range.ToDateExclusive) ||
+            (item.AppealDeadlineAt.HasValue && item.AppealDeadlineAt.Value >= range.FromDate && item.AppealDeadlineAt.Value < range.ToDateExclusive) ||
+            (item.CassationDeadlineAt.HasValue && item.CassationDeadlineAt.Value >= range.FromDate && item.CassationDeadlineAt.Value < range.ToDateExclusive) ||
+            (item.MotionDeadlineAt.HasValue && item.MotionDeadlineAt.Value >= range.FromDate && item.MotionDeadlineAt.Value < range.ToDateExclusive) ||
+            (item.ObjectionDeadlineAt.HasValue && item.ObjectionDeadlineAt.Value >= range.FromDate && item.ObjectionDeadlineAt.Value < range.ToDateExclusive) ||
             _db.ClientCaseCourtEvents.Any(courtEvent =>
                 courtEvent.ClientCaseId == item.Id &&
                 courtEvent.MovementStatus != "cancelled" &&
-                courtEvent.ScheduledAt >= fromDate &&
-                courtEvent.ScheduledAt < toExclusive) ||
+                (courtEvent.AllDay
+                    ? courtEvent.ScheduledAt >= range.FromDate && courtEvent.ScheduledAt < range.ToDateExclusive
+                    : courtEvent.ScheduledAt >= range.FromInstantUtc && courtEvent.ScheduledAt < range.ToInstantExclusiveUtc)) ||
             _db.ClientCaseProceduralDeadlines.Any(deadline =>
                 deadline.ClientCaseId == item.Id &&
                 deadline.Status != "closed" &&
                 deadline.Status != "cancelled" &&
-                deadline.DueAt >= fromDate &&
-                deadline.DueAt < toExclusive) ||
+                (deadline.AllDay
+                    ? deadline.DueAt >= range.FromDate && deadline.DueAt < range.ToDateExclusive
+                    : deadline.DueAt >= range.FromInstantUtc && deadline.DueAt < range.ToInstantExclusiveUtc)) ||
             (includeTasks && _db.TaskJournalItems.Any(task =>
                 task.ClientCaseId == item.Id &&
-                task.DueAt >= fromDate &&
-                task.DueAt < toExclusive &&
+                task.DueAt >= range.FromInstantUtc &&
+                task.DueAt < range.ToInstantExclusiveUtc &&
                 task.Status != "done" &&
                 task.Status != "cancelled")));
 
@@ -4228,9 +4249,9 @@ public class CasesV2Controller : ControllerBase
                 .Where(item => item.Status != "closed" && item.Status != "cancelled")
                 .Select(item => item.DeadlineType)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            AddCaseCalendarDateEvents(events, clientCase, separateDeadlineTypes, fromDate, toExclusive);
-            AddCaseCalendarCourtEvents(events, clientCase, fromDate, toExclusive);
-            AddCaseCalendarProceduralDeadlineEvents(events, clientCase, fromDate, toExclusive);
+            AddCaseCalendarDateEvents(events, clientCase, separateDeadlineTypes, range);
+            AddCaseCalendarCourtEvents(events, clientCase, range);
+            AddCaseCalendarProceduralDeadlineEvents(events, clientCase, range);
         }
 
         if (includeTasks && cases.Count > 0)
@@ -4239,7 +4260,7 @@ public class CasesV2Controller : ControllerBase
             var tasks = await _db.TaskJournalItems
                 .AsNoTracking()
                 .Where(item => item.ClientCaseId.HasValue && visibleCaseIds.Contains(item.ClientCaseId.Value))
-                .Where(item => item.DueAt >= fromDate && item.DueAt < toExclusive)
+                .Where(item => item.DueAt >= range.FromInstantUtc && item.DueAt < range.ToInstantExclusiveUtc)
                 .Where(item => item.Status != "done" && item.Status != "cancelled")
                 .OrderBy(item => item.DueAt)
                 .ThenBy(item => item.Id)
@@ -4386,17 +4407,16 @@ public class CasesV2Controller : ControllerBase
         ICollection<CaseCalendarEventDto> events,
         ClientCase clientCase,
         IReadOnlySet<string> separateDeadlineTypes,
-        DateTime fromDate,
-        DateTime toExclusive)
+        CaseCalendarDateRange range)
     {
-        AddCaseCalendarEvent(events, clientCase, "case-deadline", "due", "Крайний срок по делу", clientCase.DueDate, true, fromDate, toExclusive);
-        AddCaseCalendarEvent(events, clientCase, "court", "hearing", "Судебное заседание", clientCase.NextHearingAt, false, fromDate, toExclusive);
-        AddCaseCalendarEvent(events, clientCase, "court", "claim", "Подача иска", clientCase.ClaimFiledAt, true, fromDate, toExclusive);
-        AddCaseCalendarEvent(events, clientCase, "court", "decision", "Судебное решение", clientCase.CourtDecisionAt, true, fromDate, toExclusive);
-        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "appeal", "Срок апелляции", clientCase.AppealDeadlineAt, fromDate, toExclusive);
-        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "cassation", "Срок кассации", clientCase.CassationDeadlineAt, fromDate, toExclusive);
-        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "motion", "Срок подачи ходатайства", clientCase.MotionDeadlineAt, fromDate, toExclusive);
-        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "objection", "Срок подачи возражений", clientCase.ObjectionDeadlineAt, fromDate, toExclusive);
+        AddCaseCalendarEvent(events, clientCase, "case-deadline", "due", "Крайний срок по делу", clientCase.DueDate, true, range);
+        AddCaseCalendarEvent(events, clientCase, "court", "hearing", "Судебное заседание", clientCase.NextHearingAt, false, range);
+        AddCaseCalendarEvent(events, clientCase, "court", "claim", "Подача иска", clientCase.ClaimFiledAt, true, range);
+        AddCaseCalendarEvent(events, clientCase, "court", "decision", "Судебное решение", clientCase.CourtDecisionAt, true, range);
+        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "appeal", "Срок апелляции", clientCase.AppealDeadlineAt, range);
+        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "cassation", "Срок кассации", clientCase.CassationDeadlineAt, range);
+        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "motion", "Срок подачи ходатайства", clientCase.MotionDeadlineAt, range);
+        AddLegacyProceduralCalendarEvent(events, clientCase, separateDeadlineTypes, "objection", "Срок подачи возражений", clientCase.ObjectionDeadlineAt, range);
     }
 
     private static void AddLegacyProceduralCalendarEvent(
@@ -4406,26 +4426,26 @@ public class CasesV2Controller : ControllerBase
         string sourceType,
         string title,
         DateTime? startAt,
-        DateTime fromDate,
-        DateTime toExclusive)
+        CaseCalendarDateRange range)
     {
         if (separateDeadlineTypes.Contains(sourceType))
         {
             return;
         }
 
-        AddCaseCalendarEvent(events, clientCase, "procedural-deadline", sourceType, title, startAt, true, fromDate, toExclusive);
+        AddCaseCalendarEvent(events, clientCase, "procedural-deadline", sourceType, title, startAt, true, range);
     }
 
     private static void AddCaseCalendarProceduralDeadlineEvents(
         ICollection<CaseCalendarEventDto> events,
         ClientCase clientCase,
-        DateTime fromDate,
-        DateTime toExclusive)
+        CaseCalendarDateRange range)
     {
         foreach (var deadline in clientCase.ProceduralDeadlines
             .Where(item => item.Status != "closed" && item.Status != "cancelled")
-            .Where(item => item.DueAt >= fromDate && item.DueAt < toExclusive)
+            .Where(item => item.AllDay
+                ? item.DueAt >= range.FromDate && item.DueAt < range.ToDateExclusive
+                : item.DueAt >= range.FromInstantUtc && item.DueAt < range.ToInstantExclusiveUtc)
             .OrderBy(item => item.DueAt)
             .ThenBy(item => item.Id))
         {
@@ -4460,12 +4480,13 @@ public class CasesV2Controller : ControllerBase
     private static void AddCaseCalendarCourtEvents(
         ICollection<CaseCalendarEventDto> events,
         ClientCase clientCase,
-        DateTime fromDate,
-        DateTime toExclusive)
+        CaseCalendarDateRange range)
     {
         foreach (var courtEvent in clientCase.CourtEvents
             .Where(item => item.MovementStatus != "cancelled")
-            .Where(item => item.ScheduledAt >= fromDate && item.ScheduledAt < toExclusive)
+            .Where(item => item.AllDay
+                ? item.ScheduledAt >= range.FromDate && item.ScheduledAt < range.ToDateExclusive
+                : item.ScheduledAt >= range.FromInstantUtc && item.ScheduledAt < range.ToInstantExclusiveUtc)
             .OrderBy(item => item.ScheduledAt)
             .ThenBy(item => item.Id))
         {
@@ -4505,10 +4526,11 @@ public class CasesV2Controller : ControllerBase
         string title,
         DateTime? startAt,
         bool allDay,
-        DateTime fromDate,
-        DateTime toExclusive)
+        CaseCalendarDateRange range)
     {
-        if (!startAt.HasValue || startAt.Value < fromDate || startAt.Value >= toExclusive)
+        var rangeStart = allDay ? range.FromDate : range.FromInstantUtc;
+        var rangeEnd = allDay ? range.ToDateExclusive : range.ToInstantExclusiveUtc;
+        if (!startAt.HasValue || startAt.Value < rangeStart || startAt.Value >= rangeEnd)
         {
             return;
         }

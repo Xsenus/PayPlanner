@@ -1571,6 +1571,80 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CaseCalendarEvents_UsesUserTimeZoneForTimedEventBoundaries()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "case-calendar-boundary@example.com", "Calendar Owner");
+        var client = new Client
+        {
+            Name = "Boundary client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var eventAtUtc = new DateTime(2026, 5, 19, 20, 30, 0, DateTimeKind.Utc);
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Boundary case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            NextHearingAt = eventAtUtc,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ClientCaseId = clientCase.Id,
+            ObjectName = clientCase.Title,
+            Title = "Boundary task",
+            DueAt = eventAtUtc,
+            PlannedDurationMinutes = 60,
+            Type = "task",
+            Priority = "normal",
+            Status = "new",
+            AssigneeUserId = owner.Id,
+            AssigneeName = owner.FullName,
+            AuthorUserId = owner.Id,
+            AuthorName = owner.FullName,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var previousDayResult = await controller.GetCaseCalendarEvents(
+            new DateTime(2026, 5, 19, 0, 0, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 5, 19, 0, 0, 0, DateTimeKind.Unspecified),
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: true,
+            ct: CancellationToken.None);
+        var previousDayOk = Assert.IsType<OkObjectResult>(previousDayResult.Result);
+        var previousDayEvents = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(previousDayOk.Value);
+        Assert.DoesNotContain(previousDayEvents, item => item.ClientCaseId == clientCase.Id);
+
+        var localDayResult = await controller.GetCaseCalendarEvents(
+            new DateTime(2026, 5, 20, 0, 0, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 5, 20, 0, 0, 0, DateTimeKind.Unspecified),
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: true,
+            ct: CancellationToken.None);
+
+        var localDayOk = Assert.IsType<OkObjectResult>(localDayResult.Result);
+        var localDayEvents = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(localDayOk.Value);
+        Assert.Contains(localDayEvents, item => item.Kind == "court" && item.SourceType == "hearing" && item.StartAt == eventAtUtc);
+        Assert.Contains(localDayEvents, item => item.Kind == "task" && item.Title == "Boundary task" && item.StartAt == eventAtUtc);
+    }
+
+    [Fact]
     public async Task ExportCaseCalendarIcs_ReturnsForbidWhenExportDenied()
     {
         await using var db = await CreateContextAsync();

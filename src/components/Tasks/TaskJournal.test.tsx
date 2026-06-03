@@ -594,6 +594,9 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Судов: 1')).toBeTruthy();
     expect(apiMock.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({ includeTasks: false }));
     expect(apiMock.getCaseCalendarSummary).toHaveBeenCalledWith(expect.objectContaining({ includeTasks: false }));
+    const calendarParams = apiMock.getCaseCalendarEvents.mock.calls.at(-1)?.[0];
+    expect(calendarParams?.from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(calendarParams?.to).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('exports case calendar events to ICS with current calendar filters', async () => {

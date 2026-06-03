@@ -1710,8 +1710,8 @@ export function TaskJournal({
       ? Number(assigneeFilter)
       : undefined;
     const params = {
-      from: range.from.toISOString(),
-      to: range.to.toISOString(),
+      from: toTimeZoneDateKey(range.from, currentTimeZoneId),
+      to: toTimeZoneDateKey(range.to, currentTimeZoneId),
       responsibleUserId,
       includeTasks: false,
     };
@@ -1730,7 +1730,7 @@ export function TaskJournal({
     } finally {
       setCaseCalendarLoading(false);
     }
-  }, [assigneeFilter, calendarAnchorDate, periodMode, toast, viewMode]);
+  }, [assigneeFilter, calendarAnchorDate, currentTimeZoneId, periodMode, toast, viewMode]);
 
   const buildCaseCalendarParams = useCallback(() => {
     const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
@@ -1739,12 +1739,12 @@ export function TaskJournal({
       : undefined;
 
     return {
-      from: range.from.toISOString(),
-      to: range.to.toISOString(),
+      from: toTimeZoneDateKey(range.from, currentTimeZoneId),
+      to: toTimeZoneDateKey(range.to, currentTimeZoneId),
       responsibleUserId,
       includeTasks: false,
     };
-  }, [assigneeFilter, calendarAnchorDate, periodMode, viewMode]);
+  }, [assigneeFilter, calendarAnchorDate, currentTimeZoneId, periodMode, viewMode]);
 
   useEffect(() => {
     void refreshCaseCalendarEvents();
