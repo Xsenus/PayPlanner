@@ -1747,7 +1747,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var events = await QueryCaseCalendarEventsAsync(visibility, range, clientCaseId, responsibleUserId, includeTasks, ct);
-        return Ok(BuildCaseCalendarSummary(events, range.FromDate, range.ToDate));
+        return Ok(BuildCaseCalendarSummary(events, range));
     }
 
     [HttpGet("/api/case-calendar/events.ics")]
@@ -4162,11 +4162,14 @@ public class CasesV2Controller : ControllerBase
         DateTime ToDate,
         DateTime ToDateExclusive,
         DateTime FromInstantUtc,
-        DateTime ToInstantExclusiveUtc);
+        DateTime ToInstantExclusiveUtc,
+        DateTime TodayDate,
+        DateTime NowInstantUtc);
 
     private static CaseCalendarDateRange ResolveCaseCalendarDateRange(DateTime? from, DateTime? to, TimeZoneInfo timeZone)
     {
-        var localToday = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
+        var nowUtc = DateTime.UtcNow;
+        var localToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
         var fromDate = (from ?? localToday.AddDays(-30)).Date;
         var toDate = (to ?? fromDate.AddDays(90)).Date;
         var toDateExclusive = toDate.AddDays(1);
@@ -4176,7 +4179,9 @@ public class CasesV2Controller : ControllerBase
             toDate,
             toDateExclusive,
             CalendarTimeZoneHelper.FromUserLocalToUtc(fromDate, timeZone),
-            CalendarTimeZoneHelper.FromUserLocalToUtc(toDateExclusive, timeZone));
+            CalendarTimeZoneHelper.FromUserLocalToUtc(toDateExclusive, timeZone),
+            localToday,
+            nowUtc);
     }
 
     private async Task<IReadOnlyList<CaseCalendarEventDto>> QueryCaseCalendarEventsAsync(
@@ -4271,7 +4276,7 @@ public class CasesV2Controller : ControllerBase
             {
                 if (task.ClientCaseId.HasValue && casesById.TryGetValue(task.ClientCaseId.Value, out var clientCase))
                 {
-                    events.Add(MapTaskCalendarEvent(clientCase, task));
+                    events.Add(MapTaskCalendarEvent(clientCase, task, range));
                 }
             }
         }
@@ -4285,13 +4290,12 @@ public class CasesV2Controller : ControllerBase
 
     private static CaseCalendarSummaryDto BuildCaseCalendarSummary(
         IReadOnlyCollection<CaseCalendarEventDto> events,
-        DateTime fromDate,
-        DateTime toDate)
+        CaseCalendarDateRange range)
     {
         return new CaseCalendarSummaryDto
         {
-            From = fromDate,
-            To = toDate,
+            From = range.FromDate,
+            To = range.ToDate,
             TotalEventCount = events.Count,
             OverdueCount = events.Count(static item => item.IsOverdue),
             WarningCount = events.Count(static item => item.IsWarning),
@@ -4300,7 +4304,9 @@ public class CasesV2Controller : ControllerBase
             CaseDeadlineCount = events.Count(static item => item.Kind == "case-deadline"),
             TaskCount = events.Count(static item => item.Kind == "task"),
             NearestEvent = events
-                .Where(static item => item.StartAt >= DateTime.UtcNow.Date)
+                .Where(item => item.AllDay
+                    ? item.StartAt.Date >= range.TodayDate
+                    : item.StartAt >= range.NowInstantUtc)
                 .OrderBy(static item => item.StartAt)
                 .FirstOrDefault()
                 ?? events.OrderByDescending(static item => item.StartAt).FirstOrDefault(),
@@ -4469,8 +4475,8 @@ public class CasesV2Controller : ControllerBase
                 Status = deadline.Status,
                 Priority = clientCase.Priority,
                 DeadlineType = deadline.DeadlineType,
-                IsOverdue = normalizedStart.Date < DateTime.UtcNow.Date,
-                IsWarning = normalizedStart.Date >= DateTime.UtcNow.Date && normalizedStart.Date <= DateTime.UtcNow.Date.AddDays(Math.Max(0, deadline.WarningDaysBefore)),
+                IsOverdue = IsCalendarEventOverdue(normalizedStart, deadline.AllDay, range),
+                IsWarning = IsCalendarEventInWarningPeriod(normalizedStart, deadline.AllDay, Math.Max(0, deadline.WarningDaysBefore), range),
                 CourtName = NormalizeOptional(clientCase.CourtName),
                 CourtCaseNumber = NormalizeOptional(clientCase.CourtCaseNumber),
             });
@@ -4510,8 +4516,8 @@ public class CasesV2Controller : ControllerBase
                 Status = courtEvent.MovementStatus,
                 Priority = clientCase.Priority,
                 DeadlineType = courtEvent.EventType,
-                IsOverdue = normalizedStart.Date < DateTime.UtcNow.Date && courtEvent.MovementStatus is not "held" and not "completed",
-                IsWarning = normalizedStart.Date >= DateTime.UtcNow.Date && normalizedStart.Date <= DateTime.UtcNow.Date.AddDays(7),
+                IsOverdue = IsCalendarEventOverdue(normalizedStart, courtEvent.AllDay, range) && courtEvent.MovementStatus is not "held" and not "completed",
+                IsWarning = IsCalendarEventInWarningPeriod(normalizedStart, courtEvent.AllDay, 7, range),
                 CourtName = NormalizeOptional(courtEvent.CourtName) ?? NormalizeOptional(clientCase.CourtName),
                 CourtCaseNumber = NormalizeOptional(courtEvent.CourtCaseNumber) ?? NormalizeOptional(clientCase.CourtCaseNumber),
             });
@@ -4554,14 +4560,14 @@ public class CasesV2Controller : ControllerBase
             Status = clientCase.Status.ToString(),
             Priority = clientCase.Priority,
             DeadlineType = sourceType,
-            IsOverdue = kind.Contains("deadline", StringComparison.OrdinalIgnoreCase) && normalizedStart.Date < DateTime.UtcNow.Date,
-            IsWarning = kind.Contains("deadline", StringComparison.OrdinalIgnoreCase) && normalizedStart.Date >= DateTime.UtcNow.Date && normalizedStart.Date <= DateTime.UtcNow.Date.AddDays(7),
+            IsOverdue = kind.Contains("deadline", StringComparison.OrdinalIgnoreCase) && IsCalendarEventOverdue(normalizedStart, allDay, range),
+            IsWarning = kind.Contains("deadline", StringComparison.OrdinalIgnoreCase) && IsCalendarEventInWarningPeriod(normalizedStart, allDay, 7, range),
             CourtName = NormalizeOptional(clientCase.CourtName),
             CourtCaseNumber = NormalizeOptional(clientCase.CourtCaseNumber),
         });
     }
 
-    private static CaseCalendarEventDto MapTaskCalendarEvent(ClientCase clientCase, TaskJournalItem task)
+    private static CaseCalendarEventDto MapTaskCalendarEvent(ClientCase clientCase, TaskJournalItem task, CaseCalendarDateRange range)
     {
         var durationMinutes = task.PlannedDurationMinutes > 0 ? task.PlannedDurationMinutes : 60;
         return new CaseCalendarEventDto
@@ -4583,13 +4589,26 @@ public class CasesV2Controller : ControllerBase
             Status = task.Status,
             Priority = task.Priority,
             DeadlineType = null,
-            IsOverdue = task.DueAt < DateTime.UtcNow
+            IsOverdue = task.DueAt < range.NowInstantUtc
                 && !string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(task.Status, "cancelled", StringComparison.OrdinalIgnoreCase),
-            IsWarning = task.DueAt >= DateTime.UtcNow && task.DueAt <= DateTime.UtcNow.AddDays(7),
+            IsWarning = task.DueAt >= range.NowInstantUtc && task.DueAt <= range.NowInstantUtc.AddDays(7),
             CourtName = NormalizeOptional(clientCase.CourtName),
             CourtCaseNumber = NormalizeOptional(clientCase.CourtCaseNumber),
         };
+    }
+
+    private static bool IsCalendarEventOverdue(DateTime startAt, bool allDay, CaseCalendarDateRange range)
+        => allDay
+            ? startAt.Date < range.TodayDate
+            : startAt < range.NowInstantUtc;
+
+    private static bool IsCalendarEventInWarningPeriod(DateTime startAt, bool allDay, int warningDays, CaseCalendarDateRange range)
+    {
+        var normalizedWarningDays = Math.Max(0, warningDays);
+        return allDay
+            ? startAt.Date >= range.TodayDate && startAt.Date <= range.TodayDate.AddDays(normalizedWarningDays)
+            : startAt >= range.NowInstantUtc && startAt <= range.NowInstantUtc.AddDays(normalizedWarningDays);
     }
 
     private static string ResolveCaseResponsibleName(ClientCase clientCase)

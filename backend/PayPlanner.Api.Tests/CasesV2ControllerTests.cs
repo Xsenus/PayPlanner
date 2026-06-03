@@ -1645,6 +1645,79 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CaseCalendarSummary_UsesUserTimeZoneForAllDayDeadlineStatus()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "case-calendar-status@example.com", "Calendar Owner");
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        var selectedZone = TimeZoneInfo.GetSystemTimeZones()
+            .Select(zone => new
+            {
+                Zone = zone,
+                LocalToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, zone).Date,
+            })
+            .FirstOrDefault(item => item.LocalToday != utcToday);
+        Assert.NotNull(selectedZone);
+
+        var shouldBeOverdue = selectedZone!.LocalToday > utcToday;
+        var deadlineDate = shouldBeOverdue ? utcToday : selectedZone.LocalToday;
+        var client = new Client
+        {
+            Name = "Status boundary client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Status boundary case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            DueDate = deadlineDate,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone.Zone.Id,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var eventsResult = await controller.GetCaseCalendarEvents(
+            deadlineDate,
+            deadlineDate,
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: false,
+            ct: CancellationToken.None);
+
+        var eventsOk = Assert.IsType<OkObjectResult>(eventsResult.Result);
+        var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(eventsOk.Value);
+        var deadlineEvent = Assert.Single(events, item => item.Kind == "case-deadline" && item.ClientCaseId == clientCase.Id);
+        Assert.Equal(shouldBeOverdue, deadlineEvent.IsOverdue);
+        Assert.Equal(!shouldBeOverdue, deadlineEvent.IsWarning);
+
+        var summaryResult = await controller.GetCaseCalendarSummary(
+            deadlineDate,
+            deadlineDate,
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: false,
+            ct: CancellationToken.None);
+
+        var summaryOk = Assert.IsType<OkObjectResult>(summaryResult.Result);
+        var summary = Assert.IsType<CasesV2Controller.CaseCalendarSummaryDto>(summaryOk.Value);
+        Assert.Equal(shouldBeOverdue ? 1 : 0, summary.OverdueCount);
+        Assert.Equal(shouldBeOverdue ? 0 : 1, summary.WarningCount);
+    }
+
+    [Fact]
     public async Task ExportCaseCalendarIcs_ReturnsForbidWhenExportDenied()
     {
         await using var db = await CreateContextAsync();
