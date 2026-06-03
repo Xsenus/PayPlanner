@@ -5,7 +5,7 @@ import type { ActResponsible, ClientCase, ClientCaseActivity, ClientCaseDocument
 import { useDialog } from '../../hooks/useDialog';
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
-import { fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
+import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem, TaskJournalPriority, TaskJournalStatus } from '../../utils/taskJournalStore';
 
@@ -121,13 +121,7 @@ function formatTaskDateTime(value?: string | null) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeInTimeZone(date, activeCaseModalTimeZoneId);
 }
 
 function toDateInput(value?: string | null) {

@@ -10,6 +10,8 @@ import { buildCaseTaskPayload } from '../../utils/caseTaskPayload';
 import { toRuDate } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
+import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import { CaseModal } from '../Clients/CaseModal';
 import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
@@ -212,6 +214,10 @@ function formatMoney(value?: number | null) {
   return typeof value === 'number' ? formatCurrencySmart(value).full : '—';
 }
 
+function formatProfileDateTime(value: string | null | undefined, timeZoneId: string) {
+  return value ? formatDateTimeInTimeZone(value, timeZoneId) : '';
+}
+
 function downloadBlob(fileName: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -406,6 +412,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [bulkSaving, setBulkSaving] = useState(false);
   const [creatingTaskCaseId, setCreatingTaskCaseId] = useState<number | null>(null);
   const [courtSyncCaseId, setCourtSyncCaseId] = useState<number | null>(null);
+  const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [ownerPickerOpen, setOwnerPickerOpen] = useState(false);
@@ -439,6 +446,29 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     defaultPageSize: 25,
     maxPageSize: 200,
   });
+
+  useEffect(() => {
+    let cancelled = false;
+    if (typeof apiService.getUserSetting !== 'function') {
+      return undefined;
+    }
+
+    apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY)
+      .then((response) => {
+        if (!cancelled) {
+          setTimeZoneId(normalizeUserTimeZoneId(response?.value));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTimeZoneId(normalizeUserTimeZoneId());
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -857,7 +887,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     setError(null);
     setNotice(null);
     try {
-      await apiService.createTaskJournalItem(buildCaseTaskPayload(item));
+      await apiService.createTaskJournalItem(buildCaseTaskPayload(item, timeZoneId));
       setNotice('Задача по делу создана.');
       setReloadToken((value) => value + 1);
     } catch (err) {
@@ -918,7 +948,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       PRIORITY_LABELS[item.priority ?? ''] ?? item.priority,
       item.courtName,
       item.courtCaseNumber,
-      toRuDate(item.nextHearingAt),
+      formatProfileDateTime(item.nextHearingAt, timeZoneId),
     ]);
     const csv = [header, ...rows].map((row) => row.map(csvCell).join(';')).join('\n');
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
@@ -1044,7 +1074,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           </div>
         );
       case 'nextHearingAt':
-        return item.nextHearingAt ? toRuDate(item.nextHearingAt) : '—';
+        return item.nextHearingAt ? formatProfileDateTime(item.nextHearingAt, timeZoneId) : '—';
       case 'incomeTotal':
         return <span className="font-semibold text-slate-900">{formatMoney(item.incomeTotal)}</span>;
       case 'overdueTaskCount':
@@ -1181,7 +1211,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           </div>
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Ближайший срок</div>
-            <div className="mt-1 text-slate-700">{toRuDate(item.dueDate) || toRuDate(item.nextHearingAt) || '—'}</div>
+            <div className="mt-1 text-slate-700">{toRuDate(item.dueDate) || formatProfileDateTime(item.nextHearingAt, timeZoneId) || '—'}</div>
           </div>
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Индикатор риска</div>

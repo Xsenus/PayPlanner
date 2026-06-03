@@ -59,7 +59,7 @@ import type {
 import { toRuDate } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { buildCaseTaskPayload } from '../../utils/caseTaskPayload';
-import { fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
+import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 
@@ -366,13 +366,7 @@ function formatRuDateTime(value?: string | null) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return toRuDate(value);
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
+  return formatDateTimeInTimeZone(date, activeCaseTimeZoneId);
 }
 
 function toDateInputValue(value?: string | null) {
@@ -611,7 +605,7 @@ function buildDocumentSourceOptions(
   if (sourceType === 'courtEvent') {
     return courtEvents.map((event) => ({
       value: String(event.id),
-      label: `${event.title || `Событие #${event.id}`} · ${toRuDate(event.scheduledAt) || 'без даты'}`,
+      label: `${event.title || `Событие #${event.id}`} · ${formatRuDateTime(event.scheduledAt) || 'без даты'}`,
     }));
   }
 
@@ -2667,7 +2661,7 @@ export function CaseDetailPage({
     setCreatingTask(true);
     setError(null);
     try {
-      await apiService.createTaskJournalItem(buildCaseTaskPayload(caseItem));
+      await apiService.createTaskJournalItem(buildCaseTaskPayload(caseItem, caseTimeZoneId));
       setReloadToken((value) => value + 1);
       setActiveTab('tasks');
       setNotice('Задача по делу создана.');
@@ -2895,7 +2889,7 @@ export function CaseDetailPage({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
           <SummaryCard label="Клиент" value={getOwnerName(caseItem)} />
           <SummaryCard label="Ответственный" value={getResponsibleName(caseItem)} />
-          <SummaryCard label="Ближайший срок" value={toRuDate(caseItem.dueDate) || toRuDate(caseItem.nextHearingAt) || '—'} />
+          <SummaryCard label="Ближайший срок" value={toRuDate(caseItem.dueDate) || formatRuDateTime(caseItem.nextHearingAt) || '—'} />
           <SummaryCard label="Просрочки" value={getRiskLabel(caseItem)} tone={overdueTasks > 0 ? 'rose' : 'emerald'} />
           <SummaryCard label="Оплачено / долг" value={`${formatMoney(caseItem.incomePaid)} / ${formatMoney(caseItem.incomeOutstanding)}`} />
           <SummaryCard label="Активность" value={inactivitySummary.value} tone={inactivitySummary.tone} />
@@ -2935,7 +2929,7 @@ export function CaseDetailPage({
                 ['Срок', toRuDate(caseItem.dueDate) || '—'],
                 ['Суд', caseItem.courtName || '—'],
                 ['№ в суде', caseItem.courtCaseNumber || '—'],
-                ['Заседание', toRuDate(caseItem.nextHearingAt) || '—'],
+                ['Заседание', formatRuDateTime(caseItem.nextHearingAt) || '—'],
                 ['Просмотр ответственным', responsibleLastViewedAt ? `${toRuDate(responsibleLastViewedAt)}${responsibleLastViewedByName ? ` · ${responsibleLastViewedByName}` : ''}` : '—'],
               ]} />
               <InfoSection title="Участники процесса" rows={[
@@ -4898,7 +4892,7 @@ function TaskList({
               <tr key={task.id}>
                 <td className="px-3 py-3 font-semibold text-slate-900">{task.title}</td>
                 <td className="px-3 py-3 text-slate-700">{task.assigneeName || '—'}</td>
-                <td className="px-3 py-3 text-slate-700">{toRuDate(task.dueAt) || '—'}</td>
+                <td className="px-3 py-3 text-slate-700">{formatRuDateTime(task.dueAt) || '—'}</td>
                 <td className="px-3 py-3 text-slate-700">{TASK_STATUS_LABELS[task.status] ?? task.status}</td>
                 <td className="px-3 py-3 text-slate-700">{task.result || '—'}</td>
               </tr>
@@ -5592,7 +5586,7 @@ function CourtPanel({
               <div key={event.id} className={`rounded-lg border p-3 ${event.isOverdue ? 'border-rose-200 bg-rose-50' : 'border-slate-100 bg-slate-50'}`}>
                 <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{event.eventTypeLabel || event.eventType} · {event.movementStatusLabel || event.movementStatus}</div>
                 <div className="mt-2 font-semibold text-slate-900">{event.title}</div>
-                <div className="mt-1 text-sm text-slate-600">{toRuDate(event.scheduledAt) || '—'} · {event.courtInstanceLabel}</div>
+                <div className="mt-1 text-sm text-slate-600">{formatRuDateTime(event.scheduledAt) || '—'} · {event.courtInstanceLabel}</div>
                 {event.courtName ? <div className="mt-2 text-sm text-slate-500">{event.courtName}{event.courtCaseNumber ? ` · ${event.courtCaseNumber}` : ''}</div> : null}
                 {event.clientCaseDocumentId ? <div className="mt-2 text-sm text-slate-500">Документ #{event.clientCaseDocumentId}</div> : null}
                 {event.resultSummary ? <div className="mt-2 text-sm text-slate-500">{event.resultSummary}</div> : null}

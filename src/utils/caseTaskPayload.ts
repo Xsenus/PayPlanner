@@ -1,4 +1,5 @@
 import type { ClientCase } from '../types';
+import { fromTimeZoneDateTimeInput, toTimeZoneDateKey } from './timeZoneDate';
 import type { TaskJournalPriority, TaskJournalUpsertPayload } from './taskJournalStore';
 
 const ALLOWED_TASK_PRIORITIES = new Set<TaskJournalPriority>(['low', 'normal', 'high', 'urgent']);
@@ -11,14 +12,23 @@ function resolveTaskPriority(value?: string | null): TaskJournalPriority {
   return ALLOWED_TASK_PRIORITIES.has(value as TaskJournalPriority) ? value as TaskJournalPriority : 'normal';
 }
 
-function buildDefaultDueAt() {
-  const dueAt = new Date();
-  dueAt.setDate(dueAt.getDate() + 1);
-  dueAt.setHours(10, 0, 0, 0);
-  return dueAt.toISOString();
+function addDaysToDateKey(value: string, days: number) {
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, '0'),
+    String(date.getUTCDate()).padStart(2, '0'),
+  ].join('-');
 }
 
-export function buildCaseTaskPayload(caseItem: ClientCase): TaskJournalUpsertPayload {
+function buildDefaultDueAt(timeZoneId?: string | null) {
+  const todayKey = toTimeZoneDateKey(new Date(), timeZoneId);
+  const tomorrowKey = todayKey ? addDaysToDateKey(todayKey, 1) : addDaysToDateKey(new Date().toISOString().slice(0, 10), 1);
+  return fromTimeZoneDateTimeInput(`${tomorrowKey}T10:00`, timeZoneId);
+}
+
+export function buildCaseTaskPayload(caseItem: ClientCase, timeZoneId?: string | null): TaskJournalUpsertPayload {
   return {
     clientId: caseItem.clientId ?? null,
     legalEntityId: caseItem.legalEntityId ?? null,
@@ -29,7 +39,7 @@ export function buildCaseTaskPayload(caseItem: ClientCase): TaskJournalUpsertPay
     description: `Создано из карточки дела «${caseItem.title}».`,
     assigneeUserId: caseItem.responsibleUserId ?? null,
     assigneeName: '',
-    dueAt: buildDefaultDueAt(),
+    dueAt: buildDefaultDueAt(timeZoneId),
     approvalDueAt: null,
     plannedDurationMinutes: 60,
     contractorPaymentEnabled: false,
