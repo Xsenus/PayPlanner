@@ -748,8 +748,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var changed = false;
         var changes = new List<string>();
         var timeZone = await ResolveTaskTimeZoneAsync(connection, calendar, task, cancellationToken);
-        var importedStartAt = yandexEvent.StartAt.HasValue ? CalendarTimeZoneHelper.ToUserLocal(yandexEvent.StartAt.Value, timeZone) : (DateTime?)null;
-        var importedEndAt = yandexEvent.EndAt.HasValue ? CalendarTimeZoneHelper.ToUserLocal(yandexEvent.EndAt.Value, timeZone) : (DateTime?)null;
+        var importedStartAt = yandexEvent.StartAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(yandexEvent.StartAt.Value) : (DateTime?)null;
+        var importedEndAt = yandexEvent.EndAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(yandexEvent.EndAt.Value) : (DateTime?)null;
         if (importedStartAt.HasValue && task.DueAt != importedStartAt.Value)
         {
             changes.Add($"Срок: {FormatLogDateTime(task.DueAt)} → {FormatLogDateTime(importedStartAt.Value)}");

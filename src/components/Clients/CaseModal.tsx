@@ -5,6 +5,8 @@ import type { ActResponsible, ClientCase, ClientCaseActivity, ClientCaseDocument
 import { useDialog } from '../../hooks/useDialog';
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
+import { fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
+import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem, TaskJournalPriority, TaskJournalStatus } from '../../utils/taskJournalStore';
 
 interface CaseModalProps {
@@ -135,10 +137,7 @@ function toDateInput(value?: string | null) {
 }
 
 function toDateTimeInput(value?: string | null) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toISOString().slice(0, 16);
+  return toTimeZoneDateTimeInput(value, activeCaseModalTimeZoneId);
 }
 
 function fromDateInput(value: string) {
@@ -146,7 +145,13 @@ function fromDateInput(value: string) {
 }
 
 function fromDateTimeInput(value: string) {
-  return value ? new Date(value).toISOString() : null;
+  return value ? fromTimeZoneDateTimeInput(value, activeCaseModalTimeZoneId) : null;
+}
+
+let activeCaseModalTimeZoneId = normalizeUserTimeZoneId();
+
+function setActiveCaseModalTimeZoneId(value?: string | null) {
+  activeCaseModalTimeZoneId = normalizeUserTimeZoneId(value);
 }
 
 function formatDateInput(year: number, monthIndex: number, day: number) {
@@ -250,6 +255,7 @@ function getContactOptionKey(item: ContactDirectoryItemDto) {
 
 export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, responsibles = [], overlayClassName, allowEdit = true }: CaseModalProps) {
   const { confirm } = useDialog();
+  const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [title, setTitle] = useState(caseData.title ?? '');
   const [description, setDescription] = useState(caseData.description ?? '');
   const [status, setStatus] = useState<StatusValue>((caseData.status as StatusValue) ?? 'Open');
@@ -322,6 +328,30 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
   const [relatedPartySourceKey, setRelatedPartySourceKey] = useState('');
   const [relatedPartyLegalEntityId, setRelatedPartyLegalEntityId] = useState('');
   const [relatedPartyRole, setRelatedPartyRole] = useState('Участник');
+
+  useEffect(() => {
+    setActiveCaseModalTimeZoneId(timeZoneId);
+  }, [timeZoneId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    const timeZoneRequest = typeof apiService.getUserSetting === 'function'
+      ? apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY)
+      : Promise.resolve(null);
+    timeZoneRequest
+      .then((response) => {
+        if (cancelled) return;
+        const nextTimeZoneId = normalizeUserTimeZoneId(response?.value);
+        setActiveCaseModalTimeZoneId(nextTimeZoneId);
+        setTimeZoneId(nextTimeZoneId);
+        setNextHearingAt(toDateTimeInput(caseData.nextHearingAt));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [caseData.nextHearingAt, isOpen]);
 
   useEffect(() => {
     setTitle(caseData.title ?? '');

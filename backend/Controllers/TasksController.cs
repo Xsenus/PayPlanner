@@ -788,6 +788,7 @@ public class TasksController : ControllerBase
             return NotFound(new { message = "Дело для автоконтроля не найдено или уже закрыто." });
         }
 
+        var dueAt = await BuildDefaultTaskDueAtUtcAsync(assignee.UserId, ct);
         var entity = new TaskJournalItem
         {
             ClientId = binding.ClientId,
@@ -800,7 +801,7 @@ public class TasksController : ControllerBase
             AssigneeName = assignee.DisplayName,
             AuthorUserId = access.UserId,
             AuthorName = access.DisplayName,
-            DueAt = DateTime.UtcNow.Date.AddDays(1).AddHours(9),
+            DueAt = dueAt,
             PlannedDurationMinutes = 60,
             Type = "control",
             Priority = ResolveAutomationPriority(daysWithoutActiveTask, settings.CaseInactivityDays, settings.CaseInactivityEscalationDays),
@@ -907,6 +908,7 @@ public class TasksController : ControllerBase
             }
 
             var assignee = await ResolveAutomationAssigneeAsync(item.Case, access, ct);
+            var dueAt = await BuildDefaultTaskDueAtUtcAsync(assignee.UserId, ct);
             var entity = BuildAutomationTaskEntity(
                 item.Case,
                 binding,
@@ -914,6 +916,7 @@ public class TasksController : ControllerBase
                 assignee,
                 settings,
                 escalationUser,
+                dueAt,
                 item.LastTaskAt,
                 item.LastTaskCommentAt,
                 item.LastDocumentAt,
@@ -1074,7 +1077,8 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = "Причина переноса не должна превышать 1000 символов." });
         }
 
-        var commentText = BuildDeadlineChangeRequestText(entity, access.DisplayName, request.RequestedDueAt, reason);
+        var requestedDueAt = NormalizeUtcInstant(request.RequestedDueAt);
+        var commentText = BuildDeadlineChangeRequestText(entity, access.DisplayName, requestedDueAt, reason);
         var comment = CreateTaskComment(
             entity.Id,
             access,
@@ -1083,7 +1087,7 @@ public class TasksController : ControllerBase
             JsonSerializer.Serialize(new
             {
                 type = "deadlineChangeRequest",
-                requestedDueAt = ToIso(request.RequestedDueAt),
+                requestedDueAt = ToIso(requestedDueAt),
                 reason,
             }, JsonOptions));
 
@@ -1435,7 +1439,7 @@ public class TasksController : ControllerBase
             AssigneeName = participants.PrimaryAssigneeName,
             AuthorUserId = access.UserId,
             AuthorName = access.DisplayName,
-            DueAt = request.DueAt,
+            DueAt = NormalizeUtcInstant(request.DueAt),
             ApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt),
             PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes),
             ContractorPaymentEnabled = request.ContractorPaymentEnabled,
@@ -1528,6 +1532,7 @@ public class TasksController : ControllerBase
 
         var becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
             && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
+        var requestDueAt = NormalizeUtcInstant(request.DueAt);
         var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus);
         var changeComment = NormalizeOptional(request.ChangeComment);
 
@@ -1539,7 +1544,7 @@ public class TasksController : ControllerBase
         entity.Description = NormalizeOptional(request.Description);
         entity.AssigneeUserId = participants.PrimaryAssigneeUserId;
         entity.AssigneeName = participants.PrimaryAssigneeName;
-        entity.DueAt = request.DueAt;
+        entity.DueAt = requestDueAt;
         entity.ApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt);
         entity.PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes);
         entity.ContractorPaymentEnabled = request.ContractorPaymentEnabled;
@@ -1811,9 +1816,10 @@ public class TasksController : ControllerBase
                 changes.Add("Приоритет");
             }
 
-            if (request.DueAt.HasValue && entity.DueAt != request.DueAt.Value)
+            var requestDueAt = request.DueAt.HasValue ? NormalizeUtcInstant(request.DueAt.Value) : (DateTime?)null;
+            if (requestDueAt.HasValue && entity.DueAt != requestDueAt.Value)
             {
-                entity.DueAt = request.DueAt.Value;
+                entity.DueAt = requestDueAt.Value;
                 changes.Add("Срок");
             }
 
@@ -3137,8 +3143,11 @@ public class TasksController : ControllerBase
                 : normalized;
     }
 
+    private static DateTime NormalizeUtcInstant(DateTime value)
+        => CalendarTimeZoneHelper.NormalizeUtcInstant(value);
+
     private static DateTime? NormalizeApprovalDueAt(DateTime? value)
-        => value.HasValue && value.Value != default ? value.Value : null;
+        => value.HasValue && value.Value != default ? NormalizeUtcInstant(value.Value) : null;
 
     private static decimal? NormalizeMoneyAmount(decimal? value)
     {
@@ -3624,6 +3633,14 @@ public class TasksController : ControllerBase
         });
     }
 
+    private async Task<DateTime> BuildDefaultTaskDueAtUtcAsync(int? userId, CancellationToken ct)
+    {
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, userId, ct);
+        var localNow = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone);
+        var localDueAt = localNow.Date.AddDays(1).AddHours(9);
+        return CalendarTimeZoneHelper.FromUserLocalToUtc(localDueAt, timeZone);
+    }
+
     private static TaskJournalItem BuildAutomationTaskEntity(
         ClientCase clientCase,
         TaskClientBinding binding,
@@ -3631,6 +3648,7 @@ public class TasksController : ControllerBase
         TaskParticipantDraft assignee,
         TaskJournalSettingsDto settings,
         User? escalationUser,
+        DateTime dueAt,
         params DateTime?[] activitySignals)
     {
         var lastActivity = ResolveLastCaseActivity(clientCase, activitySignals);
@@ -3649,7 +3667,7 @@ public class TasksController : ControllerBase
             AssigneeName = assignee.DisplayName,
             AuthorUserId = access.UserId,
             AuthorName = access.DisplayName,
-            DueAt = DateTime.UtcNow.Date.AddDays(1).AddHours(9),
+            DueAt = dueAt,
             PlannedDurationMinutes = 60,
             Type = "control",
             Priority = ResolveAutomationPriority(daysWithoutActiveTask, settings.CaseInactivityDays, settings.CaseInactivityEscalationDays),
@@ -4206,9 +4224,10 @@ public class TasksController : ControllerBase
         AddIfChanged(changes, "Наименование", entity.Title, request.Title.Trim());
         AddIfChanged(changes, "Описание", NormalizeOptional(entity.Description), NormalizeOptional(request.Description));
         AddIfChanged(changes, "Исполнитель", entity.AssigneeName, participants.PrimaryAssigneeName);
-        if (entity.DueAt != request.DueAt)
+        var nextDueAt = NormalizeUtcInstant(request.DueAt);
+        if (entity.DueAt != nextDueAt)
         {
-            changes.Add($"Срок: {FormatHistoryDateTime(entity.DueAt)} -> {FormatHistoryDateTime(request.DueAt)}");
+            changes.Add($"Срок: {FormatHistoryDateTime(entity.DueAt)} -> {FormatHistoryDateTime(nextDueAt)}");
         }
         var nextApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt);
         if (entity.ApprovalDueAt != nextApprovalDueAt)

@@ -1540,8 +1540,8 @@ public class TasksControllerTests
         Assert.Equal("text/calendar; charset=utf-8", file.ContentType);
         Assert.Contains("BEGIN:VCALENDAR", content);
         Assert.Contains("SUMMARY:Проверить документы", content);
-        Assert.Contains("DTSTART:20260510T050000Z", content);
-        Assert.Contains("DTEND:20260510T063000Z", content);
+        Assert.Contains("DTSTART:20260510T090000Z", content);
+        Assert.Contains("DTEND:20260510T103000Z", content);
         Assert.Contains("BEGIN:VALARM", content);
         Assert.Contains("DESCRIPTION:Напоминание: Проверить документы", content);
         Assert.Contains("TRIGGER:-PT1H", content);

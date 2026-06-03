@@ -152,7 +152,7 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
-    public async Task SyncNowAsync_TreatsUnspecifiedTaskDueAtAsCrmLocalTimeWhenCreatingGoogleEvent()
+    public async Task SyncNowAsync_TreatsUnspecifiedTaskDueAtAsUtcInstantWhenCreatingGoogleEvent()
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-unspecified-google@example.com", "user");
@@ -176,8 +176,8 @@ public class GoogleCalendarSyncServiceTests
             request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
         var body = await createEventRequest.Content!.ReadAsStringAsync();
         using var document = JsonDocument.Parse(body);
-        Assert.Equal("2026-06-05T09:00:00+04:00", document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
-        Assert.Equal("2026-06-05T10:00:00+04:00", document.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
+        Assert.Equal("2026-06-05T13:00:00+04:00", document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
+        Assert.Equal("2026-06-05T14:00:00+04:00", document.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
     }
 
     [Fact]
@@ -293,7 +293,7 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal(0, firstResult.ErrorCount);
         Assert.Equal(0, secondResult.ErrorCount);
         var updatedTask = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
-        Assert.Equal(new DateTime(2026, 6, 5, 16, 0, 0), updatedTask.DueAt);
+        Assert.Equal(new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc), updatedTask.DueAt);
         Assert.DoesNotContain(handler.Requests, request =>
             request.Method == HttpMethod.Put &&
             request.RequestUri!.AbsolutePath.Contains("/events/event-google-move", StringComparison.Ordinal));

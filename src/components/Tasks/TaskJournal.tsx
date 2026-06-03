@@ -47,6 +47,13 @@ import type { MenuSectionPermissions } from '../../types/permissions';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import {
+  formatDateTimeInTimeZone,
+  fromTimeZoneDateTimeInput,
+  getZonedParts,
+  toTimeZoneDateTimeInput,
+} from '../../utils/timeZoneDate';
+import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
+import {
   isTaskJournalActive,
   TASK_JOURNAL_EVENT,
   type TaskJournalAssignee,
@@ -369,6 +376,11 @@ function writeTaskJournalFilterPreferences(userId: number | null, preferences: T
 
 const INTERNAL_TASK_OBJECT_NAME = 'Внутренняя задача';
 const DEFAULT_TASK_COMPLETION_RESULT = 'Задача выполнена.';
+let activeTaskJournalTimeZoneId = normalizeUserTimeZoneId();
+
+function setActiveTaskJournalTimeZoneId(value?: string | null) {
+  activeTaskJournalTimeZoneId = normalizeUserTimeZoneId(value);
+}
 
 const emptyForm = (
   assigneeName: string,
@@ -420,24 +432,15 @@ const emptyForm = (
 };
 
 function toLocalInputValue(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+  return toTimeZoneDateTimeInput(value, activeTaskJournalTimeZoneId);
 }
 
 function fromLocalInputValue(value: string) {
-  return value ? new Date(value).toISOString() : new Date().toISOString();
+  return value ? fromTimeZoneDateTimeInput(value, activeTaskJournalTimeZoneId) : new Date().toISOString();
 }
 
 function formatDateTime(value: string) {
-  return new Date(value).toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeInTimeZone(value, activeTaskJournalTimeZoneId);
 }
 
 function formatRelative(value: string) {
@@ -475,21 +478,15 @@ function intervalsOverlap(aStart: number, aEnd: number, bStart: number, bEnd: nu
 }
 
 function buildDefaultDueAtForDate(date: Date) {
-  const next = startOfDay(date);
-  next.setHours(9, 0, 0, 0);
-  return next.toISOString();
+  return fromTimeZoneDateTimeInput(`${toLocalDateKey(date)}T09:00`, activeTaskJournalTimeZoneId);
 }
 
 function moveDueAtToDate(currentDueAt: string, targetDate: Date) {
-  const current = new Date(currentDueAt);
-  const next = startOfDay(targetDate);
-  if (Number.isNaN(current.getTime())) {
-    next.setHours(9, 0, 0, 0);
-    return next.toISOString();
-  }
-
-  next.setHours(current.getHours(), current.getMinutes(), current.getSeconds(), current.getMilliseconds());
-  return next.toISOString();
+  const current = getZonedParts(currentDueAt, activeTaskJournalTimeZoneId);
+  const time = current
+    ? `${String(current.hour).padStart(2, '0')}:${String(current.minute).padStart(2, '0')}`
+    : '09:00';
+  return fromTimeZoneDateTimeInput(`${toLocalDateKey(targetDate)}T${time}`, activeTaskJournalTimeZoneId);
 }
 
 function taskToPayload(task: TaskJournalItem, overrides: Partial<TaskJournalUpsertPayload> = {}): TaskJournalUpsertPayload {
@@ -592,6 +589,10 @@ function toDateKey(date: Date) {
     String(date.getMonth() + 1).padStart(2, '0'),
     String(date.getDate()).padStart(2, '0'),
   ].join('-');
+}
+
+function toLocalDateKey(date: Date) {
+  return toDateKey(date);
 }
 
 function formatDateOnly(value: Date) {
@@ -1303,9 +1304,10 @@ function buildTimelineDropDate(day: Date, relativeY: number) {
     TIMELINE_END_MINUTE - TIMELINE_SNAP_MINUTES,
     Math.max(TIMELINE_START_MINUTE, TIMELINE_START_MINUTE + minutesFromStart),
   );
-  const next = startOfDay(day);
-  next.setHours(Math.floor(targetMinutes / 60), targetMinutes % 60, 0, 0);
-  return next;
+  return new Date(fromTimeZoneDateTimeInput(
+    `${toLocalDateKey(day)}T${String(Math.floor(targetMinutes / 60)).padStart(2, '0')}:${String(targetMinutes % 60).padStart(2, '0')}`,
+    activeTaskJournalTimeZoneId,
+  ));
 }
 
 function parseLocalInputDate(value: string) {
@@ -1424,6 +1426,7 @@ export function TaskJournal({
   const { legalEntities } = useLegalEntities();
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
+  const [currentTimeZoneId, setCurrentTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const isAdminUser = isAdmin();
   const permissions = useRolePermissions(user?.role?.id);
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
@@ -1449,6 +1452,10 @@ export function TaskJournal({
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
+
+  useEffect(() => {
+    setActiveTaskJournalTimeZoneId(currentTimeZoneId);
+  }, [currentTimeZoneId]);
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialPreferences.quickFilter);
   const [metricFilter, setMetricFilter] = useState<MetricFilter>(initialPreferences.metricFilter);
   const [search, setSearch] = useState(initialPreferences.search);
@@ -1601,11 +1608,12 @@ export function TaskJournal({
           })
           : []
       ));
-      const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
+      const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
         loadAllTaskJournalItems(),
         apiService.getTaskJournalAssignees(),
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
+        apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY).catch(() => null),
         apiService.getCalendarSyncSettings().catch(() => null),
         automationPromise,
       ]);
@@ -1614,6 +1622,7 @@ export function TaskJournal({
       setAutomationCandidates(automationResponse);
       setTaskSettings(settingsResponse);
       setTaskNotificationDefaults(parseTaskNotificationDefaults(notificationDefaultsResponse?.value));
+      setCurrentTimeZoneId(normalizeUserTimeZoneId(timeZoneResponse?.value));
       setCompletedTaskCalendarAction(calendarSyncSettingsResponse?.completedTaskCalendarAction === 'hide' ? 'hide' : 'color');
     } catch {
       toast.error('Не удалось загрузить журнал задач.', 'Журнал задач');

@@ -38,21 +38,22 @@ public static class CalendarTimeZoneHelper
         return TimeZoneInfo.Local;
     }
 
-    public static DateTime ToExternalUtc(DateTime value, TimeZoneInfo timeZone)
+    public static DateTime NormalizeUtcInstant(DateTime value)
         => value.Kind switch
         {
             DateTimeKind.Utc => value,
             DateTimeKind.Local => value.ToUniversalTime(),
-            _ => ConvertUnspecifiedToUtc(value, timeZone),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
         };
 
+    public static DateTime ToExternalUtc(DateTime value, TimeZoneInfo timeZone)
+        => NormalizeUtcInstant(value);
+
     public static DateTime ToUserLocal(DateTime value, TimeZoneInfo timeZone)
-        => value.Kind switch
-        {
-            DateTimeKind.Utc => TimeZoneInfo.ConvertTimeFromUtc(value, timeZone),
-            DateTimeKind.Local => TimeZoneInfo.ConvertTime(value, timeZone),
-            _ => DateTime.SpecifyKind(value, DateTimeKind.Unspecified),
-        };
+        => TimeZoneInfo.ConvertTimeFromUtc(NormalizeUtcInstant(value), timeZone);
+
+    public static DateTime FromUserLocalToUtc(DateTime value, TimeZoneInfo timeZone)
+        => ConvertUserLocalToUtc(value, timeZone);
 
     public static string FormatOffsetDateTime(DateTime value, TimeZoneInfo timeZone)
     {
@@ -63,7 +64,7 @@ public static class CalendarTimeZoneHelper
     }
 
     public static string FormatUtcIcsDateTime(DateTime value, TimeZoneInfo timeZone)
-        => ToExternalUtc(value, timeZone).ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
+        => NormalizeUtcInstant(value).ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
 
     public static string ResolveIanaTimeZoneId(TimeZoneInfo timeZone)
     {
@@ -129,7 +130,7 @@ public static class CalendarTimeZoneHelper
         return false;
     }
 
-    private static DateTime ConvertUnspecifiedToUtc(DateTime value, TimeZoneInfo timeZone)
+    private static DateTime ConvertUserLocalToUtc(DateTime value, TimeZoneInfo timeZone)
     {
         var unspecified = DateTime.SpecifyKind(value, DateTimeKind.Unspecified);
         try

@@ -811,8 +811,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var changed = false;
         var changes = new List<string>();
         var timeZone = await ResolveTaskTimeZoneAsync(connection, calendar, task, cancellationToken);
-        var importedStartAt = googleEvent.StartAt.HasValue ? CalendarTimeZoneHelper.ToUserLocal(googleEvent.StartAt.Value, timeZone) : (DateTime?)null;
-        var importedEndAt = googleEvent.EndAt.HasValue ? CalendarTimeZoneHelper.ToUserLocal(googleEvent.EndAt.Value, timeZone) : (DateTime?)null;
+        var importedStartAt = googleEvent.StartAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(googleEvent.StartAt.Value) : (DateTime?)null;
+        var importedEndAt = googleEvent.EndAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(googleEvent.EndAt.Value) : (DateTime?)null;
         if (importedStartAt.HasValue && task.DueAt != importedStartAt.Value)
         {
             changes.Add($"Срок: {FormatLogDateTime(task.DueAt)} → {FormatLogDateTime(importedStartAt.Value)}");
@@ -1512,7 +1512,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         string crmHash,
         TimeZoneInfo timeZone)
     {
-        var start = CalendarTimeZoneHelper.ToUserLocal(task.DueAt, timeZone);
+        var start = CalendarTimeZoneHelper.NormalizeUtcInstant(task.DueAt);
         var end = start.AddMinutes(Math.Max(15, task.PlannedDurationMinutes));
         var timeZoneId = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(timeZone);
         return new GoogleEventPayload

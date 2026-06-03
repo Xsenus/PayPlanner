@@ -59,6 +59,8 @@ import type {
 import { toRuDate } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { buildCaseTaskPayload } from '../../utils/caseTaskPayload';
+import { fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
+import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 
 interface CaseDetailPageProps {
@@ -826,17 +828,14 @@ function toDateInput(value: string | null | undefined) {
   return value ? String(value).slice(0, 10) : '';
 }
 
-function toDateTimeInput(value: string | null | undefined) {
-  if (!value) return '';
-  const text = String(value);
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) {
-    return text.slice(0, 16);
-  }
+let activeCaseTimeZoneId = normalizeUserTimeZoneId();
 
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) return '';
-  const offsetMs = parsed.getTimezoneOffset() * 60_000;
-  return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 16);
+function setActiveCaseTimeZoneId(value?: string | null) {
+  activeCaseTimeZoneId = normalizeUserTimeZoneId(value);
+}
+
+function toDateTimeInput(value: string | null | undefined) {
+  return toTimeZoneDateTimeInput(value, activeCaseTimeZoneId);
 }
 
 function fromDateInput(value: string) {
@@ -844,7 +843,7 @@ function fromDateInput(value: string) {
 }
 
 function fromDateTimeInput(value: string) {
-  return value ? new Date(value).toISOString() : null;
+  return value ? fromTimeZoneDateTimeInput(value, activeCaseTimeZoneId) : null;
 }
 
 function getNextCourtInstance(instance: string) {
@@ -1009,6 +1008,7 @@ export function CaseDetailPage({
 }: CaseDetailPageProps) {
   const initialViewState = readCaseDetailViewState(caseId);
   const [caseItem, setCaseItem] = useState<ClientCase | null>(null);
+  const [caseTimeZoneId, setCaseTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
   const [relatedParties, setRelatedParties] = useState<ClientCaseRelatedParty[]>([]);
@@ -1139,6 +1139,10 @@ export function CaseDetailPage({
   const [newWorkOrderItemDraft, setNewWorkOrderItemDraft] = useState<WorkOrderItemDraft>(() => buildWorkOrderItemDraft(null));
   const [workOrderItemDrafts, setWorkOrderItemDrafts] = useState<Record<number, WorkOrderItemDraft>>({});
 
+  useEffect(() => {
+    setActiveCaseTimeZoneId(caseTimeZoneId);
+  }, [caseTimeZoneId]);
+
   const documentTypeOptions = useMemo(
     () => buildDocumentTypeOptions(documentTypeDirectoryOptions, filterCaseDocumentTemplatesByCaseType(documentTemplates, caseItem?.caseType), documents),
     [documentTypeDirectoryOptions, documentTemplates, caseItem?.caseType, documents],
@@ -1246,9 +1250,17 @@ export function CaseDetailPage({
     setLoading(true);
     setError(null);
 
-    apiService.getCaseV2(caseId)
-      .then((loadedCase) => {
+    Promise.all([
+      apiService.getCaseV2(caseId),
+      typeof apiService.getUserSetting === 'function'
+        ? apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY).catch(() => null)
+        : Promise.resolve(null),
+    ])
+      .then(([loadedCase, timeZoneResponse]) => {
         if (cancelled) return;
+        const nextTimeZoneId = normalizeUserTimeZoneId(timeZoneResponse?.value);
+        setActiveCaseTimeZoneId(nextTimeZoneId);
+        setCaseTimeZoneId(nextTimeZoneId);
         setCaseItem(loadedCase);
       })
       .catch((err) => {
@@ -2190,7 +2202,7 @@ export function CaseDetailPage({
       const item = await apiService.createCaseCourtEvent(caseItem.id, {
         eventType: courtEventTypeDraft,
         title: courtEventTitleDraft.trim() || undefined,
-        scheduledAt: courtEventScheduledAtDraft,
+        scheduledAt: fromDateTimeInput(courtEventScheduledAtDraft),
         allDay: courtEventTypeDraft !== 'hearing',
         courtId: courtEventCourtIdDraft ? Number(courtEventCourtIdDraft) : undefined,
         courtInstance: activeCourtInstance,

@@ -1548,8 +1548,8 @@ public class CasesV2ControllerTests
         Assert.Contains("BEGIN:VCALENDAR", ics, StringComparison.Ordinal);
         Assert.Contains("X-WR-CALNAME:Календарь дел", ics, StringComparison.Ordinal);
         Assert.Contains("SUMMARY:Судебное заседание", ics, StringComparison.Ordinal);
-        Assert.Contains("DTSTART:20260610T070000Z", ics, StringComparison.Ordinal);
-        Assert.DoesNotContain("DTSTART:20260610T110000Z", ics, StringComparison.Ordinal);
+        Assert.Contains("DTSTART:20260610T110000Z", ics, StringComparison.Ordinal);
+        Assert.DoesNotContain("DTSTART:20260610T070000Z", ics, StringComparison.Ordinal);
         Assert.Contains("SUMMARY:Срок апелляции", ics, StringComparison.Ordinal);
         Assert.Contains("SUMMARY:Подготовить позицию", ics, StringComparison.Ordinal);
         Assert.Contains("BEGIN:VALARM", ics, StringComparison.Ordinal);

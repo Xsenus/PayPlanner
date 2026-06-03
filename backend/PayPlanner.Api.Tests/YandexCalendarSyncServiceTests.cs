@@ -152,7 +152,7 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
-    public async Task SyncTaskForConnectedUsersAsync_TreatsUnspecifiedTaskDueAtAsCrmLocalTimeWhenWritingYandexEvent()
+    public async Task SyncTaskForConnectedUsersAsync_TreatsUnspecifiedTaskDueAtAsUtcInstantWhenWritingYandexEvent()
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-yandex-unspecified@example.com", "user");
@@ -171,8 +171,8 @@ public class YandexCalendarSyncServiceTests
 
         var putRequest = handler.Requests.Single(request => request.Method == HttpMethod.Put);
         var body = await putRequest.Content!.ReadAsStringAsync();
-        Assert.Contains("DTSTART:20260605T050000Z", body);
-        Assert.Contains("DTEND:20260605T060000Z", body);
+        Assert.Contains("DTSTART:20260605T090000Z", body);
+        Assert.Contains("DTEND:20260605T100000Z", body);
     }
 
     [Fact]
