@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskJournal } from './TaskJournal';
 import type { Client, ClientCase, LegalEntitySummary } from '../../types';
+import { fromTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import type { TaskJournalAssignee, TaskJournalItem } from '../../utils/taskJournalStore';
 
 const apiMock = vi.hoisted(() => ({
@@ -1910,6 +1911,26 @@ describe('TaskJournal', () => {
       dueAt: expect.any(String),
     }));
     expect(apiMock.updateTaskJournalItem.mock.calls[0][1].dueAt).not.toEqual(createTask().dueAt);
+  });
+
+  it('groups calendar tasks by the user profile time zone', async () => {
+    apiMock.getUserSetting.mockImplementation(async (key: string) => (
+      key === 'profile.timeZoneId'
+        ? { key, value: 'Europe/Moscow' }
+        : null
+    ));
+    const profileDateKey = dateKey(new Date());
+    const dueAt = fromTimeZoneDateTimeInput(`${profileDateKey}T23:30`, 'Europe/Moscow');
+
+    await renderJournal([
+      createTask({
+        title: 'Поздняя задача профиля',
+        dueAt,
+      }),
+    ], { initialView: 'calendar' });
+
+    const profileDay = await screen.findByTestId(`task-calendar-day-${profileDateKey}`);
+    expect(within(profileDay).getByTestId('task-calendar-task-101')).toBeTruthy();
   });
 
   it('updates task duration from the calendar load panel', async () => {

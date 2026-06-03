@@ -50,6 +50,7 @@ import {
   formatDateTimeInTimeZone,
   fromTimeZoneDateTimeInput,
   getZonedParts,
+  toTimeZoneDateKey,
   toTimeZoneDateTimeInput,
 } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
@@ -299,18 +300,32 @@ function isDateFilterValue(value: unknown): value is string {
   return typeof value === 'string' && (value === '' || /^\d{4}-\d{2}-\d{2}$/.test(value));
 }
 
+function getNextDateFilterKey(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + 1));
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, '0'),
+    String(date.getUTCDate()).padStart(2, '0'),
+  ].join('-');
+}
+
 function parseDateFilterValue(value: string, boundary: 'start' | 'end') {
   if (!isDateFilterValue(value) || !value) {
     return null;
   }
 
   const [year, month, day] = value.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
     return null;
   }
 
-  return boundary === 'start' ? startOfDay(date) : endOfDay(date);
+  if (boundary === 'start') {
+    return new Date(fromTimeZoneDateTimeInput(`${value}T00:00`, activeTaskJournalTimeZoneId));
+  }
+
+  return new Date(new Date(fromTimeZoneDateTimeInput(`${getNextDateFilterKey(value)}T00:00`, activeTaskJournalTimeZoneId)).getTime() - 1);
 }
 
 function getTaskDateRangeBounds(dateFrom: string, dateTo: string) {
@@ -319,8 +334,8 @@ function getTaskDateRangeBounds(dateFrom: string, dateTo: string) {
 
   if (from && to && from.getTime() > to.getTime()) {
     return {
-      from: startOfDay(to),
-      to: endOfDay(from),
+      from: parseDateFilterValue(dateTo, 'start'),
+      to: parseDateFilterValue(dateFrom, 'end'),
     };
   }
 
@@ -595,6 +610,41 @@ function toLocalDateKey(date: Date) {
   return toDateKey(date);
 }
 
+function getTaskDateKey(value: string | Date) {
+  return toTimeZoneDateKey(value, activeTaskJournalTimeZoneId);
+}
+
+function isSameTaskDay(value: string | Date, day: Date) {
+  return getTaskDateKey(value) === toLocalDateKey(day);
+}
+
+function getCurrentTaskDayKey(now = new Date()) {
+  return getTaskDateKey(now);
+}
+
+function getTaskTimeLabel(value: string | Date) {
+  const parts = getZonedParts(value, activeTaskJournalTimeZoneId);
+  if (!parts) {
+    return '';
+  }
+
+  return `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
+}
+
+function getTaskDateLabel(value: string | Date) {
+  const parts = getZonedParts(value, activeTaskJournalTimeZoneId);
+  if (!parts) {
+    return '';
+  }
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'UTC',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(Date.UTC(parts.year, parts.month - 1, parts.day)));
+}
+
 function formatDateOnly(value: Date) {
   return value.toLocaleDateString('ru-RU', {
     day: '2-digit',
@@ -640,13 +690,15 @@ function getTaskPeriodBounds(date: Date, mode: PeriodMode) {
     : mode === 'week'
       ? startOfWeek(date)
       : startOfMonth(date);
-  const periodEnd = mode === 'day'
-    ? endOfDay(date)
+  const periodEndDay = mode === 'day'
+    ? date
     : mode === 'week'
-      ? endOfDay(addDays(periodStart, 6))
-      : endOfDay(new Date(date.getFullYear(), date.getMonth() + 1, 0));
+      ? addDays(periodStart, 6)
+      : new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  const periodStartValue = parseDateFilterValue(toLocalDateKey(periodStart), 'start') ?? startOfDay(periodStart);
+  const periodEndValue = parseDateFilterValue(toLocalDateKey(periodEndDay), 'end') ?? endOfDay(periodEndDay);
 
-  return { periodStart, periodEnd };
+  return { periodStart: periodStartValue, periodEnd: periodEndValue };
 }
 
 function getCaseCalendarRange(anchorDate: Date, mode: PeriodMode) {
@@ -705,6 +757,9 @@ function buildTaskTooltipLines(task: TaskJournalItem) {
   const due = new Date(task.dueAt);
   const duration = normalizeTaskDuration(task.plannedDurationMinutes);
   const end = new Date(due.getTime() + duration * 60 * 1000);
+  const dueDateLabel = getTaskDateLabel(due);
+  const dueTimeLabel = getTaskTimeLabel(due);
+  const endTimeLabel = getTaskTimeLabel(end);
   const caseTitle = getTaskCaseTitle(task);
   const assignees = getTaskAssigneeNames(task).join(', ') || task.assigneeName || 'Не назначен';
   const lines = [
@@ -717,7 +772,7 @@ function buildTaskTooltipLines(task: TaskJournalItem) {
   }
 
   lines.push(
-    `Время: ${formatDateOnly(due)} ${formatTimeOnly(due)}-${formatTimeOnly(end)}`,
+    `Время: ${dueDateLabel || formatDateOnly(due)} ${dueTimeLabel || formatTimeOnly(due)}-${endTimeLabel || formatTimeOnly(end)}`,
     `Исполнитель: ${assignees}`,
     `Поручил: ${getTaskAuthorName(task)}`,
     `Статус: ${getStatusLabel(task.status)}`,
@@ -854,7 +909,7 @@ function matchesMetricFilter(task: TaskJournalItem, metricFilter: MetricFilter, 
     case 'overdue':
       return isTaskOverdue(task, nowDate);
     case 'today':
-      return active && isSameDay(new Date(task.dueAt), nowDate);
+      return active && isSameTaskDay(task.dueAt, nowDate);
     case 'highPriority':
       return active && (task.priority === 'high' || task.priority === 'urgent');
     default:
@@ -1024,6 +1079,11 @@ function getTaskCalendarLoadWarningThresholds(mode: TaskCalendarLoadWarningMode)
 }
 
 function formatTimeOnly(value: Date | string) {
+  const label = getTaskTimeLabel(value);
+  if (label) {
+    return label;
+  }
+
   const date = typeof value === 'string' ? new Date(value) : value;
   return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
@@ -1036,12 +1096,12 @@ function getTimelineHourLabels() {
 }
 
 function getTaskStartMinute(task: TaskJournalItem) {
-  const date = new Date(task.dueAt);
-  if (Number.isNaN(date.getTime())) {
+  const parts = getZonedParts(task.dueAt, activeTaskJournalTimeZoneId);
+  if (!parts) {
     return TIMELINE_START_MINUTE;
   }
 
-  return date.getHours() * 60 + date.getMinutes();
+  return parts.hour * 60 + parts.minute;
 }
 
 function getTaskEndMinute(task: TaskJournalItem) {
@@ -1137,7 +1197,7 @@ function findTaskScheduleConflict(task: TaskJournalItem, nextDueAt: Date, tasks:
     }
 
     const candidateDueAt = new Date(candidate.dueAt);
-    if (!isSameDay(candidateDueAt, nextDueAt)) {
+    if (!isSameTaskDay(candidate.dueAt, nextDueAt)) {
       return false;
     }
 
@@ -1315,12 +1375,13 @@ function parseLocalInputDate(value: string) {
     return null;
   }
 
-  const date = new Date(value);
+  const date = new Date(fromTimeZoneDateTimeInput(value, activeTaskJournalTimeZoneId));
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function getMinuteOfDay(date: Date) {
-  return date.getHours() * 60 + date.getMinutes();
+  const parts = getZonedParts(date, activeTaskJournalTimeZoneId);
+  return parts ? parts.hour * 60 + parts.minute : date.getHours() * 60 + date.getMinutes();
 }
 
 function taskMatchesAssignee(task: TaskJournalItem, assigneeUserId?: number | null, assigneeName?: string) {
@@ -1427,6 +1488,7 @@ export function TaskJournal({
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
   const [currentTimeZoneId, setCurrentTimeZoneId] = useState(() => normalizeUserTimeZoneId());
+  setActiveTaskJournalTimeZoneId(currentTimeZoneId);
   const isAdminUser = isAdmin();
   const permissions = useRolePermissions(user?.role?.id);
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
@@ -1814,7 +1876,7 @@ export function TaskJournal({
     [clients, legalEntities],
   );
 
-  const dateRangeBounds = useMemo(() => getTaskDateRangeBounds(dateFromFilter, dateToFilter), [dateFromFilter, dateToFilter]);
+  const dateRangeBounds = useMemo(() => getTaskDateRangeBounds(dateFromFilter, dateToFilter), [currentTimeZoneId, dateFromFilter, dateToFilter]);
 
   const scopeFilteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1872,12 +1934,12 @@ export function TaskJournal({
         return statusOk && periodOk;
       })
       .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
-  }, [dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
+  }, [currentTimeZoneId, dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
 
   const filteredTasks = useMemo(() => {
     const nowDate = new Date();
     return statusAndPeriodFilteredTasks.filter((task) => matchesMetricFilter(task, metricFilter, nowDate));
-  }, [metricFilter, statusAndPeriodFilteredTasks]);
+  }, [currentTimeZoneId, metricFilter, statusAndPeriodFilteredTasks]);
 
   const calendarTasks = useMemo(
     () => completedTaskCalendarAction === 'hide'
@@ -1938,10 +2000,10 @@ export function TaskJournal({
   const stats = useMemo(() => {
     const active = statusAndPeriodFilteredTasks.filter((task) => isTaskJournalActive(task.status));
     const overdue = active.filter((task) => new Date(task.dueAt).getTime() < Date.now());
-    const today = active.filter((task) => isSameDay(new Date(task.dueAt), new Date()));
+    const today = active.filter((task) => isSameTaskDay(task.dueAt, new Date()));
     const high = active.filter((task) => task.priority === 'high' || task.priority === 'urgent');
     return { active: active.length, overdue: overdue.length, today: today.length, high: high.length };
-  }, [statusAndPeriodFilteredTasks]);
+  }, [currentTimeZoneId, statusAndPeriodFilteredTasks]);
 
   const boardColumns = useMemo(() => {
     const nowDate = new Date();
@@ -1959,13 +2021,13 @@ export function TaskJournal({
         key: 'today',
         title: 'На сегодня',
         tone: 'blue',
-        items: active.filter((task) => isSameDay(new Date(task.dueAt), nowDate)),
+        items: active.filter((task) => isSameTaskDay(task.dueAt, nowDate)),
       },
       {
         key: 'tomorrow',
         title: 'На завтра',
         tone: 'emerald',
-        items: active.filter((task) => isSameDay(new Date(task.dueAt), tomorrow)),
+        items: active.filter((task) => isSameTaskDay(task.dueAt, tomorrow)),
       },
       {
         key: 'later',
@@ -1973,11 +2035,11 @@ export function TaskJournal({
         tone: 'slate',
         items: active.filter((task) => {
           const due = new Date(task.dueAt);
-          return due.getTime() >= Date.now() && !isSameDay(due, nowDate) && !isSameDay(due, tomorrow);
+          return due.getTime() >= Date.now() && !isSameTaskDay(task.dueAt, nowDate) && !isSameTaskDay(task.dueAt, tomorrow);
         }),
       },
     ];
-  }, [filteredTasks, periodMode]);
+  }, [currentTimeZoneId, filteredTasks, periodMode]);
 
   const handleQuickFilterChange = (nextFilter: QuickFilter) => {
     setQuickFilter(nextFilter);
@@ -2315,7 +2377,7 @@ export function TaskJournal({
       return;
     }
 
-    if (isSameDay(new Date(task.dueAt), targetDate)) {
+    if (isSameTaskDay(task.dueAt, targetDate)) {
       setCalendarSelectedDate(targetDate);
       return;
     }
@@ -2565,6 +2627,7 @@ export function TaskJournal({
             presentation="page"
             state={routeTaskState}
             tasks={tasks}
+            timeZoneId={currentTimeZoneId}
             assignees={assignees}
             clients={clients}
             legalEntities={legalEntities}
@@ -3039,6 +3102,7 @@ export function TaskJournal({
             <TaskCalendar
               tasks={calendarTasks}
               mode={periodMode}
+              timeZoneId={currentTimeZoneId}
               colorMode={calendarColorMode}
               completedTaskCalendarAction={completedTaskCalendarAction}
               loadWarningMode={calendarLoadWarningMode}
@@ -3077,6 +3141,7 @@ export function TaskJournal({
             />
             <TaskTimelineCalendar
               tasks={calendarTasks}
+              timeZoneId={currentTimeZoneId}
               colorMode={calendarColorMode}
               completedTaskCalendarAction={completedTaskCalendarAction}
               anchorDate={calendarAnchorDate}
@@ -3106,6 +3171,7 @@ export function TaskJournal({
           presentation="modal"
           state={modal}
           tasks={tasks}
+          timeZoneId={currentTimeZoneId}
           assignees={assignees}
           clients={clients}
           legalEntities={legalEntities}
@@ -3826,14 +3892,15 @@ function formatCaseCalendarEventDate(event: CaseCalendarEvent) {
   }
 
   if (event.allDay) {
-    return start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+    return getTaskDateLabel(start) || start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
   }
 
-  return `${start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })} ${formatTimeOnly(start)}`;
+  return `${getTaskDateLabel(start) || start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })} ${formatTimeOnly(start)}`;
 }
 
 function TaskTimelineCalendar({
   tasks,
+  timeZoneId,
   colorMode,
   completedTaskCalendarAction,
   anchorDate,
@@ -3854,6 +3921,7 @@ function TaskTimelineCalendar({
   movingTaskId,
 }: {
   tasks: TaskJournalItem[];
+  timeZoneId: string;
   colorMode: TaskCalendarColorMode;
   completedTaskCalendarAction: 'color' | 'hide';
   anchorDate: Date;
@@ -3877,14 +3945,14 @@ function TaskTimelineCalendar({
     const start = startOfWeek(anchorDate);
     return Array.from({ length: 7 }, (_, index) => addDays(start, index));
   }, [anchorDate]);
-  const visibleDayKeys = useMemo(() => new Set(visibleDays.map(toDateKey)), [visibleDays]);
+  const visibleDayKeys = useMemo(() => new Set(visibleDays.map(toLocalDateKey)), [visibleDays]);
   const hourLabels = useMemo(getTimelineHourLabels, []);
   const timelineHeight = (TIMELINE_END_HOUR - TIMELINE_START_HOUR) * TIMELINE_HOUR_HEIGHT;
 
   const tasksByDate = useMemo(() => {
     const map = new Map<string, TaskJournalItem[]>();
     tasks.forEach((task) => {
-      const key = toDateKey(new Date(task.dueAt));
+      const key = getTaskDateKey(task.dueAt);
       if (!visibleDayKeys.has(key)) {
         return;
       }
@@ -3899,10 +3967,10 @@ function TaskTimelineCalendar({
     });
 
     return map;
-  }, [tasks, visibleDayKeys]);
+  }, [tasks, timeZoneId, visibleDayKeys]);
 
   const weekTasks = useMemo(
-    () => visibleDays.flatMap((day) => tasksByDate.get(toDateKey(day)) ?? []),
+    () => visibleDays.flatMap((day) => tasksByDate.get(toLocalDateKey(day)) ?? []),
     [tasksByDate, visibleDays],
   );
 
@@ -3930,7 +3998,7 @@ function TaskTimelineCalendar({
     const map = new Map<string, { placements: ReturnType<typeof buildTimelineTaskPlacements>; minWidth: number; laneCount: number }>();
 
     visibleDays.forEach((day) => {
-      const key = toDateKey(day);
+      const key = toLocalDateKey(day);
       const placements = buildTimelineTaskPlacements(tasksByDate.get(key) ?? []);
       const laneCount = Math.max(1, ...placements.map((placement) => placement.laneCount));
       map.set(key, {
@@ -3944,13 +4012,13 @@ function TaskTimelineCalendar({
   }, [tasksByDate, visibleDays]);
   const timelineGridTemplateColumns = useMemo(
     () => `${TIMELINE_TIME_COLUMN_WIDTH}px ${visibleDays
-      .map((day) => `minmax(${timelineDayLayouts.get(toDateKey(day))?.minWidth ?? TIMELINE_DAY_MIN_WIDTH}px, 1fr)`)
+      .map((day) => `minmax(${timelineDayLayouts.get(toLocalDateKey(day))?.minWidth ?? TIMELINE_DAY_MIN_WIDTH}px, 1fr)`)
       .join(' ')}`,
     [timelineDayLayouts, visibleDays],
   );
   const timelineMinWidth = useMemo(
     () => TIMELINE_TIME_COLUMN_WIDTH + visibleDays.reduce(
-      (sum, day) => sum + (timelineDayLayouts.get(toDateKey(day))?.minWidth ?? TIMELINE_DAY_MIN_WIDTH),
+      (sum, day) => sum + (timelineDayLayouts.get(toLocalDateKey(day))?.minWidth ?? TIMELINE_DAY_MIN_WIDTH),
       0,
     ),
     [timelineDayLayouts, visibleDays],
@@ -3982,9 +4050,11 @@ function TaskTimelineCalendar({
       ];
 
   const now = new Date();
+  const nowParts = getZonedParts(now, activeTaskJournalTimeZoneId);
+  const currentTaskDayKey = getCurrentTaskDayKey(now);
   const currentTimeTop =
-    ((now.getHours() * 60 + now.getMinutes()) - TIMELINE_START_MINUTE) * TIMELINE_MINUTE_HEIGHT;
-  const showCurrentTime = visibleDayKeys.has(toDateKey(now))
+    (((nowParts?.hour ?? now.getHours()) * 60 + (nowParts?.minute ?? now.getMinutes())) - TIMELINE_START_MINUTE) * TIMELINE_MINUTE_HEIGHT;
+  const showCurrentTime = visibleDayKeys.has(currentTaskDayKey)
     && currentTimeTop >= 0
     && currentTimeTop <= timelineHeight;
 
@@ -4061,9 +4131,9 @@ function TaskTimelineCalendar({
                 className="grid border-b border-slate-200 bg-slate-50"
                 style={{ gridTemplateColumns: timelineGridTemplateColumns }}
               >
-                <div className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Самара</div>
+                <div className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{timeZoneId}</div>
                 {visibleDays.map((day) => {
-                  const key = toDateKey(day);
+                  const key = toLocalDateKey(day);
                   const dayTasks = tasksByDate.get(key) ?? [];
                   const dayDuration = dayTasks
                     .filter((task) => isTaskJournalActive(task.status))
@@ -4104,9 +4174,9 @@ function TaskTimelineCalendar({
                 </div>
 
                 {visibleDays.map((day) => {
-                  const key = toDateKey(day);
+                  const key = toLocalDateKey(day);
                   const placements = timelineDayLayouts.get(key)?.placements ?? [];
-                  const isToday = isSameDay(day, now);
+                  const isToday = key === currentTaskDayKey;
 
                   return (
                     <div
@@ -4230,6 +4300,7 @@ function CalendarTaskTooltip({ task }: { task: TaskJournalItem }) {
 function TaskCalendar({
   tasks,
   mode,
+  timeZoneId,
   colorMode,
   completedTaskCalendarAction,
   loadWarningMode,
@@ -4255,6 +4326,7 @@ function TaskCalendar({
 }: {
   tasks: TaskJournalItem[];
   mode: PeriodMode;
+  timeZoneId: string;
   colorMode: TaskCalendarColorMode;
   completedTaskCalendarAction: 'color' | 'hide';
   loadWarningMode: TaskCalendarLoadWarningMode;
@@ -4296,7 +4368,7 @@ function TaskCalendar({
   const tasksByDate = useMemo(() => {
     const map = new Map<string, TaskJournalItem[]>();
     tasks.forEach((task) => {
-      const key = toDateKey(new Date(task.dueAt));
+      const key = getTaskDateKey(task.dueAt);
       const items = map.get(key) ?? [];
       items.push(task);
       map.set(key, items);
@@ -4307,10 +4379,10 @@ function TaskCalendar({
     });
 
     return map;
-  }, [tasks]);
+  }, [tasks, timeZoneId]);
 
   const selectedTasks = useMemo(
-    () => tasksByDate.get(toDateKey(selectedDate)) ?? [],
+    () => tasksByDate.get(toLocalDateKey(selectedDate)) ?? [],
     [selectedDate, tasksByDate],
   );
   const loadWarningThresholds = useMemo(
@@ -4388,7 +4460,7 @@ function TaskCalendar({
       })
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ru'));
   }, [loadWarningThresholds, selectedTasks]);
-  const periodTaskCount = visibleDays.reduce((count, day) => count + (tasksByDate.get(toDateKey(day))?.length ?? 0), 0);
+  const periodTaskCount = visibleDays.reduce((count, day) => count + (tasksByDate.get(toLocalDateKey(day))?.length ?? 0), 0);
   const calendarGridClass = mode === 'day' ? 'grid-cols-1' : 'grid-cols-7';
   const calendarMinWidthClass = mode === 'day' ? 'min-w-[320px]' : 'min-w-[860px]';
 
@@ -4443,7 +4515,7 @@ function TaskCalendar({
             <div data-testid="task-calendar-mobile-strip" className="mb-3 md:hidden">
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {visibleDays.map((day) => {
-                  const key = toDateKey(day);
+                  const key = toLocalDateKey(day);
                   const dayTasks = tasksByDate.get(key) ?? [];
                   const activeDayTasks = dayTasks.filter((task) => isTaskJournalActive(task.status));
                   const activeDayDuration = activeDayTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
@@ -4493,11 +4565,11 @@ function TaskCalendar({
 
             <div className={`grid gap-2 ${calendarMinWidthClass} ${calendarGridClass}`}>
               {visibleDays.map((day) => {
-                const key = toDateKey(day);
+                const key = toLocalDateKey(day);
                 const dayTasks = tasksByDate.get(key) ?? [];
                 const isSelected = isSameDay(day, selectedDate);
                 const isCurrentMonth = mode !== 'month' || isSameMonth(day, anchorDate);
-                const isCurrentDay = isSameDay(day, new Date());
+                const isCurrentDay = key === getCurrentTaskDayKey();
                 const activeDayTasks = dayTasks.filter((task) => isTaskJournalActive(task.status));
                 const activeDayDuration = activeDayTasks.reduce((sum, task) => sum + normalizeTaskDuration(task.plannedDurationMinutes), 0);
                 const dayConflictCount = dayTasks.filter((task) => conflictTaskIds.has(task.id)).length;
@@ -4778,6 +4850,7 @@ function TaskCalendar({
 
 function TaskDaySchedulePanel({
   tasks,
+  timeZoneId,
   selectedDueAt,
   plannedDurationMinutes,
   assigneeUserId,
@@ -4785,6 +4858,7 @@ function TaskDaySchedulePanel({
   currentTaskId,
 }: {
   tasks: TaskJournalItem[];
+  timeZoneId: string;
   selectedDueAt: string;
   plannedDurationMinutes: number | null | undefined;
   assigneeUserId?: number | null;
@@ -4804,10 +4878,10 @@ function TaskDaySchedulePanel({
     return tasks
       .filter((task) => {
         const due = new Date(task.dueAt);
-        return !Number.isNaN(due.getTime()) && isSameDay(due, selectedDate);
+        return !Number.isNaN(due.getTime()) && isSameTaskDay(task.dueAt, selectedDate);
       })
       .sort((a, b) => getTaskStartMinute(a) - getTaskStartMinute(b) || a.id - b.id);
-  }, [selectedDate, tasks]);
+  }, [selectedDate, tasks, timeZoneId]);
 
   const activeDayTasks = useMemo(() => dayTasks.filter((task) => isTaskJournalActive(task.status)), [dayTasks]);
   const assigneeDayTasks = useMemo(
@@ -4932,6 +5006,7 @@ function TaskModal({
   presentation = 'modal',
   state,
   tasks,
+  timeZoneId,
   assignees,
   clients,
   legalEntities,
@@ -4952,6 +5027,7 @@ function TaskModal({
   presentation?: 'modal' | 'page';
   state: ModalState;
   tasks: TaskJournalItem[];
+  timeZoneId: string;
   assignees: TaskJournalAssignee[];
   clients: Client[];
   legalEntities: LegalEntitySummary[];
@@ -5750,6 +5826,7 @@ function TaskModal({
               <div className="lg:col-span-2">
                 <TaskDaySchedulePanel
                   tasks={tasks}
+                  timeZoneId={timeZoneId}
                   selectedDueAt={form.dueAt}
                   plannedDurationMinutes={form.plannedDurationMinutes}
                   assigneeUserId={form.assigneeUserId}
