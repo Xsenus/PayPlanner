@@ -327,8 +327,9 @@ public class CasesV2Controller : ControllerBase
             return error;
         }
 
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
         var bytes = BuildRegistryCsv(items!);
-        var fileName = $"cases-registry-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv";
+        var fileName = $"cases-registry-{FormatUserExportTimestamp(statusClock.NowLocal)}.csv";
         return File(bytes, "text/csv; charset=utf-8", fileName);
     }
 
@@ -375,8 +376,9 @@ public class CasesV2Controller : ControllerBase
             return error;
         }
 
-        var bytes = BuildRegistryExcel(items!);
-        var fileName = $"cases-registry-{DateTime.UtcNow:yyyyMMdd-HHmmss}.xls";
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
+        var bytes = BuildRegistryExcel(items!, statusClock.NowLocal);
+        var fileName = $"cases-registry-{FormatUserExportTimestamp(statusClock.NowLocal)}.xls";
         return File(bytes, "application/vnd.ms-excel; charset=utf-8", fileName);
     }
 
@@ -428,8 +430,9 @@ public class CasesV2Controller : ControllerBase
             return Problem("Сервис формирования PDF недоступен.");
         }
 
-        var bytes = await _pdfService.RenderAsync(BuildRegistryPrintHtml(items!), ct);
-        var fileName = $"cases-registry-{DateTime.UtcNow:yyyyMMdd-HHmmss}.pdf";
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
+        var bytes = await _pdfService.RenderAsync(BuildRegistryPrintHtml(items!, statusClock.NowLocal), ct);
+        var fileName = $"cases-registry-{FormatUserExportTimestamp(statusClock.NowLocal)}.pdf";
         return File(bytes, "application/pdf", fileName);
     }
 
@@ -476,7 +479,8 @@ public class CasesV2Controller : ControllerBase
             return error;
         }
 
-        return Content(BuildRegistryPrintHtml(items!), "text/html; charset=utf-8", Encoding.UTF8);
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
+        return Content(BuildRegistryPrintHtml(items!, statusClock.NowLocal), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
     private async Task<(IReadOnlyList<ClientCase>? Items, IActionResult? Error)> LoadRegistryExportItemsAsync(
@@ -1228,9 +1232,9 @@ public class CasesV2Controller : ControllerBase
         return result;
     }
 
-    private static byte[] BuildRegistryExcel(IReadOnlyCollection<ClientCase> items)
+    private static byte[] BuildRegistryExcel(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal)
     {
-        var generatedAt = DateTime.Now.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
         var totalFee = items.Sum(item => item.FeeAmount);
         var totalIncome = items.Sum(item => item.IncomeTotal);
         var totalPaid = items.Sum(item => item.IncomePaid);
@@ -1324,9 +1328,9 @@ public class CasesV2Controller : ControllerBase
         return result;
     }
 
-    private static string BuildRegistryPrintHtml(IReadOnlyCollection<ClientCase> items)
+    private static string BuildRegistryPrintHtml(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal)
     {
-        var generatedAt = DateTime.Now.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
         var totalFee = items.Sum(item => item.FeeAmount);
         var totalIncome = items.Sum(item => item.IncomeTotal);
         var totalPaid = items.Sum(item => item.IncomePaid);
@@ -1416,6 +1420,12 @@ public class CasesV2Controller : ControllerBase
 
     private static string CsvCell(string? value)
         => $"\"{(value ?? string.Empty).Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+
+    private static string FormatUserGeneratedAt(DateTime localDateTime)
+        => localDateTime.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+
+    private static string FormatUserExportTimestamp(DateTime localDateTime)
+        => localDateTime.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
 
     private static void AppendExcelRow(StringBuilder builder, params string?[] values)
     {
@@ -4169,13 +4179,14 @@ public class CasesV2Controller : ControllerBase
         DateTime TodayDate,
         DateTime NowInstantUtc);
 
-    private readonly record struct CaseStatusClock(DateTime TodayDate, DateTime NowInstantUtc);
+    private readonly record struct CaseStatusClock(DateTime TodayDate, DateTime NowInstantUtc, DateTime NowLocal);
 
     private async Task<CaseStatusClock> ResolveCaseStatusClockAsync(CancellationToken ct)
     {
         var nowUtc = DateTime.UtcNow;
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
-        return new CaseStatusClock(CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date, nowUtc);
+        var nowLocal = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone);
+        return new CaseStatusClock(nowLocal.Date, nowUtc, nowLocal);
     }
 
     private static CaseCalendarDateRange ResolveCaseCalendarDateRange(DateTime? from, DateTime? to, TimeZoneInfo timeZone)
@@ -5184,7 +5195,8 @@ public class CasesV2Controller : ControllerBase
             return NotFound(new { message = "По делу еще нет заказ-наряда." });
         }
 
-        return Content(BuildWorkOrderPrintHtml(clientCase, workOrder), "text/html; charset=utf-8", Encoding.UTF8);
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
+        return Content(BuildWorkOrderPrintHtml(clientCase, workOrder, statusClock.NowLocal), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
     [HttpPost("{id:int}/work-order/generate-document")]
@@ -5226,7 +5238,7 @@ public class CasesV2Controller : ControllerBase
             "Заказ-наряд",
             NormalizeWorkOrderStatus(workOrder.Status) == "approved" ? "Согласован" : "Подготовлен",
             $"case-{id}-work-order.html",
-            BuildWorkOrderPrintHtml(clientCase, workOrder),
+            BuildWorkOrderPrintHtml(clientCase, workOrder, (await ResolveCaseStatusClockAsync(ct)).NowLocal),
             "Generated",
             $"Сформирована печатная форма заказ-наряда «{workOrder.Title}».",
             $"Заказ-наряд «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
@@ -5637,7 +5649,7 @@ public class CasesV2Controller : ControllerBase
             "Счет",
             "Черновик",
             $"case-{id}-invoice-{payment.Id}.html",
-            BuildWorkOrderInvoiceDocumentHtml(clientCase, workOrder, payment, number, invoiceDate, dueDate),
+            BuildWorkOrderInvoiceDocumentHtml(clientCase, workOrder, payment, number, invoiceDate, dueDate, statusClock.NowLocal),
             "Generated",
             $"Сформирован документ счета №{number} из заказ-наряда «{workOrder.Title}».",
             $"Счет №{number} из заказ-наряда «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
@@ -8653,10 +8665,10 @@ public class CasesV2Controller : ControllerBase
             SortOrder = item.SortOrder,
         };
 
-    private static string BuildWorkOrderPrintHtml(ClientCase clientCase, ClientCaseWorkOrder workOrder)
+    private static string BuildWorkOrderPrintHtml(ClientCase clientCase, ClientCaseWorkOrder workOrder, DateTime generatedAtLocal)
     {
         RecalculateWorkOrder(workOrder);
-        var generatedAt = DateTime.UtcNow.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
         var rows = string.Join(Environment.NewLine, workOrder.Items
             .OrderBy(item => item.SortOrder)
             .ThenBy(item => item.Id)
@@ -8749,9 +8761,10 @@ public class CasesV2Controller : ControllerBase
         Payment payment,
         string number,
         DateTime invoiceDate,
-        DateTime dueDate)
+        DateTime dueDate,
+        DateTime generatedAtLocal)
     {
-        var generatedAt = DateTime.UtcNow.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
         var rows = string.Join(Environment.NewLine, payment.InvoiceLineItems
             .OrderBy(item => item.SortOrder)
             .ThenBy(item => item.Id)

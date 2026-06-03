@@ -514,6 +514,15 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var nowUtc = DateTime.UtcNow;
+        var selectedZone = TimeZoneInfo.GetSystemTimeZones()
+            .Select(zone => new
+            {
+                Zone = zone,
+                LocalNow = CalendarTimeZoneHelper.ToUserLocal(nowUtc, zone),
+            })
+            .FirstOrDefault(item => item.LocalNow.Date != nowUtc.Date);
+        Assert.NotNull(selectedZone);
         var otherResponsible = await CreateUserAsync(db, "other@example.com", "Другой");
         var visibleClient = new Client
         {
@@ -547,7 +556,16 @@ public class CasesV2ControllerTests
                 Status = ClientCaseStatus.Open,
                 FeeAmount = 50_000m,
             });
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone!.Zone.Id,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
+        var expectedFilePrefix = $"cases-registry-{selectedZone.LocalNow:yyyyMMdd}-";
         var pdfService = new FakeInvoiceDocumentPdfService("pdf");
         var controller = CreateController(db, owner, pdfService: pdfService);
 
@@ -570,7 +588,7 @@ public class CasesV2ControllerTests
 
         var file = Assert.IsType<FileContentResult>(result);
         Assert.Equal("text/csv; charset=utf-8", file.ContentType);
-        Assert.StartsWith("cases-registry-", file.FileDownloadName);
+        Assert.StartsWith(expectedFilePrefix, file.FileDownloadName);
         var csv = Encoding.UTF8.GetString(file.FileContents);
         Assert.Contains("№ дела", csv);
         Assert.Contains("CASE-001", csv);
@@ -598,7 +616,7 @@ public class CasesV2ControllerTests
 
         var excelFile = Assert.IsType<FileContentResult>(excelResult);
         Assert.Equal("application/vnd.ms-excel; charset=utf-8", excelFile.ContentType);
-        Assert.StartsWith("cases-registry-", excelFile.FileDownloadName);
+        Assert.StartsWith(expectedFilePrefix, excelFile.FileDownloadName);
         Assert.EndsWith(".xls", excelFile.FileDownloadName);
         var excel = Encoding.UTF8.GetString(excelFile.FileContents);
         Assert.Contains("Excel.Sheet", excel);
@@ -625,7 +643,7 @@ public class CasesV2ControllerTests
 
         var pdfFile = Assert.IsType<FileContentResult>(pdfResult);
         Assert.Equal("application/pdf", pdfFile.ContentType);
-        Assert.StartsWith("cases-registry-", pdfFile.FileDownloadName);
+        Assert.StartsWith(expectedFilePrefix, pdfFile.FileDownloadName);
         Assert.EndsWith(".pdf", pdfFile.FileDownloadName);
         Assert.Equal(Encoding.UTF8.GetBytes("pdf"), pdfFile.FileContents);
         Assert.Contains("Реестр дел", pdfService.LastHtml);
@@ -5271,6 +5289,15 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var nowUtc = DateTime.UtcNow;
+        var selectedZone = TimeZoneInfo.GetSystemTimeZones()
+            .Select(zone => new
+            {
+                Zone = zone,
+                LocalNow = CalendarTimeZoneHelper.ToUserLocal(nowUtc, zone),
+            })
+            .FirstOrDefault(item => item.LocalNow.Date != nowUtc.Date);
+        Assert.NotNull(selectedZone);
         var executor = await CreateUserAsync(db, "executor@example.com", "Исполнитель");
         var client = new Client
         {
@@ -5313,6 +5340,14 @@ public class CasesV2ControllerTests
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
         db.ClientCaseWorkOrders.Add(workOrder);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone!.Zone.Id,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
 
@@ -5325,6 +5360,7 @@ public class CasesV2ControllerTests
         Assert.Contains("PRINT-1", content.Content, StringComparison.Ordinal);
         Assert.Contains("Подготовка заявления", content.Content, StringComparison.Ordinal);
         Assert.Contains("24", content.Content, StringComparison.Ordinal);
+        Assert.Contains(selectedZone.LocalNow.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU")), content.Content, StringComparison.Ordinal);
     }
 
     [Fact]
