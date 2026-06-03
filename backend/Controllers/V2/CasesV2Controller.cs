@@ -3335,6 +3335,7 @@ public class CasesV2Controller : ControllerBase
             .ToArray();
 
         var linkedContracts = await LoadFinanceContractsAsync(visiblePayments, linkedInvoicePaymentIds, paymentIds, ct);
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
 
         return Ok(new ClientCaseFinanceDetailDto
         {
@@ -3342,7 +3343,7 @@ public class CasesV2Controller : ControllerBase
             CaseTitle = clientCase.Title,
             OwnerName = ResolveCaseOwnerName(clientCase),
             Totals = BuildFinanceTotals(clientCase, visiblePayments),
-            Calendar = BuildFinanceCalendar(visiblePayments),
+            Calendar = BuildFinanceCalendar(visiblePayments, statusClock.TodayDate),
             Invoices = BuildFinanceInvoices(visiblePayments, linkedContracts),
             Payments = visiblePayments.Select(MapFinancePayment).ToList(),
             Contracts = linkedContracts.Values
@@ -5556,7 +5557,8 @@ public class CasesV2Controller : ControllerBase
             return BadRequest(new { message = "Перед созданием счета согласуйте заказ-наряд." });
         }
 
-        var invoiceDate = request?.Date?.Date ?? DateTime.UtcNow.Date;
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
+        var invoiceDate = request?.Date?.Date ?? statusClock.TodayDate;
         var dueDate = request?.DueDate?.Date ?? invoiceDate;
         var number = await BuildWorkOrderInvoiceNumberAsync(id, workOrder.Id, invoiceDate, request?.Number, ct);
         var now = DateTime.UtcNow;
@@ -8298,9 +8300,8 @@ public class CasesV2Controller : ControllerBase
         return totals;
     }
 
-    private static ClientCaseFinanceCalendarDto BuildFinanceCalendar(IReadOnlyCollection<Payment> payments)
+    private static ClientCaseFinanceCalendarDto BuildFinanceCalendar(IReadOnlyCollection<Payment> payments, DateTime today)
     {
-        var today = DateTime.UtcNow.Date;
         var calendar = new ClientCaseFinanceCalendarDto();
 
         foreach (var payment in payments)

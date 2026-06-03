@@ -1122,6 +1122,74 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetFinance_UsesUserTimeZoneForPaymentCalendarStatus()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "finance-timezone@example.com", "Finance Owner", DataVisibilityScope.All);
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        var selectedZone = TimeZoneInfo.GetSystemTimeZones()
+            .Select(zone => new
+            {
+                Zone = zone,
+                LocalToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, zone).Date,
+            })
+            .FirstOrDefault(item => item.LocalToday != utcToday);
+        Assert.NotNull(selectedZone);
+
+        var shouldBeOverdue = selectedZone!.LocalToday > utcToday;
+        var plannedDate = shouldBeOverdue ? utcToday : selectedZone.LocalToday;
+        var client = new Client
+        {
+            Name = "Finance timezone client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUserId = owner.Id,
+            Title = "Finance timezone case",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone.Zone.Id,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        db.Payments.Add(new Payment
+        {
+            Client = client,
+            ClientCase = clientCase,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 1000m,
+            PaidAmount = 0m,
+            Date = plannedDate,
+            PlannedDate = plannedDate,
+            Description = "Timezone planned payment",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetFinance(clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseFinanceDetailDto>(ok.Value);
+        Assert.Equal(1, dto.Calendar.PaymentCount);
+        Assert.Equal(1000m, dto.Calendar.OutstandingTotal);
+        Assert.Equal(shouldBeOverdue ? 1 : 0, dto.Calendar.OverdueCount);
+        Assert.Equal(shouldBeOverdue ? 0 : 1, dto.Calendar.PlannedCount);
+        Assert.Equal(shouldBeOverdue ? null : plannedDate, dto.Calendar.NextPaymentDate);
+    }
+
+    [Fact]
     public async Task GetById_AndDelete_HideCasesFromOtherResponsibles()
     {
         await using var db = await CreateContextAsync();
@@ -5116,6 +5184,86 @@ public class CasesV2ControllerTests
         await db.Entry(clientCase).ReloadAsync();
         Assert.Equal("invoice_created", workOrder.Status);
         Assert.Contains("создан счет", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WorkOrder_CreateInvoiceDefaultsDateToUserTimeZone()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "work-order-timezone@example.com", "Work Order Owner");
+        var nowUtc = DateTime.UtcNow;
+        var selectedZone = TimeZoneInfo.GetSystemTimeZones()
+            .Select(zone => new
+            {
+                Zone = zone,
+                LocalToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, zone).Date,
+            })
+            .FirstOrDefault(item => item.LocalToday != nowUtc.Date);
+        Assert.NotNull(selectedZone);
+
+        var client = new Client
+        {
+            Name = "Invoice timezone client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Invoice timezone case",
+            CaseNumber = "TZ-INV",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Timezone services",
+            Status = "approved",
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Timezone service",
+                    Quantity = 1,
+                    UnitPrice = 5000,
+                    TotalAmount = 5000,
+                    SortOrder = 1,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone!.Zone.Id,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.CreateInvoiceFromWorkOrder(
+            clientCase.Id,
+            new CasesV2Controller.CreateClientCaseWorkOrderInvoiceRequest(),
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderInvoiceDto>(created.Value);
+        Assert.Equal(selectedZone.LocalToday, dto.Date);
+        Assert.Equal(selectedZone.LocalToday, dto.DueDate);
+
+        var payment = await db.Payments.Include(item => item.Invoice).SingleAsync(item => item.Id == dto.PaymentId);
+        Assert.Equal(selectedZone.LocalToday, payment.Date);
+        Assert.Equal(selectedZone.LocalToday, payment.PlannedDate);
+        Assert.Equal(selectedZone.LocalToday, payment.AccountDate);
+        Assert.NotNull(payment.Invoice);
+        Assert.Equal(selectedZone.LocalToday, payment.Invoice!.Date);
     }
 
     [Fact]
