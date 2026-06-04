@@ -752,7 +752,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var importedEndAt = yandexEvent.EndAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(yandexEvent.EndAt.Value) : (DateTime?)null;
         if (importedStartAt.HasValue && task.DueAt != importedStartAt.Value)
         {
-            changes.Add($"Срок: {FormatLogDateTime(task.DueAt)} → {FormatLogDateTime(importedStartAt.Value)}");
+            changes.Add($"Срок: {FormatLogDateTime(task.DueAt, timeZone)} → {FormatLogDateTime(importedStartAt.Value, timeZone)}");
             task.DueAt = importedStartAt.Value;
             changed = true;
         }
@@ -858,7 +858,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             created ? "create-event" : "update-event",
             "success",
             created ? "Задача создана в Яндекс.Календаре." : "Задача обновлена в Яндекс.Календаре.",
-            BuildTaskSnapshotDetails(task),
+            BuildTaskSnapshotDetails(task, timeZone),
             cancellationToken);
 
         link.CalendarSyncCalendarId = calendar.Id;
@@ -2076,11 +2076,14 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     private static string FormatLogDateTime(DateTime value)
         => value.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
 
-    private static string BuildTaskSnapshotDetails(TaskJournalItem task)
+    private static string FormatLogDateTime(DateTime value, TimeZoneInfo timeZone)
+        => CalendarTimeZoneHelper.FormatUserDateTime(value, timeZone);
+
+    private static string BuildTaskSnapshotDetails(TaskJournalItem task, TimeZoneInfo timeZone)
     {
         var parts = new List<string>
         {
-            $"Срок: {FormatLogDateTime(task.DueAt)}",
+            $"Срок: {FormatLogDateTime(task.DueAt, timeZone)}",
             $"Длительность: {FormatDuration(task.PlannedDurationMinutes)}",
             $"Статус: {FormatTaskStatus(task.Status)}",
         };

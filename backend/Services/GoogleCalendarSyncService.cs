@@ -815,7 +815,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var importedEndAt = googleEvent.EndAt.HasValue ? CalendarTimeZoneHelper.NormalizeUtcInstant(googleEvent.EndAt.Value) : (DateTime?)null;
         if (importedStartAt.HasValue && task.DueAt != importedStartAt.Value)
         {
-            changes.Add($"Срок: {FormatLogDateTime(task.DueAt)} → {FormatLogDateTime(importedStartAt.Value)}");
+            changes.Add($"Срок: {FormatLogDateTime(task.DueAt, timeZone)} → {FormatLogDateTime(importedStartAt.Value, timeZone)}");
             task.DueAt = importedStartAt.Value;
             changed = true;
         }
@@ -908,12 +908,12 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                 CreatedAt = DateTime.UtcNow,
             };
             _db.GoogleCalendarTaskLinks.Add(link);
-            await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "create-event", "success", "Задача создана в Google Calendar.", BuildTaskSnapshotDetails(task), cancellationToken);
+            await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "create-event", "success", "Задача создана в Google Calendar.", BuildTaskSnapshotDetails(task, timeZone), cancellationToken);
         }
         else
         {
             result = await UpdateGoogleEventAsync(accessToken, link.GoogleCalendarId, link.GoogleEventId, payload, cancellationToken);
-            await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "update-event", "success", "Задача обновлена в Google Calendar.", BuildTaskSnapshotDetails(task), cancellationToken);
+            await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "update-event", "success", "Задача обновлена в Google Calendar.", BuildTaskSnapshotDetails(task, timeZone), cancellationToken);
         }
 
         link.CalendarSyncCalendarId = calendar.Id;
@@ -2097,11 +2097,14 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     private static string FormatLogDateTime(DateTime value)
         => value.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
 
-    private static string BuildTaskSnapshotDetails(TaskJournalItem task)
+    private static string FormatLogDateTime(DateTime value, TimeZoneInfo timeZone)
+        => CalendarTimeZoneHelper.FormatUserDateTime(value, timeZone);
+
+    private static string BuildTaskSnapshotDetails(TaskJournalItem task, TimeZoneInfo timeZone)
     {
         var parts = new List<string>
         {
-            $"Срок: {FormatLogDateTime(task.DueAt)}",
+            $"Срок: {FormatLogDateTime(task.DueAt, timeZone)}",
             $"Длительность: {FormatDuration(task.PlannedDurationMinutes)}",
             $"Статус: {FormatTaskStatus(task.Status)}",
         };

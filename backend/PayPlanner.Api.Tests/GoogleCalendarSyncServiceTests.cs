@@ -342,6 +342,13 @@ public class GoogleCalendarSyncServiceTests
         Assert.Equal(0, secondResult.ErrorCount);
         var updatedTask = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
         Assert.Equal(new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc), updatedTask.DueAt);
+        var syncLog = await db.GoogleCalendarSyncLogs.SingleAsync(item =>
+            item.ConnectionId == connection.Id &&
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "update-task" &&
+            item.Status == "success");
+        Assert.Contains("12:00", syncLog.DetailsJson);
+        Assert.Contains("16:00", syncLog.DetailsJson);
         Assert.DoesNotContain(handler.Requests, request =>
             request.Method == HttpMethod.Put &&
             request.RequestUri!.AbsolutePath.Contains("/events/event-google-move", StringComparison.Ordinal));
@@ -440,6 +447,52 @@ public class GoogleCalendarSyncServiceTests
             item.TaskJournalItemId == task.Id &&
             item.Operation == "delete-event" &&
             item.Status == "success");
+    }
+
+    [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_UpdatesLinkedGoogleEventAndWritesLocalTimeLog()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-update-google@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetUserTimeZoneAsync(db, user.Id, "Asia/Kamchatka");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var task = await CreateTaskAsync(
+            db,
+            user.Id,
+            "Update linked Google event",
+            dueAt: new DateTime(2026, 6, 4, 11, 30, 0, DateTimeKind.Utc));
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-update", "PayPlanner задачи");
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "event-update",
+            SyncStatus = "active",
+            LastCrmHash = "old-crm-hash",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        var putRequest = handler.Requests.Single(request =>
+            request.Method == HttpMethod.Put &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-update/events/event-update", StringComparison.Ordinal));
+        var body = await putRequest.Content!.ReadAsStringAsync();
+        using var document = JsonDocument.Parse(body);
+        Assert.Equal("2026-06-04T23:30:00+12:00", document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
+        var syncLog = await db.GoogleCalendarSyncLogs.SingleAsync(item =>
+            item.ConnectionId == connection.Id &&
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "update-event" &&
+            item.Status == "success");
+        Assert.Contains("23:30", syncLog.DetailsJson);
     }
 
     [Fact]

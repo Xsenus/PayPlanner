@@ -206,6 +206,111 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_AppliesYandexMoveAndWritesLocalTimeLog()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-move@example.com", "user");
+        await SetUserTimeZoneAsync(db, user.Id, "Asia/Kamchatka");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-yandex-move", "PayPlanner задачи");
+        var task = await CreateTaskAsync(
+            db,
+            user.Id,
+            "Near midnight moved",
+            new DateTime(2026, 6, 4, 8, 30, 0, DateTimeKind.Utc));
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = "event-yandex-move",
+            YandexEventUrl = $"{calendar.CalendarUrl}event-yandex-move.ics",
+            SyncStatus = "active",
+            LastYandexHash = "old-yandex-hash",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var reportResponse = BuildYandexReportResponse(
+            calendar.CalendarUrl,
+            "event-yandex-move",
+            $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:event-yandex-move
+DTSTART:20260604T113000Z
+DTEND:20260604T123000Z
+SUMMARY:Near midnight moved
+X-PAYPLANNER-TASK-ID:{task.Id}
+X-PAYPLANNER-HASH:yandex-move-hash
+END:VEVENT
+END:VCALENDAR
+""");
+        var handler = new RecordingYandexHandler(reportResponse: reportResponse);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ImportedEvents);
+        Assert.Equal(0, result.ErrorCount);
+        var updatedTask = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(new DateTime(2026, 6, 4, 11, 30, 0, DateTimeKind.Utc), updatedTask.DueAt);
+        var syncLog = await db.YandexCalendarSyncLogs.SingleAsync(item =>
+            item.ConnectionId == connection.Id &&
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "update-task" &&
+            item.Status == "success");
+        Assert.Contains("20:30", syncLog.DetailsJson);
+        Assert.Contains("23:30", syncLog.DetailsJson);
+    }
+
+    [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_UpdatesLinkedYandexEventAndWritesLocalTimeLog()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-update-yandex@example.com", "user");
+        await SetUserTimeZoneAsync(db, user.Id, "Asia/Kamchatka");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-yandex-update", "PayPlanner задачи");
+        var task = await CreateTaskAsync(
+            db,
+            user.Id,
+            "Update linked Yandex event",
+            new DateTime(2026, 6, 4, 11, 30, 0, DateTimeKind.Utc));
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = "event-yandex-update",
+            YandexEventUrl = $"{calendar.CalendarUrl}event-yandex-update.ics",
+            SyncStatus = "active",
+            LastCrmHash = "old-crm-hash",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        var putRequest = handler.Requests.Single(request => request.Method == HttpMethod.Put);
+        var body = await putRequest.Content!.ReadAsStringAsync();
+        Assert.Contains("DTSTART:20260604T113000Z", body);
+        Assert.Contains("X-PAYPLANNER-TIMEZONE:Asia/Kamchatka", body);
+        var syncLog = await db.YandexCalendarSyncLogs.SingleAsync(item =>
+            item.ConnectionId == connection.Id &&
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "update-event" &&
+            item.Status == "success");
+        Assert.Contains("23:30", syncLog.DetailsJson);
+    }
+
+    [Fact]
     public async Task SyncTaskForConnectedUsersAsync_DeletesCompletedTaskEventWhenHideModeEnabled()
     {
         await using var db = await CreateContextAsync();
@@ -440,6 +545,26 @@ public class YandexCalendarSyncServiceTests
         return task;
     }
 
+    private static string BuildYandexReportResponse(string calendarUrl, string eventId, string ics)
+    {
+        var href = $"{calendarUrl}{eventId}.ics";
+        return $"""
+<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>{href}</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getetag>"etag-{eventId}"</D:getetag>
+        <C:calendar-data><![CDATA[{ics}]]></C:calendar-data>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>
+""";
+    }
+
     private static HttpRequest CreateHttpRequest(int userId, string role = "user")
     {
         var context = new DefaultHttpContext();
@@ -468,10 +593,14 @@ public class YandexCalendarSyncServiceTests
     private sealed class RecordingYandexHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _deleteStatusCode;
+        private readonly string? _reportResponse;
 
-        public RecordingYandexHandler(HttpStatusCode deleteStatusCode = HttpStatusCode.NoContent)
+        public RecordingYandexHandler(
+            HttpStatusCode deleteStatusCode = HttpStatusCode.NoContent,
+            string? reportResponse = null)
         {
             _deleteStatusCode = deleteStatusCode;
+            _reportResponse = reportResponse;
         }
 
         public List<HttpRequestMessage> Requests { get; } = [];
@@ -485,6 +614,14 @@ public class YandexCalendarSyncServiceTests
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
                 {
                     Content = new StringContent(string.Empty, Encoding.UTF8, "text/plain"),
+                });
+            }
+
+            if (string.Equals(request.Method.Method, "REPORT", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage((HttpStatusCode)207)
+                {
+                    Content = new StringContent(_reportResponse ?? string.Empty, Encoding.UTF8, "application/xml"),
                 });
             }
 
