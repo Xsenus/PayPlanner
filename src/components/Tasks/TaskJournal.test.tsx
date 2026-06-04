@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskJournal } from './TaskJournal';
 import type { Client, ClientCase, LegalEntitySummary } from '../../types';
-import { fromTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
+import { fromTimeZoneDateTimeInput, toTimeZoneDateKey } from '../../utils/timeZoneDate';
 import type { TaskJournalAssignee, TaskJournalItem } from '../../utils/taskJournalStore';
 
 const apiMock = vi.hoisted(() => ({
@@ -323,6 +323,7 @@ async function openFirstTaskForEdit() {
 
 describe('TaskJournal', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     window.localStorage.clear();
     authState.user = { id: 7, fullName: 'Администратор', email: 'admin@example.com' };
@@ -1971,6 +1972,33 @@ describe('TaskJournal', () => {
 
     const profileDay = await screen.findByTestId(`task-calendar-day-${profileDateKey}`);
     expect(within(profileDay).getByTestId('task-calendar-task-101')).toBeTruthy();
+  });
+
+  it('opens the task calendar on today from the user profile time zone', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
+    apiMock.getUserSetting.mockImplementation(async (key: string) => (
+      key === 'profile.timeZoneId'
+        ? { key, value: 'Asia/Kamchatka' }
+        : null
+    ));
+    const profileDateKey = toTimeZoneDateKey(new Date(), 'Asia/Kamchatka');
+    const dueAt = fromTimeZoneDateTimeInput(`${profileDateKey}T10:00`, 'Asia/Kamchatka');
+
+    await renderJournal([
+      createTask({
+        title: 'Profile timezone task',
+        dueAt,
+      }),
+    ], { initialView: 'calendar' });
+
+    const profileDay = await screen.findByTestId(`task-calendar-day-${profileDateKey}`);
+    expect(profileDay.className).toContain('border-blue-300');
+    expect(within(profileDay).getByTestId('task-calendar-task-101')).toBeTruthy();
+    await waitFor(() => expect(apiMock.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({
+      from: profileDateKey,
+      to: profileDateKey,
+    })));
   });
 
   it('updates task duration from the calendar load panel', async () => {

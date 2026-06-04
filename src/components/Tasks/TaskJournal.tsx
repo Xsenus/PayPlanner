@@ -610,12 +610,23 @@ function toDateKey(date: Date) {
   ].join('-');
 }
 
+function dateKeyToCalendarDate(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day, 12, 0, 0, 0);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
 function toLocalDateKey(date: Date) {
   return toDateKey(date);
 }
 
 function getTaskDateKey(value: string | Date) {
   return toTimeZoneDateKey(value, activeTaskJournalTimeZoneId);
+}
+
+function getCurrentCalendarDate(now = new Date()) {
+  const key = getTaskDateKey(now);
+  return key ? dateKeyToCalendarDate(key) : new Date(now);
 }
 
 function isSameTaskDay(value: string | Date, day: Date) {
@@ -1539,8 +1550,8 @@ export function TaskJournal({
   const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
   const [modal, setModal] = useState<ModalState>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
-  const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => new Date());
-  const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => new Date());
+  const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => getCurrentCalendarDate());
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => getCurrentCalendarDate());
   const [calendarMovingTaskId, setCalendarMovingTaskId] = useState<number | null>(null);
   const [calendarResizingTaskId, setCalendarResizingTaskId] = useState<number | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(() => new Set());
@@ -1552,6 +1563,7 @@ export function TaskJournal({
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const routeTaskRequestRef = useRef(0);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
+  const previousCalendarTimeZoneRef = useRef(currentTimeZoneId);
   const skipNextFilterSaveRef = useRef(false);
   const previousInitialViewRef = useRef(initialView);
   const icsReminderMinutes = useMemo(
@@ -1567,6 +1579,19 @@ export function TaskJournal({
     previousInitialViewRef.current = initialView;
     setViewMode(initialView);
   }, [initialView]);
+
+  useEffect(() => {
+    const previousTimeZoneId = previousCalendarTimeZoneRef.current;
+    if (previousTimeZoneId === currentTimeZoneId) {
+      return;
+    }
+
+    const previousTodayKey = toTimeZoneDateKey(new Date(), previousTimeZoneId);
+    const nextToday = getCurrentCalendarDate();
+    setCalendarAnchorDate((current) => (toLocalDateKey(current) === previousTodayKey ? nextToday : current));
+    setCalendarSelectedDate((current) => (toLocalDateKey(current) === previousTodayKey ? nextToday : current));
+    previousCalendarTimeZoneRef.current = currentTimeZoneId;
+  }, [currentTimeZoneId]);
 
   useEffect(() => {
     const nextOwnerKey = getTaskJournalFilterStorageKey(currentUserId, mode);
@@ -1714,8 +1739,8 @@ export function TaskJournal({
       ? Number(assigneeFilter)
       : undefined;
     const params = {
-      from: toTimeZoneDateKey(range.from, currentTimeZoneId),
-      to: toTimeZoneDateKey(range.to, currentTimeZoneId),
+      from: toLocalDateKey(range.from),
+      to: toLocalDateKey(range.to),
       responsibleUserId,
       includeTasks: false,
     };
@@ -1743,8 +1768,8 @@ export function TaskJournal({
       : undefined;
 
     return {
-      from: toTimeZoneDateKey(range.from, currentTimeZoneId),
-      to: toTimeZoneDateKey(range.to, currentTimeZoneId),
+      from: toLocalDateKey(range.from),
+      to: toLocalDateKey(range.to),
       responsibleUserId,
       includeTasks: false,
     };
@@ -1918,7 +1943,7 @@ export function TaskJournal({
   }, [assigneeFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, quickFilter, search, tasks, typeFilter]);
 
   const statusAndPeriodFilteredTasks = useMemo(() => {
-    const nowDate = new Date();
+    const nowDate = getCurrentCalendarDate();
     const { periodStart, periodEnd } = getTaskPeriodBounds(nowDate, periodMode);
     const hasManualDateRange = Boolean(dateFromFilter || dateToFilter);
     const shouldApplyPeriodFilter = metricFilter === 'none' && !hasManualDateRange && periodMode !== 'all';
@@ -1941,7 +1966,7 @@ export function TaskJournal({
   }, [currentTimeZoneId, dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
 
   const filteredTasks = useMemo(() => {
-    const nowDate = new Date();
+    const nowDate = getCurrentCalendarDate();
     return statusAndPeriodFilteredTasks.filter((task) => matchesMetricFilter(task, metricFilter, nowDate));
   }, [currentTimeZoneId, metricFilter, statusAndPeriodFilteredTasks]);
 
@@ -1996,7 +2021,7 @@ export function TaskJournal({
   };
 
   const resetCalendarPeriod = () => {
-    const today = new Date();
+    const today = getCurrentCalendarDate();
     setCalendarAnchorDate(today);
     setCalendarSelectedDate(today);
   };
@@ -2004,13 +2029,13 @@ export function TaskJournal({
   const stats = useMemo(() => {
     const active = statusAndPeriodFilteredTasks.filter((task) => isTaskJournalActive(task.status));
     const overdue = active.filter((task) => new Date(task.dueAt).getTime() < Date.now());
-    const today = active.filter((task) => isSameTaskDay(task.dueAt, new Date()));
+    const today = active.filter((task) => isSameTaskDay(task.dueAt, getCurrentCalendarDate()));
     const high = active.filter((task) => task.priority === 'high' || task.priority === 'urgent');
     return { active: active.length, overdue: overdue.length, today: today.length, high: high.length };
   }, [currentTimeZoneId, statusAndPeriodFilteredTasks]);
 
   const boardColumns = useMemo(() => {
-    const nowDate = new Date();
+    const nowDate = getCurrentCalendarDate();
     const tomorrow = addDays(nowDate, 1);
     const active = filteredTasks.filter((task) => isTaskJournalActive(task.status));
 
@@ -2554,7 +2579,7 @@ export function TaskJournal({
   };
 
   const buildPlanningReportParams = (format: TaskPlanningReportFormat) => {
-    const nowDate = new Date();
+    const nowDate = getCurrentCalendarDate();
     let from = dateRangeBounds.from?.toISOString();
     let to = dateRangeBounds.to?.toISOString();
     let reportStatus: TaskJournalStatus | 'active' | undefined = statusFilter === 'all' ? undefined : statusFilter;
@@ -2573,8 +2598,8 @@ export function TaskJournal({
       to = nowDate.toISOString();
     } else if (metricFilter === 'today') {
       reportStatus = 'active';
-      from = startOfDay(nowDate).toISOString();
-      to = endOfDay(nowDate).toISOString();
+      from = parseDateFilterValue(toLocalDateKey(nowDate), 'start')?.toISOString() ?? startOfDay(nowDate).toISOString();
+      to = parseDateFilterValue(toLocalDateKey(nowDate), 'end')?.toISOString() ?? endOfDay(nowDate).toISOString();
     } else if (metricFilter === 'highPriority') {
       reportStatus = 'active';
       reportPriority = 'highPriority';
