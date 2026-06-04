@@ -1,3 +1,5 @@
+import { toTimeZoneDateKey } from './timeZoneDate';
+
 /** 0..9 -> '00'..'09' */
 const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
 
@@ -44,6 +46,11 @@ export function fromInputToApiDate(ymd: string | null | undefined): string | und
 /** Сегодня (локально) в 'YYYY-MM-DD' */
 export function todayYMD(): string {
   return formatLocalYMD(new Date());
+}
+
+/** Сегодня в 'YYYY-MM-DD' по указанному часовому поясу профиля. */
+export function todayYMDInTimeZone(timeZoneId?: string | null, now: Date = new Date()): string {
+  return toTimeZoneDateKey(now, timeZoneId) || formatLocalYMD(now);
 }
 
 /** Превращает ISO/'YYYY-MM-DD'/Date в 'ДД.ММ.ГГГГ' */

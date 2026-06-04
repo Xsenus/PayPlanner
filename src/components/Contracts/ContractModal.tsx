@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Plus, X } from 'lucide-react';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
 import type { Contract, ContractBillingMode, ContractClient, ContractInput, ContractLegalEntity, ContractStatus } from '../../types';
-import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
+import { fromInputToApiDate, todayYMDInTimeZone, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 
@@ -55,9 +56,9 @@ function buildInitialCounterparties(contract: Contract | null, defaultClients?: 
   return [...clients, ...legalEntities];
 }
 
-function normalizeContractToForm(contract: Contract | null): FormState {
+function normalizeContractToForm(contract: Contract | null, timeZoneId?: string | null): FormState {
   if (!contract) {
-    const today = toDateInputValue(new Date());
+    const today = todayYMDInTimeZone(timeZoneId);
     return {
       number: '',
       title: '',
@@ -74,7 +75,7 @@ function normalizeContractToForm(contract: Contract | null): FormState {
   return {
     number: contract.number ?? '',
     title: contract.title ?? '',
-    date: toDateInputValue(contract.date) || toDateInputValue(new Date()),
+    date: toDateInputValue(contract.date) || todayYMDInTimeZone(timeZoneId),
     billingMode: contract.billingMode ?? 'Fixed',
     status: contract.status ?? 'Draft',
     isOpenEnded: contract.isOpenEnded ?? false,
@@ -99,8 +100,11 @@ export function ContractModal({
   overlayClassName,
 }: ContractModalProps) {
   const { t } = useTranslation();
+  const profileTimeZoneId = useUserTimeZone();
   const isEdit = mode === 'edit';
-  const [form, setForm] = useState<FormState>(() => normalizeContractToForm(contract));
+  const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
+  const defaultDateRef = useRef(defaultDate);
+  const [form, setForm] = useState<FormState>(() => normalizeContractToForm(contract, profileTimeZoneId));
   const [localError, setLocalError] = useState<string | null>(null);
   const [numberManuallyEdited, setNumberManuallyEdited] = useState(isEdit);
   const numberManuallyEditedRef = useRef(isEdit);
@@ -115,14 +119,29 @@ export function ContractModal({
 
   useEffect(() => {
     if (open) {
-      setForm(normalizeContractToForm(contract));
+      setForm(normalizeContractToForm(contract, profileTimeZoneId));
       setLocalError(null);
       setSelectedCounterparties(buildInitialCounterparties(contract, defaultClients));
       setPickerOpen(false);
       setNumberManuallyEdited(isEdit);
       numberManuallyEditedRef.current = isEdit;
+      defaultDateRef.current = defaultDate;
     }
   }, [open, contract, defaultClients, isEdit]);
+
+  useEffect(() => {
+    if (!open || isEdit) {
+      defaultDateRef.current = defaultDate;
+      return;
+    }
+
+    setForm((current) => (
+      current.date === defaultDateRef.current
+        ? { ...current, date: defaultDate }
+        : current
+    ));
+    defaultDateRef.current = defaultDate;
+  }, [defaultDate, isEdit, open]);
 
   useEffect(() => {
     numberManuallyEditedRef.current = numberManuallyEdited;

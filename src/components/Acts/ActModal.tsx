@@ -18,7 +18,7 @@ import type {
 import { useTranslation } from '../../hooks/useTranslation';
 import { useFormRequirements } from '../../hooks/useFormRequirements';
 import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
-import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
+import { fromInputToApiDate, todayYMDInTimeZone, toDateInputValue } from '../../utils/dateUtils';
 import { getDocumentStatusCodes, getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -26,6 +26,7 @@ import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { useLegalEntities } from '../../hooks/useLegalEntities';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 
 interface ActModalProps {
   open: boolean;
@@ -407,9 +408,10 @@ function normalizeActToForm(
   defaultClientId?: number | null,
   defaultResponsibleId?: number | null,
   initialValues?: Partial<ActInput> & { amount?: number | null },
+  timeZoneId?: string | null,
 ): FormState {
   if (!act) {
-    const today = toDateInputValue(new Date());
+    const today = todayYMDInTimeZone(timeZoneId);
     const initialInvoiceId = initialValues?.invoiceId ? String(initialValues.invoiceId) : '';
 
     return {
@@ -446,7 +448,7 @@ function normalizeActToForm(
   return {
     number: act.number ?? '',
     title: act.title ?? '',
-    date: toDateInputValue(act.date) || toDateInputValue(new Date()),
+    date: toDateInputValue(act.date) || todayYMDInTimeZone(timeZoneId),
     amount: act.amount !== undefined && act.amount !== null ? String(act.amount) : '',
     creationMode: act.creationMode === 'Manual' ? 'Manual' : 'Partial',
     invoiceNumber: act.invoiceNumber ?? '',
@@ -489,8 +491,11 @@ export function ActModal({
   const { isRequired } = useFormRequirements('acts', open);
   const documentStatusSettings = useDocumentStatusSettings();
   const { legalEntities } = useLegalEntities();
+  const profileTimeZoneId = useUserTimeZone();
+  const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
+  const defaultDateRef = useRef(defaultDate);
   const [form, setForm] = useState<FormState>(() =>
-    normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues),
+    normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues, profileTimeZoneId),
   );
   const [localError, setLocalError] = useState<string | null>(null);
   const [invoiceDetails, setInvoiceDetails] = useState<Invoice | null>(null);
@@ -515,7 +520,7 @@ export function ActModal({
 
   useEffect(() => {
     if (open) {
-      setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues));
+      setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues, profileTimeZoneId));
       setLocalError(null);
       setInvoiceDetails(null);
       setInvoiceError(null);
@@ -527,8 +532,23 @@ export function ActModal({
       setManualLineItems([]);
       manualLineItemsSeedRef.current = null;
       setLineItemPickerOpen(false);
+      defaultDateRef.current = defaultDate;
     }
   }, [open, act, defaultClientId, defaultResponsibleId, initialValues]);
+
+  useEffect(() => {
+    if (!open || isEdit) {
+      defaultDateRef.current = defaultDate;
+      return;
+    }
+
+    setForm((current) => (
+      current.date === defaultDateRef.current
+        ? { ...current, date: defaultDate }
+        : current
+    ));
+    defaultDateRef.current = defaultDate;
+  }, [defaultDate, isEdit, open]);
 
   useEffect(() => {
     if (!open) {

@@ -2,9 +2,10 @@ import { ArrowLeft, Loader2, Plus, Save, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
 import type { ContractBillingMode, ContractClient, ContractInput, ContractLegalEntity, ContractStatus } from '../../types';
-import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
+import { fromInputToApiDate, todayYMDInTimeZone } from '../../utils/dateUtils';
 import { TablePagination } from '../ui/TablePagination';
 import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 
@@ -27,8 +28,8 @@ type FormState = {
   terminationDate: string;
 };
 
-const createInitialForm = (): FormState => {
-  const today = toDateInputValue(new Date());
+const createInitialForm = (timeZoneId?: string | null): FormState => {
+  const today = todayYMDInTimeZone(timeZoneId);
   return {
     number: '',
     title: '',
@@ -61,7 +62,10 @@ function legalEntityName(entity: Pick<ContractLegalEntity, 'shortName' | 'fullNa
 export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProps) {
   const { t } = useTranslation();
   const toast = useToast();
-  const [form, setForm] = useState<FormState>(createInitialForm);
+  const profileTimeZoneId = useUserTimeZone();
+  const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
+  const defaultDateRef = useRef(defaultDate);
+  const [form, setForm] = useState<FormState>(() => createInitialForm(profileTimeZoneId));
   const [localError, setLocalError] = useState<string | null>(null);
   const [numberManuallyEdited, setNumberManuallyEdited] = useState(false);
   const numberManuallyEditedRef = useRef(false);
@@ -78,6 +82,15 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
   useEffect(() => {
     numberManuallyEditedRef.current = numberManuallyEdited;
   }, [numberManuallyEdited]);
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      date: current.date === defaultDateRef.current ? defaultDate : current.date,
+      startDate: current.startDate === defaultDateRef.current ? defaultDate : current.startDate,
+    }));
+    defaultDateRef.current = defaultDate;
+  }, [defaultDate]);
 
   useEffect(() => {
     if (!form.date || numberManuallyEdited) return;

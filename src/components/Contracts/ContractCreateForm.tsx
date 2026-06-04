@@ -1,10 +1,11 @@
 import { Loader2, Search, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService } from '../../services/api';
 import type { ContractBillingMode, ContractClient, ContractInput, ContractStatus } from '../../types';
-import { fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
+import { fromInputToApiDate, todayYMDInTimeZone } from '../../utils/dateUtils';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 
 type FormState = {
@@ -25,11 +26,11 @@ interface ContractCreateFormProps {
   errorMessage?: string | null;
 }
 
-function getDefaultFormState(): FormState {
+function getDefaultFormState(timeZoneId?: string | null): FormState {
   return {
     number: '',
     title: '',
-    date: toDateInputValue(new Date()),
+    date: todayYMDInTimeZone(timeZoneId),
     billingMode: 'Fixed',
     status: 'Draft',
     isOpenEnded: false,
@@ -41,7 +42,10 @@ function getDefaultFormState(): FormState {
 
 export function ContractCreateForm({ onSubmit, submitting, errorMessage }: ContractCreateFormProps) {
   const { t } = useTranslation();
-  const [form, setForm] = useState<FormState>(getDefaultFormState);
+  const profileTimeZoneId = useUserTimeZone();
+  const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
+  const defaultDateRef = useRef(defaultDate);
+  const [form, setForm] = useState<FormState>(() => getDefaultFormState(profileTimeZoneId));
   const [localError, setLocalError] = useState<string | null>(null);
   const [selectedClients, setSelectedClients] = useState<ContractClient[]>([]);
   const [clientSearch, setClientSearch] = useState('');
@@ -50,6 +54,13 @@ export function ContractCreateForm({ onSubmit, submitting, errorMessage }: Contr
   const [clientOptionsLoading, setClientOptionsLoading] = useState(false);
   const [clientOptionsError, setClientOptionsError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setForm((current) => (
+      current.date === defaultDateRef.current ? { ...current, date: defaultDate } : current
+    ));
+    defaultDateRef.current = defaultDate;
+  }, [defaultDate]);
 
   useEffect(() => {
     let cancelled = false;
