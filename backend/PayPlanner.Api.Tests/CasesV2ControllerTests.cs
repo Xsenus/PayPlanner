@@ -4592,6 +4592,86 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task RunCourtSync_ConvertsSudrfTimedHearingsFromUserTimeZone()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-sync-samara@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Чудайкин Алексей",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Чудайкин - С/З",
+            CourtUrl = "https://samara--sam.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var sourceLocalHearingAt = new DateTime(2026, 6, 5, 16, 0, 0, DateTimeKind.Unspecified);
+        var expectedUtcHearingAt = new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc);
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = clientCase.CourtUrl,
+            CourtName = "Самарский областной суд",
+            CaseNumber = "33-100/2026",
+            JudgeName = "Иванов И.И.",
+            Instance = "appeal",
+            NextHearingAt = sourceLocalHearingAt,
+            NextHearingPlace = "зал 4",
+            MovementEvents =
+            [
+                new()
+                {
+                    Title = "Судебное заседание",
+                    ScheduledAt = sourceLocalHearingAt,
+                    Place = "зал 4",
+                    SourceSummary = "Судебное заседание; 05.06.2026 16:00; место: зал 4",
+                },
+            ],
+        };
+        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
+
+        var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
+        Assert.Equal("external-sync-completed", dto.Status);
+        Assert.Equal(expectedUtcHearingAt, dto.NextHearingAt);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal(expectedUtcHearingAt, clientCase.NextHearingAt);
+        var courtEvent = await db.ClientCaseCourtEvents.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal(expectedUtcHearingAt, courtEvent.ScheduledAt);
+        Assert.False(courtEvent.AllDay);
+
+        var calendarResult = await controller.GetCaseCalendarEvents(
+            new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Unspecified),
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: false,
+            ct: CancellationToken.None);
+        var calendarOk = Assert.IsType<OkObjectResult>(calendarResult.Result);
+        var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(calendarOk.Value);
+        Assert.Contains(events, item => item.Kind == "court" && item.SourceType == "hearing" && item.StartAt == expectedUtcHearingAt);
+        Assert.Contains(events, item => item.Kind == "court" && item.SourceId == courtEvent.Id && item.StartAt == expectedUtcHearingAt);
+    }
+
+    [Fact]
     public async Task RunCourtSync_ReusesExistingManualCourtEventAtSameHearingTime()
     {
         await using var db = await CreateContextAsync();

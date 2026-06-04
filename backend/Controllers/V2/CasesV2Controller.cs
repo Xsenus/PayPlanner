@@ -6029,7 +6029,8 @@ public class CasesV2Controller : ControllerBase
             try
             {
                 var courtData = await courtSyncProvider.FetchCaseAsync(clientCase.CourtUrl, ct, clientCase.CourtCaseNumber);
-                var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, actorName, checkedAt, ct);
+                var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
+                var syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, checkedAt, ct);
                 var syncMessage = syncResult.ChangedFields.Count == 0 && syncResult.CreatedCourtEvents == 0 && syncResult.UpdatedCourtEvents == 0
                     ? $"Судебный источник проверен: новых изменений не найдено. Суд: {FormatCaseTextValue(clientCase.CourtName)}; № в суде: {FormatCaseTextValue(clientCase.CourtCaseNumber)}."
                     : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult)}";
@@ -6107,9 +6108,67 @@ public class CasesV2Controller : ControllerBase
         });
     }
 
+    private async Task<TimeZoneInfo?> ResolveCourtSyncSourceTimeZoneAsync(ClientCase clientCase, CancellationToken ct)
+    {
+        var userIds = new List<int>();
+        if (User.GetUserId() is { } actorUserId)
+        {
+            userIds.Add(actorUserId);
+        }
+
+        if (clientCase.ResponsibleUserId is { } responsibleUserId && !userIds.Contains(responsibleUserId))
+        {
+            userIds.Add(responsibleUserId);
+        }
+
+        if (userIds.Count == 0)
+        {
+            return null;
+        }
+
+        var settings = await _db.UserSettings
+            .AsNoTracking()
+            .Where(item => userIds.Contains(item.UserId) && item.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
+            .Select(item => new { item.UserId, item.Value })
+            .ToListAsync(ct);
+
+        foreach (var userId in userIds)
+        {
+            var timeZoneId = settings
+                .FirstOrDefault(item => item.UserId == userId)?.Value;
+            if (!string.IsNullOrWhiteSpace(timeZoneId))
+            {
+                return CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            }
+        }
+
+        return null;
+    }
+
+    private static DateTime NormalizeCourtSyncSourceDateTime(DateTime value, TimeZoneInfo? sourceTimeZone, bool dateOnly)
+    {
+        if (dateOnly)
+        {
+            return DateTime.SpecifyKind(value.Date, DateTimeKind.Utc);
+        }
+
+        if (sourceTimeZone is null)
+        {
+            return CalendarTimeZoneHelper.NormalizeUtcInstant(value);
+        }
+
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => CalendarTimeZoneHelper.FromUserLocalToUtc(value, sourceTimeZone),
+        };
+    }
+
     private async Task<CourtSyncApplyResult> ApplySudrfCourtSyncAsync(
         ClientCase clientCase,
         SudrfCourtCaseData courtData,
+        TimeZoneInfo? sourceTimeZone,
         string actorName,
         DateTime checkedAt,
         CancellationToken ct)
@@ -6132,9 +6191,12 @@ public class CasesV2Controller : ControllerBase
         UpdateString("третьи лица", clientCase.ThirdParties, JoinParticipants(courtData.Participants, "ТРЕТ", "ЗАИНТЕРЕС"), value => clientCase.ThirdParties = value, 1000);
         UpdateString("представители", clientCase.Representatives, JoinParticipants(courtData.Participants, "ПРЕДСТАВИТЕЛ"), value => clientCase.Representatives = value, 1000);
 
-        if (courtData.NextHearingAt.HasValue && clientCase.NextHearingAt != courtData.NextHearingAt)
+        var nextHearingAt = courtData.NextHearingAt.HasValue
+            ? NormalizeCourtSyncSourceDateTime(courtData.NextHearingAt.Value, sourceTimeZone, courtData.NextHearingAt.Value.TimeOfDay == TimeSpan.Zero)
+            : (DateTime?)null;
+        if (nextHearingAt.HasValue && clientCase.NextHearingAt != nextHearingAt)
         {
-            clientCase.NextHearingAt = courtData.NextHearingAt;
+            clientCase.NextHearingAt = nextHearingAt;
             changedFields.Add("ближайшее заседание");
         }
 
@@ -6150,7 +6212,9 @@ public class CasesV2Controller : ControllerBase
 
             foreach (var hearing in hearings)
             {
-                var scheduledAt = hearing.ScheduledAt!.Value;
+                var sourceScheduledAt = hearing.ScheduledAt!.Value;
+                var allDay = sourceScheduledAt.TimeOfDay == TimeSpan.Zero;
+                var scheduledAt = NormalizeCourtSyncSourceDateTime(sourceScheduledAt, sourceTimeZone, allDay);
                 var title = Truncate(NormalizeOptional(hearing.Title) ?? "Судебное заседание", 200);
                 var existing = existingEvents.FirstOrDefault(item =>
                     CourtEventMatchesSudrfHearing(item, scheduledAt, title, courtData, hearing));
@@ -6165,7 +6229,7 @@ public class CasesV2Controller : ControllerBase
                         Title = title,
                         Description = Truncate(hearing.SourceSummary, 1000),
                         ScheduledAt = scheduledAt,
-                        AllDay = scheduledAt.TimeOfDay == TimeSpan.Zero,
+                        AllDay = allDay,
                         CourtInstance = courtData.Instance,
                         CourtName = Truncate(NormalizeOptional(courtData.CourtName) ?? clientCase.CourtName, 200),
                         CourtCaseNumber = Truncate(NormalizeOptional(courtData.CaseNumber) ?? clientCase.CourtCaseNumber, 100),
