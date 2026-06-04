@@ -472,14 +472,15 @@ public sealed class NotificationService : INotificationService
             ? $"task:{task.Id}:reminder:{reminderKey}:{nowUtc:yyyyMMdd}"
             : $"task:{task.Id}:reminder:{reminderKey}";
 
+        var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(task.AssigneeUserId.Value, cancellationToken);
         var reminderSubject = BuildTaskReminderSubject(task, reminderKey, nowUtc);
-        var reminderBody = BuildTaskReminderBody(task, reminderKey, nowUtc);
+        var reminderBody = BuildTaskReminderBody(task, reminderKey, nowUtc, recipientTimeZone);
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.TaskReminder,
             reminderSubject,
             reminderBody,
             NotificationTemplateCatalog.MergeValues(
-                BuildTaskTemplateValues(task),
+                BuildTaskTemplateValues(task, recipientTimeZone),
                 new Dictionary<string, string?>
                 {
                     ["reminder.subject"] = reminderSubject,
@@ -528,19 +529,21 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<NotificationDelivery>();
         }
 
-        var taskAssignedSubject = $"Новая задача: {task.Title}";
-        var taskAssignedBody = BuildTaskAssignedBody(task, actorName);
-        var message = await RenderTemplateAsync(
-            NotificationTemplateKeys.TaskAssigned,
-            taskAssignedSubject,
-            taskAssignedBody,
-            BuildTaskTemplateValues(task, actorName),
-            purpose: NotificationPurposes.TaskReminder,
-            cancellationToken: cancellationToken);
         var eventKey = $"task:{task.Id}:assigned";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var taskAssignedSubject = $"Новая задача: {task.Title}";
+            var taskAssignedBody = BuildTaskAssignedBody(task, actorName, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskAssigned,
+                taskAssignedSubject,
+                taskAssignedBody,
+                BuildTaskTemplateValues(task, recipientTimeZone, actorName),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
                 await CreateUserNotificationAsync(
@@ -578,13 +581,14 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<NotificationDelivery>();
         }
 
+        var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(task.AuthorUserId.Value, cancellationToken);
         var taskCompletedSubject = $"Задача выполнена: {task.Title}";
-        var taskCompletedBody = BuildTaskCompletedBody(task);
+        var taskCompletedBody = BuildTaskCompletedBody(task, recipientTimeZone);
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.TaskCompleted,
             taskCompletedSubject,
             taskCompletedBody,
-            BuildTaskTemplateValues(task),
+            BuildTaskTemplateValues(task, recipientTimeZone),
             purpose: NotificationPurposes.TaskReminder,
             cancellationToken: cancellationToken);
 
@@ -638,20 +642,22 @@ public sealed class NotificationService : INotificationService
             .ToList();
         var eventKey = $"case:{task.ClientCaseId ?? 0}:inactivity-control:{task.Id}";
         var caseInactivitySubject = $"Автоконтроль дела: {task.ObjectName}";
-        var caseInactivityBody = BuildCaseInactivityControlBody(task, daysWithoutActiveTask);
-        var message = await RenderTemplateAsync(
-            NotificationTemplateKeys.CaseInactivityControl,
-            caseInactivitySubject,
-            caseInactivityBody,
-            NotificationTemplateCatalog.MergeValues(
-                BuildTaskTemplateValues(task),
-                new Dictionary<string, string?> { ["case.daysWithoutActiveTask"] = daysWithoutActiveTask.ToString(CultureInfo.InvariantCulture) }),
-            purpose: NotificationPurposes.TaskReminder,
-            cancellationToken: cancellationToken);
-
-        if (HasTaskChannel(task, NotificationChannels.InApp))
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var recipientUserId in recipientUserIds)
         {
-            foreach (var recipientUserId in recipientUserIds)
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(recipientUserId, cancellationToken);
+            var caseInactivityBody = BuildCaseInactivityControlBody(task, daysWithoutActiveTask, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.CaseInactivityControl,
+                caseInactivitySubject,
+                caseInactivityBody,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone),
+                    new Dictionary<string, string?> { ["case.daysWithoutActiveTask"] = daysWithoutActiveTask.ToString(CultureInfo.InvariantCulture) }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
+            if (HasTaskChannel(task, NotificationChannels.InApp))
             {
                 await CreateUserNotificationAsync(
                     recipientUserId,
@@ -670,11 +676,7 @@ public sealed class NotificationService : INotificationService
                     },
                     cancellationToken);
             }
-        }
 
-        var deliveries = new List<NotificationDelivery>();
-        foreach (var recipientUserId in recipientUserIds)
-        {
             var enabledChannels = await ResolveUserNotificationChannelsAsync(
                 recipientUserId,
                 UserNotificationTypes.CaseInactivityControl,
@@ -715,22 +717,24 @@ public sealed class NotificationService : INotificationService
 
         var channels = ResolveTaskMessageChannels(task);
         var conflictSubject = $"Конфликт расписания: {task.Title}";
-        var conflictBody = BuildTaskScheduleConflictBody(task, effectiveConflicts, actorName);
-        var message = await RenderTemplateAsync(
-            NotificationTemplateKeys.TaskScheduleConflict,
-            conflictSubject,
-            conflictBody,
-            NotificationTemplateCatalog.MergeValues(
-                BuildTaskTemplateValues(task, actorName),
-                new Dictionary<string, string?> { ["conflicts"] = BuildConflictSummary(effectiveConflicts) }),
-            purpose: NotificationPurposes.TaskReminder,
-            cancellationToken: cancellationToken);
         var conflictKey = string.Join('-', effectiveConflicts.Select(item => item.Id).OrderBy(id => id));
         var eventKey = $"task:{task.Id}:schedule-conflict:{task.DueAt:yyyyMMddHHmm}:{task.PlannedDurationMinutes}:{conflictKey}";
         var deliveries = new List<NotificationDelivery>();
 
         foreach (var userId in recipients)
         {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var conflictBody = BuildTaskScheduleConflictBody(task, effectiveConflicts, actorName, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskScheduleConflict,
+                conflictSubject,
+                conflictBody,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, actorName),
+                    new Dictionary<string, string?> { ["conflicts"] = BuildConflictSummary(effectiveConflicts, recipientTimeZone) }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
                 await CreateUserNotificationAsync(
@@ -776,23 +780,25 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<NotificationDelivery>();
         }
 
-        var channels = ResolveTaskMessageChannels(task);
         var currentApprover = GetCurrentApprover(task);
         var approvalSubject = $"Задача ожидает согласования: {task.Title}";
-        var approvalBody = BuildTaskApprovalRequestedBody(task, actorName, currentApprover);
-        var message = await RenderTemplateAsync(
-            NotificationTemplateKeys.TaskApprovalRequested,
-            approvalSubject,
-            approvalBody,
-            NotificationTemplateCatalog.MergeValues(
-                BuildTaskTemplateValues(task, actorName),
-                new Dictionary<string, string?> { ["approval.approverName"] = currentApprover?.User?.FullName ?? currentApprover?.User?.Email ?? "не указан" }),
-            purpose: NotificationPurposes.TaskReminder,
-            cancellationToken: cancellationToken);
+        var channels = ResolveTaskMessageChannels(task);
         var eventKey = $"task:{task.Id}:approval-request:{currentApprover?.Id ?? 0}:{DateTime.UtcNow:yyyyMMddHHmmssfff}";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var approvalBody = BuildTaskApprovalRequestedBody(task, actorName, currentApprover, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskApprovalRequested,
+                approvalSubject,
+                approvalBody,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, actorName),
+                    new Dictionary<string, string?> { ["approval.approverName"] = currentApprover?.User?.FullName ?? currentApprover?.User?.Email ?? "не указан" }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
                 await CreateUserNotificationAsync(
@@ -849,20 +855,22 @@ public sealed class NotificationService : INotificationService
         }
 
         var channels = ResolveTaskMessageChannels(task);
-        var approvalDecisionBody = BuildTaskApprovalDecisionBody(task, approver, decision, actorName, resolution);
-        var message = await RenderTemplateAsync(
-            isRevision ? NotificationTemplateKeys.TaskRevisionRequested : NotificationTemplateKeys.TaskApproved,
-            subject,
-            approvalDecisionBody,
-            NotificationTemplateCatalog.MergeValues(
-                BuildTaskTemplateValues(task, actorName),
-                new Dictionary<string, string?> { ["approval.resolution"] = string.IsNullOrWhiteSpace(resolution) ? "Без комментария." : resolution.Trim() }),
-            purpose: NotificationPurposes.TaskReminder,
-            cancellationToken: cancellationToken);
         var eventKey = $"task:{task.Id}:approval-decision:{approver.Id}:{decision}:{DateTime.UtcNow:yyyyMMddHHmmssfff}";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var approvalDecisionBody = BuildTaskApprovalDecisionBody(task, approver, decision, actorName, resolution, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                isRevision ? NotificationTemplateKeys.TaskRevisionRequested : NotificationTemplateKeys.TaskApproved,
+                subject,
+                approvalDecisionBody,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, actorName),
+                    new Dictionary<string, string?> { ["approval.resolution"] = string.IsNullOrWhiteSpace(resolution) ? "Без комментария." : resolution.Trim() }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
                 await CreateUserNotificationAsync(
@@ -907,24 +915,26 @@ public sealed class NotificationService : INotificationService
         }
 
         var taskChangedSubject = $"Изменения по задаче: {task.Title}";
-        var taskChangedBody = BuildTaskChangedBody(task, changeLabels, actorName, comment);
-        var message = await RenderTemplateAsync(
-            NotificationTemplateKeys.TaskChanged,
-            taskChangedSubject,
-            taskChangedBody,
-            NotificationTemplateCatalog.MergeValues(
-                BuildTaskTemplateValues(task, actorName),
-                new Dictionary<string, string?>
-                {
-                    ["task.changes"] = string.Join(Environment.NewLine, changeLabels.Select(label => $"- {label}")),
-                    ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
-                }),
-            purpose: NotificationPurposes.TaskReminder,
-            cancellationToken: cancellationToken);
         var eventKey = $"task:{task.Id}:changed:{DateTime.UtcNow:yyyyMMddHHmmssfff}:{actorUserId}";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var taskChangedBody = BuildTaskChangedBody(task, changeLabels, actorName, comment, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskChanged,
+                taskChangedSubject,
+                taskChangedBody,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, actorName),
+                    new Dictionary<string, string?>
+                    {
+                        ["task.changes"] = string.Join(Environment.NewLine, changeLabels.Select(label => $"- {label}")),
+                        ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
+                    }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
                 await CreateUserNotificationAsync(
@@ -967,24 +977,26 @@ public sealed class NotificationService : INotificationService
         }
 
         var taskCommentSubject = $"Комментарий по задаче: {task.Title}";
-        var taskCommentBody = BuildTaskCommentBody(task, comment);
-        var message = await RenderTemplateAsync(
-            NotificationTemplateKeys.TaskComment,
-            taskCommentSubject,
-            taskCommentBody,
-            NotificationTemplateCatalog.MergeValues(
-                BuildTaskTemplateValues(task, comment.AuthorName),
-                new Dictionary<string, string?>
-                {
-                    ["comment.authorName"] = comment.AuthorName,
-                    ["comment.text"] = comment.Text,
-                }),
-            purpose: NotificationPurposes.TaskReminder,
-            cancellationToken: cancellationToken);
         var eventKey = $"task:{task.Id}:comment:{comment.Id}";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var taskCommentBody = BuildTaskCommentBody(task, comment, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskComment,
+                taskCommentSubject,
+                taskCommentBody,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, comment.AuthorName),
+                    new Dictionary<string, string?>
+                    {
+                        ["comment.authorName"] = comment.AuthorName,
+                        ["comment.text"] = comment.Text,
+                    }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
                 await CreateUserNotificationAsync(
@@ -1954,12 +1966,21 @@ public sealed class NotificationService : INotificationService
             ["user.email"] = user.Email ?? string.Empty,
         };
 
-    private static Dictionary<string, string?> BuildTaskTemplateValues(TaskJournalItem task, string? actorName = null)
+    private Task<TimeZoneInfo> ResolveTaskRecipientTimeZoneAsync(int userId, CancellationToken cancellationToken)
+        => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_context, userId, cancellationToken);
+
+    private static string FormatTaskDueAt(DateTime dueAt, TimeZoneInfo timeZone)
+        => CalendarTimeZoneHelper.FormatUserDateTime(dueAt, timeZone, culture: RuCulture);
+
+    private static Dictionary<string, string?> BuildTaskTemplateValues(
+        TaskJournalItem task,
+        TimeZoneInfo timeZone,
+        string? actorName = null)
         => new(StringComparer.OrdinalIgnoreCase)
         {
             ["task.title"] = task.Title,
             ["task.objectName"] = task.ObjectName,
-            ["task.dueAt"] = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture),
+            ["task.dueAt"] = FormatTaskDueAt(task.DueAt, timeZone),
             ["task.status"] = task.Status,
             ["task.priority"] = task.Priority,
             ["task.assigneeName"] = string.IsNullOrWhiteSpace(task.AssigneeName) ? "не указан" : task.AssigneeName.Trim(),
@@ -1967,11 +1988,11 @@ public sealed class NotificationService : INotificationService
             ["actor.name"] = string.IsNullOrWhiteSpace(actorName) ? "Система" : actorName.Trim(),
         };
 
-    private static string BuildConflictSummary(IReadOnlyList<TaskJournalItem> conflicts)
+    private static string BuildConflictSummary(IReadOnlyList<TaskJournalItem> conflicts, TimeZoneInfo timeZone)
         => string.Join(
             Environment.NewLine,
             conflicts.Select(item =>
-                $"- {item.Title} · {DateTime.SpecifyKind(item.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture)}"));
+                $"- {item.Title} · {FormatTaskDueAt(item.DueAt, timeZone)}"));
 
     private static string BuildTaskReminderSubject(TaskJournalItem task, string reminderKey, DateTime nowUtc)
         => reminderKey switch
@@ -1981,9 +2002,13 @@ public sealed class NotificationService : INotificationService
             _ => $"Напоминание о задаче: {task.Title}"
         };
 
-    private static string BuildTaskReminderBody(TaskJournalItem task, string reminderKey, DateTime nowUtc)
+    private static string BuildTaskReminderBody(
+        TaskJournalItem task,
+        string reminderKey,
+        DateTime nowUtc,
+        TimeZoneInfo timeZone)
     {
-        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var prefix = reminderKey switch
         {
             "dailyOverdue" => "Задача просрочена.",
@@ -2013,9 +2038,9 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
-    private static string BuildTaskAssignedBody(TaskJournalItem task, string actorName)
+    private static string BuildTaskAssignedBody(TaskJournalItem task, string actorName, TimeZoneInfo timeZone)
     {
-        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var lines = new List<string>
         {
             $"{actorName} назначил(а) задачу.",
@@ -2040,9 +2065,9 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
-    private static string BuildTaskCompletedBody(TaskJournalItem task)
+    private static string BuildTaskCompletedBody(TaskJournalItem task, TimeZoneInfo timeZone)
     {
-        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var lines = new List<string>
         {
             "Исполнитель отметил задачу выполненной.",
@@ -2066,9 +2091,12 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
-    private static string BuildCaseInactivityControlBody(TaskJournalItem task, int daysWithoutActiveTask)
+    private static string BuildCaseInactivityControlBody(
+        TaskJournalItem task,
+        int daysWithoutActiveTask,
+        TimeZoneInfo timeZone)
     {
-        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var lines = new List<string>
         {
             "По делу давно нет активной задачи, поэтому автоконтроль создал контрольную задачу.",
@@ -2088,9 +2116,13 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
-    private static string BuildTaskScheduleConflictBody(TaskJournalItem task, IReadOnlyList<TaskJournalItem> conflicts, string actorName)
+    private static string BuildTaskScheduleConflictBody(
+        TaskJournalItem task,
+        IReadOnlyList<TaskJournalItem> conflicts,
+        string actorName,
+        TimeZoneInfo timeZone)
     {
-        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var lines = new List<string>
         {
             $"{actorName} назначил(а) или изменил(а) задачу на время, которое пересекается с другими активными задачами.",
@@ -2109,16 +2141,20 @@ public sealed class NotificationService : INotificationService
         lines.Add("Пересечения:");
         foreach (var conflict in conflicts)
         {
-            var conflictDue = DateTime.SpecifyKind(conflict.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+            var conflictDue = FormatTaskDueAt(conflict.DueAt, timeZone);
             lines.Add($"- {conflictDue}: {conflict.Title}");
         }
 
         return string.Join('\n', lines);
     }
 
-    private static string BuildTaskApprovalRequestedBody(TaskJournalItem task, string actorName, TaskJournalParticipant? approver)
+    private static string BuildTaskApprovalRequestedBody(
+        TaskJournalItem task,
+        string actorName,
+        TaskJournalParticipant? approver,
+        TimeZoneInfo timeZone)
     {
-        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var lines = new List<string>
         {
             $"{actorName} отправил(а) задачу на согласование.",
@@ -2148,9 +2184,10 @@ public sealed class NotificationService : INotificationService
         TaskJournalParticipant approver,
         string decision,
         string actorName,
-        string? resolution)
+        string? resolution,
+        TimeZoneInfo timeZone)
     {
-        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var isRevision = string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase);
         var actionText = isRevision ? "вернул(а) задачу на доработку" : "согласовал(а) задачу";
         var lines = new List<string>
@@ -2181,9 +2218,10 @@ public sealed class NotificationService : INotificationService
         TaskJournalItem task,
         IReadOnlyList<string> changeLabels,
         string actorName,
-        string? comment)
+        string? comment,
+        TimeZoneInfo timeZone)
     {
-        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var lines = new List<string>
         {
             $"{actorName} изменил(а) задачу.",
@@ -2212,9 +2250,9 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
-    private static string BuildTaskCommentBody(TaskJournalItem task, TaskJournalComment comment)
+    private static string BuildTaskCommentBody(TaskJournalItem task, TaskJournalComment comment, TimeZoneInfo timeZone)
     {
-        var dueText = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm", RuCulture);
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         return string.Join('\n', new[]
         {
             $"{comment.AuthorName} добавил(а) комментарий по задаче.",

@@ -134,6 +134,66 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskReminderAsync_FormatsDueAtInRecipientTimeZone()
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        var user = await CreateUserAsync(db, "assignee-timezone@example.com");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Asia/Yekaterinburg",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "notifications.templates.v1",
+            Value = JsonSerializer.Serialize(new
+            {
+                templates = new[]
+                {
+                    new
+                    {
+                        key = NotificationTemplateKeys.TaskReminder,
+                        isEnabled = true,
+                        subject = "Срок задачи {{task.dueAt}}",
+                        body = "Срок шаблона: {{task.dueAt}}\n{{reminder.body}}"
+                    }
+                }
+            }, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        var dueAtUtc = new DateTime(2026, 6, 4, 11, 0, 0, DateTimeKind.Utc);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Проверить заседание",
+            AssigneeUserId = user.Id,
+            AssigneeName = user.FullName,
+            DueAt = dueAtUtc,
+            RemindersJson = "[\"atDue\"]",
+            ChannelsJson = "[\"email\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+
+        await service.NotifyTaskReminderAsync(task, "atDue", dueAtUtc);
+
+        var message = Assert.Single(emailService.Messages);
+        Assert.Contains("Срок задачи 04.06.2026 16:00", message.Subject);
+        Assert.Contains("Срок шаблона: 04.06.2026 16:00", message.Body);
+        Assert.Contains("Срок: 04.06.2026 16:00", message.Body);
+        Assert.DoesNotContain("04.06.2026 11:00", message.Body);
+    }
+
+    [Fact]
     public async Task NotifyTaskChangedAsync_CreatesInAppNotificationWithoutExternalChannels()
     {
         await using var db = await CreateContextAsync();
