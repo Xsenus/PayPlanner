@@ -240,6 +240,83 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
+    public async Task GetDiagnostics_FormatsSystemLogDescriptionsInProfileTimeZone()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        var role = new Role { Name = $"system-log-role-{Guid.NewGuid():N}", Description = "System log role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var admin = new User
+        {
+            Email = $"system-log-admin-{Guid.NewGuid():N}@example.com",
+            FullName = "System Log Admin",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        scope.Db.Users.Add(admin);
+        await scope.Db.SaveChangesAsync();
+        scope.Db.UserSettings.Add(new UserSetting
+        {
+            UserId = admin.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting
+            {
+                Key = NotificationDeliveryRetentionService.EnabledSettingKey,
+                Value = "true",
+                CreatedAt = now,
+                UpdatedAt = now,
+            },
+            new SystemSetting
+            {
+                Key = NotificationDeliveryRetentionService.RetentionDaysSettingKey,
+                Value = "30",
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        scope.Db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = "task:timezone:email",
+            Channel = NotificationChannels.Email,
+            Subject = "Timezone delivery",
+            Status = NotificationDeliveryStatus.Sent,
+            CreatedAt = new DateTime(2026, 6, 4, 20, 30, 0, DateTimeKind.Utc),
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var controller = new SystemJobsController(
+            scope.Db,
+            new ConfigurationBuilder().Build(),
+            new TestOptionsMonitor<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()));
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, admin.Id.ToString())
+                ], "test"))
+            }
+        };
+
+        var result = await controller.GetDiagnostics(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
+        var retention = Assert.Single(dto.Items, item => item.Key == SystemJobKeys.NotificationDeliveryRetention);
+        Assert.Equal(
+            "Самая старая техническая запись: 05.06.2026 00:30.",
+            retention.LastActivityDescription);
+    }
+
+    [Fact]
     public async Task RunJob_ReturnsBadRequestWhenManualRunIsDisabled()
     {
         await using var scope = await CreateDbScopeAsync();

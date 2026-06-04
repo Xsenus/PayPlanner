@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SystemJobDiagnosticsSettings } from './SystemJobDiagnosticsSettings';
 
 const apiMock = vi.hoisted(() => ({
+  getUserSetting: vi.fn(),
   getSystemJobDiagnostics: vi.fn(),
   runSystemJob: vi.fn(),
 }));
@@ -15,6 +16,7 @@ vi.mock('../../services/api', () => ({
 describe('SystemJobDiagnosticsSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMock.getUserSetting.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     apiMock.getSystemJobDiagnostics.mockResolvedValue({
       generatedAt: '2026-05-26T12:00:00Z',
       items: [
@@ -88,6 +90,13 @@ describe('SystemJobDiagnosticsSettings', () => {
     expect(screen.getByText('feature flag disabled')).toBeTruthy();
     expect(screen.getByText('Всего сервисов')).toBeTruthy();
     expect(screen.getByText('Ожидает условий')).toBeTruthy();
+  });
+
+  it('formats diagnostic timestamps in profile time zone', async () => {
+    render(<SystemJobDiagnosticsSettings />);
+
+    expect(await screen.findByText(/Обновлено: 26\.05\.2026, 16:00/)).toBeTruthy();
+    expect(screen.getAllByText(/26\.05\.2026, 14:00/).length).toBeGreaterThan(0);
   });
 
   it('refreshes diagnostics by button', async () => {

@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, Play, RefreshCw } from 'lucide-react';
 import { apiService, type SystemJobDiagnosticsDto, type SystemJobDiagnosticsItemDto } from '../../services/api';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   if (!value) {
     return '—';
   }
 
   try {
-    return new Date(value).toLocaleString('ru-RU');
+    return formatDateTimeInTimeZone(value, timeZoneId) || value;
   } catch {
     return value;
   }
@@ -55,10 +57,12 @@ function JobDiagnosticsCard({
   item,
   onRun,
   running,
+  timeZoneId,
 }: {
   item: SystemJobDiagnosticsItemDto;
   onRun: (jobKey: string) => void;
   running: boolean;
+  timeZoneId?: string | null;
 }) {
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -90,7 +94,7 @@ function JobDiagnosticsCard({
         </div>
         <div className="rounded-xl bg-slate-50 p-3">
           <div className="font-medium text-slate-500">Последний запуск</div>
-          <div className="mt-1 text-slate-900">{formatDateTime(item.lastRunFinishedAt)}</div>
+          <div className="mt-1 text-slate-900">{formatDateTime(item.lastRunFinishedAt, timeZoneId)}</div>
         </div>
       </div>
 
@@ -99,7 +103,7 @@ function JobDiagnosticsCard({
           {item.lastRunStatusText || 'Запуск не зафиксирован'}
         </span>
         {item.lastRunStartedAt ? (
-          <span className="text-slate-500">Начало: {formatDateTime(item.lastRunStartedAt)}</span>
+          <span className="text-slate-500">Начало: {formatDateTime(item.lastRunStartedAt, timeZoneId)}</span>
         ) : null}
         {item.lastRunError ? (
           <span className="text-red-700">{item.lastRunError}</span>
@@ -120,7 +124,7 @@ function JobDiagnosticsCard({
 
       {item.lastActivityAt || item.lastActivityDescription || item.nextRunHint ? (
         <div className="mt-4 space-y-2 text-sm leading-6 text-slate-600">
-          {item.lastActivityAt ? <p>Последняя видимая активность: {formatDateTime(item.lastActivityAt)}</p> : null}
+          {item.lastActivityAt ? <p>Последняя видимая активность: {formatDateTime(item.lastActivityAt, timeZoneId)}</p> : null}
           {item.lastActivityDescription ? <p>{item.lastActivityDescription}</p> : null}
           {item.nextRunHint ? <p>{item.nextRunHint}</p> : null}
         </div>
@@ -130,6 +134,7 @@ function JobDiagnosticsCard({
 }
 
 export function SystemJobDiagnosticsSettings() {
+  const timeZoneId = useUserTimeZone();
   const [diagnostics, setDiagnostics] = useState<SystemJobDiagnosticsDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningJobKey, setRunningJobKey] = useState<string | null>(null);
@@ -216,7 +221,7 @@ export function SystemJobDiagnosticsSettings() {
         </div>
 
         <div className="mt-4 text-sm text-slate-500">
-          Обновлено: {formatDateTime(diagnostics?.generatedAt)}
+          Обновлено: {formatDateTime(diagnostics?.generatedAt, timeZoneId)}
         </div>
       </div>
 
@@ -245,6 +250,7 @@ export function SystemJobDiagnosticsSettings() {
             item={item}
             onRun={runJob}
             running={runningJobKey === item.key}
+            timeZoneId={timeZoneId}
           />
         ))}
       </div>

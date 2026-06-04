@@ -88,6 +88,7 @@ public sealed class SystemJobsController : ControllerBase
     public async Task<ActionResult<SystemJobDiagnosticsDto>> GetDiagnostics(CancellationToken ct)
     {
         var now = DateTime.UtcNow;
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, GetCurrentUserId(), ct);
         var settings = await _db.SystemSettings
             .AsNoTracking()
             .Where(item =>
@@ -132,12 +133,12 @@ public sealed class SystemJobsController : ControllerBase
             await BuildTaskReminderJobAsync(now, ct),
             await BuildNotificationRetryJobAsync(settings, ct),
             await BuildYandexDiskCrmSyncJobAsync(settings, ct),
-            await BuildNotificationDeliveryRetentionJobAsync(settings, ct),
-            await BuildExternalCalendarSyncJobAsync(settings, ct),
+            await BuildNotificationDeliveryRetentionJobAsync(settings, timeZone, ct),
+            await BuildExternalCalendarSyncJobAsync(settings, timeZone, ct),
             await BuildCaseControlJobAsync(settings, now, ct),
             await BuildCourtSyncJobAsync(settings, ct),
             await BuildMoneyBalanceReconciliationJobAsync(ct),
-            await BuildUserActivityRetentionJobAsync(settings, ct),
+            await BuildUserActivityRetentionJobAsync(settings, timeZone, ct),
         };
         var lastRuns = _jobRunState is null
             ? new Dictionary<string, SystemJobRunState>(StringComparer.OrdinalIgnoreCase)
@@ -542,6 +543,7 @@ public sealed class SystemJobsController : ControllerBase
 
     private async Task<SystemJobDiagnosticsItemDto> BuildNotificationDeliveryRetentionJobAsync(
         IReadOnlyDictionary<string, string> settings,
+        TimeZoneInfo timeZone,
         CancellationToken ct)
     {
         var enabled = ParseBool(
@@ -582,7 +584,7 @@ public sealed class SystemJobsController : ControllerBase
             PendingCount = pendingCount,
             LastProcessedCount = batchSize,
             LastActivityAt = oldestDeliveryAt,
-            LastActivityDescription = oldestDeliveryAt is null ? null : $"Самая старая техническая запись: {oldestDeliveryAt:dd.MM.yyyy HH:mm}.",
+            LastActivityDescription = oldestDeliveryAt is null ? null : $"Самая старая техническая запись: {FormatSystemJobDateTime(oldestDeliveryAt.Value, timeZone)}.",
             NextRunHint = enabled
                 ? $"За один запуск удаляется до {batchSize} устаревших записей; ожидают очистки: {pendingCount}."
                 : "Автоочистка технических логов уведомлений выключена.",
@@ -593,6 +595,7 @@ public sealed class SystemJobsController : ControllerBase
 
     private async Task<SystemJobDiagnosticsItemDto> BuildExternalCalendarSyncJobAsync(
         IReadOnlyDictionary<string, string> settings,
+        TimeZoneInfo timeZone,
         CancellationToken ct)
     {
         var schedulerEnabled = ParseBool(
@@ -654,7 +657,7 @@ public sealed class SystemJobsController : ControllerBase
             PendingCount = state.CandidateCount,
             LastProcessedCount = state.BatchSize,
             LastActivityAt = state.OldestCandidateAt,
-            LastActivityDescription = state.OldestCandidateAt is null ? null : $"Ближайшее событие-кандидат: {state.OldestCandidateAt:dd.MM.yyyy HH:mm}.",
+            LastActivityDescription = state.OldestCandidateAt is null ? null : $"Ближайшее событие-кандидат: {FormatSystemJobDateTime(state.OldestCandidateAt.Value, timeZone)}.",
             NextRunHint = ready
                 ? $"За один запуск проверяется до {state.BatchSize} событий. Внешняя запись остается подготовительным контуром до OAuth."
                 : $"Не закрыто обязательных пунктов готовности: {blockedCount}.",
@@ -827,6 +830,7 @@ public sealed class SystemJobsController : ControllerBase
 
     private async Task<SystemJobDiagnosticsItemDto> BuildUserActivityRetentionJobAsync(
         IReadOnlyDictionary<string, string> settings,
+        TimeZoneInfo timeZone,
         CancellationToken ct)
     {
         var retentionDays = ParseNullableInt(settings.GetValueOrDefault(UserActivityRetentionDaysKey));
@@ -847,7 +851,7 @@ public sealed class SystemJobsController : ControllerBase
             StatusText = enabled ? "Включено" : "Без ограничения хранения",
             IntervalText = "Проверка каждые 12 часов",
             LastActivityAt = oldestLogAt,
-            LastActivityDescription = oldestLogAt is null ? null : $"Самая старая запись журнала: {oldestLogAt:dd.MM.yyyy HH:mm}.",
+            LastActivityDescription = oldestLogAt is null ? null : $"Самая старая запись журнала: {FormatSystemJobDateTime(oldestLogAt.Value, timeZone)}.",
             NextRunHint = enabled ? $"Хранение журнала: {retentionDays} дн." : "Автоочистка не удаляет записи без заданного срока хранения.",
             ManualRunEnabled = enabled,
             ManualRunHint = enabled ? "Можно вручную выполнить очистку журнала действий по текущему сроку хранения." : "Ручной запуск недоступен, пока срок хранения журнала не задан.",
@@ -857,6 +861,7 @@ public sealed class SystemJobsController : ControllerBase
     private async Task<SystemJobDiagnosticsItemDto?> BuildSingleJobAsync(string jobKey, CancellationToken ct)
     {
         var normalized = (jobKey ?? string.Empty).Trim();
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, GetCurrentUserId(), ct);
         var settings = await _db.SystemSettings
             .AsNoTracking()
             .Where(item =>
@@ -901,12 +906,12 @@ public sealed class SystemJobsController : ControllerBase
             SystemJobKeys.TaskReminders => await BuildTaskReminderJobAsync(DateTime.UtcNow, ct),
             SystemJobKeys.NotificationRetry => await BuildNotificationRetryJobAsync(settings, ct),
             SystemJobKeys.YandexDiskCrmSync => await BuildYandexDiskCrmSyncJobAsync(settings, ct),
-            SystemJobKeys.NotificationDeliveryRetention => await BuildNotificationDeliveryRetentionJobAsync(settings, ct),
-            SystemJobKeys.ExternalCalendarSync => await BuildExternalCalendarSyncJobAsync(settings, ct),
+            SystemJobKeys.NotificationDeliveryRetention => await BuildNotificationDeliveryRetentionJobAsync(settings, timeZone, ct),
+            SystemJobKeys.ExternalCalendarSync => await BuildExternalCalendarSyncJobAsync(settings, timeZone, ct),
             SystemJobKeys.CaseInactivityControl => await BuildCaseControlJobAsync(settings, DateTime.UtcNow, ct),
             SystemJobKeys.CourtSync => await BuildCourtSyncJobAsync(settings, ct),
             SystemJobKeys.MoneyBalanceReconciliation => await BuildMoneyBalanceReconciliationJobAsync(ct),
-            SystemJobKeys.UserActivityRetention => await BuildUserActivityRetentionJobAsync(settings, ct),
+            SystemJobKeys.UserActivityRetention => await BuildUserActivityRetentionJobAsync(settings, timeZone, ct),
             _ => null,
         };
     }
@@ -988,9 +993,12 @@ public sealed class SystemJobsController : ControllerBase
 
     private int? GetCurrentUserId()
     {
-        var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var value = HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
         return int.TryParse(value, out var userId) ? userId : null;
     }
+
+    private static string FormatSystemJobDateTime(DateTime value, TimeZoneInfo timeZone)
+        => CalendarTimeZoneHelper.FormatUserDateTime(value, timeZone, culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
 
     private static bool ParseBool(string? value, bool fallback)
         => bool.TryParse(value, out var parsed) ? parsed : fallback;
