@@ -20,6 +20,7 @@ vi.mock('../../services/api', () => ({
     createCaseDocumentTemplate: vi.fn(),
     updateCaseDocumentTemplate: vi.fn(),
     renderCaseDocumentTemplate: vi.fn(),
+    getUserSetting: vi.fn(),
   },
 }));
 
@@ -30,6 +31,8 @@ describe('CaseDocumentTemplateSettings', () => {
     vi.mocked(apiService.createCaseDocumentTemplate).mockReset();
     vi.mocked(apiService.updateCaseDocumentTemplate).mockReset();
     vi.mocked(apiService.renderCaseDocumentTemplate).mockReset();
+    vi.mocked(apiService.getUserSetting).mockReset();
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     toastMock.success.mockReset();
     toastMock.error.mockReset();
   });
@@ -46,7 +49,7 @@ describe('CaseDocumentTemplateSettings', () => {
         content: '<p>{{case.title}}</p>',
         version: 1,
         isActive: true,
-        updatedAt: '2026-05-20T10:00:00Z',
+        updatedAt: '2026-05-20T22:30:00Z',
       },
     ]);
     vi.mocked(apiService.getCaseDocumentTemplateTokens).mockResolvedValue([
@@ -89,7 +92,7 @@ describe('CaseDocumentTemplateSettings', () => {
     expect(screen.getByText('{{case.title}}')).toBeTruthy();
     expect(screen.getByText('v1')).toBeTruthy();
     expect(screen.getByText('Версия 1')).toBeTruthy();
-    expect(screen.getByText('Обновлено: 20.05.2026')).toBeTruthy();
+    expect(await screen.findByText('Обновлено: 21.05.2026')).toBeTruthy();
 
     const editor = screen.getByDisplayValue('<p>{{case.title}}</p>') as HTMLTextAreaElement;
     fireEvent.click(screen.getAllByRole('button', { name: 'Вставить' })[0]);

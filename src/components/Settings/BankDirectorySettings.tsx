@@ -4,12 +4,14 @@ import { createPortal } from 'react-dom';
 
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import {
   apiService,
   type BankDto,
   type BankUpsertRequest,
 } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
 interface BankFormState {
   name: string;
@@ -59,6 +61,7 @@ function normalizePayload(form: BankFormState): BankUpsertRequest {
 export function BankDirectorySettings() {
   const toast = useToast();
   const { confirm } = useDialog();
+  const timeZoneId = useUserTimeZone();
   const [banks, setBanks] = useState<BankDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -292,7 +295,7 @@ export function BankDirectorySettings() {
                         <div className="min-w-0">
                           <div className="font-semibold text-slate-900">{bank.name}</div>
                           <div className="mt-1 text-xs text-slate-500">
-                            Создан: {new Date(bank.createdAt).toLocaleString('ru-RU')}
+                            Создан: {formatDateTimeInTimeZone(bank.createdAt, timeZoneId) || bank.createdAt}
                           </div>
                         </div>
                       </div>

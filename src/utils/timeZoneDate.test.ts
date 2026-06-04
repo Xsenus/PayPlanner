@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatDateInTimeZone,
   formatDateTimeInTimeZone,
+  formatDateTimeWithSecondsInTimeZone,
   fromTimeZoneDateTimeInput,
   toTimeZoneDateTimeInput,
 } from './timeZoneDate';
@@ -19,6 +20,10 @@ describe('timeZoneDate', () => {
 
   it('uses the selected time zone for display text', () => {
     expect(formatDateTimeInTimeZone('2026-06-05T12:00:00Z', 'Europe/Samara')).toContain('16:00');
+  });
+
+  it('keeps seconds in detailed journal display text', () => {
+    expect(formatDateTimeWithSecondsInTimeZone('2026-06-05T12:00:07Z', 'Europe/Samara')).toContain('16:00:07');
   });
 
   it('formats date-only display in the selected user time zone', () => {

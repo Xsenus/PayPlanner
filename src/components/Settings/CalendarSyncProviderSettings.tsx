@@ -9,7 +9,9 @@ import {
   type CalendarSyncLogPageDto,
   type CalendarSyncSettingsDto,
 } from '../../services/api';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone, formatDateTimeWithSecondsInTimeZone } from '../../utils/timeZoneDate';
 import { TablePagination } from '../ui/TablePagination';
 
 const LOG_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -51,6 +53,7 @@ const defaultLogFilters: CalendarLogFilters = {
 };
 
 export function CalendarSyncProviderSettings() {
+  const timeZoneId = useUserTimeZone();
   const [providers, setProviders] = useState<CalendarSyncProviderDto[]>([]);
   const [readiness, setReadiness] = useState<CalendarSyncReadinessDto | null>(null);
   const [logs, setLogs] = useState<CalendarSyncLogPageDto | null>(null);
@@ -512,7 +515,7 @@ export function CalendarSyncProviderSettings() {
             <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">{saveMessage}</div>
           ) : null}
           {settings?.updatedAt ? (
-            <p className="mt-2 text-[11px] text-gray-500">Последнее сохранение: {new Date(settings.updatedAt).toLocaleString('ru-RU')}</p>
+            <p className="mt-2 text-[11px] text-gray-500">Последнее сохранение: {formatDateTimeInTimeZone(settings.updatedAt, timeZoneId) || settings.updatedAt}</p>
           ) : null}
         </div>
       ) : null}
@@ -704,7 +707,7 @@ export function CalendarSyncProviderSettings() {
               {logs?.items.length ? logs.items.map((item) => (
                 <tr key={`${item.provider}-${item.id}`} className="align-top">
                   <td className="min-w-[180px] px-3 py-2 text-gray-700">
-                    <div className="whitespace-nowrap font-medium">{formatCalendarSyncLogDateTime(item.createdAt)}</div>
+                    <div className="whitespace-nowrap font-medium">{formatCalendarSyncLogDateTime(item.createdAt, timeZoneId)}</div>
                     <div className="mt-1 font-semibold text-gray-900">{item.providerLabel}</div>
                     <div className="text-[11px] text-gray-500">{item.directionLabel || getCalendarLogDirectionLabel(item)}</div>
                     <div className="mt-1 text-[11px] font-semibold text-sky-700">{item.operationLabel || getCalendarLogOperationLabel(item.operation)}</div>
@@ -1226,19 +1229,9 @@ function normalizeCalendarSyncInterval(value: number | undefined | null) {
   return Math.min(MAX_CALENDAR_SYNC_INTERVAL_MINUTES, Math.max(MIN_CALENDAR_SYNC_INTERVAL_MINUTES, Math.round(value ?? 10)));
 }
 
-function formatCalendarSyncLogDateTime(value: string) {
+function formatCalendarSyncLogDateTime(value: string, timeZoneId?: string | null) {
   const normalizedValue = /(?:z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
-  const date = new Date(normalizedValue);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(date);
+  return formatDateTimeWithSecondsInTimeZone(normalizedValue, timeZoneId) || value;
 }
 
 function getCalendarLogEmployeeName(item: CalendarSyncLogEntryDto) {

@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   getYandexDiskCrmSyncPreviewMock: vi.fn(),
   getYandexDiskCrmSyncStatusMock: vi.fn(),
   updateYandexDiskCrmSyncSettingsMock: vi.fn(),
+  getUserSettingMock: vi.fn(),
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -77,6 +78,7 @@ vi.mock('../../services/api', () => ({
     getYandexDiskCrmSyncPreview: mocks.getYandexDiskCrmSyncPreviewMock,
     getYandexDiskCrmSyncStatus: mocks.getYandexDiskCrmSyncStatusMock,
     updateYandexDiskCrmSyncSettings: mocks.updateYandexDiskCrmSyncSettingsMock,
+    getUserSetting: mocks.getUserSettingMock,
   },
 }));
 
@@ -115,6 +117,7 @@ describe('YandexDisk', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.confirmMock.mockResolvedValue(true);
+    mocks.getUserSettingMock.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     mocks.getYandexDiskConnectionsMock.mockResolvedValue({
       connections: [
         buildConnection(),
@@ -190,6 +193,7 @@ describe('YandexDisk', () => {
     const editButton = within(card).getByRole('button', { name: /Изменить/i });
     expect(filesButton.textContent?.trim()).toBe('');
     expect(editButton.textContent?.trim()).toBe('');
+    expect(await screen.findAllByText(/01\.06\.2026, 08:00/)).toHaveLength(2);
     expect(filesButton.getAttribute('title')).toBe('Открыть файлы');
   });
 

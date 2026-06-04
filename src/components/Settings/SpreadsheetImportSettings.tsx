@@ -12,7 +12,9 @@ import type {
 } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { SpreadsheetImportPreviewModal } from './SpreadsheetImportPreviewModal';
 
 const PREVIEW_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -21,10 +23,10 @@ function isSafeSpreadsheetImportRow(row: SpreadsheetImportPreviewRowDto) {
   return row.isSelectable && row.action === 'Created' && row.issues.length === 0;
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   if (!value) return '—';
   try {
-    return new Date(value).toLocaleString('ru-RU');
+    return formatDateTimeInTimeZone(value, timeZoneId) || value;
   } catch {
     return value;
   }
@@ -111,6 +113,7 @@ function badgeClass(value: string) {
 export function SpreadsheetImportSettings() {
   const toast = useToast();
   const { confirm } = useDialog();
+  const timeZoneId = useUserTimeZone();
   const [files, setFiles] = useState<File[]>([]);
   const [preview, setPreview] = useState<SpreadsheetImportPreviewDto | null>(null);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
@@ -777,7 +780,7 @@ export function SpreadsheetImportSettings() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="font-semibold text-gray-900">{batch.title}</div>
-                      <div className="mt-1 text-xs text-gray-500">{formatDateTime(batch.createdAt)}</div>
+                      <div className="mt-1 text-xs text-gray-500">{formatDateTime(batch.createdAt, timeZoneId)}</div>
                     </div>
                     <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClass(batch.status)}`}>
                       {formatBatchStatusLabel(batch.status)}
@@ -853,8 +856,8 @@ export function SpreadsheetImportSettings() {
                         {operation.rollbackMessage && <div className="mt-1 text-sm text-amber-700">{operation.rollbackMessage}</div>}
                       </div>
                       <div className="text-xs text-gray-500">
-                        <div>{formatDateTime(operation.createdAt)}</div>
-                        {operation.rolledBackAt && <div>Откат: {formatDateTime(operation.rolledBackAt)}</div>}
+                        <div>{formatDateTime(operation.createdAt, timeZoneId)}</div>
+                        {operation.rolledBackAt && <div>Откат: {formatDateTime(operation.rolledBackAt, timeZoneId)}</div>}
                       </div>
                     </div>
                   </div>

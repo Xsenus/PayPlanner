@@ -16,7 +16,9 @@ import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { ObjectAuditDeletedObjectsSettings } from './ObjectAuditDeletedObjectsSettings';
 import { SystemJobDiagnosticsSettings } from './SystemJobDiagnosticsSettings';
 
@@ -51,13 +53,13 @@ function formatBytes(bytes: number) {
   return `${value >= 100 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   if (!value) {
     return '—';
   }
 
   try {
-    return new Date(value).toLocaleString('ru-RU');
+    return formatDateTimeInTimeZone(value, timeZoneId) || value;
   } catch {
     return value;
   }
@@ -115,6 +117,7 @@ export function DatabaseMaintenanceSettings() {
   const toast = useToast();
   const { confirm } = useDialog();
   const { user, isAdmin } = useAuth();
+  const timeZoneId = useUserTimeZone();
   const permissions = useRolePermissions(user?.role?.id);
   const [activeTab, setActiveTab] = useState<MaintenanceTab>('overview');
   const [loading, setLoading] = useState(true);
@@ -738,7 +741,7 @@ export function DatabaseMaintenanceSettings() {
                     <Save size={16} />
                     {userActivitySettingsSaving ? 'Сохраняем...' : 'Сохранить'}
                   </button>
-                  <span className="text-sm text-gray-500">Обновлено: {formatDateTime(userActivityMaintenance?.updatedAt)}</span>
+                  <span className="text-sm text-gray-500">Обновлено: {formatDateTime(userActivityMaintenance?.updatedAt, timeZoneId)}</span>
                 </div>
 
                 {(userActivityMaintenanceError || userActivityMaintenanceMessage) && (
@@ -796,11 +799,11 @@ export function DatabaseMaintenanceSettings() {
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <div className="rounded-2xl border border-gray-200 p-4">
                   <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Самая старая запись</div>
-                  <div className="mt-2 text-sm text-gray-700">{formatDateTime(userActivityMaintenance?.oldestLogAt)}</div>
+                  <div className="mt-2 text-sm text-gray-700">{formatDateTime(userActivityMaintenance?.oldestLogAt, timeZoneId)}</div>
                 </div>
                 <div className="rounded-2xl border border-gray-200 p-4">
                   <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Последняя запись</div>
-                  <div className="mt-2 text-sm text-gray-700">{formatDateTime(userActivityMaintenance?.newestLogAt)}</div>
+                  <div className="mt-2 text-sm text-gray-700">{formatDateTime(userActivityMaintenance?.newestLogAt, timeZoneId)}</div>
                 </div>
               </div>
             </div>
@@ -1193,7 +1196,7 @@ export function DatabaseMaintenanceSettings() {
                             </div>
                           </div>
                           <div className="mt-1 break-all text-xs text-slate-500">{result.targetPath}</div>
-                          <div className="mt-1 text-xs text-slate-500">{formatDateTime(result.updatedAt)} · {formatBytes(result.sizeBytes)}</div>
+                          <div className="mt-1 text-xs text-slate-500">{formatDateTime(result.updatedAt, timeZoneId)} · {formatBytes(result.sizeBytes)}</div>
                           {result.error ? (
                             <div className="mt-1 text-xs text-red-700">{result.error}</div>
                           ) : null}
@@ -1237,7 +1240,7 @@ export function DatabaseMaintenanceSettings() {
                             </div>
                           </div>
                           <div className="mt-1 break-all text-xs text-slate-500">{result.targetPath}</div>
-                          <div className="mt-1 text-xs text-slate-500">{formatDateTime(result.updatedAt)} · {formatBytes(result.sizeBytes)}</div>
+                          <div className="mt-1 text-xs text-slate-500">{formatDateTime(result.updatedAt, timeZoneId)} · {formatBytes(result.sizeBytes)}</div>
                           {result.error ? (
                             <div className="mt-1 text-xs text-red-700">{result.error}</div>
                           ) : null}
@@ -1313,7 +1316,7 @@ export function DatabaseMaintenanceSettings() {
                               <div className="font-medium">{item.fileName}</div>
                               <div className="mt-1 text-xs text-gray-500">{item.relativePath}</div>
                             </td>
-                            <td className="px-4 py-3 text-gray-700">{formatDateTime(item.createdAt)}</td>
+                            <td className="px-4 py-3 text-gray-700">{formatDateTime(item.createdAt, timeZoneId)}</td>
                             <td className="px-4 py-3 text-gray-700">{formatBytes(item.sizeBytes)}</td>
                             <td className="px-4 py-3 text-gray-700">{item.trigger === 'manual' ? 'Ручная' : item.trigger === 'auto' ? 'Автоматическая' : item.trigger}</td>
                             <td className="px-4 py-3">

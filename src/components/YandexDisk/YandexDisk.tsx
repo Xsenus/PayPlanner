@@ -37,8 +37,10 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { defaultRestrictedMenuPermissions } from '../../types/permissions';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { TextPromptModal } from '../ui/TextPromptModal';
 
 type YandexDiskProps = {
@@ -108,8 +110,9 @@ function formatSize(size?: number | null) {
   return `${value.toLocaleString('ru-RU', { maximumFractionDigits: unitIndex === 0 ? 0 : 1 })} ${units[unitIndex]}`;
 }
 
-function formatDate(value?: string | null) {
-  return value ? new Date(value).toLocaleString('ru-RU') : '-';
+function formatDate(value?: string | null, timeZoneId?: string | null) {
+  if (!value) return '-';
+  return formatDateTimeInTimeZone(value, timeZoneId) || value;
 }
 
 function appendYandexDiskHint(message: string, hint: string) {
@@ -220,6 +223,7 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
   const toast = useToast();
   const { confirm } = useDialog();
   const { user } = useAuth();
+  const timeZoneId = useUserTimeZone();
   const rolePermissions = useRolePermissions(user?.role?.id);
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
   const permissions = rolePermissions.yandexDisk ?? defaultRestrictedMenuPermissions;
@@ -750,7 +754,7 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
               </div>
               <div>
                 <div className="font-semibold uppercase text-slate-400">Обновлено</div>
-                <div className="mt-1 text-slate-800">{formatDate(connection.updatedAt)}</div>
+                <div className="mt-1 text-slate-800">{formatDate(connection.updatedAt, timeZoneId)}</div>
               </div>
             </div>
 
@@ -819,7 +823,7 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
                     <div className="mt-1 font-mono text-xs text-slate-400">{item.path}</div>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{item.type === 'dir' ? '-' : formatSize(item.size)}</td>
-                  <td className="px-4 py-3 text-slate-600">{formatDate(item.modified)}</td>
+                  <td className="px-4 py-3 text-slate-600">{formatDate(item.modified, timeZoneId)}</td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">
                       {item.type === 'file' && cardActionButton({ label: 'Скачать', icon: <Download className="h-4 w-4" />, onClick: () => void downloadFile(item), disabled: !canExport })}
@@ -916,7 +920,7 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h3 className="text-base font-semibold text-slate-900">Результат проверки</h3>
-                <p className="text-sm text-slate-500">{formatDate(connectionTest.checkedAt)}</p>
+                <p className="text-sm text-slate-500">{formatDate(connectionTest.checkedAt, timeZoneId)}</p>
               </div>
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Успешно</span>
             </div>

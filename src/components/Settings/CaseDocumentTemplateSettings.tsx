@@ -4,7 +4,9 @@ import { Check, Copy, Eye, FileText, Loader2, Plus, RefreshCw, Save, Search } fr
 import { apiService } from '../../services/api';
 import type { ClientCaseDocumentTemplate, ClientCaseDocumentTemplateToken } from '../../types';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateInTimeZone } from '../../utils/timeZoneDate';
 
 function createTemplateDraft(index: number): ClientCaseDocumentTemplate {
   return {
@@ -31,11 +33,13 @@ function formatCaseTypes(value: string[] | undefined): string {
   return (value ?? []).join(', ');
 }
 
-function formatTemplateDate(value?: string | null): string {
+function formatTemplateDate(value?: string | null, timeZoneId?: string | null): string {
   if (!value) return '—';
+  const formattedValue = formatDateInTimeZone(value, timeZoneId);
+  if (formattedValue) return formattedValue;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString('ru-RU');
+  return value;
 }
 
 function cloneTemplate(template: ClientCaseDocumentTemplate): ClientCaseDocumentTemplate {
@@ -50,6 +54,7 @@ function cloneTemplate(template: ClientCaseDocumentTemplate): ClientCaseDocument
 
 export function CaseDocumentTemplateSettings() {
   const toast = useToast();
+  const timeZoneId = useUserTimeZone();
   const [templates, setTemplates] = useState<ClientCaseDocumentTemplate[]>([]);
   const [originalKeys, setOriginalKeys] = useState<Set<string>>(new Set());
   const [tokens, setTokens] = useState<ClientCaseDocumentTemplateToken[]>([]);
@@ -317,7 +322,7 @@ export function CaseDocumentTemplateSettings() {
               <div className="mb-4 flex flex-wrap gap-2 text-xs font-semibold">
                 <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-blue-700">Версия {selectedTemplate.version ?? 1}</span>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
-                  Обновлено: {formatTemplateDate(selectedTemplate.updatedAt)}
+                  Обновлено: {formatTemplateDate(selectedTemplate.updatedAt, timeZoneId)}
                 </span>
               </div>
               <div className="grid gap-4 md:grid-cols-2">

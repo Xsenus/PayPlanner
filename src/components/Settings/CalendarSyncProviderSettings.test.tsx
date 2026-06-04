@@ -9,6 +9,7 @@ const apiMock = vi.hoisted(() => ({
   getCalendarSyncSettings: vi.fn(),
   getCalendarSyncLogs: vi.fn(),
   updateCalendarSyncSettings: vi.fn(),
+  getUserSetting: vi.fn(),
 }));
 
 const authMock = vi.hoisted(() => ({
@@ -26,6 +27,7 @@ vi.mock('../../services/authService', () => ({
 describe('CalendarSyncProviderSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMock.getUserSetting.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     apiMock.getCalendarSyncProviders.mockResolvedValue([
       {
         key: 'ics-export',
@@ -185,6 +187,7 @@ describe('CalendarSyncProviderSettings', () => {
 
   it('shows provider diagnostics and readiness checklist', async () => {
     render(<CalendarSyncProviderSettings />);
+    expect(await screen.findByText('26.05.2026, 21:20:00')).toBeTruthy();
 
     expect(await screen.findByText('Провайдеры календарной синхронизации')).toBeTruthy();
     expect(screen.getByText('ICS-файлы')).toBeTruthy();

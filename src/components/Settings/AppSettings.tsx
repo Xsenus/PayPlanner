@@ -6,7 +6,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { TablePagination } from '../ui/TablePagination';
 import { AuthProviderSettings } from './AuthProviderSettings';
 import { BankDirectorySettings } from './BankDirectorySettings';
@@ -147,6 +149,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
   const permissions = useRolePermissions(user?.role?.id);
   const { confirm } = useDialog();
   const toast = useToast();
+  const timeZoneId = useUserTimeZone();
   const [activeSection, setActiveSection] = useState<SettingsSection>(() => initialSection ?? readSettingsSectionFromUrl());
   const [activeFinancialRulesSubsection, setActiveFinancialRulesSubsection] = useState<FinancialRulesSubsection>('invoices');
   const [activeDatabaseOperationsSubsection, setActiveDatabaseOperationsSubsection] = useState<DatabaseOperationsSubsection>('invoices');
@@ -281,7 +284,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
     }
 
     try {
-      return new Date(value).toLocaleString('ru-RU');
+      return formatDateTimeInTimeZone(value, timeZoneId) || value;
     } catch {
       return value;
     }

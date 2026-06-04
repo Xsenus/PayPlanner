@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getYandexDiskSettingsMock: vi.fn(),
   retryDatabaseBackupS3UploadMock: vi.fn(),
   retryDatabaseBackupYandexDiskUploadMock: vi.fn(),
+  getUserSettingMock: vi.fn(),
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -61,6 +62,7 @@ vi.mock('../../services/api', () => ({
     updateDatabaseBackupSettings: mocks.updateDatabaseBackupSettingsMock,
     retryDatabaseBackupS3Upload: mocks.retryDatabaseBackupS3UploadMock,
     retryDatabaseBackupYandexDiskUpload: mocks.retryDatabaseBackupYandexDiskUploadMock,
+    getUserSetting: mocks.getUserSettingMock,
   },
 }));
 
@@ -116,6 +118,7 @@ function buildBackupOverview() {
 describe('DatabaseMaintenanceSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getUserSettingMock.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     mocks.getDatabaseStatusMock.mockResolvedValue({
       provider: 'sqlite',
       displayName: 'SQLite',
@@ -169,6 +172,7 @@ describe('DatabaseMaintenanceSettings', () => {
 
     await waitFor(() => expect(mocks.getDatabaseBackupOverviewMock).toHaveBeenCalled());
     fireEvent.click(screen.getAllByRole('button')[4]);
+    expect(await screen.findByText(/01\.06\.2026, 07:01/)).toBeTruthy();
 
     expect(await screen.findByText('Отправка backup в S3')).toBeTruthy();
 

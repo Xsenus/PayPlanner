@@ -6,7 +6,9 @@ import {
   type AuthProviderSettings as AuthProviderSettingsDto,
 } from '../../services/authService';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
 type SectionId =
   | 'overview'
@@ -72,13 +74,13 @@ const EMPTY_PUBLIC: AuthProviderPublicSettings = {
   telegramBotUsername: null,
 };
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   if (!value) {
     return 'Не синхронизировано';
   }
 
   try {
-    return new Date(value).toLocaleString('ru-RU');
+    return formatDateTimeInTimeZone(value, timeZoneId) || value;
   } catch {
     return value;
   }
@@ -290,6 +292,7 @@ function ActionButton({
 
 export function AuthProviderSettings() {
   const toast = useToast();
+  const timeZoneId = useUserTimeZone();
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
   const [settings, setSettings] = useState<AuthProviderSettingsDto>(EMPTY_SETTINGS);
   const [publicSettings, setPublicSettings] = useState<AuthProviderPublicSettings>(EMPTY_PUBLIC);
@@ -1022,9 +1025,9 @@ export function AuthProviderSettings() {
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
                   <ReadonlyField label="Webhook Secret" value={settings.telegramWebhookSecret} />
-                  <ReadonlyField label="Синхронизация бота" value={formatDateTime(settings.telegramBotInfoSyncedAt)} allowCopy={false} />
+                  <ReadonlyField label="Синхронизация бота" value={formatDateTime(settings.telegramBotInfoSyncedAt, timeZoneId)} allowCopy={false} />
                 </div>
-                <ReadonlyField label="Синхронизация webhook" value={formatDateTime(settings.telegramWebhookSyncedAt)} allowCopy={false} />
+                <ReadonlyField label="Синхронизация webhook" value={formatDateTime(settings.telegramWebhookSyncedAt, timeZoneId)} allowCopy={false} />
               </Card>
 
               <div className="grid gap-6 lg:grid-cols-2">
