@@ -1953,6 +1953,54 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateStatus_DoneUsesProfileTimeZoneForContractorPaymentResultDate()
+    {
+        await using var db = await CreateContextAsync();
+        var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
+        var author = await CreateAdminUserAsync(db, "author-timezone@example.com", "Автор с часовым поясом");
+        var assignee = await CreateAdminUserAsync(db, "contractor-timezone@example.com", "Исполнитель с оплатой", isExternalContractor: true);
+        var client = await CreateClientAsync(db, "Клиент с задачей");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = author.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone.TimeZoneId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var createResult = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            AssigneeUserId = assignee.Id,
+            Title = "Выполнить работу с оплатой",
+            DueAt = DateTime.UtcNow.AddHours(2),
+            ContractorPaymentEnabled = true,
+            ContractorPaymentAmount = 9_000m,
+            ContractorPaymentOnResult = true,
+            ContractorPaymentResultDelayDays = 5,
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<TaskJournalItemDto>(created.Value);
+
+        var statusResult = await controller.UpdateStatus(createdDto.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Работа выполнена.",
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(statusResult.Result);
+
+        var payment = await db.Payments.SingleAsync();
+        Assert.Equal(selectedZone.ProfileToday.AddDays(5), payment.Date);
+        Assert.Equal(selectedZone.ProfileToday.AddDays(5), payment.PlannedDate);
+    }
+
+    [Fact]
     public async Task CreateTask_RejectsContractorPaymentWhenExactDateAndResultDelayBothSet()
     {
         await using var db = await CreateContextAsync();
@@ -2724,6 +2772,29 @@ public class TasksControllerTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private static (string TimeZoneId, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        foreach (var timeZoneId in new[]
+        {
+            "Pacific/Kiritimati",
+            "Line Islands Standard Time",
+            "Pacific/Pago_Pago",
+            "Samoa Standard Time",
+        })
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            if (profileToday != utcToday)
+            {
+                return (timeZone.Id, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
     }
 
     private static (TaskJournalAutomationSchedulerService Scheduler, ServiceProvider Provider) CreateAutomationScheduler(

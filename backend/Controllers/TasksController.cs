@@ -1462,7 +1462,7 @@ public class TasksController : ControllerBase
         AddTaskHistory(entity, access, "Задача создана.");
         _db.TaskJournalItems.Add(entity);
         await _db.SaveChangesAsync(ct);
-        await SyncContractorPaymentAsync(entity, GetContractorPaymentResultBaseDate(null, nextStatus, entity.CreatedAt), ct);
+        await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(null, nextStatus, entity.CreatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
         await _notificationService.NotifyTaskAssignedAsync(entity, access.DisplayName, access.UserId, ct);
         if (IsApprovalActiveStatus(entity.Status))
@@ -1585,7 +1585,7 @@ public class TasksController : ControllerBase
             _db.TaskJournalComments.Add(userComment);
         }
 
-        await SyncContractorPaymentAsync(entity, GetContractorPaymentResultBaseDate(previousStatus, nextStatus, entity.UpdatedAt), ct);
+        await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(previousStatus, nextStatus, entity.UpdatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
         if (changeLabels.Count > 0)
         {
@@ -1684,7 +1684,7 @@ public class TasksController : ControllerBase
             AddTaskHistory(entity, access, $"Изменено: {string.Join(", ", parts)}.");
         }
 
-        await SyncContractorPaymentAsync(entity, GetContractorPaymentResultBaseDate(oldStatus, entity.Status, entity.UpdatedAt), ct);
+        await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(oldStatus, entity.Status, entity.UpdatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
         if (statusChanged || resultChanged)
         {
@@ -3397,11 +3397,21 @@ public class TasksController : ControllerBase
     private static bool IsContractorPaymentResultTriggerStatus(string? status)
         => string.Equals(status, "done", StringComparison.OrdinalIgnoreCase);
 
-    private static DateTime? GetContractorPaymentResultBaseDate(string? oldStatus, string? nextStatus, DateTime? changedAt)
-        => IsContractorPaymentResultTriggerStatus(nextStatus)
-           && !string.Equals(oldStatus, nextStatus, StringComparison.OrdinalIgnoreCase)
-            ? changedAt?.Date ?? DateTime.UtcNow.Date
-            : null;
+    private async Task<DateTime?> ResolveContractorPaymentResultBaseDateAsync(
+        string? oldStatus,
+        string? nextStatus,
+        DateTime? changedAt,
+        CancellationToken ct)
+    {
+        if (!IsContractorPaymentResultTriggerStatus(nextStatus)
+            || string.Equals(oldStatus, nextStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        return CalendarTimeZoneHelper.ToUserLocal(changedAt ?? DateTime.UtcNow, timeZone).Date;
+    }
 
     private static DateTime? ResolveContractorPaymentDueDate(TaskJournalItem entity, Payment? payment, DateTime? resultBaseDate)
     {
