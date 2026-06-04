@@ -107,6 +107,7 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
             }
 
             var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+            var assigneeTimeZones = new Dictionary<int, TimeZoneInfo>();
             foreach (var task in tasks)
             {
                 var channels = DeserializeList(task.ChannelsJson);
@@ -115,9 +116,19 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                     continue;
                 }
 
+                var assigneeUserId = task.AssigneeUserId!.Value;
+                if (!assigneeTimeZones.TryGetValue(assigneeUserId, out var assigneeTimeZone))
+                {
+                    assigneeTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(
+                        context,
+                        assigneeUserId,
+                        cancellationToken);
+                    assigneeTimeZones[assigneeUserId] = assigneeTimeZone;
+                }
+
                 foreach (var reminder in DeserializeList(task.RemindersJson))
                 {
-                    if (!IsReminderDue(task, reminder, nowUtc))
+                    if (!IsReminderDue(task, reminder, nowUtc, assigneeTimeZone))
                     {
                         continue;
                     }
@@ -196,7 +207,11 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
         return caseIds.Count;
     }
 
-    private static bool IsReminderDue(TaskJournalItem task, string reminderKey, DateTime nowUtc)
+    private static bool IsReminderDue(
+        TaskJournalItem task,
+        string reminderKey,
+        DateTime nowUtc,
+        TimeZoneInfo assigneeTimeZone)
     {
         var dueAt = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc);
         return reminderKey switch
@@ -207,7 +222,8 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
             "before1h" => IsInsideReminderWindow(nowUtc, dueAt, TimeSpan.FromHours(1)),
             "before15m" => IsInsideReminderWindow(nowUtc, dueAt, TimeSpan.FromMinutes(15)),
             "atDue" => nowUtc >= dueAt,
-            "dailyOverdue" => nowUtc.Date > dueAt.Date,
+            "dailyOverdue" => CalendarTimeZoneHelper.ToUserLocal(nowUtc, assigneeTimeZone).Date >
+                              CalendarTimeZoneHelper.ToUserLocal(dueAt, assigneeTimeZone).Date,
             _ => false
         };
     }

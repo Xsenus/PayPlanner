@@ -194,6 +194,53 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskReminderAsync_DeduplicatesDailyOverdueByRecipientLocalDate()
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        var user = await CreateUserAsync(db, "daily-overdue-local-date@example.com");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Pacific/Pago_Pago",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Просроченная задача",
+            AssigneeUserId = user.Id,
+            AssigneeName = user.FullName,
+            DueAt = new DateTime(2026, 6, 4, 10, 0, 0, DateTimeKind.Utc),
+            RemindersJson = "[\"dailyOverdue\"]",
+            ChannelsJson = "[\"email\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+
+        var firstDeliveries = await service.NotifyTaskReminderAsync(
+            task,
+            "dailyOverdue",
+            new DateTime(2026, 6, 4, 23, 30, 0, DateTimeKind.Utc));
+        var duplicateDeliveries = await service.NotifyTaskReminderAsync(
+            task,
+            "dailyOverdue",
+            new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc));
+
+        Assert.Single(firstDeliveries);
+        Assert.Empty(duplicateDeliveries);
+        Assert.Single(emailService.Messages);
+        var delivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.EndsWith(":20260604", delivery.EventKey, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NotifyTaskChangedAsync_CreatesInAppNotificationWithoutExternalChannels()
     {
         await using var db = await CreateContextAsync();
