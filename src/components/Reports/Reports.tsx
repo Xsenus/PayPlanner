@@ -61,7 +61,7 @@ import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicke
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
+import { formatReportDate, formatReportDateTime, formatReportDeadlineDate } from '../../utils/reportDateFormatting';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
@@ -172,19 +172,16 @@ function monthRangeToDates(fromYM: `${number}-${string}`, toYM: `${number}-${str
   };
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: '2-digit',
-    month: 'short',
-  }).format(new Date(value));
+function formatDate(value: string, timeZoneId?: string | null) {
+  return formatReportDate(value, timeZoneId);
 }
 
 function formatDateTime(value: string, timeZoneId?: string | null) {
-  return formatDateTimeInTimeZone(value, timeZoneId);
+  return formatReportDateTime(value, timeZoneId);
 }
 
 function formatDeadlineDate(value: string, allDay?: boolean, timeZoneId?: string | null) {
-  return allDay === false ? formatDateTime(value, timeZoneId) : formatDate(value);
+  return formatReportDeadlineDate(value, allDay, timeZoneId);
 }
 
 function csvCell(value: unknown) {
@@ -207,7 +204,7 @@ function downloadBlob(filename: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
-function exportCaseFinanceReport(report: CaseFinanceReport) {
+function exportCaseFinanceReport(report: CaseFinanceReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус дела', 'Финансовый статус', 'Гонорар', 'Оплачено', 'Остаток', 'Оплачено %', 'Срок дела'],
   ];
@@ -224,14 +221,14 @@ function exportCaseFinanceReport(report: CaseFinanceReport) {
       item.paidTotal,
       item.outstandingTotal,
       item.paymentRate,
-      item.dueDate ? formatDate(item.dueDate) : '',
+      item.dueDate ? formatDate(item.dueDate, timeZoneId) : '',
     ]);
   });
 
   downloadCsv('case-finance-report.csv', rows);
 }
 
-function exportCaseSuccessReport(report: CaseSuccessReport) {
+function exportCaseSuccessReport(report: CaseSuccessReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус дела', 'Исход', 'Дней в работе', 'Дата начала', 'Срок дела'],
   ];
@@ -245,8 +242,8 @@ function exportCaseSuccessReport(report: CaseSuccessReport) {
       item.statusLabel,
       item.outcomeLabel,
       item.daysInWork,
-      item.startDate ? formatDate(item.startDate) : formatDate(item.createdAt),
-      item.dueDate ? formatDate(item.dueDate) : '',
+      item.startDate ? formatDate(item.startDate, timeZoneId) : formatDate(item.createdAt, timeZoneId),
+      item.dueDate ? formatDate(item.dueDate, timeZoneId) : '',
     ]);
   });
 
@@ -289,7 +286,7 @@ function exportCurrentCasesReport(report: CurrentCasesReport, timeZoneId?: strin
       item.responsibleName,
       item.caseType,
       item.statusLabel,
-      item.dueDate ? formatDate(item.dueDate) : '',
+      item.dueDate ? formatDate(item.dueDate, timeZoneId) : '',
       item.daysInWork,
       `${item.openTaskCount} открытых; ${item.overdueTaskCount} просроченных`,
       `${item.activeDeadlineCount} активных; ${item.overdueDeadlineCount} просроченных`,
@@ -1706,7 +1703,7 @@ function LegalWorkReportSection({
                             {row.deadlineLabel}
                             <ArrowUpRight className="h-3.5 w-3.5" />
                           </button>
-                          <div className="mt-1 text-sm text-slate-500">{formatDate(row.dueAt)} · {row.responsibleName}</div>
+                          <div className="mt-1 text-sm text-slate-500">{formatDate(row.dueAt, profileTimeZoneId)} · {row.responsibleName}</div>
                           <div className="mt-3 flex flex-wrap gap-2">
                             <ReportDrilldownButton onClick={() => onOpenCaseSection?.(row.caseId, 'tasks')}>
                               Задачи
@@ -1868,6 +1865,7 @@ function CaseFinanceReportSection({
   filters,
   onReload,
   onOpenCase,
+  profileTimeZoneId,
 }: {
   report: CaseFinanceReport | null;
   loading: boolean;
@@ -1875,6 +1873,7 @@ function CaseFinanceReportSection({
   filters?: ManagementReportExportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.items ?? [];
   const responsibleRows = report?.byResponsible ?? [];
@@ -1896,7 +1895,7 @@ function CaseFinanceReportSection({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => report && exportCaseFinanceReport(report)}
+            onClick={() => report && exportCaseFinanceReport(report, profileTimeZoneId)}
             disabled={!report}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -2070,6 +2069,7 @@ function CaseSuccessReportSection({
   filters,
   onReload,
   onOpenCase,
+  profileTimeZoneId,
 }: {
   report: CaseSuccessReport | null;
   loading: boolean;
@@ -2077,6 +2077,7 @@ function CaseSuccessReportSection({
   filters?: ManagementReportExportFilters;
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.items ?? [];
   const responsibleRows = report?.byResponsible ?? [];
@@ -2099,7 +2100,7 @@ function CaseSuccessReportSection({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => report && exportCaseSuccessReport(report)}
+            onClick={() => report && exportCaseSuccessReport(report, profileTimeZoneId)}
             disabled={!report}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -2265,7 +2266,7 @@ function CaseSuccessReportSection({
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right text-slate-600">{row.daysInWork}</td>
-                      <td className="px-4 py-3 text-slate-600">{row.dueDate ? formatDate(row.dueDate) : 'Не указан'}</td>
+                      <td className="px-4 py-3 text-slate-600">{row.dueDate ? formatDate(row.dueDate, profileTimeZoneId) : 'Не указан'}</td>
                     </tr>
                   )) : (
                     <tr>
@@ -2292,6 +2293,7 @@ function TaskReportSection({
   onScopeChange,
   onReload,
   onOpenTask,
+  profileTimeZoneId,
 }: {
   report: TaskReport | null;
   loading: boolean;
@@ -2300,6 +2302,7 @@ function TaskReportSection({
   onScopeChange: (scope: TaskReportScope) => void;
   onReload: () => void;
   onOpenTask?: (taskId: number) => void;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.items ?? [];
   const responsibleRows = report?.byResponsible ?? [];
@@ -2587,7 +2590,7 @@ function CurrentCasesReportSection({
               value={String(report.overdueCases)}
               icon={AlertTriangle}
               tone="expense"
-              subtitle={`Дата контроля: ${formatDate(report.asOf)}`}
+              subtitle={`Дата контроля: ${formatDate(report.asOf, profileTimeZoneId)}`}
             />
             <MetricCard
               title="С открытыми задачами"
@@ -2675,7 +2678,7 @@ function CurrentCasesReportSection({
                       </td>
                       <td className="px-4 py-3 text-slate-600">{row.responsibleName}</td>
                       <td className="px-4 py-3 text-slate-600">
-                        <div>{row.dueDate ? formatDate(row.dueDate) : 'Не указан'}</div>
+                        <div>{row.dueDate ? formatDate(row.dueDate, profileTimeZoneId) : 'Не указан'}</div>
                         <div className={`mt-1 text-xs ${row.isOverdue ? 'text-rose-600' : 'text-slate-500'}`}>
                           {row.daysUntilDue === null || row.daysUntilDue === undefined
                             ? 'Без срока'
@@ -2998,7 +3001,7 @@ function OverdueProceduralDeadlinesReportSection({
               value={String(report.totalOverdueCount)}
               icon={AlertTriangle}
               tone="expense"
-              subtitle={`Дата контроля: ${formatDate(report.asOf)}`}
+              subtitle={`Дата контроля: ${formatDate(report.asOf, profileTimeZoneId)}`}
             />
             <MetricCard
               title="Критичных"
@@ -6348,6 +6351,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 onScopeChange={setTaskReportScope}
                 onReload={reloadTaskReport}
                 onOpenTask={onOpenTask}
+                profileTimeZoneId={profileTimeZoneId}
               />
             ) : null}
 
@@ -6362,6 +6366,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               onReload={reloadLegalWorkReport}
               onOpenCase={onOpenCase}
               onOpenCaseSection={onOpenCaseSection}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <CaseFinanceReportSection
@@ -6371,6 +6376,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               filters={casePeriodReportFilters}
               onReload={reloadCaseFinanceReport}
               onOpenCase={onOpenCase}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <CaseSuccessReportSection
@@ -6380,6 +6386,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               filters={casePeriodReportFilters}
               onReload={reloadCaseSuccessReport}
               onOpenCase={onOpenCase}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <CurrentCasesReportSection

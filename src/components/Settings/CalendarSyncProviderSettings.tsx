@@ -17,6 +17,7 @@ import { TablePagination } from '../ui/TablePagination';
 const LOG_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const MIN_CALENDAR_SYNC_INTERVAL_MINUTES = 1;
 const MAX_CALENDAR_SYNC_INTERVAL_MINUTES = 1440;
+const SHOW_INLINE_READINESS_PANEL = import.meta.env.VITE_ENABLE_CALENDAR_SYNC_READINESS_PANEL === 'true';
 const completedTaskActionOptions = [
   { value: 'color', label: 'Выделять цветом' },
   { value: 'hide', label: 'Скрывать из календарей' },
@@ -520,7 +521,7 @@ export function CalendarSyncProviderSettings() {
         </div>
       ) : null}
 
-      {false && readiness ? (
+      {SHOW_INLINE_READINESS_PANEL && readiness ? (
         <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <div>
