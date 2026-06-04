@@ -912,6 +912,80 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task TasksReport_UsesProfileTimeZoneForDefaultAsOf()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "task-report-timezone-role", Description = "Task reporter" };
+        var user = new User
+        {
+            Email = "task-report-timezone@example.test",
+            FullName = "Task Report Timezone User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone.TimeZoneId,
+        });
+
+        var dueDate = selectedZone.ProfileToday > selectedZone.UtcToday
+            ? selectedZone.ProfileToday.AddDays(-1)
+            : selectedZone.ProfileToday;
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ObjectName = "Timezone task object",
+            Title = "Timezone default as-of task",
+            AssigneeUserId = user.Id,
+            AssigneeName = user.FullName,
+            DueAt = dueDate.AddHours(9),
+            Status = "new",
+            Priority = "normal",
+            Type = "task",
+            CreatedAt = dueDate.AddDays(-1),
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.Tasks(
+            asOf: null,
+            scope: "open",
+            assigneeUserId: null,
+            limit: 50,
+            ct: CancellationToken.None);
+
+        var report = Assert.IsType<TaskReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+
+        Assert.Equal(selectedZone.ProfileToday, report.AsOf);
+        Assert.Equal(selectedZone.ProfileToday > selectedZone.UtcToday ? 1 : 0, report.OverdueTaskCount);
+        Assert.Equal(selectedZone.ProfileToday < selectedZone.UtcToday ? 1 : 0, report.DueTodayTaskCount);
+    }
+
+    [Fact]
     public async Task LawyerWorkload_UsesVisibleCasesTasksAndDeadlines()
     {
         await using var db = await CreateContextAsync();
@@ -3531,6 +3605,29 @@ public class ReportsControllerTests
         => new(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
             authenticationType: "Test"));
+
+    private static (string TimeZoneId, DateTime UtcToday, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        foreach (var timeZoneId in new[]
+        {
+            "Pacific/Kiritimati",
+            "Line Islands Standard Time",
+            "Pacific/Pago_Pago",
+            "Samoa Standard Time",
+        })
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            if (profileToday != utcToday)
+            {
+                return (timeZoneId, utcToday, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
+    }
 
     private static async Task<PaymentContext> CreateContextAsync()
     {

@@ -101,6 +101,15 @@ public class ReportsController : ControllerBase
         return permission?.CanExport == true;
     }
 
+    private async Task<DateTime> ResolveReportTodayAsync(CancellationToken ct)
+    {
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
+    }
+
+    private async Task<(DateTime Start, DateTime End)> ResolveReportPeriodAsync(DateTime? from, DateTime? to, CancellationToken ct)
+        => ResolveReportPeriod(from, to, await ResolveReportTodayAsync(ct));
+
     [HttpGet("legal-work")]
     public async Task<ActionResult<LegalWorkReportDto>> LegalWork(
         [FromQuery] DateTime? from,
@@ -110,7 +119,8 @@ public class ReportsController : ControllerBase
         [FromQuery] string? caseType,
         CancellationToken ct)
     {
-        var (start, end) = ResolveLegalWorkPeriod(from, to);
+        var reportToday = await ResolveReportTodayAsync(ct);
+        var (start, end) = ResolveReportPeriod(from, to, reportToday);
 
         if (!await CanViewReportsAsync(ct))
         {
@@ -127,7 +137,7 @@ public class ReportsController : ControllerBase
 
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildLegalWorkReportAsync(start, end, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
+            cancellationToken => BuildLegalWorkReportAsync(start, end, reportToday, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -315,7 +325,7 @@ public class ReportsController : ControllerBase
             return Unauthorized();
         }
 
-        var (start, end) = ResolveLegalWorkPeriod(from, to);
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
 
@@ -348,12 +358,13 @@ public class ReportsController : ControllerBase
             return Unauthorized();
         }
 
-        var (start, end) = ResolveLegalWorkPeriod(from, to);
+        var reportToday = await ResolveReportTodayAsync(ct);
+        var (start, end) = ResolveReportPeriod(from, to, reportToday);
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
 
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildCaseSuccessReportAsync(start, end, filters, effectiveLimit, casesVisibility, cancellationToken),
+            cancellationToken => BuildCaseSuccessReportAsync(start, end, reportToday, filters, effectiveLimit, casesVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -381,10 +392,11 @@ public class ReportsController : ControllerBase
             return (null, Unauthorized());
         }
 
-        var (start, end) = ResolveLegalWorkPeriod(from, to);
+        var reportToday = await ResolveReportTodayAsync(ct);
+        var (start, end) = ResolveReportPeriod(from, to, reportToday);
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildLegalWorkReportAsync(start, end, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
+            cancellationToken => BuildLegalWorkReportAsync(start, end, reportToday, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -414,7 +426,8 @@ public class ReportsController : ControllerBase
         }
 
         var normalizedReport = (NormalizeOptional(report) ?? string.Empty).ToLowerInvariant();
-        var effectiveAsOf = asOf?.Date ?? DateTime.UtcNow.Date;
+        var reportToday = await ResolveReportTodayAsync(ct);
+        var effectiveAsOf = asOf?.Date ?? reportToday;
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
 
         switch (normalizedReport)
@@ -428,7 +441,7 @@ public class ReportsController : ControllerBase
                     return (null, Unauthorized());
                 }
 
-                var (start, end) = ResolveLegalWorkPeriod(from, to);
+                var (start, end) = ResolveReportPeriod(from, to, reportToday);
                 var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
                 var reportDto = await SqliteRetryHelper.ExecuteAsync(
                     cancellationToken => BuildCaseFinanceReportAsync(start, end, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
@@ -445,10 +458,10 @@ public class ReportsController : ControllerBase
                     return (null, Unauthorized());
                 }
 
-                var (start, end) = ResolveLegalWorkPeriod(from, to);
+                var (start, end) = ResolveReportPeriod(from, to, reportToday);
                 var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
                 var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                    cancellationToken => BuildCaseSuccessReportAsync(start, end, filters, effectiveLimit, casesVisibility, cancellationToken),
+                    cancellationToken => BuildCaseSuccessReportAsync(start, end, reportToday, filters, effectiveLimit, casesVisibility, cancellationToken),
                     _logger,
                     ct);
                 return (BuildCaseSuccessExportDocument(reportDto), null);
@@ -528,9 +541,8 @@ public class ReportsController : ControllerBase
         }
     }
 
-    private static (DateTime Start, DateTime End) ResolveLegalWorkPeriod(DateTime? from, DateTime? to)
+    private static (DateTime Start, DateTime End) ResolveReportPeriod(DateTime? from, DateTime? to, DateTime today)
     {
-        var today = DateTime.Today;
         var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
         var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
         return end < start ? (end, start) : (start, end);
@@ -596,7 +608,7 @@ public class ReportsController : ControllerBase
             return Unauthorized();
         }
 
-        var effectiveAsOf = asOf?.Date ?? DateTime.UtcNow.Date;
+        var effectiveAsOf = asOf?.Date ?? await ResolveReportTodayAsync(ct);
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
         var filters = new CurrentCasesReportFilters(
             NormalizeOptional(status),
@@ -636,7 +648,7 @@ public class ReportsController : ControllerBase
             return Unauthorized();
         }
 
-        var effectiveAsOf = asOf?.Date ?? DateTime.UtcNow.Date;
+        var effectiveAsOf = asOf?.Date ?? await ResolveReportTodayAsync(ct);
         var effectiveScope = NormalizeTaskReportScope(scope);
         var effectiveLimit = Math.Clamp(limit ?? 150, 1, 500);
 
@@ -674,7 +686,7 @@ public class ReportsController : ControllerBase
             return Unauthorized();
         }
 
-        var effectiveAsOf = asOf?.Date ?? DateTime.UtcNow.Date;
+        var effectiveAsOf = asOf?.Date ?? await ResolveReportTodayAsync(ct);
         var effectiveHorizonDays = Math.Clamp(horizonDays ?? 7, 1, 60);
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
 
@@ -712,7 +724,7 @@ public class ReportsController : ControllerBase
             return Unauthorized();
         }
 
-        var effectiveAsOf = (asOf?.Date ?? DateTime.UtcNow.Date);
+        var effectiveAsOf = asOf?.Date ?? await ResolveReportTodayAsync(ct);
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
         var normalizedDeadlineType = NormalizeOptional(deadlineType);
 
@@ -738,13 +750,7 @@ public class ReportsController : ControllerBase
         [FromQuery] string? accountName,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         var normalizedAccountName = string.IsNullOrWhiteSpace(accountName)
             ? null
@@ -769,13 +775,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -790,13 +790,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -811,13 +805,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -832,13 +820,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -853,13 +835,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -874,13 +850,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -895,13 +865,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -916,13 +880,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -937,13 +895,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -958,13 +910,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -979,13 +925,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -999,13 +939,7 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? to,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Accounts,
@@ -1019,13 +953,7 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? to,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Acts,
@@ -1039,13 +967,7 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? to,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Contracts,
@@ -1060,13 +982,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -1081,13 +997,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -1102,13 +1012,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -1123,13 +1027,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -1144,13 +1042,7 @@ public class ReportsController : ControllerBase
         [FromQuery] MoneyOperationSource? source,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
@@ -1164,13 +1056,7 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? to,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         if (!await CanViewReportsAsync(ct))
         {
@@ -1191,13 +1077,7 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? to,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         if (!await CanViewReportsAsync(ct))
         {
@@ -1218,13 +1098,7 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? to,
         CancellationToken ct)
     {
-        var today = DateTime.Today;
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        if (end < start)
-        {
-            (start, end) = (end, start);
-        }
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         if (!await CanViewReportsAsync(ct))
         {
@@ -1242,13 +1116,13 @@ public class ReportsController : ControllerBase
     private async Task<LegalWorkReportDto> BuildLegalWorkReportAsync(
         DateTime start,
         DateTime end,
+        DateTime today,
         LegalWorkReportFilters filters,
         DataVisibilityAccess casesVisibility,
         DataVisibilityAccess tasksVisibility,
         DataVisibilityAccess accountsVisibility,
         CancellationToken ct)
     {
-        var today = DateTime.UtcNow.Date;
         var endInclusive = end.Date.AddDays(1).AddTicks(-1);
 
         var caseQuery = _db.ClientCases
@@ -1561,12 +1435,12 @@ public class ReportsController : ControllerBase
     private async Task<CaseSuccessReportDto> BuildCaseSuccessReportAsync(
         DateTime start,
         DateTime end,
+        DateTime asOf,
         LegalWorkReportFilters filters,
         int limit,
         DataVisibilityAccess casesVisibility,
         CancellationToken ct)
     {
-        var asOf = DateTime.UtcNow.Date;
         var endInclusive = end.Date.AddDays(1).AddTicks(-1);
         var caseQuery = _db.ClientCases
             .AsNoTracking()
