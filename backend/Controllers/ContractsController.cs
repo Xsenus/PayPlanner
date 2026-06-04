@@ -565,13 +565,13 @@ public class ContractsController : ControllerBase
                 contract.CancelledReason = null;
                 break;
             case ContractStatus.Terminated:
-                contract.TerminationDate ??= now.Date;
+                contract.TerminationDate ??= ContractDomainService.NormalizeLocalDate(now);
                 contract.TerminationTerms ??= "Быстрая смена статуса";
                 contract.CancelledAt = null;
                 contract.CancelledReason = null;
                 break;
             case ContractStatus.Cancelled:
-                contract.CancelledAt ??= now.Date;
+                contract.CancelledAt ??= ContractDomainService.NormalizeLocalDate(now);
                 contract.CancelledReason ??= reason ?? "Быстрая смена статуса";
                 contract.TerminationDate = null;
                 contract.TerminationReason = null;
@@ -615,7 +615,7 @@ public class ContractsController : ControllerBase
         }
 
         contract.Status = ContractStatus.Terminated;
-        contract.TerminationDate = request.TerminationDate.Date;
+        contract.TerminationDate = ContractDomainService.NormalizeLocalDate(request.TerminationDate);
         contract.TerminationReason = terminationReason;
         contract.TerminationTerms = terms;
         contract.TerminationFinancialTerms = Normalize(request.FinancialTerms);
@@ -654,7 +654,7 @@ public class ContractsController : ControllerBase
         var now = DateTime.UtcNow;
         var contractTimeZone = await ResolveContractTimeZoneAsync(ct);
         contract.Status = ContractStatus.Cancelled;
-        contract.CancelledAt ??= now.Date;
+        contract.CancelledAt ??= ContractDomainService.NormalizeLocalDate(now);
         contract.CancelledReason = reason;
         contract.UpdatedAt = now;
         ApplyContractCancellationSideEffects(contract, reason, now, contractTimeZone);
@@ -744,11 +744,11 @@ public class ContractsController : ControllerBase
             Date = ContractDomainService.NormalizeLocalDate(request.Date),
             StartDate = ContractDomainService.NormalizeLocalDate(request.StartDate),
             ValidUntil = normalized.ValidUntil,
-            TerminationDate = request.TerminationDate?.Date,
+            TerminationDate = ContractDomainService.NormalizeLocalDate(request.TerminationDate),
             TerminationReason = Normalize(request.TerminationReason),
             TerminationTerms = Normalize(request.TerminationTerms),
             TerminationFinancialTerms = Normalize(request.TerminationFinancialTerms),
-            CancelledAt = request.CancelledAt?.Date,
+            CancelledAt = ContractDomainService.NormalizeLocalDate(request.CancelledAt),
             CancelledReason = Normalize(request.CancelledReason),
             CreatedAt = DateTime.UtcNow,
         };
@@ -801,11 +801,11 @@ public class ContractsController : ControllerBase
         contract.Date = ContractDomainService.NormalizeLocalDate(request.Date);
         contract.StartDate = ContractDomainService.NormalizeLocalDate(request.StartDate);
         contract.ValidUntil = normalized.ValidUntil;
-        contract.TerminationDate = request.TerminationDate?.Date;
+        contract.TerminationDate = ContractDomainService.NormalizeLocalDate(request.TerminationDate);
         contract.TerminationReason = Normalize(request.TerminationReason);
         contract.TerminationTerms = Normalize(request.TerminationTerms);
         contract.TerminationFinancialTerms = Normalize(request.TerminationFinancialTerms);
-        contract.CancelledAt = request.CancelledAt?.Date;
+        contract.CancelledAt = ContractDomainService.NormalizeLocalDate(request.CancelledAt);
         contract.CancelledReason = Normalize(request.CancelledReason);
         contract.UpdatedAt = DateTime.UtcNow;
 
@@ -1343,8 +1343,8 @@ public class ContractsController : ControllerBase
             Description = contract.Description,
             BillingMode = contract.BillingMode,
             Status = contract.Status,
-            SentForSigningAt = contract.SentForSigningAt,
-            ConcludedAt = contract.ConcludedAt,
+            SentForSigningAt = ContractDomainService.NormalizeUtcInstant(contract.SentForSigningAt),
+            ConcludedAt = ContractDomainService.NormalizeUtcInstant(contract.ConcludedAt),
             IsOpenEnded = contract.IsOpenEnded,
             Amount = contract.Amount,
             Date = contract.Date,
@@ -1356,15 +1356,15 @@ public class ContractsController : ControllerBase
             TerminationFinancialTerms = contract.TerminationFinancialTerms,
             CancelledAt = contract.CancelledAt,
             CancelledReason = contract.CancelledReason,
-            CreatedAt = contract.CreatedAt,
-            UpdatedAt = contract.UpdatedAt,
+            CreatedAt = ContractDomainService.NormalizeUtcInstant(contract.CreatedAt),
+            UpdatedAt = ContractDomainService.NormalizeUtcInstant(contract.UpdatedAt),
             AuditCreatedByUserId = entry.Property<int?>("CreatedByUserId").CurrentValue,
             AuditCreatedByUserName = entry.Property<string?>("CreatedByUserName").CurrentValue,
-            AuditUpdatedAt = entry.Property<DateTime?>("UpdatedAt").CurrentValue,
+            AuditUpdatedAt = ContractDomainService.NormalizeUtcInstant(entry.Property<DateTime?>("UpdatedAt").CurrentValue),
             AuditUpdatedByUserId = entry.Property<int?>("UpdatedByUserId").CurrentValue,
             AuditUpdatedByUserName = entry.Property<string?>("UpdatedByUserName").CurrentValue,
             AuditIsDeleted = entry.Property<bool>("IsDeleted").CurrentValue,
-            AuditDeletedAt = entry.Property<DateTime?>("DeletedAt").CurrentValue,
+            AuditDeletedAt = ContractDomainService.NormalizeUtcInstant(entry.Property<DateTime?>("DeletedAt").CurrentValue),
             AuditDeletedByUserId = entry.Property<int?>("DeletedByUserId").CurrentValue,
             AuditDeletedByUserName = entry.Property<string?>("DeletedByUserName").CurrentValue,
             InvoiceAmountTotal = legacyInvoiceAmount + canonicalInvoiceAmount,

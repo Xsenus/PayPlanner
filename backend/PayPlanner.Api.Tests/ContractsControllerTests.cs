@@ -275,16 +275,18 @@ public class ContractsControllerTests
         var sendOk = Assert.IsType<OkObjectResult>(sendAction.Result);
         var sentDto = Assert.IsType<ContractDto>(sendOk.Value);
         Assert.Equal(ContractStatus.OnSigning, sentDto.Status);
-        Assert.NotNull(sentDto.SentForSigningAt);
+        AssertUtcInstantKind(sentDto.SentForSigningAt);
         Assert.Null(sentDto.ConcludedAt);
+        Assert.Contains("Z", JsonSerializer.Serialize(new { sentDto.SentForSigningAt }));
 
         var concludeAction = await controller.MarkConcluded(createdDto.Id, CancellationToken.None);
 
         var concludeOk = Assert.IsType<OkObjectResult>(concludeAction.Result);
         var concludedDto = Assert.IsType<ContractDto>(concludeOk.Value);
         Assert.Equal(ContractStatus.Concluded, concludedDto.Status);
-        Assert.NotNull(concludedDto.SentForSigningAt);
-        Assert.NotNull(concludedDto.ConcludedAt);
+        AssertUtcInstantKind(concludedDto.SentForSigningAt);
+        AssertUtcInstantKind(concludedDto.ConcludedAt);
+        Assert.Contains("Z", JsonSerializer.Serialize(new { concludedDto.SentForSigningAt, concludedDto.ConcludedAt }));
 
         db.ChangeTracker.Clear();
         var stored = await db.Contracts.AsNoTracking().SingleAsync(contract => contract.Id == createdDto.Id);
@@ -326,6 +328,63 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task UpdateStatus_NormalizesLifecycleDatesAsLocalDatesWithoutUtcMarker()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+
+        var terminateCreateResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-STATUS-TERM",
+                Date = new DateTime(2026, 4, 20),
+                BillingMode = ContractBillingMode.Fixed,
+                Status = ContractStatus.Concluded,
+                Amount = 25_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var terminateCreated = Assert.IsType<CreatedResult>(terminateCreateResult.Result);
+        var terminateCreatedDto = Assert.IsType<ContractDto>(terminateCreated.Value);
+
+        var terminateAction = await controller.UpdateStatus(
+            terminateCreatedDto.Id,
+            new UpdateNamedStatusRequest { Status = ContractStatus.Terminated },
+            CancellationToken.None);
+
+        var terminateOk = Assert.IsType<OkObjectResult>(terminateAction.Result);
+        var terminatedDto = Assert.IsType<ContractDto>(terminateOk.Value);
+        Assert.Equal(ContractStatus.Terminated, terminatedDto.Status);
+        AssertLocalDateKind(terminatedDto.TerminationDate);
+        Assert.DoesNotContain("Z", JsonSerializer.Serialize(new { terminatedDto.TerminationDate }));
+
+        var cancelCreateResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-STATUS-CANCEL",
+                Date = new DateTime(2026, 4, 20),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 25_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var cancelCreated = Assert.IsType<CreatedResult>(cancelCreateResult.Result);
+        var cancelCreatedDto = Assert.IsType<ContractDto>(cancelCreated.Value);
+
+        var cancelAction = await controller.UpdateStatus(
+            cancelCreatedDto.Id,
+            new UpdateNamedStatusRequest { Status = ContractStatus.Cancelled, Reason = "Ошибочно создан" },
+            CancellationToken.None);
+
+        var cancelOk = Assert.IsType<OkObjectResult>(cancelAction.Result);
+        var cancelledDto = Assert.IsType<ContractDto>(cancelOk.Value);
+        Assert.Equal(ContractStatus.Cancelled, cancelledDto.Status);
+        AssertLocalDateKind(cancelledDto.CancelledAt);
+        Assert.DoesNotContain("Z", JsonSerializer.Serialize(new { cancelledDto.CancelledAt }));
+    }
+
+    [Fact]
     public async Task Terminate_StoresTermsAndUpdatesStatus()
     {
         await using var db = await CreateContextAsync();
@@ -350,7 +409,7 @@ public class ContractsControllerTests
             createdDto.Id,
             new TerminateContractRequest
             {
-                TerminationDate = new DateTime(2026, 5, 2),
+                TerminationDate = new DateTime(2026, 5, 2, 21, 30, 0, DateTimeKind.Utc),
                 Reason = "Соглашение сторон",
                 Terms = "Услуги прекращаются с даты расторжения",
                 FinancialTerms = "Без взаимных штрафов",
@@ -360,15 +419,16 @@ public class ContractsControllerTests
         var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
         var dto = Assert.IsType<ContractDto>(ok.Value);
         Assert.Equal(ContractStatus.Terminated, dto.Status);
-        Assert.Equal(new DateTime(2026, 5, 2), dto.TerminationDate);
+        AssertLocalDate(dto.TerminationDate, 2026, 5, 2);
         Assert.Equal("Соглашение сторон", dto.TerminationReason);
         Assert.Equal("Услуги прекращаются с даты расторжения", dto.TerminationTerms);
         Assert.Equal("Без взаимных штрафов", dto.TerminationFinancialTerms);
+        Assert.DoesNotContain("Z", JsonSerializer.Serialize(new { dto.TerminationDate }));
 
         db.ChangeTracker.Clear();
         var stored = await db.Contracts.AsNoTracking().SingleAsync(contract => contract.Id == createdDto.Id);
         Assert.Equal(ContractStatus.Terminated, stored.Status);
-        Assert.Equal(new DateTime(2026, 5, 2), stored.TerminationDate);
+        AssertLocalDate(stored.TerminationDate, 2026, 5, 2);
         Assert.Equal("Услуги прекращаются с даты расторжения", stored.TerminationTerms);
     }
 
@@ -400,13 +460,14 @@ public class ContractsControllerTests
         var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
         var dto = Assert.IsType<ContractDto>(ok.Value);
         Assert.Equal(ContractStatus.Cancelled, dto.Status);
-        Assert.NotNull(dto.CancelledAt);
+        AssertLocalDateKind(dto.CancelledAt);
         Assert.Equal("Ошибочно созданный договор", dto.CancelledReason);
+        Assert.DoesNotContain("Z", JsonSerializer.Serialize(new { dto.CancelledAt }));
 
         db.ChangeTracker.Clear();
         var stored = await db.Contracts.AsNoTracking().SingleAsync(contract => contract.Id == createdDto.Id);
         Assert.Equal(ContractStatus.Cancelled, stored.Status);
-        Assert.NotNull(stored.CancelledAt);
+        AssertLocalDateKind(stored.CancelledAt);
         Assert.Equal("Ошибочно созданный договор", stored.CancelledReason);
     }
 
@@ -1738,6 +1799,19 @@ public class ContractsControllerTests
     {
         Assert.True(actual.HasValue);
         AssertLocalDate(actual.Value, year, month, day);
+    }
+
+    private static void AssertLocalDateKind(DateTime? actual)
+    {
+        Assert.True(actual.HasValue);
+        Assert.Equal(actual.Value.Date, actual.Value);
+        Assert.Equal(DateTimeKind.Unspecified, actual.Value.Kind);
+    }
+
+    private static void AssertUtcInstantKind(DateTime? actual)
+    {
+        Assert.True(actual.HasValue);
+        Assert.Equal(DateTimeKind.Utc, actual.Value.Kind);
     }
 
     private static void AssertLocalDate(DateTime actual, int year, int month, int day)

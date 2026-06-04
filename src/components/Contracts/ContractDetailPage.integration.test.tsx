@@ -131,6 +131,7 @@ const contractFixture = {
 
 describe('ContractDetailPage integration', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.mocked(apiService.getContract).mockReset();
     vi.mocked(apiService.getContractRulesSettings).mockReset();
     vi.mocked(apiService.getInvoices).mockReset();
@@ -394,6 +395,8 @@ describe('ContractDetailPage integration', () => {
   });
 
   it('checks unpaid invoices before terminating a contract', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-03T20:30:00.000Z'));
     const promptSpy = vi
       .spyOn(window, 'prompt')
       .mockReturnValueOnce('2026-05-22')
@@ -434,8 +437,14 @@ describe('ContractDetailPage integration', () => {
         'Оплатить остаток до конца месяца',
       );
     });
+    expect(promptSpy).toHaveBeenNthCalledWith(
+      1,
+      'Дата расторжения договора (ГГГГ-ММ-ДД)',
+      '2026-06-04',
+    );
 
     promptSpy.mockRestore();
     confirmSpy.mockRestore();
+    vi.useRealTimers();
   });
 });

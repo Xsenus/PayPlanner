@@ -10,7 +10,7 @@ import {
   getContractExecutionMetrics,
   getContractReconciliationWarnings,
 } from '../../utils/contracts';
-import { fromInputToApiDate, toDateInputValue, toRuDate } from '../../utils/dateUtils';
+import { fromInputToApiDate, todayYMD, toDateInputValue, toRuDate } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { useToast } from '../../hooks/useToast';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
@@ -685,7 +685,7 @@ export function ContractDetailPage({
     let cancelReason: string | null = null;
 
     if (action === 'terminate') {
-      const terminationDate = window.prompt('Дата расторжения договора (ГГГГ-ММ-ДД)', new Date().toISOString().slice(0, 10))?.trim();
+      const terminationDate = window.prompt('Дата расторжения договора (ГГГГ-ММ-ДД)', todayYMD())?.trim();
       if (!terminationDate) return;
 
       const terms = window.prompt('Укажите условия расторжения договора')?.trim();

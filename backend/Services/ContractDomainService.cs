@@ -11,6 +11,8 @@ public static class ContractDomainService
         contract.Date = NormalizeLocalDate(contract.Date);
         contract.StartDate = NormalizeLocalDate(contract.StartDate);
         contract.ValidUntil = NormalizeLocalDate(contract.ValidUntil);
+        contract.TerminationDate = NormalizeLocalDate(contract.TerminationDate);
+        contract.CancelledAt = NormalizeLocalDate(contract.CancelledAt);
     }
 
     public static DateTime NormalizeLocalDate(DateTime value)
@@ -18,4 +20,10 @@ public static class ContractDomainService
 
     public static DateTime? NormalizeLocalDate(DateTime? value)
         => value.HasValue ? NormalizeLocalDate(value.Value) : null;
+
+    public static DateTime NormalizeUtcInstant(DateTime value)
+        => CalendarTimeZoneHelper.NormalizeUtcInstant(value);
+
+    public static DateTime? NormalizeUtcInstant(DateTime? value)
+        => value.HasValue ? NormalizeUtcInstant(value.Value) : null;
 }
