@@ -24,9 +24,10 @@ namespace PayPlanner.Api.Services
         /// Рассчитать сводную статистику по платежам с фильтрами.
         /// </summary>
         public async Task<StatsSummary> GetAsync(int? clientId, int? caseId, DateTime? from, DateTime? to,
-            string? period, PaymentType? type, PaymentStatus? status, string? q, string? clientRole, CancellationToken ct)
+            string? period, PaymentType? type, PaymentStatus? status, string? q, string? clientRole, CancellationToken ct,
+            string? timeZoneId = null, DateTime? nowUtc = null)
         {
-            var (f, t) = PeriodHelper.Resolve(from, to, period);
+            var (f, t) = PeriodHelper.Resolve(from, to, period, tzId: timeZoneId, nowUtc: nowUtc);
 
             var qry = _db.Payments
                 .AsNoTracking()

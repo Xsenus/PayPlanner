@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 
@@ -36,7 +37,8 @@ public class StatsV2Controller : ControllerBase
         [FromQuery] string? clientRole,
         CancellationToken ct)
     {
-        var res = await _svc.GetAsync(clientId, caseId, from, to, period, type, status, q, clientRole, ct);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var res = await _svc.GetAsync(clientId, caseId, from, to, period, type, status, q, clientRole, ct, timeZone.Id);
         return Ok(res);
     }
 

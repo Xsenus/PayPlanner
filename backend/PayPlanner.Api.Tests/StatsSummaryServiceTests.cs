@@ -302,6 +302,66 @@ public class StatsSummaryServiceTests
         Assert.Equal(5_000m, expenseClientSummary.Expense.PendingAmount);
     }
 
+    [Fact]
+    public async Task GetAsync_UsesTimeZoneForRelativeDefaultPeriod()
+    {
+        await using var db = await CreateContextAsync();
+        var selectedZone = ResolveTimeZoneWithDifferentLocalMonth();
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                Amount = 100m,
+                PaidAmount = 100m,
+                Date = selectedZone.ProfileToday,
+                PlannedDate = selectedZone.ProfileToday,
+                Description = "Profile month payment",
+                DocumentKind = DocumentKind.Payment,
+                Status = PaymentStatus.Completed,
+                Type = PaymentType.Income,
+                Notes = string.Empty,
+                SystemNotes = string.Empty,
+            },
+            new Payment
+            {
+                Amount = 200m,
+                PaidAmount = 200m,
+                Date = selectedZone.UtcToday,
+                PlannedDate = selectedZone.UtcToday,
+                Description = "UTC month payment",
+                DocumentKind = DocumentKind.Payment,
+                Status = PaymentStatus.Completed,
+                Type = PaymentType.Income,
+                Notes = string.Empty,
+                SystemNotes = string.Empty,
+            });
+        await db.SaveChangesAsync();
+
+        var service = new StatsSummaryService(db);
+
+        var summary = await service.GetAsync(
+            null,
+            null,
+            null,
+            null,
+            "this-month",
+            PaymentType.Income,
+            null,
+            null,
+            null,
+            CancellationToken.None,
+            timeZoneId: selectedZone.TimeZoneId,
+            nowUtc: selectedZone.NowUtc);
+
+        var expectedFrom = new DateTime(selectedZone.ProfileToday.Year, selectedZone.ProfileToday.Month, 1);
+        var expectedTo = expectedFrom.AddMonths(1).AddTicks(-1);
+
+        Assert.Equal(expectedFrom, summary.From);
+        Assert.Equal(expectedTo, summary.To);
+        Assert.Equal(100m, summary.Income.TotalAmount);
+        Assert.Equal(1, summary.Income.TotalCount);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -314,5 +374,31 @@ public class StatsSummaryServiceTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private static (string TimeZoneId, DateTime NowUtc, DateTime UtcToday, DateTime ProfileToday)
+        ResolveTimeZoneWithDifferentLocalMonth()
+    {
+        var candidates = new[]
+        {
+            ("Pacific/Kiritimati", new DateTime(2026, 1, 31, 23, 30, 0, DateTimeKind.Utc)),
+            ("Line Islands Standard Time", new DateTime(2026, 1, 31, 23, 30, 0, DateTimeKind.Utc)),
+            ("Pacific/Pago_Pago", new DateTime(2026, 2, 1, 1, 30, 0, DateTimeKind.Utc)),
+            ("Samoa Standard Time", new DateTime(2026, 2, 1, 1, 30, 0, DateTimeKind.Utc)),
+        };
+
+        foreach (var (timeZoneId, nowUtc) in candidates)
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            var utcToday = nowUtc.Date;
+
+            if (profileToday.Year != utcToday.Year || profileToday.Month != utcToday.Month)
+            {
+                return (timeZone.Id, nowUtc, utcToday, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("Could not resolve a test time zone with a different local month.");
     }
 }
