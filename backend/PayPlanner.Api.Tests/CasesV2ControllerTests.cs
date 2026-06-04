@@ -2878,6 +2878,9 @@ public class CasesV2ControllerTests
         Assert.Equal(2, documents.Count);
         Assert.Contains(documents, item => item.Id == first.Id && !item.IsLatestVersion);
         Assert.Contains(documents, item => item.Id == second.Id && item.IsLatestVersion);
+        Assert.All(documents, item => Assert.Equal(DateTimeKind.Utc, item.UploadedAt.Kind));
+        Assert.Contains("\"UploadedAt\":\"", JsonSerializer.Serialize(documents), StringComparison.Ordinal);
+        Assert.Contains("Z\"", JsonSerializer.Serialize(documents), StringComparison.Ordinal);
 
         var deleteResult = await controller.DeleteDocument(clientCase.Id, first.Id, CancellationToken.None);
 
@@ -3323,7 +3326,7 @@ public class CasesV2ControllerTests
             ContentType = "text/html",
             SizeBytes = 1024,
             UploadedByName = "Владелец",
-            UploadedAt = DateTime.UtcNow.AddMinutes(-5),
+            UploadedAt = DateTime.SpecifyKind(new DateTime(2026, 5, 18, 10, 0, 0), DateTimeKind.Unspecified),
         };
         var second = new ClientCaseDocument
         {
@@ -3338,7 +3341,7 @@ public class CasesV2ControllerTests
             ContentType = "text/html",
             SizeBytes = 2048,
             UploadedByName = "Владелец",
-            UploadedAt = DateTime.UtcNow,
+            UploadedAt = DateTime.SpecifyKind(new DateTime(2026, 5, 18, 11, 0, 0), DateTimeKind.Unspecified),
         };
         db.ClientCaseDocuments.AddRange(first, second);
         await db.SaveChangesAsync();
@@ -3356,6 +3359,9 @@ public class CasesV2ControllerTests
         var latestDto = Assert.IsType<ClientCaseDocumentDto>(latestOk.Value);
         Assert.True(latestDto.IsLatestVersion);
         Assert.Equal("Подписан", latestDto.Status);
+        Assert.Equal(DateTimeKind.Utc, latestDto.UploadedAt.Kind);
+        Assert.Contains("\"UploadedAt\":\"", JsonSerializer.Serialize(latestDto), StringComparison.Ordinal);
+        Assert.Contains("Z\"", JsonSerializer.Serialize(latestDto), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3490,7 +3496,7 @@ public class CasesV2ControllerTests
                 ContentType = "application/pdf",
                 SizeBytes = 1024,
                 UploadedByName = "Владелец",
-                UploadedAt = DateTime.UtcNow.AddMinutes(-10),
+                UploadedAt = DateTime.SpecifyKind(new DateTime(2026, 5, 19, 10, 0, 0), DateTimeKind.Unspecified),
             },
             new ClientCaseDocument
             {
@@ -3505,7 +3511,7 @@ public class CasesV2ControllerTests
                 ContentType = "application/pdf",
                 SizeBytes = 2048,
                 UploadedByName = "Владелец",
-                UploadedAt = DateTime.UtcNow,
+                UploadedAt = DateTime.SpecifyKind(new DateTime(2026, 5, 19, 11, 0, 0), DateTimeKind.Unspecified),
             },
             new ClientCaseDocument
             {
@@ -3520,7 +3526,7 @@ public class CasesV2ControllerTests
                 ContentType = "application/pdf",
                 SizeBytes = 1024,
                 UploadedByName = "Другой",
-                UploadedAt = DateTime.UtcNow,
+                UploadedAt = DateTime.SpecifyKind(new DateTime(2026, 5, 19, 12, 0, 0), DateTimeKind.Unspecified),
             });
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
@@ -3543,6 +3549,9 @@ public class CasesV2ControllerTests
         var item = Assert.Single(items);
         Assert.Equal("claim-v2.pdf", item.OriginalFileName);
         Assert.True(item.IsLatestVersion);
+        Assert.Equal(DateTimeKind.Utc, item.UploadedAt.Kind);
+        Assert.Contains("\"UploadedAt\":\"", JsonSerializer.Serialize(item), StringComparison.Ordinal);
+        Assert.Contains("Z\"", JsonSerializer.Serialize(item), StringComparison.Ordinal);
     }
 
     [Fact]

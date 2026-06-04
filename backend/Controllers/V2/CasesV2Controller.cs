@@ -8187,7 +8187,7 @@ public class CasesV2Controller : ControllerBase
             SizeBytes = document.SizeBytes,
             UploadedByUserId = document.UploadedByUserId,
             UploadedByName = document.UploadedByName,
-            UploadedAt = document.UploadedAt,
+            UploadedAt = CalendarTimeZoneHelper.NormalizeUtcInstant(document.UploadedAt),
             IsLatestVersion = isLatestVersion,
         };
     }
